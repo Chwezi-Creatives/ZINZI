@@ -1,0 +1,109 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Ignore Gradle project-specific cache directory
+.gradle
+
+# Ignore Gradle build output directory
+build
+
+# Miscellaneous files to ignore
+*.class    # Compiled Java classes
+*.log      # Log files
+*.pyc      # Compiled Python files
+*.swp      # Swap files
+.DS_Store  # macOS system file
+.atom/     # Atom editor settings
+.buildlog/ # Build log files
+.history   # History files
+.svn/      # Subversion repository metadata
+migrate_working_dir/ # Migration working directory
+Thumbs.db  # Windows thumbnail cache file
+
+# IntelliJ IDEA project files to ignore
+*.iml      # Module files
+*.ipr      # Project files
+*.iws      # Workspace files
+.idea/     # IntelliJ IDEA project directory
+
+# VSCode settings to ignore (uncomment to ignore)
+.vscode/   # VSCode project directory
+
+# Flutter/Dart/Pub project files to ignore
+**/doc/api/ # API documentation
+**/ios/Flutter/.last_build_id # iOS build ID
+.dart_tool/ # Dart tool directory
+.flutter-plugins # Flutter plugins
+.flutter-plugins-dependencies # Flutter plugin dependencies
+.pub-cache/ # Pub cache directory
+.pub/ # Pub directory
+/build/ # Build directory
+.packages # Packages file
+.pubspec.lock # Pubspec lock file
+flutter.pub-cache/ # Flutter pub cache directory
+
+# Symbolication files to ignore
+app.*.symbols # Symbolication files
+
+# Obfuscation files to ignore
+app.*.map.json # Obfuscation map files
+
+# Android project files to ignore
+/android/app/debug # Android debug build directory
+/android/app/profile # Android profile build directory
+/android/app/release # Android release build directory
+/android/.gradle/ # Android Gradle directory
+/android/captures/ # Android captures directory
+/android/gradle/ # Android Gradle directory
+/android/local.properties # Android local properties file
+
+# iOS project files to ignore
+ios/Podfile # iOS Podfile
+ios/Podfile.lock # iOS Podfile lock
+ios/Runner.xcworkspace/ # iOS workspace directory
+ios/xcuserdata/ # iOS user data directory
+
+# Gradle project files to ignore
+.gradle # Gradle project directory
+build # Build directory

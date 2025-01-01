@@ -1,0 +1,343 @@
+import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart';
+
+class WeightGraph extends StatefulWidget {
+  @override
+  _WeightGraphState createState() => _WeightGraphState();
+}
+
+class _WeightGraphState extends State<WeightGraph> {
+  List<FlSpot> _weightData = [];
+  bool _isLoading = true;
+  int? _userId;
+  String _timeUnit = 'seconds'; // Default time unit
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchUserId();
+  }
+
+  Future<void> _fetchUserId() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _userId = prefs.getInt('user_id');
+    });
+
+    if (_userId != null) {
+      _fetchMetricsHistory();
+    }
+  }
+
+  Future<void> _fetchMetricsHistory() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    final url = Uri.parse(
+        'http://192.168.1.4:5000/rr/get_metrics_history?user_id=$_userId');
+    try {
+      final response = await http.get(url);
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        List<FlSpot> weightData = [];
+        double? initialTimestamp;
+
+        for (var metric in responseData) {
+          try {
+            final timestamp = DateTime.parse(metric['logged_at'])
+                .millisecondsSinceEpoch
+                .toDouble();
+            final weight = double.tryParse(metric['weight'].toString()) ?? 0.0;
+
+            if (weight != 0.0) {
+              if (initialTimestamp == null) {
+                initialTimestamp = timestamp;
+              }
+              final convertedTime =
+                  convertToTimeUnit(timestamp - initialTimestamp);
+              weightData.add(FlSpot(convertedTime, weight));
+            }
+          } catch (e) {
+            print("Error parsing metric: $metric, Error: $e");
+          }
+        }
+
+        setState(() {
+          _weightData = weightData;
+          _isLoading = false;
+        });
+      } else {
+        print("Failed to fetch metrics history: ${response.body}");
+        throw Exception('Failed to fetch metrics history');
+      }
+    } catch (error) {
+      print("Error fetching metrics history: $error");
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  double convertToTimeUnit(double timestampDifference) {
+    switch (_timeUnit) {
+      case 'milliseconds':
+        return timestampDifference;
+      case 'microseconds':
+        return timestampDifference * 1000;
+      case 'seconds':
+        return timestampDifference / 1000;
+      case 'minutes':
+        return timestampDifference / (1000 * 60);
+      case 'hours':
+        return timestampDifference / (1000 * 60 * 60);
+      case 'days':
+        return timestampDifference / (1000 * 60 * 60 * 24);
+      case 'weeks':
+        return timestampDifference / (1000 * 60 * 60 * 24 * 7);
+      case 'months':
+        return timestampDifference / (1000 * 60 * 60 * 24 * 30);
+      default:
+        return timestampDifference / (1000 * 60); // Default to minutes
+    }
+  }
+
+  String _getXLabel(double value) {
+    switch (_timeUnit) {
+      case 'milliseconds':
+        return '${value.toStringAsFixed(0)}';
+      case 'microseconds':
+        return '${value.toStringAsFixed(0)}';
+      case 'seconds':
+        return '${value.toStringAsFixed(0)}';
+      case 'minutes':
+        return '${value.toStringAsFixed(0)}';
+      case 'hours':
+        return '${value.toStringAsFixed(0)}';
+      case 'days':
+        return '${value.toStringAsFixed(0)}';
+      case 'weeks':
+        return '${value.toStringAsFixed(0)}';
+      case 'months':
+        return '${value.toStringAsFixed(0)}';
+      default:
+        return '${value.toStringAsFixed(0)}';
+    }
+  }
+
+  double _calculateXInterval() {
+    double maxX = _getMaxX();
+    double scale = maxX / 10; // Dividing the range into 10 equal intervals
+
+    return scale > 0 ? scale : 1.0; // Ensuring a non-zero interval
+  }
+
+  double _getMinX() {
+    if (_weightData.isEmpty) return 0;
+    return _weightData.first.x;
+  }
+
+  double _getMaxX() {
+    if (_weightData.isEmpty) return 1;
+    return _weightData.last.x;
+  }
+
+  Widget _buildGraph() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SizedBox(
+          height: constraints.maxHeight,
+          child: Container(
+            color: Colors.blueGrey.shade800, // Dark background for graph
+            child: LineChart(
+              LineChartData(
+                gridData: FlGridData(
+                  show: true,
+                  drawHorizontalLine: true,
+                  drawVerticalLine: true,
+                  horizontalInterval: 5,
+                  verticalInterval: _calculateXInterval(),
+                  getDrawingHorizontalLine: (value) => FlLine(
+                      color: Colors.grey.withOpacity(0.2),
+                      strokeWidth: 1,
+                      dashArray: [4, 4]),
+                  getDrawingVerticalLine: (value) => FlLine(
+                      color: Colors.grey.withOpacity(0.2),
+                      strokeWidth: 1,
+                      dashArray: [4, 4]),
+                ),
+                titlesData: FlTitlesData(
+                  leftTitles: AxisTitles(
+                      axisNameWidget: const Text('Weight (kg)',
+                          style: TextStyle(fontSize: 14, color: Colors.white)),
+                      sideTitles: SideTitles(
+                          showTitles: true, interval: 10, reservedSize: 40)),
+                  bottomTitles: AxisTitles(
+                      axisNameWidget: Text('Time ($_timeUnit)',
+                          style: TextStyle(fontSize: 14, color: Colors.white)),
+                      sideTitles: SideTitles(
+                          showTitles: true,
+                          getTitlesWidget: (value, meta) {
+                            return Text(_getXLabel(value),
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.white));
+                          },
+                          reservedSize: 30)),
+                  topTitles:
+                      AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  rightTitles:
+                      AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                ),
+                borderData: FlBorderData(
+                    show: true,
+                    border: Border.all(
+                        color: Colors.white.withOpacity(0.3), width: 1)),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: _weightData,
+                    isCurved: true,
+                    gradient: LinearGradient(colors: [
+                      Colors.blueAccent,
+                      Colors.greenAccent
+                    ]), // Gradient line color
+                    barWidth: 4,
+                    isStrokeCapRound: true,
+                    belowBarData: BarAreaData(
+                        show: true,
+                        gradient: LinearGradient(colors: [
+                          Colors.green.shade300,
+                          Colors.blue.shade300,
+                        ])), // Gradient below the line
+                    dotData: FlDotData(
+                        show: true,
+                        getDotPainter: (spot, percent, barData, index) {
+                          return FlDotCirclePainter(
+                              radius: 6,
+                              color: Colors.blueAccent,
+                              strokeWidth: 1,
+                              strokeColor: Colors.white);
+                        }),
+                  ),
+                ],
+                minX: _getMinX(),
+                maxX: _getMaxX(),
+                minY: 0,
+                maxY: _weightData.isNotEmpty
+                    ? _weightData
+                        .map((e) => e.y)
+                        .reduce((a, b) => a > b ? a : b)
+                    : 100,
+                lineTouchData: LineTouchData(
+                  touchTooltipData: LineTouchTooltipData(
+                    tooltipPadding: EdgeInsets.all(8),
+                    tooltipRoundedRadius: 8,
+                    maxContentWidth: 200,
+                    tooltipMargin: 10,
+                    getTooltipItems: (spots) => spots.map((spot) {
+                      // Adjust spot.x based on the time unit
+                      double adjustedTimestamp = spot.x;
+
+                      // Convert back to milliseconds if necessary (assuming spot.x is in seconds here)
+                      if (_timeUnit == 'seconds') {
+                        adjustedTimestamp *= 1000;
+                      }
+
+                      return LineTooltipItem(
+                        '${spot.y.toStringAsFixed(1)} kg\n${DateFormat('MM/dd/yyyy HH:mm').format(DateTime.fromMillisecondsSinceEpoch(adjustedTimestamp.toInt()))}',
+                        TextStyle(
+                            color: Colors.white, fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: EdgeInsets.all(16.0),
+      child: Card(
+        elevation: 6,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        color: Colors.blueGrey.shade900, // Card color to match theme
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: DropdownButton<String>(
+                value: _timeUnit,
+                onChanged: (String? newValue) {
+                  if (newValue != null) {
+                    setState(() {
+                      _timeUnit = newValue;
+                      _fetchMetricsHistory(); // Fetch new data when time unit changes
+                    });
+                  }
+                },
+                items: [
+                  'milliseconds',
+                  'microseconds',
+                  'seconds',
+                  'minutes',
+                  'hours',
+                  'days',
+                  'weeks',
+                  'months'
+                ]
+                    .map((unit) => DropdownMenuItem(
+                          value: unit,
+                          child: Text(unit.capitalize(),
+                              style: TextStyle(
+                                  color: Colors
+                                      .white)), // Capitalized and white text
+                        ))
+                    .toList(),
+                dropdownColor:
+                    Colors.blueGrey.shade800, // Dropdown background color
+                style: TextStyle(color: Colors.white), // Dropdown text color
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.all(16.0),
+              child: _isLoading
+                  ? Center(
+                      child: CircularProgressIndicator(
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(Colors.green)))
+                  : _weightData.isEmpty
+                      ? Center(
+                          child: Text(
+                              'Please log your first weight to visualize trends',
+                              style: TextStyle(
+                                  fontSize: 16, color: Colors.white70)))
+                      : SizedBox(
+                          height: 300, // Provide a fixed height for the graph
+                          child: _buildGraph(),
+                        ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+extension StringExtension on String {
+  String capitalize() {
+    return this[0].toUpperCase() + substring(1);
+  }
+}
