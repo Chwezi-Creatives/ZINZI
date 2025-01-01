@@ -20,6 +20,17 @@ dist/
 .venv/
 env/
 virtualenv/
+*.json
+*.crt
+*.pem
+*.rsa
+*.pub
+*.txt
+~/.aws/credentials
+~/.aws/config
+~/.config/gcloud/application_default_credentials.json
+instance/
+env.py
 
 # Logs and databases
 *.log
