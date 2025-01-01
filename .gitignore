@@ -1,0 +1,39 @@
+# VS Code files
+.vscode/
+
+# Python files
+*.pyc
+__pycache__/
+*.egg-info/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+
+# Installation files
+build/
+dist/
+*.egg/
+*.whl/
+
+# Package manager files
+.tox/
+.venv/
+env/
+virtualenv/
+
+# Logs and databases
+*.log
+*.db
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# IDE-specific files
+.idea/
+.settings/
+.metadata/
+
+# Other files
+*.bak
+*.tmp
