@@ -102,7 +102,6 @@ class Authentication:
             user_id, stored_hashed_password, verified = result
 
             if bcrypt.checkpw(password.encode(), stored_hashed_password.encode()):
-
                 if not verified:
                     return {'message': 'Account not verified. Check your email for the verification code.'}, 403
                 return {'message': 'Login successful', 'user_id': user_id}, 200
@@ -172,7 +171,6 @@ class Authentication:
     def generate_verification_code(self):
         return ''.join(random.choices(string.digits, k=6))
 
-
     # Verifying the verification code
     def verify_user_email(self, user_id, verification_code):
         try:
@@ -211,7 +209,6 @@ class Authentication:
         finally:
             if connection:
                 connection.close()
-
 
 
 class Updatelists:
@@ -422,7 +419,7 @@ class Updatelists:
         activity_multiplier = {
             'Sedentary': 1.2,
             'Lightly active': 1.375,
-            'Moderately active': 1.55,
+            ' Moderately active': 1.55,
             'Very active': 1.725,
             'Extremely active': 1.9
         }
@@ -446,9 +443,9 @@ class Updatelists:
 
             cursor = connection.cursor()
             insert_query = """
-    INSERT INTO Metrics_history (User_id, Weight, Logged_at)
-    VALUES (?, ?, CONVERT(VARCHAR(30), GETDATE(), 127))
-"""
+                INSERT INTO Metrics_history (User_id, Weight, Logged_at)
+                VALUES (?, ?, CONVERT(VARCHAR(30), GETDATE(), 127))
+            """
             cursor.execute(insert_query, (user_id, weight))
             connection.commit()
 
@@ -532,7 +529,6 @@ class Updatelists:
         except pyodbc.Error as e:
             print(f"Error updating meal data: {e}")
 
-
     # Add meal data
     def add_meal_data(self, meal_name, products, user_id):
         """
@@ -561,7 +557,6 @@ class Updatelists:
         finally:
             if connection:
                 connection.close()
-
 
     # Calculate nutritional contributions
     def calculate_nutritional_contributions(self, products):
@@ -681,84 +676,91 @@ class MealRecommendation:
 # Set up PayPal SDK with your credentials (client_id and secret)
 
 def configure_paypal(mode, client_id, client_secret):
-  """
-  Configures the PayPal SDK with the provided credentials.
-  """
-  paypalrestsdk.configure({
-    'mode': mode,
-    'client_id': client_id,
-    'client_secret': client_secret
-  })
+    """
+    Configures the PayPal SDK with the provided credentials.
+    """
+    paypalrestsdk.configure({
+        'mode': mode,
+        'client_id': client_id,
+        'client_secret': client_secret
+    })
 
-def create_payment(amount, description):
-  """
-  Creates a PayPal payment object with the specified amount and description.
 
-  Args:
-      amount: The amount of the payment.
-      description: A description of the payment.
 
-  Returns:
-      A dictionary containing the approval URL if successful, or an error message otherwise.
-  """
-  payment = paypalrestsdk.Payment({
-    "intent": "sale",
-    "payer": {
-      "payment_method": "paypal"
-    },
-    "transactions": [{
-      "amount": {
-        "total": str(amount),
-        "currency": "USD"
-      },
-      "description": description
-    }],
-    "redirect_urls": {
-      "return_url": f"{apibaseurl}/rr/execute",
-      "cancel_url": f"{apibaseurl}/rr/cancel"
-    }
-  })
+def create_payment_paypal(amount, description):
+    """
+    Creates a PayPal payment object with the specified amount and description.
 
-  if payment.create():
-    for link in payment.links:
-      if link.rel == "approval_url":
-        return {"approval_url": link.href}
-  else:
-    logging.error(payment.error)
-    return {"error": "Payment creation failed"}
+    Args:
+        amount: The amount of the payment.
+        description: A description of the payment.
+
+    Returns:
+        A dictionary containing the approval URL if successful, or an error message otherwise.
+    """
+    try:
+        payment = paypalrestsdk.Payment({
+            "intent": "sale",
+            "payer": {"payment_method": "paypal"},
+            "transactions": [{
+                "amount": {"total": str(amount), "currency": "USD"},
+                "description": description
+            }],
+            "redirect_urls": {
+                "return_url": f"{apibaseurl}/rr/execute",
+                "cancel_url": f"{apibaseurl}/rr/cancel"
+            }
+        })
+
+        if payment.create():
+            for link in payment.links:
+                if link.rel == "approval_url":
+                    return {"approval_url": link.href}
+        else:
+            logging.error(payment.error)
+            return {"error": "Payment creation failed"}
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        return {"error": "An unexpected error occurred"}
+
 
 def execute_payment(payment_id, payer_id):
-  """
-  Executes a PayPal payment using the provided payment ID and payer ID.
+    """
+    Executes a PayPal payment using the provided payment ID and payer ID.
 
-  Args:
-      payment_id: The ID of the PayPal payment.
-      payer_id: The ID of the payer who authorized the payment.
+    Args:
+        payment_id: The ID of the PayPal payment.
+        payer_id: The ID of the payer who authorized the payment.
 
-  Returns:
-      A dictionary containing the payment status and details if successful, or an error message otherwise.
-  """
-  payment = paypalrestsdk.Payment.find(payment_id)
-  if payment.execute({"payer_id": payer_id}):
-    return {"status": "success", "payment": payment.to_dict()}
-  else:
-    logging.error(payment.error)
-    return {"status": "failure", "error": payment.error}
-  
+    Returns:
+        A dictionary containing the payment status and details if successful, or an error message otherwise.
+    """
+    try:
+        payment = paypalrestsdk.Payment.find(payment_id)
+        if payment.execute({"payer_id": payer_id}):
+            return {"status": "success", "payment": payment.to_dict()}
+        else:
+            logging.error(payment.error)
+            return {"status": "failure", "error": payment.error}
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        return {"status": "failure", "error": "An unexpected error occurred"}
+
+
 def handle_payment_cancellation():
-  """
-  Returns a message indicating payment cancellation.
-  """
-  return {"status": "failure", "message": "Payment was cancelled."}
+    """
+    Returns a message indicating payment cancellation.
+    """
+    return {"status": "failure", "message": "Payment was cancelled."}
 
-#stripe
-# Set up Stripe with your secret key
+
+# Stripe
 def configure_stripe(secret_key):
     """
     Configures Stripe with the provided secret key.
     """
     stripe.api_key = secret_key
-    
+
 
 def create_stripe_payment(amount, description="Payment for Zinzi Health Service", currency="usd"):
     """
@@ -773,15 +775,21 @@ def create_stripe_payment(amount, description="Payment for Zinzi Health Service"
         A dictionary containing the client secret if successful, or an error message otherwise.
     """
     try:
+        if amount <= 0:
+            return {"status": "failure", "error": "Amount must be greater than zero"}
+
         payment_intent = stripe.PaymentIntent.create(
-            amount=int(amount),  # to convert to cents you can say amount=int(amount*100)
+            amount=int(amount),  # Convert to cents if required
             currency=currency,
             description=description
         )
         return {"status": "success", "client_secret": payment_intent.client_secret}
     except stripe.error.StripeError as e:
         logging.error(f"Stripe error: {e}")
-        return {"status": "failure", "error": "Payment creation failed"}
+        return {"status": "failure", "error": e.user_message}
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        return {"status": "failure", "error": "An unexpected error occurred"}
 
 
 def execute_stripe_payment(payment_intent_id, payment_method_id):
@@ -807,6 +815,10 @@ def execute_stripe_payment(payment_intent_id, payment_method_id):
     except stripe.error.StripeError as e:
         logging.error(f"Stripe error: {e}")
         return {"status": "failure", "error": e.user_message}
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        return {"status": "failure", "error": "An unexpected error occurred"}
+
 
 def handle_stripe_payment_cancellation():
     """
