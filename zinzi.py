@@ -1,5 +1,6 @@
 #Cspell:disable
 import os
+from dotenv import load_dotenv
 import random
 import string
 from datetime import datetime
@@ -13,7 +14,14 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 import paypalrestsdk
 import logging
+import stripe
 
+# Load the .env file
+load_dotenv()
+
+# Access the API base URL
+apibaseurl = os.getenv('API_BASE_URL', 'https://default.url')
+print(apibaseurl)
 
 # Database connection
 def get_db_connection():
@@ -671,52 +679,137 @@ class MealRecommendation:
 
 
 # Set up PayPal SDK with your credentials (client_id and secret)
-paypalrestsdk.configure({
-    'mode': 'sandbox',  # or 'live' for production
-    'client_id': 'AfzJI5McbstkRODEO9C_DtEgmP7lRf0K49OFKXhi3Xo6W5HSVO77JTNnwWJI2ndjz0fcAg9oWObiT5nb',
-    'client_secret': 'YOELDAPDBWEEWxEuAofCbcWH5XvKLYtcp_TFsL_b-XQPdR0G04IDiEkSuNmZTPRF-ItPjKOPnp12i-u_FJ'
-})
 
-# Function to create a payment
-def create_payment(amount, currency="USD", return_url="http://localhost:5000/rr/execute", cancel_url="http://localhost:5000/rr/cancel"):
-    payment = paypalrestsdk.Payment({
-        "intent": "sale",
-        "payer": {
-            "payment_method": "paypal"
-        },
-        "transactions": [{
-            "amount": {
-                "total": str(amount),
-                "currency": currency
-            },
-            "description": "Payment for ZINZI health service"
-        }],
-        "redirect_urls": {
-            "return_url": return_url,
-            "cancel_url": cancel_url
-        }
-    })
+def configure_paypal(mode, client_id, client_secret):
+  """
+  Configures the PayPal SDK with the provided credentials.
+  """
+  paypalrestsdk.configure({
+    'mode': mode,
+    'client_id': client_id,
+    'client_secret': client_secret
+  })
 
-    if payment.create():
-        for link in payment.links:
-            if link.rel == "approval_url":
-                approval_url = link.href
-                return approval_url
-    else:
-        logging.error(payment.error)
-        return None
+def create_payment(amount, description):
+  """
+  Creates a PayPal payment object with the specified amount and description.
 
-# Function to execute a payment after user approval
+  Args:
+      amount: The amount of the payment.
+      description: A description of the payment.
+
+  Returns:
+      A dictionary containing the approval URL if successful, or an error message otherwise.
+  """
+  payment = paypalrestsdk.Payment({
+    "intent": "sale",
+    "payer": {
+      "payment_method": "paypal"
+    },
+    "transactions": [{
+      "amount": {
+        "total": str(amount),
+        "currency": "USD"
+      },
+      "description": description
+    }],
+    "redirect_urls": {
+      "return_url": f"{apibaseurl}/rr/execute",
+      "cancel_url": f"{apibaseurl}/rr/cancel"
+    }
+  })
+
+  if payment.create():
+    for link in payment.links:
+      if link.rel == "approval_url":
+        return {"approval_url": link.href}
+  else:
+    logging.error(payment.error)
+    return {"error": "Payment creation failed"}
+
 def execute_payment(payment_id, payer_id):
-    payment = paypalrestsdk.Payment.find(payment_id)
+  """
+  Executes a PayPal payment using the provided payment ID and payer ID.
 
-    if payment.execute({"payer_id": payer_id}):
-        return {"status": "success", "payment": payment}
-    else:
-        logging.error(payment.error)
-        return {"status": "failure", "error": payment.error}
+  Args:
+      payment_id: The ID of the PayPal payment.
+      payer_id: The ID of the payer who authorized the payment.
 
-# Function to handle cancellation
+  Returns:
+      A dictionary containing the payment status and details if successful, or an error message otherwise.
+  """
+  payment = paypalrestsdk.Payment.find(payment_id)
+  if payment.execute({"payer_id": payer_id}):
+    return {"status": "success", "payment": payment.to_dict()}
+  else:
+    logging.error(payment.error)
+    return {"status": "failure", "error": payment.error}
+  
 def handle_payment_cancellation():
-    return {"status": "failure", "message": "Payment was cancelled."}
+  """
+  Returns a message indicating payment cancellation.
+  """
+  return {"status": "failure", "message": "Payment was cancelled."}
 
+#stripe
+# Set up Stripe with your secret key
+def configure_stripe(secret_key):
+    """
+    Configures Stripe with the provided secret key.
+    """
+    stripe.api_key = secret_key
+    
+
+def create_stripe_payment(amount, description="Payment for Zinzi Health Service", currency="usd"):
+    """
+    Creates a Stripe payment intent with the specified amount and description.
+
+    Args:
+        amount: The amount of the payment.
+        description: A description of the payment.
+        currency: The currency of the payment (default is USD).
+
+    Returns:
+        A dictionary containing the client secret if successful, or an error message otherwise.
+    """
+    try:
+        payment_intent = stripe.PaymentIntent.create(
+            amount=int(amount),  # to convert to cents you can say amount=int(amount*100)
+            currency=currency,
+            description=description
+        )
+        return {"status": "success", "client_secret": payment_intent.client_secret}
+    except stripe.error.StripeError as e:
+        logging.error(f"Stripe error: {e}")
+        return {"status": "failure", "error": "Payment creation failed"}
+
+
+def execute_stripe_payment(payment_intent_id, payment_method_id):
+    """
+    Executes a Stripe payment using the provided payment intent ID and payment method ID.
+
+    Args:
+        payment_intent_id: The ID of the payment intent.
+        payment_method_id: The ID of the payment method to use.
+
+    Returns:
+        A dictionary containing the payment status and details if successful, or an error message otherwise.
+    """
+    try:
+        payment_intent = stripe.PaymentIntent.confirm(
+            payment_intent_id,
+            payment_method=payment_method_id
+        )
+        if payment_intent.status == 'succeeded':
+            return {"status": "success", "payment": payment_intent}
+        else:
+            return {"status": "failure", "message": "Payment not completed"}
+    except stripe.error.StripeError as e:
+        logging.error(f"Stripe error: {e}")
+        return {"status": "failure", "error": e.user_message}
+
+def handle_stripe_payment_cancellation():
+    """
+    Returns a message indicating payment cancellation.
+    """
+    return {"status": "failure", "message": "Payment was cancelled."}

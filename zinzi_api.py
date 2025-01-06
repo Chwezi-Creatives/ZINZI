@@ -4,9 +4,12 @@ import hashlib
 import pyodbc
 import random
 import string
+import zinzi
+import logging
 from flask_cors import CORS
-from zinzy.zinzy import Authentication, Updatelists, MealRecommendation
-from zinzy.zinzy import create_payment, execute_payment, handle_payment_cancellation
+from zinzi import Authentication, Updatelists, MealRecommendation
+from zinzi import configure_paypal, create_payment, execute_payment, handle_payment_cancellation
+from zinzi import configure_stripe, create_stripe_payment, execute_stripe_payment, handle_stripe_payment_cancellation
 
 app = Flask(__name__)
 CORS(app)
@@ -265,44 +268,95 @@ def get_meal_recommendations():
 
 
 # Endpoint to initiate payment
+# Configure PayPal SDK (replace with your credentials)
+configure_paypal('sandbox', 'AcKJRTT6sFMyTvRfqzMXP0b2pXbBv12hDXHP1lA16lwdMYpT942sIFxyEttBKcaX3B_Y640CiJSLIziX', 'EPZFANf3DedgssBp64xEwR2H0BnoIQy9HTq04Wi4Fohf_c2rYLU3q7iv0QhKnXTNmaQT4rHxHAb_7p-K')
+
 @app.route('/rr/pay', methods=['POST'])
-def pay():
-    data = request.get_json()
-    amount = data.get('amount')  # Get the payment amount from the request
+def create_payment_route():
+    data = request.json
+    amount = data.get('amount')
+    description = "Payment for ZINZI health service"  # Update with your description
 
     if amount is None:
         return jsonify({"error": "Amount is required"}), 400
 
-    approval_url = create_payment(amount)
+    response = create_payment(amount, description)
+    return jsonify(response)
 
-    if approval_url:
-        return jsonify({"approval_url": approval_url}), 200
-    else:
-        return jsonify({"error": "Failed to create payment"}), 500
-
-# Endpoint to execute payment after user approval
 @app.route('/rr/execute', methods=['GET'])
-def execute():
-    payment_id = request.args.get('paymentId')
-    payer_id = request.args.get('PayerID')
+def execute_payment_route():
+  payment_id = request.args.get('paymentId')
+  payer_id = request.args.get('PayerID')
 
-    if not payment_id or not payer_id:
-        return jsonify({"error": "Payment ID and Payer ID are required"}), 400
+  response = execute_payment(payment_id, payer_id)
+  return jsonify(response)
 
-    result = execute_payment(payment_id, payer_id)
-
-    if result["status"] == "success":
-        return jsonify({"message": "Payment executed successfully", "payment": result["payment"]}), 200
-    else:
-        return jsonify({"error": "Payment execution failed", "details": result["error"]}), 500
-
-# Endpoint for payment cancellation
 @app.route('/rr/cancel', methods=['GET'])
-def cancel():
-    result = handle_payment_cancellation()
-    return jsonify(result), 200
+def handle_payment_cancellation_route():
+  return jsonify(handle_payment_cancellation())
+
+# Configure Stripe with your secret key
+STRIPE_SECRET_KEY = "sk_test_51QdZkrP0TRsYJeZcUMkyQMSDojKYuRaWVZmmTP7VkdXui3sEeu5jsaXimH8qQGd0q9foYSkGdZt5yQ7Gs8Vfi0HT00odFWIpA3"
+configure_stripe(STRIPE_SECRET_KEY)
+
+
+@app.route('/rr/create_stripe_payment', methods=['POST'])
+def create_payment():
+    """
+    Endpoint to create a Stripe payment intent.
+    Expects JSON with 'amount'.
+    """
+    try:
+        data = request.json
+        amount = data.get('amount')
+
+        if not amount:
+            return jsonify({"status": "failure", "error": "Missing amount"}), 400
+
+        # Call backend function to create payment
+        response = create_stripe_payment(amount)
+        return jsonify(response)
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        return jsonify({"status": "failure", "error": "Something went wrong"}), 500
+
+@app.route('/rr/confirm_stripe_payment', methods=['POST'])
+def confirm_payment():
+    """
+    Endpoint to confirm a Stripe payment.
+    Expects JSON with 'paymentIntentId' and optionally 'paymentMethodId'.
+    """
+    try:
+        data = request.json
+        payment_intent_id = data.get('paymentIntentId')
+        payment_method_id = data.get('paymentMethodId')
+
+        if not payment_intent_id:
+            return jsonify({"error": "Missing paymentIntentId"}), 400
+
+        # Call backend function to confirm payment
+        response = execute_stripe_payment(payment_intent_id, payment_method_id)
+        return jsonify(response)
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        return jsonify({"error": "Something went wrong"}), 500
+
+
+@app.route('/rr/cancel_stripe_payment', methods=['POST'])
+def cancel_payment():
+    """
+    Endpoint to handle payment cancellation.
+    """
+    try:
+        # Call backend function to handle cancellation
+        response = handle_stripe_payment_cancellation()
+        return jsonify(response)
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        return jsonify({"error": "Something went wrong"}), 500
+
 
 
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=5000, debug=True)
+  app.run(debug=True, host='0.0.0.0')
