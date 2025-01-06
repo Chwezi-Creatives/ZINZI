@@ -1,4 +1,4 @@
-#cSpell:disable
+# cSpell:disable
 from flask import Flask, request, jsonify
 import hashlib
 import pyodbc
@@ -8,7 +8,7 @@ import zinzi
 import logging
 from flask_cors import CORS
 from zinzi import Authentication, Updatelists, MealRecommendation
-from zinzi import configure_paypal, create_payment, execute_payment, handle_payment_cancellation
+from zinzi import configure_paypal, create_payment_paypal, execute_payment, handle_payment_cancellation
 from zinzi import configure_stripe, create_stripe_payment, execute_stripe_payment, handle_stripe_payment_cancellation
 
 app = Flask(__name__)
@@ -125,7 +125,6 @@ def add_user_metrics():
         return jsonify({'message': 'Error updating metrics.', 'error': str(e)}), 500
 
 
-    
 @app.route('/rr/get_user_metrics', methods=['GET'])
 def get_user_metrics():
     user_id = request.args.get('user_id')
@@ -135,12 +134,10 @@ def get_user_metrics():
     try:
         updatelists = Updatelists()
         user_metrics = updatelists.get_user_metrics(user_id)
-        print (user_metrics)
+        print(user_metrics)
         
-
         if user_metrics:
             return jsonify(user_metrics), 200
-        
         else:
             return jsonify({'error': 'User metrics not found'}), 404
     except Exception as e:
@@ -264,7 +261,6 @@ def get_meal_recommendations():
         return jsonify({'recommended_meals': recommended_meals}), 200
     except Exception as e:
         return jsonify({'error': f'Error fetching meal recommendations: {str(e)}'}), 500
-    
 
 
 # Endpoint to initiate payment
@@ -280,20 +276,21 @@ def create_payment_route():
     if amount is None:
         return jsonify({"error": "Amount is required"}), 400
 
-    response = create_payment(amount, description)
+    response = create_payment_paypal(amount, description)
     return jsonify(response)
+
 
 @app.route('/rr/execute', methods=['GET'])
 def execute_payment_route():
-  payment_id = request.args.get('paymentId')
-  payer_id = request.args.get('PayerID')
+    payment_id = request.args.get('paymentId')
+    payer_id = request.args.get('PayerID')
 
-  response = execute_payment(payment_id, payer_id)
-  return jsonify(response)
+    response = execute_payment(payment_id, payer_id)
+    return jsonify(response)
 
 @app.route('/rr/cancel', methods=['GET'])
 def handle_payment_cancellation_route():
-  return jsonify(handle_payment_cancellation())
+    return jsonify(handle_payment_cancellation())
 
 # Configure Stripe with your secret key
 STRIPE_SECRET_KEY = "sk_test_51QdZkrP0TRsYJeZcUMkyQMSDojKYuRaWVZmmTP7VkdXui3sEeu5jsaXimH8qQGd0q9foYSkGdZt5yQ7Gs8Vfi0HT00odFWIpA3"
@@ -356,7 +353,5 @@ def cancel_payment():
         return jsonify({"error": "Something went wrong"}), 500
 
 
-
-
 if __name__ == '__main__':
-  app.run(debug=True, host='0.0.0.0')
+    app.run(debug=True, host='0.0.0.0')
