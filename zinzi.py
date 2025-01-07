@@ -21,7 +21,6 @@ load_dotenv()
 
 # Access the API base URL
 apibaseurl = os.getenv('API_BASE_URL', 'https://default.url')
-print(apibaseurl)
 
 # Database connection
 def get_db_connection():

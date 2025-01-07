@@ -17,7 +17,7 @@ CORS(app)
 # Create instances of the classes from the backend
 auth = Authentication()
 updater = Updatelists()
-meal_rec = MealRecommendation(1)  # Example user_id is 1 for testing
+#meal_rec = MealRecommendation()  not yet active # Example user_id is 1 for testing
 
 
 @app.route('/rr')
@@ -311,7 +311,7 @@ def create_payment():
             return jsonify({"status": "failure", "error": "Missing amount"}), 400
 
         # Call backend function to create payment
-        response = create_stripe_payment(amount)
+        response = create_stripe_payment(amount*100)
         return jsonify(response)
     except Exception as e:
         logging.error(f"Unexpected error: {e}")
