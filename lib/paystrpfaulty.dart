@@ -65,32 +65,19 @@ class _PaymentScreenstrpState extends State<PaymentScreenstrp> {
 
   Future<void> _showPaymentSheet(String clientSecret) async {
     try {
-      // Show the payment sheet to collect payment information
+      // Initialize the payment sheet
+      await Stripe.instance.initPaymentSheet(
+        paymentSheetParameters: SetupPaymentSheetParameters(
+          paymentIntentClientSecret: clientSecret,
+          merchantDisplayName: 'ZINZI health',
+        ),
+      );
+
+      // Present the payment sheet
       await Stripe.instance.presentPaymentSheet();
 
       // Payment was successful
-      _showSuccess('Payment successful! Redirecting...');
-      Navigator.pushReplacement(
-        context,
-        PageRouteBuilder(
-          pageBuilder: (context, animation, secondaryAnimation) =>
-              DashboardPage(),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            const begin = Offset(1.0, 0.0);
-            const end = Offset.zero;
-            const curve = Curves.easeInOut;
-
-            final tween =
-                Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-            final offsetAnimation = animation.drive(tween);
-
-            return SlideTransition(
-              position: offsetAnimation,
-              child: child,
-            );
-          },
-        ),
-      );
+      _showSuccessPopup();
     } catch (e) {
       _showError('Error during payment processing: ${e.toString()}');
     }
@@ -116,18 +103,39 @@ class _PaymentScreenstrpState extends State<PaymentScreenstrp> {
     );
   }
 
-  void _showSuccess(String message) {
+  void _showSuccessPopup() {
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: Text('Success'),
-          content: Text(message),
+          content: Text('Payment successful!'),
           actions: <Widget>[
             TextButton(
-              child: Text('OK'),
+              child: Text('Go to Dashboard'),
               onPressed: () {
-                Navigator.of(context).pop();
+                Navigator.pushReplacement(
+                  context,
+                  PageRouteBuilder(
+                    pageBuilder: (context, animation, secondaryAnimation) =>
+                        DashboardPage(),
+                    transitionsBuilder:
+                        (context, animation, secondaryAnimation, child) {
+                      const begin = Offset(1.0, 0.0);
+                      const end = Offset.zero;
+                      const curve = Curves.easeInOut;
+
+                      final tween = Tween(begin: begin, end: end)
+                          .chain(CurveTween(curve: curve));
+                      final offsetAnimation = animation.drive(tween);
+
+                      return SlideTransition(
+                        position: offsetAnimation,
+                        child: child,
+                      );
+                    },
+                  ),
+                );
               },
             ),
           ],
