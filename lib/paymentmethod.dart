@@ -36,42 +36,25 @@ class PaymentMethodSelectionPage extends StatelessWidget {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                      builder: (context) => PaymentScreennowebview()),
+                    builder: (context) => PaymentScreenstrp(),
+                  ),
                 );
               },
-              child: const Text('Pay with Stripe'),
+              child: const Text('Pay with Stripe (new)'),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => PaymentScreennowebview()));
+              },
+              child: const Text('Pay with stripe (Outdated)'),
             ),
           ],
         ),
       ),
-    );
-  }
-}
-
-class PayPalPaymentPage extends StatelessWidget {
-  const PayPalPaymentPage({Key? key}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('PayPal Payment'),
-      ),
-      body: const Center(child: Text('PayPal Payment Integration')),
-    );
-  }
-}
-
-class StripePaymentPage extends StatelessWidget {
-  const StripePaymentPage({Key? key}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Stripe Payment'),
-      ),
-      body: const Center(child: Text('Stripe Payment Integration')),
     );
   }
 }
