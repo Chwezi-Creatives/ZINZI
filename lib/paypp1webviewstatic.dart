@@ -14,13 +14,21 @@ class PaymentScreenpp extends StatefulWidget {
 
 class _PaymentScreenppState extends State<PaymentScreenpp> {
   final TextEditingController _amountController = TextEditingController();
+  bool _isLoading = false;
 
   Future<void> _initiateAndPay() async {
+    setState(() {
+      _isLoading = true;
+    });
+
     final amount = _amountController.text;
     if (amount.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text("Please enter a valid amount."),
       ));
+      setState(() {
+        _isLoading = false;
+      });
       return;
     }
 
@@ -40,7 +48,26 @@ class _PaymentScreenppState extends State<PaymentScreenpp> {
           // Navigate to WebView for payment
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => WebViewScreen(paymentUrl)),
+            PageRouteBuilder(
+              pageBuilder: (context, animation, secondaryAnimation) =>
+                  WebViewScreen(paymentUrl),
+              transitionDuration: Duration(milliseconds: 500),
+              transitionsBuilder:
+                  (context, animation, secondaryAnimation, child) {
+                const begin = Offset(1.0, 0.0);
+                const end = Offset.zero;
+                const curve = Curves.easeInOut;
+
+                final tween = Tween(begin: begin, end: end)
+                    .chain(CurveTween(curve: curve));
+                final offsetAnimation = animation.drive(tween);
+
+                return SlideTransition(
+                  position: offsetAnimation,
+                  child: child,
+                );
+              },
+            ),
           );
         } else {
           throw Exception("Invalid payment URL received.");
@@ -53,6 +80,10 @@ class _PaymentScreenppState extends State<PaymentScreenpp> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text("Error initiating payment. Please try again."),
       ));
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
@@ -70,10 +101,12 @@ class _PaymentScreenppState extends State<PaymentScreenpp> {
               keyboardType: TextInputType.number,
             ),
             SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: _initiateAndPay,
-              child: Text("Proceed to PayPal"),
-            ),
+            _isLoading
+                ? CircularProgressIndicator()
+                : ElevatedButton(
+                    onPressed: _initiateAndPay,
+                    child: Text("Proceed to PayPal"),
+                  ),
           ],
         ),
       ),
@@ -135,33 +168,44 @@ class _WebViewScreenState extends State<WebViewScreen> {
           '$apibaseurl/rr/execute?paymentId=$paymentId&PayerID=$payerId'));
 
       if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text("Payment successful!"),
-        ));
-
-        // Navigate back to dashboard with slide transition
-        Navigator.pushReplacement(
-          context,
-          PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) =>
-                DashboardPage(),
-            transitionsBuilder:
-                (context, animation, secondaryAnimation, child) {
-              const begin = Offset(1.0, 0.0);
-              const end = Offset.zero;
-              const curve = Curves.easeInOut;
-
-              final tween =
-                  Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-              final offsetAnimation = animation.drive(tween);
-
-              return SlideTransition(
-                position: offsetAnimation,
-                child: child,
-              );
-            },
+        // Display success dialog
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text('Payment Successful'),
+            content: Text('Your payment has been successfully processed.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: Text('Okay'),
+              ),
+            ],
           ),
-        );
+        ).then((_) {
+          // Navigate back to dashboard with slide transition
+          Navigator.pushReplacement(
+            context,
+            PageRouteBuilder(
+              pageBuilder: (context, animation, secondaryAnimation) =>
+                  DashboardPage(),
+              transitionsBuilder:
+                  (context, animation, secondaryAnimation, child) {
+                const begin = Offset(1.0, 0.0);
+                const end = Offset.zero;
+                const curve = Curves.easeInOut;
+
+                final tween = Tween(begin: begin, end: end)
+                    .chain(CurveTween(curve: curve));
+                final offsetAnimation = animation.drive(tween);
+
+                return SlideTransition(
+                  position: offsetAnimation,
+                  child: child,
+                );
+              },
+            ),
+          );
+        });
       } else {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text("Payment execution failed."),
