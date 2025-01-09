@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:zinzi2/dashboard_page.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';
 
@@ -27,10 +28,13 @@ class _PaymentScreennowebviewState extends State<PaymentScreennowebview> {
     });
 
     try {
+      // Multiply the amount by 100 before sending it to the backend
+      final double amountInCents = double.parse(amount) * 100;
+
       final response = await http.post(
         Uri.parse('$apibaseurl/rr/create_stripe_payment'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'amount': double.parse(amount)}),
+        body: jsonEncode({'amount': amountInCents.toInt()}),
       );
 
       if (response.statusCode == 200) {
@@ -78,7 +82,30 @@ class _PaymentScreennowebviewState extends State<PaymentScreennowebview> {
         content: Text(message),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              Navigator.of(context).pushReplacement(
+                PageRouteBuilder(
+                  pageBuilder: (context, animation1, animation2) =>
+                      DashboardPage(),
+                  transitionDuration: Duration(milliseconds: 500),
+                  transitionsBuilder:
+                      (context, animation, secondaryAnimation, child) {
+                    var begin = Offset(-1.0, 0.0);
+                    var end = Offset.zero;
+                    var curve = Curves.ease;
+
+                    var tween = Tween(begin: begin, end: end)
+                        .chain(CurveTween(curve: curve));
+
+                    return SlideTransition(
+                      position: animation.drive(tween),
+                      child: child,
+                    );
+                  },
+                ),
+              );
+            },
             child: Text('Okay'),
           ),
         ],
