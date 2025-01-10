@@ -15,12 +15,13 @@ from google.oauth2.credentials import Credentials
 import paypalrestsdk
 import logging
 import stripe
+import requests
 
 # Load the .env file
 load_dotenv()
 
 # Access the API base URL
-apibaseurl = os.getenv('API_BASE_URL', 'https://default.url')
+apibaseurl = os.getenv('API_BASE_URL2', 'https://default.url')
 
 # Database connection
 def get_db_connection():
@@ -580,7 +581,6 @@ class Updatelists:
 
     
 
-# 5. Meal Recommendation Logic
 class MealRecommendation:
     def __init__(self, user_id):
         self.user_id = user_id
@@ -601,10 +601,10 @@ class MealRecommendation:
             if result:
                 return result[0]
             else:
-                print(f"No weight data found for user {self.user_id}.")
+                logging.warning(f"No weight data found for user {self.user_id}.")
                 return None
         except pyodbc.Error as e:
-            print(f"Error fetching weight: {e}")
+            logging.error(f"Error fetching weight for user {self.user_id}: {e}")
             return None
 
     def get_user_cholesterol_level(self):
@@ -620,10 +620,10 @@ class MealRecommendation:
             if result:
                 return result[0]
             else:
-                print(f"No cholesterol data found for user {self.user_id}.")
+                logging.warning(f"No cholesterol data found for user {self.user_id}.")
                 return None
         except pyodbc.Error as e:
-            print(f"Error fetching cholesterol level: {e}")
+            logging.error(f"Error fetching cholesterol level for user {self.user_id}: {e}")
             return None
 
     def get_user_dietary_preferences(self):
@@ -639,39 +639,46 @@ class MealRecommendation:
             if result:
                 return result[0].split(",")
             else:
-                print(f"No dietary preferences found for user {self.user_id}.")
+                logging.warning(f"No dietary preferences found for user {self.user_id}.")
                 return []
         except pyodbc.Error as e:
-            print(f"Error fetching dietary preferences: {e}")
+            logging.error(f"Error fetching dietary preferences for user {self.user_id}: {e}")
             return []
 
     def recommend_meals(self):
-        connection = get_db_connection()
-        if connection is None:
-            return []
-        cursor = connection.cursor()
-        cursor.execute("SELECT * FROM Meal_data")
-        columns = [column[0] for column in cursor.description]
-        meal_data = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        try:
+            connection = get_db_connection()
+            if connection is None:
+                return []
+            cursor = connection.cursor()
+            cursor.execute("SELECT * FROM Meal_data WHERE MealType IN (?)", (','.join(self.dietary_preferences),))
+            columns = [column[0] for column in cursor.description]
+            meal_data = [dict(zip(columns, row)) for row in cursor.fetchall()]
+            connection.close()
 
-        recommended_meals = [meal for meal in meal_data if self.is_meal_suitable(meal)]
-        connection.close()
-        return recommended_meals
+            recommended_meals = [meal for meal in meal_data if self.is_meal_suitable(meal)]
+            return recommended_meals
+        except pyodbc.Error as e:
+            logging.error(f"Error fetching meal data: {e}")
+            return []
 
     def is_meal_suitable(self, meal):
+        # Check dietary preferences
         if meal['MealType'] not in self.dietary_preferences:
             return False
 
-        if meal['Calories'] > (self.weight * 30):
+        # Check calorie limit based on weight (e.g., 30 calories per kg)
+        if meal['Calories'] > (self.weight * 30 if self.weight else 0):
             return False
 
-        if meal['Cholesterol_content'] > self.cholesterol_level:
+        # Check cholesterol level (allow some margin, e.g., 10% more than the user's cholesterol level)
+        if meal['Cholesterol_content'] > self.cholesterol_level * 1.1 if self.cholesterol_level else 0:
             return False
 
         return True
 
 
-
+#payment methds
 # Set up PayPal SDK with your credentials (client_id and secret)
 
 def configure_paypal(mode, client_id, client_secret):
@@ -824,3 +831,105 @@ def handle_stripe_payment_cancellation():
     Returns a message indicating payment cancellation.
     """
     return {"status": "failure", "message": "Payment was cancelled."}
+
+
+# Add MTN MoMo Payment Method
+
+def configure_momo(api_user, api_key, subscription_key):
+    """
+    Configures the MTN MoMo API with the provided credentials.
+
+    Args:
+        api_user: The API user ID.
+        api_key: The API key.
+        subscription_key: The subscription key for the MoMo API.
+
+    Returns:
+        A dictionary confirming configuration or an error message.
+    """
+    global momo_headers, momo_base_url
+
+    momo_headers = {
+        "Ocp-Apim-Subscription-Key": subscription_key,
+        "Authorization": f"Bearer {api_key}"
+    }
+    momo_base_url = os.getenv('MOMO_BASE_URL', 'https://default.url')
+
+    return {"status": "success", "message": "MoMo API configured successfully."}
+
+
+def request_momo_payment(amount, currency, external_id, payer_number, payer_message, payee_note):
+    """
+    Initiates an MTN MoMo payment request.
+
+    Args:
+        amount: The amount to be paid.
+        currency: The currency of the payment (e.g., XAF, USD).
+        external_id: A unique transaction ID.
+        payer_number: The payer's phone number.
+        payer_message: A message to the payer.
+        payee_note: A note for the payee.
+
+    Returns:
+        A dictionary containing the transaction reference or an error message.
+    """
+    try:
+        # Construct request payload
+        payload = {
+            "amount": str(amount),
+            "currency": currency,
+            "externalId": external_id,
+            "payer": {
+                "partyIdType": "MSISDN",
+                "partyId": payer_number
+            },
+            "payerMessage": payer_message,
+            "payeeNote": payee_note
+        }
+
+        # Send payment request to MoMo API
+        response = requests.post(
+            f"{momo_base_url}/requesttopay",
+            json=payload,
+            headers=momo_headers
+        )
+
+        if response.status_code == 202:
+            transaction_ref = response.headers.get("X-Reference-Id")
+            return {"status": "success", "transaction_ref": transaction_ref}
+        else:
+            return {"status": "failure", "error": response.json()}
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        return {"status": "failure", "error": "An unexpected error occurred"}
+
+
+def check_momo_payment_status(transaction_ref):
+    """
+    Checks the status of an MTN MoMo payment using its transaction reference.
+
+    Args:
+        transaction_ref: The reference ID of the transaction.
+
+    Returns:
+        A dictionary containing the payment status or an error message.
+    """
+    try:
+        response = requests.get(
+            f"{momo_base_url}/requesttopay/{transaction_ref}",
+            headers=momo_headers
+        )
+
+        if response.status_code == 200:
+            payment_status = response.json()
+            return {"status": "success", "payment_status": payment_status}
+        else:
+            return {"status": "failure", "error": response.json()}
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        return {"status": "failure", "error": "An unexpected error occurred"}
+
+# Example integration points for Flutter UI comments:
+# 1. The "payer_number" field in the request_momo_payment function expects input from the user via the Flutter UI.
+# 2. The "amount" field in the request_momo_payment function should be dynamically passed based on the user's selected service or input.
+# 3. After initiating a payment, the Flutter app can use the "transaction_ref" to poll the payment status by sending an API call to check_momo_payment_status.
