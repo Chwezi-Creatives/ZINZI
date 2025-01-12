@@ -21,7 +21,8 @@ import requests
 load_dotenv()
 
 # Access the API base URL
-apibaseurl = os.getenv('API_BASE_URL2', 'https://default.url')
+apibaseurl = os.getenv('API_BASE_URL1', 'https://default.url')
+callbackurl=os.getenv('API_BASE_URL11', 'https://default.url')
 
 # Database connection
 def get_db_connection():
@@ -833,48 +834,91 @@ def handle_stripe_payment_cancellation():
     return {"status": "failure", "message": "Payment was cancelled."}
 
 
+
+# Load momo environment variables (ensure these are set in your environment or .env file)
+api_user = os.getenv("X_REFERENCE_ID")
+api_key = os.getenv("MOMO_API_KEY")
+subscription_key = os.getenv("MOMO_SUBSCRIPTION_KEY")
+
+# Initialize momo_base_url and momo_headers
+momo_base_url = ''
+momo_headers = {}
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+
 # Add MTN MoMo Payment Method
 
 def configure_momo(api_user, api_key, subscription_key):
     """
     Configures the MTN MoMo API with the provided credentials.
-
-    Args:
-        api_user: The API user ID.
-        api_key: The API key.
-        subscription_key: The subscription key for the MoMo API.
-
-    Returns:
-        A dictionary confirming configuration or an error message.
     """
     global momo_headers, momo_base_url
 
+    # Set MoMo API configuration values
     momo_headers = {
         "Ocp-Apim-Subscription-Key": subscription_key,
         "Authorization": f"Bearer {api_key}"
     }
-    momo_base_url = os.getenv('MOMO_BASE_URL', 'https://default.url')
+    momo_base_url = "https://sandbox.momodeveloper.mtn.com/collection/v1_0"  # Set base URL
 
+    logging.info("MoMo API configured successfully.")
     return {"status": "success", "message": "MoMo API configured successfully."}
 
+configure_momo(api_user, api_key, subscription_key)
+
+def bc_authorize():
+    """
+    Claims consent from the account holder for the requested scopes.
+    """
+    try:
+        # Ensure MoMo has been configured
+        if not momo_base_url or not momo_headers:
+            raise Exception("MoMo API not configured. Please call configure_momo first.")
+
+        logging.info("Requesting authorization for MoMo consent...")
+
+        # Prepare the request for bc-authorize
+        payload = {
+            # Provide any required payload here as per your MoMo configuration (scope, etc.)
+        }
+
+        response = requests.post(
+            f"{momo_base_url}/bc-authorize",
+            json=payload,
+            headers=momo_headers
+        )
+
+        if response.status_code == 200:
+            # Successfully claimed consent
+            auth_req_id = response.json().get("auth_req_id")
+            logging.info(f"Authorization successful. Auth Request ID: {auth_req_id}")
+            return {"status": "success", "auth_req_id": auth_req_id}
+        else:
+            logging.error(f"Authorization failed: {response.json()}")
+            return {"status": "failure", "error": response.json()}
+    
+    except Exception as e:
+        logging.error(f"Unexpected error during bc_authorize: {e}")
+        return {"status": "failure", "error": "An unexpected error occurred"}
 
 def request_momo_payment(amount, currency, external_id, payer_number, payer_message, payee_note):
     """
     Initiates an MTN MoMo payment request.
-
-    Args:
-        amount: The amount to be paid.
-        currency: The currency of the payment (e.g., XAF, USD).
-        external_id: A unique transaction ID.
-        payer_number: The payer's phone number.
-        payer_message: A message to the payer.
-        payee_note: A note for the payee.
-
-    Returns:
-        A dictionary containing the transaction reference or an error message.
     """
     try:
-        # Construct request payload
+        logging.info(f"Initiating MoMo payment: amount={amount}, currency={currency}, external_id={external_id}, payer_number={payer_number}, payer_message={payer_message}, payee_note={payee_note}")
+        
+        # Ensure MoMo has been configured
+        if not momo_base_url or not momo_headers:
+            raise Exception("MoMo API not configured. Please call configure_momo first.")
+        
+        # Step 1: Call bc-authorize to claim consent
+        auth_response = bc_authorize()
+        if auth_response["status"] != "success":
+            return {"status": "failure", "error": "Consent not granted"}
+
+        # Step 2: Construct request payload
         payload = {
             "amount": str(amount),
             "currency": currency,
@@ -887,7 +931,8 @@ def request_momo_payment(amount, currency, external_id, payer_number, payer_mess
             "payeeNote": payee_note
         }
 
-        # Send payment request to MoMo API
+        # Step 3: Send payment request to MoMo API
+        logging.info("Sending payment request to MoMo API...")
         response = requests.post(
             f"{momo_base_url}/requesttopay",
             json=payload,
@@ -896,25 +941,26 @@ def request_momo_payment(amount, currency, external_id, payer_number, payer_mess
 
         if response.status_code == 202:
             transaction_ref = response.headers.get("X-Reference-Id")
+            logging.info(f"Payment request successful. Transaction Reference: {transaction_ref}")
             return {"status": "success", "transaction_ref": transaction_ref}
         else:
+            logging.error(f"Payment request failed: {response.json()}")
             return {"status": "failure", "error": response.json()}
     except Exception as e:
-        logging.error(f"Unexpected error: {e}")
+        logging.error(f"Unexpected error during request_momo_payment: {e}")
         return {"status": "failure", "error": "An unexpected error occurred"}
-
 
 def check_momo_payment_status(transaction_ref):
     """
     Checks the status of an MTN MoMo payment using its transaction reference.
-
-    Args:
-        transaction_ref: The reference ID of the transaction.
-
-    Returns:
-        A dictionary containing the payment status or an error message.
     """
     try:
+        logging.info(f"Checking payment status for transaction_ref: {transaction_ref}")
+        
+        # Ensure MoMo has been configured
+        if not momo_base_url or not momo_headers:
+            raise Exception("MoMo API not configured. Please call configure_momo first.")
+
         response = requests.get(
             f"{momo_base_url}/requesttopay/{transaction_ref}",
             headers=momo_headers
@@ -922,11 +968,13 @@ def check_momo_payment_status(transaction_ref):
 
         if response.status_code == 200:
             payment_status = response.json()
+            logging.info(f"Payment status retrieved successfully: {json.dumps(payment_status)}")
             return {"status": "success", "payment_status": payment_status}
         else:
+            logging.error(f"Failed to retrieve payment status: {response.json()}")
             return {"status": "failure", "error": response.json()}
     except Exception as e:
-        logging.error(f"Unexpected error: {e}")
+        logging.error(f"Unexpected error during check_momo_payment_status: {e}")
         return {"status": "failure", "error": "An unexpected error occurred"}
 
 # Example integration points for Flutter UI comments:
