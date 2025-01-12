@@ -6,10 +6,12 @@ import random
 import string
 import zinzi
 import logging
+import json
 from flask_cors import CORS
 from zinzi import Authentication, Updatelists, MealRecommendation
 from zinzi import configure_paypal, create_payment_paypal, execute_payment, handle_payment_cancellation
 from zinzi import configure_stripe, create_stripe_payment, execute_stripe_payment, handle_stripe_payment_cancellation
+from zinzi import request_momo_payment, check_momo_payment_status, configure_momo
 
 app = Flask(__name__)
 CORS(app)
@@ -249,18 +251,7 @@ def get_metrics_history():
 
 
 # 5. Get Meal Recommendations (Using the recommend_meals method from the MealRecommendation class)
-@app.route('/rr/get_meal_recommendations', methods=['GET'])
-def get_meal_recommendations():
-    user_id = request.args.get('user_id')
 
-    if not user_id:
-        return jsonify({'error': 'Missing user_id'}), 400
-
-    try:
-        recommended_meals = meal_rec.recommend_meals()
-        return jsonify({'recommended_meals': recommended_meals}), 200
-    except Exception as e:
-        return jsonify({'error': f'Error fetching meal recommendations: {str(e)}'}), 500
 
 
 # Endpoint to initiate payment
@@ -311,7 +302,7 @@ def create_payment():
             return jsonify({"status": "failure", "error": "Missing amount"}), 400
 
         # Call backend function to create payment
-        response = create_stripe_payment(amount*100)
+        response = create_stripe_payment(amount)
         return jsonify(response)
     except Exception as e:
         logging.error(f"Unexpected error: {e}")
@@ -351,6 +342,123 @@ def cancel_payment():
     except Exception as e:
         logging.error(f"Unexpected error: {e}")
         return jsonify({"error": "Something went wrong"}), 500
+
+
+
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+
+# MTN MoMo configuration endpoint
+@app.route('/rr/configure_momo', methods=['POST'])
+def configure_momo_route():
+    """Configures MTN MoMo API credentials."""
+    try:
+        data = request.json
+        api_user = data.get('api_user')
+        api_key = data.get('api_key')
+        subscription_key = data.get('subscription_key')
+
+        # Call the backend function to configure MoMo API
+        result = configure_momo(api_user, api_key, subscription_key)
+        
+        logging.info(f"MoMo API configured: {json.dumps(result)}")
+        return jsonify(result)
+    
+    except Exception as e:
+        logging.error(f"Error in configure_momo_route: {e}")
+        return jsonify({"status": "failure", "error": "An error occurred while configuring MoMo"}), 500
+
+
+# Initiate MoMo payment endpoint
+@app.route('/rr/request_momo_payment', methods=['POST'])
+def request_momo_payment_route():
+    """Handles MoMo payment requests."""
+    try:
+        data = request.json
+        logging.info(f"Received payment request: {json.dumps(data)}")
+
+        amount = data.get('amount', '1')
+        currency = data.get('currency', 'UGX')  # Default currency is UGX for sandbox accounts
+        external_id = data.get('external_id', '118')
+        payer_number = data.get('payer_number', '+256787372100')
+        payer_message = data.get('payer_message', 'Payment for zinzi')  # Optional
+        payee_note = data.get('payee_note', 'You have a payment request from ZINZI')  # Optional
+
+        # Call the backend function to request MoMo payment
+        result = request_momo_payment(amount, currency, external_id, payer_number, payer_message, payee_note)
+        
+        logging.info(f"Payment request result: {json.dumps(result)}")
+        return jsonify(result)
+    
+    except Exception as e:
+        logging.error(f"Error in request_momo_payment_route: {e}")
+        return jsonify({"status": "failure", "error": "An error occurred while processing the payment request"}), 500
+
+
+# Check MoMo payment status endpoint
+@app.route('/rr/check_momo_payment_status', methods=['GET'])
+def check_momo_payment_status_route():
+    """Checks the status of a MoMo payment."""
+    try:
+        transaction_ref = request.args.get('transaction_ref')
+
+        if not transaction_ref:
+            logging.error("Transaction reference is required.")
+            return jsonify({"status": "failure", "error": "Transaction reference is required."}), 400
+
+        logging.info(f"Checking payment status for transaction_ref: {transaction_ref}")
+        
+        # Call the backend function to check payment status
+        result = check_momo_payment_status(transaction_ref)
+        
+        logging.info(f"Payment status result: {json.dumps(result)}")
+        return jsonify(result)
+    
+    except Exception as e:
+        logging.error(f"Error in check_momo_payment_status_route: {e}")
+        return jsonify({"status": "failure", "error": "An error occurred while checking the payment status"}), 500
+
+
+# Callback handler for MoMo status updates
+@app.route('/rr/momo_callback', methods=['POST','PUT'])
+def momo_callback():
+    try:
+        # Get the incoming data from MoMo
+        notification_data = request.get_json()
+
+        # Log the received notification for debugging purposes
+        logging.info(f"Received MoMo callback: {json.dumps(notification_data)}")
+
+        # Check if the notification contains the necessary data
+        if 'transactionStatus' not in notification_data or 'transactionReference' not in notification_data:
+            logging.error("Invalid notification data received")
+            return jsonify({"status": "failure", "error": "Invalid notification data"}), 400
+
+        # Extract necessary data from the notification
+        transaction_status = notification_data['transactionStatus']
+        transaction_ref = notification_data['transactionReference']
+        payer_number = notification_data.get('payer', {}).get('partyId', '')
+        payer_message = notification_data.get('payerMessage', '')
+        payee_note = notification_data.get('payeeNote', '')
+
+        # Log the extracted data
+        logging.info(f"Extracted callback data - transaction_status: {transaction_status}, transaction_ref: {transaction_ref}, payer_number: {payer_number}, payer_message: {payer_message}, payee_note: {payee_note}")
+
+        # Here you can implement the logic to handle the status update, e.g., update the payment record in your database
+        if transaction_status == 'SUCCESSFUL':
+            logging.info(f"Payment {transaction_ref} was successful.")
+            # Example: update_payment_status(transaction_ref, 'SUCCESSFUL')
+        else:
+            logging.error(f"Payment {transaction_ref} failed.")
+
+        # Return a success response to acknowledge receipt of the callback
+        return jsonify({"status": "success", "message": "Callback received successfully."}), 200
+
+    except Exception as e:
+        logging.error(f"Error processing callback: {e}")
+        return jsonify({"status": "failure", "error": "An unexpected error occurred"}), 500
+
 
 
 if __name__ == '__main__':
