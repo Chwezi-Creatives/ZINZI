@@ -3,6 +3,10 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'user_metrics.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+final apibaseurl = dotenv.env['API_BASE_URL'] ??
+    'https://default.url'; // Ensure API base URL is available
 
 class EmailVerificationPage extends StatefulWidget {
   const EmailVerificationPage({super.key});
@@ -15,13 +19,13 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _codeController = TextEditingController();
   bool _isLoading = false;
-  int? _userId;
-  bool _isUserIdLoaded = false;
+  int? _userId; // Initialize userId as nullable
+  bool _isUserIdLoaded = false; // Track whether the user ID has been loaded
 
   @override
   void initState() {
     super.initState();
-    _loadUserId();
+    _loadUserId(); // Load user ID on initialization
   }
 
   Future<void> _loadUserId() async {
@@ -29,23 +33,30 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
     final loadedUserId = prefs.getInt('user_id');
 
     setState(() {
-      _userId = loadedUserId;
-      _isUserIdLoaded = true;
+      _userId = loadedUserId; // Set the loaded user ID
+      _isUserIdLoaded = true; // Mark that the user ID has been loaded
     });
   }
 
   Future<void> _verifyEmail() async {
-    if (!_formKey.currentState!.validate() || _userId == null) {
+    // Ensure both userId and form state are valid before proceeding
+    if (!_isUserIdLoaded ||
+        _userId == null ||
+        !_formKey.currentState!.validate()) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text(
+            'Please make sure you have entered the code and the user ID is available.'),
+      ));
       return;
     }
 
     setState(() {
-      _isLoading = true;
+      _isLoading = true; // Set loading state
     });
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.1.4:5000/rr/verify_user'),
+        Uri.parse('$apibaseurl/rr/verify_user'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'user_id': _userId,
@@ -70,13 +81,14 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
       ));
     } finally {
       setState(() {
-        _isLoading = false;
+        _isLoading = false; // Reset loading state
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // Display loading dialog until user ID is loaded
     if (!_isUserIdLoaded) {
       return Scaffold(
         appBar: AppBar(
@@ -96,44 +108,54 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
       ),
       body: Stack(
         children: [
-          // Background image
-          Positioned.fill(
-            child: Image.asset(
-              'assets/images/soft.jpg',
-              fit: BoxFit.cover,
+          // Background image within a container
+          Container(
+            width: double.infinity,
+            height: double.infinity,
+            decoration: BoxDecoration(
+              image: DecorationImage(
+                image: AssetImage('assets/images/soft.jpg'),
+                fit: BoxFit.cover,
+              ),
             ),
           ),
-          // Content over the background
+          // Overlaying content
           Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Form(
-              key: _formKey,
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const SizedBox(height: 20),
-                    Container(
-                      height: 100,
-                      decoration: BoxDecoration(
-                        color: Colors.teal.shade100.withOpacity(0.8),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Padding(
-                        padding: EdgeInsets.all(16.0),
-                        child: Text(
-                          'Verifying your email provides a way to secure your account and a means to recover it.',
-                          style: TextStyle(fontSize: 14, color: Colors.black),
-                        ),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Verification image
+                  Container(
+                    height: 100,
+                    margin: const EdgeInsets.only(bottom: 16.0),
+                    decoration: BoxDecoration(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Image.asset(
+                        'assets/images/verification.jpg',
+                        fit: BoxFit.cover,
                       ),
                     ),
-                    const SizedBox(height: 70),
-                    const Text(
-                      'Please enter the verification code sent to your email:',
-                      style: TextStyle(fontSize: 16, color: Colors.black54),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Enter your verification code:',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.teal,
                     ),
-                    const SizedBox(height: 16),
-                    TextFormField(
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Form(
+                    key: _formKey,
+                    child: TextFormField(
                       controller: _codeController,
                       decoration: InputDecoration(
                         labelText: 'Verification Code',
@@ -145,26 +167,32 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
                       ),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
-                          return 'Please enter the verification code sent to your email';
+                          return 'Required';
                         }
                         return null;
                       },
                     ),
-                    const SizedBox(height: 20),
-                    ElevatedButton(
-                      onPressed: _isLoading ? null : _verifyEmail,
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                            vertical: 16, horizontal: 32),
-                        backgroundColor: Colors.teal,
-                        textStyle: const TextStyle(color: Colors.white),
-                      ),
-                      child: _isLoading
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text('Verify'),
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    onPressed: _isLoading ? null : _verifyEmail,
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 16, horizontal: 32),
+                      backgroundColor: Colors.teal,
                     ),
-                  ],
-                ),
+                    child: _isLoading
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : const Text('VERIFY',
+                            style: TextStyle(color: Colors.white)),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    "Didn't receive a code? Check your email or request a new one.",
+                    style: TextStyle(fontSize: 14, color: Colors.black54),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
             ),
           ),
