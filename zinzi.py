@@ -1,21 +1,27 @@
 #Cspell:disable
 import os
-from dotenv import load_dotenv
+import json
 import random
 import string
-from datetime import datetime
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
 import bcrypt
 import pyodbc
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from email.mime.text import MIMEText
-import base64
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from google.auth.exceptions import RefreshError
+from email.mime.text import MIMEText
+import base64
 import paypalrestsdk
 import logging
 import stripe
 import requests
+import base64
+import time
+from typing import Dict, Any
+
 
 # Load the .env file
 load_dotenv()
@@ -115,47 +121,49 @@ class Authentication:
             if connection:
                 connection.close()
 
+#new improved email logic
     def send_verification_email(self, to_email, verification_code):
-        # OAuth 2.0 flow to get credentials
         SCOPES = ['https://www.googleapis.com/auth/gmail.send']
         creds = None
 
-        # Check if token.json exists to load the stored credentials
+        # Load existing credentials if available
         if os.path.exists('token.json'):
             try:
                 creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-            except AttributeError:
-                # If from_authorized_user_file is not available, use from_authorized_user_info
-                with open('token.json', 'r') as token:
-                    creds_info = json.load(token)
-                creds = Credentials.from_authorized_user_info(creds_info, SCOPES)
+            except Exception as e:
+                print(f"Error loading token.json: {e}")
 
-        # If there are no valid credentials, the user must log in again
+        # Check and refresh credentials
+        if creds:
+            try:
+                if creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                elif creds.expiry and creds.expiry < datetime.now() + timedelta(minutes=10):
+                    creds.refresh(Request())
+            except Exception as e:
+                print(f"Error refreshing token: {e}")
+                creds = None
+
+        # Prompt for new credentials if needed
         if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                # Load credentials from client_secret file
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    'client_secret_769800441200-vlojtkiqv165kbumgmjsku2rbm97h217.apps.googleusercontent.com.json', SCOPES)
-                creds = flow.run_local_server(port=8080)
+            flow = InstalledAppFlow.from_client_secrets_file(
+                'client_secret_769800441200-vlojtkiqv165kbumgmjsku2rbm97h217.apps.googleusercontent.com.json', SCOPES)
+            creds = flow.run_local_server(port=8080)
 
-            # Save the credentials for the next run
-            with open('token.json', 'w') as token:
-                token.write(creds.to_json())
+        # Save new credentials to token.json
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
 
-        # Build the Gmail API service
+        # Build Gmail API service
         service = build('gmail', 'v1', credentials=creds)
 
-        subject = "Your zinzi Verification Code"
-        body = f"Your verification code is: {verification_code}\nPlease enter this code in the zinzi app to verify your account."
+        subject = "Your ZINZI Verification Code"
+        body = f"Your verification code is: {verification_code}\nPlease enter this code in the ZINZI app to verify your account."
 
-        # Create the email message
+        # Create and encode the email message
         message = MIMEText(body)
         message['to'] = to_email
         message['subject'] = subject
-
-        # Encode the message
         raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
 
         try:
@@ -172,7 +180,6 @@ class Authentication:
     def generate_verification_code(self):
         return ''.join(random.choices(string.digits, k=6))
 
-    # Verifying the verification code
     def verify_user_email(self, user_id, verification_code):
         try:
             connection = get_db_connection()
@@ -204,12 +211,14 @@ class Authentication:
             connection.commit()
 
             return {'message': 'Email verification successful'}, 200
-        except pyodbc.Error as e:
+        except Exception as e:
             print(f"Error during email verification: {e}")
             return {'message': 'Error during email verification'}, 500
         finally:
             if connection:
                 connection.close()
+
+
 
 
 class Updatelists:
@@ -769,7 +778,7 @@ def configure_stripe(secret_key):
     stripe.api_key = secret_key
 
 
-def create_stripe_payment(amount, description="Payment for Zinzi Health Service", currency="usd"):
+def create_stripe_payment(amount, description="Payment for ZINZI Health Service", currency="usd"):
     """
     Creates a Stripe payment intent with the specified amount and description.
 
@@ -835,135 +844,179 @@ def handle_stripe_payment_cancellation():
 
 
 
-# Load momo environment variables (ensure these are set in your environment or .env file)
-api_user = os.getenv("X_REFERENCE_ID")
-api_key = os.getenv("MOMO_API_KEY")
-subscription_key = os.getenv("MOMO_SUBSCRIPTION_KEY")
+# Load MoMo environment variables (ensure these are set in your environment or .env file)
+X_REFERENCE_ID = os.getenv("X_REFERENCE_ID")
+API_KEY = os.getenv("MOMO_API_KEY")
+SUBSCRIPTION_KEY = os.getenv("MOMO_SUBSCRIPTION_KEY")
+API_BASE_URL = os.getenv("API_BASE_URL11")  # Your callback URL
 
-# Initialize momo_base_url and momo_headers
-momo_base_url = ''
+# Initialize MoMo base URL and headers
+momo_base_url = "https://sandbox.momodeveloper.mtn.com"
 momo_headers = {}
+access_token = ""
+token_expires_at = 0
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
-# Add MTN MoMo Payment Method
 
-def configure_momo(api_user, api_key, subscription_key):
+def get_access_token(x_reference_id: str, api_key: str) -> str:
     """
-    Configures the MTN MoMo API with the provided credentials.
+    Retrieve an access token for authentication in MoMo API requests.
     """
-    global momo_headers, momo_base_url
+    url = f"{momo_base_url}/collection/token/"
+    auth_header = base64.b64encode(f"{x_reference_id}:{api_key}".encode()).decode()
 
-    # Set MoMo API configuration values
-    momo_headers = {
-        "Ocp-Apim-Subscription-Key": subscription_key,
-        "Authorization": f"Bearer {api_key}"
+    headers = {
+        "Authorization": f"Basic {auth_header}",
+        "Ocp-Apim-Subscription-Key": SUBSCRIPTION_KEY,
     }
-    momo_base_url = "https://sandbox.momodeveloper.mtn.com/collection/v1_0"  # Set base URL
+
+    logging.info("----- Access Token Request -----")
+    logging.info(f"URL: {url}")
+    logging.info(f"Headers: {headers}")
+
+    response = requests.post(url, headers=headers)
+
+    logging.info("----- Access Token Response -----")
+    logging.info(f"Status Code: {response.status_code}")
+    logging.info(f"Response Text: {response.text}")
+
+    if response.status_code == 200:
+        token_info = response.json()
+        logging.info("Access token retrieved successfully!")
+        return token_info["access_token"], time.time() + token_info["expires_in"]
+    else:
+        logging.error("Failed to retrieve access token.")
+        response.raise_for_status()
+
+
+def refresh_access_token() -> None:
+    """Refresh the access token before it expires."""
+    global access_token, token_expires_at
+
+    if time.time() >= token_expires_at:  # Check if token needs to be refreshed
+        access_token, token_expires_at = get_access_token(X_REFERENCE_ID, API_KEY)
+        momo_headers["Authorization"] = f"Bearer {access_token}"
+
+
+def configure_momo() -> Dict[str, Any]:
+    """Configure the MoMo API with the required headers."""
+    global momo_headers
+
+    # Get initial access token
+    global access_token, token_expires_at
+    access_token, token_expires_at = get_access_token(X_REFERENCE_ID, API_KEY)
+
+    momo_headers = {
+        "Ocp-Apim-Subscription-Key": SUBSCRIPTION_KEY,
+        "Authorization": f"Bearer {access_token}",
+    }
 
     logging.info("MoMo API configured successfully.")
     return {"status": "success", "message": "MoMo API configured successfully."}
 
-configure_momo(api_user, api_key, subscription_key)
 
-def bc_authorize():
-    """
-    Claims consent from the account holder for the requested scopes.
-    """
+def bc_authorize(scope: str = "payments") -> Dict[str, Any]:
+    """Claims consent from the account holder for the requested scopes."""
     try:
-        # Ensure MoMo has been configured
-        if not momo_base_url or not momo_headers:
-            raise Exception("MoMo API not configured. Please call configure_momo first.")
+        refresh_access_token()  # Ensure token is valid before making the request
 
         logging.info("Requesting authorization for MoMo consent...")
-
-        # Prepare the request for bc-authorize
         payload = {
-            # Provide any required payload here as per your MoMo configuration (scope, etc.)
+            "scope": scope,
+            "callbackUrl": API_BASE_URL,  # Send the callback URL
         }
 
+        headers = {**momo_headers, "X-Target-Environment": "sandbox"}
+
         response = requests.post(
-            f"{momo_base_url}/bc-authorize",
+            f"{momo_base_url}/collection/v1_0/bc-authorize",
             json=payload,
-            headers=momo_headers
+            headers=headers,
         )
 
         if response.status_code == 200:
-            # Successfully claimed consent
             auth_req_id = response.json().get("auth_req_id")
             logging.info(f"Authorization successful. Auth Request ID: {auth_req_id}")
             return {"status": "success", "auth_req_id": auth_req_id}
         else:
             logging.error(f"Authorization failed: {response.json()}")
             return {"status": "failure", "error": response.json()}
-    
     except Exception as e:
         logging.error(f"Unexpected error during bc_authorize: {e}")
         return {"status": "failure", "error": "An unexpected error occurred"}
 
-def request_momo_payment(amount, currency, external_id, payer_number, payer_message, payee_note):
-    """
-    Initiates an MTN MoMo payment request.
-    """
-    try:
-        logging.info(f"Initiating MoMo payment: amount={amount}, currency={currency}, external_id={external_id}, payer_number={payer_number}, payer_message={payer_message}, payee_note={payee_note}")
-        
-        # Ensure MoMo has been configured
-        if not momo_base_url or not momo_headers:
-            raise Exception("MoMo API not configured. Please call configure_momo first.")
-        
-        # Step 1: Call bc-authorize to claim consent
-        auth_response = bc_authorize()
-        if auth_response["status"] != "success":
-            return {"status": "failure", "error": "Consent not granted"}
 
-        # Step 2: Construct request payload
+def request_momo_payment(amount: float, currency: str, external_id: str, payer_number: str, payer_message: str, payee_note: str) -> Dict[str, Any]:
+    """Initiates an MTN MoMo payment request."""
+    try:
+        refresh_access_token()  # Ensure token is valid before making the request
+
+        logging.info(f"Initiating MoMo payment: amount={amount}, currency={currency}, external_id={external_id}, payer_number={payer_number}, payer_message={payer_message}, payee_note={payee_note}")
+
         payload = {
             "amount": str(amount),
             "currency": currency,
             "externalId": external_id,
             "payer": {
                 "partyIdType": "MSISDN",
-                "partyId": payer_number
+                "partyId": payer_number,
             },
             "payerMessage": payer_message,
-            "payeeNote": payee_note
+            "payeeNote": payee_note,
+            "callbackUrl": API_BASE_URL,  # Send the callback URL
         }
 
-        # Step 3: Send payment request to MoMo API
-        logging.info("Sending payment request to MoMo API...")
+        headers = {**momo_headers, "X-Target-Environment": "sandbox"}
+
+        logging.info("----- Request Details -----")
+        logging.info(f"URL: {momo_base_url}/collection/v1_0/requesttopay")
+        logging.info(f"Headers: {headers}")
+        logging.info(f"Payload: {payload}")
+
         response = requests.post(
-            f"{momo_base_url}/requesttopay",
+            f"{momo_base_url}/collection/v1_0/requesttopay",
             json=payload,
-            headers=momo_headers
+            headers=headers,
         )
+
+        # Log the raw response details
+        logging.info("----- Response Details -----")
+        logging.info(f"Status Code: {response.status_code}")
+        logging.info(f"Headers: {response.headers}")
+        logging.info(f"Body: {response.text}")
 
         if response.status_code == 202:
             transaction_ref = response.headers.get("X-Reference-Id")
             logging.info(f"Payment request successful. Transaction Reference: {transaction_ref}")
             return {"status": "success", "transaction_ref": transaction_ref}
         else:
-            logging.error(f"Payment request failed: {response.json()}")
-            return {"status": "failure", "error": response.json()}
+            try:
+                # Log the JSON error response
+                error_response = response.json()
+                logging.error(f"Payment request failed: {error_response}")
+                return {"status": "failure", "error": error_response}
+            except ValueError:
+                # Log non-JSON error response
+                logging.error(f"Non-JSON error response: {response.text}")
+                return {"status": "failure", "error": "Non-JSON response received"}
     except Exception as e:
         logging.error(f"Unexpected error during request_momo_payment: {e}")
-        return {"status": "failure", "error": "An unexpected error occurred"}
+        return {"status": "failure", "error": f"An unexpected error occurred: {str(e)}"}
 
-def check_momo_payment_status(transaction_ref):
-    """
-    Checks the status of an MTN MoMo payment using its transaction reference.
-    """
+
+def check_momo_payment_status(transaction_ref: str) -> Dict[str, Any]:
+    """Checks the status of an MTN MoMo payment using its transaction reference."""
     try:
+        refresh_access_token()  # Ensure token is valid before making the request
+
         logging.info(f"Checking payment status for transaction_ref: {transaction_ref}")
-        
-        # Ensure MoMo has been configured
-        if not momo_base_url or not momo_headers:
-            raise Exception("MoMo API not configured. Please call configure_momo first.")
+        headers = {**momo_headers, "X-Target-Environment": "sandbox"}
 
         response = requests.get(
-            f"{momo_base_url}/requesttopay/{transaction_ref}",
-            headers=momo_headers
+            f"{momo_base_url}/collection/v1_0/requesttopay/{transaction_ref}",
+            headers=headers,
         )
 
         if response.status_code == 200:
@@ -977,7 +1030,6 @@ def check_momo_payment_status(transaction_ref):
         logging.error(f"Unexpected error during check_momo_payment_status: {e}")
         return {"status": "failure", "error": "An unexpected error occurred"}
 
-# Example integration points for Flutter UI comments:
-# 1. The "payer_number" field in the request_momo_payment function expects input from the user via the Flutter UI.
-# 2. The "amount" field in the request_momo_payment function should be dynamically passed based on the user's selected service or input.
-# 3. After initiating a payment, the Flutter app can use the "transaction_ref" to poll the payment status by sending an API call to check_momo_payment_status.
+
+# Initialize MoMo configuration
+configure_momo()
