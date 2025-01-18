@@ -1,8 +1,11 @@
-import 'package:flutter/material.dart'; 
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:zinzi2/dashboard_page.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';
 
 class UserPreferencesPage extends StatefulWidget {
   const UserPreferencesPage({super.key});
@@ -74,7 +77,7 @@ class _UserPreferencesPageState extends State<UserPreferencesPage>
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.1.4:5000/rr/add_user_preferences'),
+        Uri.parse('$apibaseurl/rr/add_user_preferences'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'user_id': _userId,

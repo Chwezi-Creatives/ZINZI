@@ -3,6 +3,9 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dashboard_page.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -56,7 +59,7 @@ class _LoginPageState extends State<LoginPage>
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.1.4:5000/rr/login_user'),
+        Uri.parse('$apibaseurl/rr/login_user'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'identifier': _identifier,

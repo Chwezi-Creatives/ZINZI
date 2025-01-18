@@ -4,22 +4,45 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';
 
 class WeightGraph extends StatefulWidget {
   @override
   _WeightGraphState createState() => _WeightGraphState();
 }
 
-class _WeightGraphState extends State<WeightGraph> {
+class _WeightGraphState extends State<WeightGraph>
+    with TickerProviderStateMixin {
   List<FlSpot> _weightData = [];
   bool _isLoading = true;
   int? _userId;
   String _timeUnit = 'seconds'; // Default time unit
+  late AnimationController _animationController;
 
   @override
   void initState() {
     super.initState();
     _fetchUserId();
+
+    // Initialize the animation controller
+    _animationController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 500),
+    );
+    _animationController.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        setState(() {}); // Update the state to rebuild with the new data
+        _animationController.reset(); // Reset the animation
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
   }
 
   Future<void> _fetchUserId() async {
@@ -38,8 +61,8 @@ class _WeightGraphState extends State<WeightGraph> {
       _isLoading = true;
     });
 
-    final url = Uri.parse(
-        'http://192.168.1.4:5000/rr/get_metrics_history?user_id=$_userId');
+    final url =
+        Uri.parse('$apibaseurl/rr/get_metrics_history?user_id=$_userId');
     try {
       final response = await http.get(url);
 
@@ -71,6 +94,7 @@ class _WeightGraphState extends State<WeightGraph> {
         setState(() {
           _weightData = weightData;
           _isLoading = false;
+          _animationController.forward(); // Start the animation on data update
         });
       } else {
         print("Failed to fetch metrics history: ${response.body}");
@@ -110,19 +134,12 @@ class _WeightGraphState extends State<WeightGraph> {
   String _getXLabel(double value) {
     switch (_timeUnit) {
       case 'milliseconds':
-        return '${value.toStringAsFixed(0)}';
       case 'microseconds':
-        return '${value.toStringAsFixed(0)}';
       case 'seconds':
-        return '${value.toStringAsFixed(0)}';
       case 'minutes':
-        return '${value.toStringAsFixed(0)}';
       case 'hours':
-        return '${value.toStringAsFixed(0)}';
       case 'days':
-        return '${value.toStringAsFixed(0)}';
       case 'weeks':
-        return '${value.toStringAsFixed(0)}';
       case 'months':
         return '${value.toStringAsFixed(0)}';
       default:
@@ -133,7 +150,6 @@ class _WeightGraphState extends State<WeightGraph> {
   double _calculateXInterval() {
     double maxX = _getMaxX();
     double scale = maxX / 10; // Dividing the range into 10 equal intervals
-
     return scale > 0 ? scale : 1.0; // Ensuring a non-zero interval
   }
 
@@ -239,10 +255,8 @@ class _WeightGraphState extends State<WeightGraph> {
                     maxContentWidth: 200,
                     tooltipMargin: 10,
                     getTooltipItems: (spots) => spots.map((spot) {
-                      // Adjust spot.x based on the time unit
                       double adjustedTimestamp = spot.x;
 
-                      // Convert back to milliseconds if necessary (assuming spot.x is in seconds here)
                       if (_timeUnit == 'seconds') {
                         adjustedTimestamp *= 1000;
                       }
@@ -289,17 +303,17 @@ class _WeightGraphState extends State<WeightGraph> {
                   }
                 },
                 items: [
-                  'milliseconds',
-                  'microseconds',
-                  'seconds',
-                  'minutes',
-                  'hours',
-                  'days',
-                  'weeks',
-                  'months'
+                  'Milliseconds',
+                  'Microseconds',
+                  'Seconds',
+                  'Minutes',
+                  'Hours',
+                  'Days',
+                  'Weeks',
+                  'Months'
                 ]
                     .map((unit) => DropdownMenuItem(
-                          value: unit,
+                          value: unit.toLowerCase(),
                           child: Text(unit.capitalize(),
                               style: TextStyle(
                                   color: Colors

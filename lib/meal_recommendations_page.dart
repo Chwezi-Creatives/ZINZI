@@ -42,7 +42,7 @@ class _MealRecommendationsPageState extends State<MealRecommendationsPage> {
     try {
       final response = await http.get(
         Uri.parse(
-            'http://192.168.188.3:5000/get_meal_recommendations?user_id=$_userId'),
+            'https://24.ip.gl.ply.gg:18851/get_meal_recommendations?user_id=$_userId'),
       );
 
       if (response.statusCode == 200) {

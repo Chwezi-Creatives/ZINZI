@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:zinzi2/checkout.dart';
+import 'package:zinzi2/reco.dart';
 import 'signup_or_login.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -153,26 +155,8 @@ class _SplashScreenState extends State<SplashScreen>
                       child: ElevatedButton(
                         onPressed: () {
                           Navigator.of(context).push(
-                            PageRouteBuilder(
-                              pageBuilder:
-                                  (context, animation, secondaryAnimation) =>
-                                      SignUpOrLoginPage(),
-                              transitionsBuilder: (context, animation,
-                                  secondaryAnimation, child) {
-                                final scaleAnimation =
-                                    Tween<double>(begin: 0.4, end: 1.0).animate(
-                                  CurvedAnimation(
-                                      parent: animation,
-                                      curve: Curves.easeInOut),
-                                );
-
-                                return ScaleTransition(
-                                  scale: scaleAnimation,
-                                  child: child,
-                                );
-                              },
-                              transitionDuration: const Duration(seconds: 1),
-                            ),
+                            MaterialPageRoute(
+                                builder: (context) => RecommendedMealsScreen()),
                           );
                         },
                         style: ElevatedButton.styleFrom(

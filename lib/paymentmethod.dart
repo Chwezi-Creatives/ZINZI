@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:zinzi2/momo2.dart';
+import 'package:zinzi2/paymom.dart';
 import 'package:zinzi2/paypp1webviewstatic.dart';
 import 'package:zinzi2/paystrpworkingbutlimited.dart';
 import 'package:zinzi2/paystrpfaulty.dart';
@@ -50,7 +52,21 @@ class PaymentMethodSelectionPage extends StatelessWidget {
                     MaterialPageRoute(
                         builder: (context) => PaymentScreennowebview()));
               },
-              child: const Text('Pay with stripe (Outdated)'),
+              child: const Text('Pay with Stripe (Outdated)'),
+            ),
+            const SizedBox(height: 20),
+            // Pay with MoMo Button
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (context) =>
+                          Momo2screen() // Navigate to the MoMo payment page
+                      ),
+                );
+              },
+              child: const Text('Pay with MoMo'),
             ),
           ],
         ),

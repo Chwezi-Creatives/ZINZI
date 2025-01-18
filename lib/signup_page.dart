@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-
 import 'package:zinzi2/verification.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';
 
 class SignUpPage extends StatefulWidget {
   const SignUpPage({super.key});
@@ -78,7 +80,7 @@ class _SignUpPageState extends State<SignUpPage>
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.1.4:5000/rr/signup_user'),
+        Uri.parse('$apibaseurl/rr/signup_user'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'name': _nameController.text.trim(),

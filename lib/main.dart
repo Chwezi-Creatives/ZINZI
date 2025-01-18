@@ -1,21 +1,26 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import the dotenv package
 import 'splash.dart'; // Assuming your splash screen is in the 'splash.dart' file
 import 'http_overrides.dart';
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized(); // This must come first
+  WidgetsFlutterBinding.ensureInitialized();
+  print("Initializing WidgetsBinding");
 
-  // Load the self-signed certificate into the app
+  await dotenv.load(fileName: ".env");
+  print(".env file loaded");
+
   final certBytes = await rootBundle.load('assets/images/selfsigned.crt');
+  print("Certificate loaded");
+
   final cert = certBytes.buffer.asUint8List();
-
-  // Set up the HTTP client with the certificate
   HttpOverrides.global = MyHttpOverrides(cert);
+  print("HTTP Overrides set");
 
-  // Run the app
   runApp(MyApp());
+  print("App started");
 }
 
 class MyApp extends StatelessWidget {

@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-
 import 'package:zinzi2/dashboard_page.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';
 
 class LogMetricsScreen extends StatefulWidget {
   @override
@@ -46,7 +48,7 @@ class _LogMetricsScreenState extends State<LogMetricsScreen> {
 
       final double weight = double.parse(_weightController.text);
 
-      final url = Uri.parse('http://192.168.1.4:5000/rr/log_user_metrics');
+      final url = Uri.parse('$apibaseurl/rr/log_user_metrics');
       try {
         final response = await http.post(
           url,

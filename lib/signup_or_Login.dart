@@ -15,7 +15,7 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage>
   late Animation<double> _signupButtonFadeAnimation;
   late Animation<double> _loginButtonFadeAnimation;
 
-  bool _isLoading = false;
+  //bool _isLoading = false;
 
   @override
   void initState() {
@@ -64,7 +64,7 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage>
 
   void _navigateToPage(BuildContext context, Widget page) async {
     setState(() {
-      _isLoading = true;
+      //_isLoading = true;
     });
 
     await Future.delayed(const Duration(milliseconds: 500));
@@ -90,7 +90,7 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage>
     );
 
     setState(() {
-      _isLoading = false;
+      //_isLoading = false;
     });
   }
 

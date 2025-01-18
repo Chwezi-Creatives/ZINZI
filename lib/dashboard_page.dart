@@ -6,10 +6,13 @@ import 'package:zinzi2/metrics_history.dart';
 import 'dart:convert';
 import 'meal_recommendations_page.dart';
 import 'user_metrics.dart';
-import 'bmi_indicator.dart'; // Import the BMIIndicator widget
-import 'weight_indicator.dart'; // Import the WeightIndicator widget
-import 'healthtipcard.dart'; // Import the HealthTipCard widget
-import 'pay1.dart'; // Import the PaymentScreen
+import 'bmi_indicator.dart';
+import 'weight_indicator.dart';
+import 'healthtipcard.dart';
+import 'package:zinzi2/paymentmethod.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import your graph widget here
+
+final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -26,8 +29,8 @@ class _DashboardPageState extends State<DashboardPage>
   late AnimationController _controller;
   late Animation<double> _buttonAnimation;
 
-  bool _bmiVisible = false;
-  bool _weightVisible = false;
+  //bool _bmiVisible = false;
+  //bool _weightVisible = false;
 
   @override
   void initState() {
@@ -72,7 +75,7 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Future<void> _fetchMetrics() async {
-    final url = 'http://192.168.1.4:5000/rr/get_user_metrics?user_id=$_userId';
+    final url = '$apibaseurl/rr/get_user_metrics?user_id=$_userId';
     debugPrint('Fetching metrics from: $url');
 
     try {
@@ -98,8 +101,7 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Future<void> _fetchPreferences() async {
-    final url =
-        'http://192.168.1.4:5000/rr/fetch_user_preferences?user_id=$_userId';
+    final url = '$apibaseurl/rr/fetch_user_preferences?user_id=$_userId';
     debugPrint('Fetching preferences from: $url');
 
     try {
@@ -393,6 +395,15 @@ class _DashboardPageState extends State<DashboardPage>
                               ),
                             ),
 
+                            // Graph Widget
+                            SizedBox(
+                              width: isWide
+                                  ? (constraints.maxWidth - 32) / 2
+                                  : constraints.maxWidth,
+                              child:
+                                  WeightGraph(), // Add your graph widget here
+                            ),
+
                             // Recommended Meals button
                             SizedBox(
                               width: isWide
@@ -457,7 +468,8 @@ class _DashboardPageState extends State<DashboardPage>
                                       Navigator.push(
                                         context,
                                         MaterialPageRoute(
-                                          builder: (context) => PaymentScreen(),
+                                          builder: (context) =>
+                                              PaymentMethodSelectionPage(),
                                         ),
                                       );
                                     },
