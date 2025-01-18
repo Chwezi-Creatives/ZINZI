@@ -3,6 +3,9 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:zinzi2/user_preferences.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';
 
 class UserMetricsPage extends StatefulWidget {
   const UserMetricsPage({super.key});
@@ -92,7 +95,7 @@ class _UserMetricsPageState extends State<UserMetricsPage>
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.1.4:5000/rr/add_user_metrics'),
+        Uri.parse('$apibaseurl/rr/add_user_metrics'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'user_id': _userId,
@@ -180,14 +183,14 @@ class _UserMetricsPageState extends State<UserMetricsPage>
                           child: Image.asset('assets/images/Gru whitet.png'),
                         ),
                       ),
-                      const SizedBox(height: 02),
+                      const SizedBox(height: 01), // Reduced height
                       // Sliding text explaining why we need the metrics
                       SlideTransition(
                         position: _slideAnimation,
                         child: const Padding(
                           padding: EdgeInsets.symmetric(vertical: 16),
                           child: Text(
-                            "Please some your health metrics to enable us provide personalized health tips, meal recommendations and to track progress towards health goals.",
+                            "Provide your health metrics for a personalized experience",
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 16,
@@ -197,7 +200,7 @@ class _UserMetricsPageState extends State<UserMetricsPage>
                           ),
                         ),
                       ),
-                      const SizedBox(height: 50),
+                      const SizedBox(height: 70), // Increased height
                       Form(
                         key: _formKey,
                         child: Column(
