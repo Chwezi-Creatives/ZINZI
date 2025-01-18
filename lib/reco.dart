@@ -334,7 +334,7 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
                     Text(
                       '\$${price.toStringAsFixed(2)}',
                       style: TextStyle(
-                          fontSize: 15.0, fontWeight: FontWeight.w500),
+                          fontSize: 15.0, fontWeight: FontWeight.w400),
                     ),
                     Row(
                       children: [
