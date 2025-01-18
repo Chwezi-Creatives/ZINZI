@@ -1,5 +1,6 @@
 # cSpell:disable
 from flask import Flask, request, jsonify
+import uuid
 import hashlib
 import pyodbc
 import random
@@ -379,11 +380,13 @@ def request_momo_payment_route():
         logging.info(f"Received payment request: {json.dumps(data)}")
 
         amount = data.get('amount', '1')
-        currency = data.get('currency', 'UGX')  # Default currency is UGX for sandbox accounts
+        currency = data.get('currency', 'EUR')  # Default currency is UGX for sandbox accounts
         external_id = data.get('external_id', '118')
         payer_number = data.get('payer_number', '+256787372100')
         payer_message = data.get('payer_message', 'Payment for zinzi')  # Optional
         payee_note = data.get('payee_note', 'You have a payment request from ZINZI')  # Optional
+        currency='EUR'  #for sandbox. chane this in production
+        external_id=str(uuid.uuid4())#dynamically assign this later
 
         # Call the backend function to request MoMo payment
         result = request_momo_payment(amount, currency, external_id, payer_number, payer_message, payee_note)

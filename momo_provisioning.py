@@ -9,7 +9,7 @@ load_dotenv()
 # MTN MoMo API credentials
 BASE_URL = os.getenv("MOMO")  # Sandbox URL, replace with production URL for live use
 SUBSCRIPTION_KEY = os.getenv("MOMO_SUBSCRIPTION_KEY")  # Your subscription key from MoMo portal
-CALLBACK_URL = "http://object-totally.gl.at.ply.gg:9698/rr/momo_callback"
+CALLBACK_URL = os.getenv("OR11") 
 X_REFERENCE_ID = str(uuid.uuid4())  # Generate a UUID if not set in .env
 
 # -----------------------

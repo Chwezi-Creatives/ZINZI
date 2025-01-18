@@ -27,8 +27,8 @@ from typing import Dict, Any
 load_dotenv()
 
 # Access the API base URL
-apibaseurl = os.getenv('API_BASE_URL1', 'https://default.url')
-callbackurl=os.getenv('API_BASE_URL11', 'https://default.url')
+apibaseurl = os.getenv('OR1', 'https://default.url')
+momocallbackurl=os.getenv('OR11', 'https://default.url')
 
 # Database connection
 def get_db_connection():
@@ -851,7 +851,7 @@ SUBSCRIPTION_KEY = os.getenv("MOMO_SUBSCRIPTION_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL11")  # Your callback URL
 
 # Initialize MoMo base URL and headers
-momo_base_url = "https://sandbox.momodeveloper.mtn.com"
+momo_base_url = os.getenv("MOMO")
 momo_headers = {}
 access_token = ""
 token_expires_at = 0
@@ -925,7 +925,7 @@ def bc_authorize(scope: str = "payments") -> Dict[str, Any]:
         logging.info("Requesting authorization for MoMo consent...")
         payload = {
             "scope": scope,
-            "callbackUrl": API_BASE_URL,  # Send the callback URL
+            "callbackUrl": momocallbackurl,  # Send the callback URL
         }
 
         headers = {**momo_headers, "X-Target-Environment": "sandbox"}
@@ -965,7 +965,7 @@ def request_momo_payment(amount: float, currency: str, external_id: str, payer_n
             },
             "payerMessage": payer_message,
             "payeeNote": payee_note,
-            "callbackUrl": API_BASE_URL,  # Send the callback URL
+            "callbackUrl": momocallbackurl,  # Send the callback URL
         }
 
         headers = {**momo_headers, "X-Target-Environment": "sandbox"}
