@@ -24,7 +24,7 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
       'health_goals': ['Weight Loss'],
     },
     {
-      'title': 'Meal 2',
+      'title': 'Grilled salmon',
       'description': 'Description for Meal 2',
       'image': 'assets/images/meal2.jpg',
       'price': 12.50,
@@ -211,32 +211,36 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
                   ),
                 ),
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  ExpansionTile(
+                    title: Text(
+                      'Dietary Preferences',
+                      style: TextStyle(
+                          fontSize: 16.0, fontWeight: FontWeight.bold),
+                    ),
                     children: [
-                      Text('Dietary Preferences',
-                          style: TextStyle(
-                              fontSize: 16.0, fontWeight: FontWeight.bold)),
-                      SizedBox(height: 10.0),
                       _buildRadioTile('Vegan', selectedDietaryPreference),
                       _buildRadioTile('Gluten-free', selectedDietaryPreference),
                       _buildRadioTile('Omnivore', selectedDietaryPreference),
-                      SizedBox(height: 20.0),
-                      Text('Health Goals',
-                          style: TextStyle(
-                              fontSize: 16.0, fontWeight: FontWeight.bold)),
-                      SizedBox(height: 10.0),
+                    ],
+                  ),
+                  ExpansionTile(
+                    title: Text(
+                      'Health Goals',
+                      style: TextStyle(
+                          fontSize: 16.0, fontWeight: FontWeight.bold),
+                    ),
+                    children: [
                       _buildRadioTile('Weight Loss', selectedHealthGoal),
                       _buildRadioTile('Weight Gain', selectedHealthGoal),
                       _buildRadioTile('More Energy', selectedHealthGoal),
-                      SizedBox(height: 20.0),
-                      ElevatedButton(
-                        onPressed: _clearFilters,
-                        child: Text('Clear Filters'),
-                        style: ElevatedButton.styleFrom(
-                            padding: EdgeInsets.symmetric(vertical: 12.0)),
-                      ),
                     ],
+                  ),
+                  SizedBox(height: 20.0),
+                  ElevatedButton(
+                    onPressed: _clearFilters,
+                    child: Text('Clear Filters'),
+                    style: ElevatedButton.styleFrom(
+                        padding: EdgeInsets.symmetric(vertical: 12.0)),
                   ),
                 ],
               ),
@@ -301,57 +305,63 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
       String title, String description, String imagePath, double price) {
     return Card(
       elevation: 4,
-      child: Padding(
-        padding: EdgeInsets.all(16.0),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Image.asset(
+      child: Column(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(4)),
+            child: Image.asset(
               imagePath,
-              width: 80.0,
-              height: 80.0,
+              width: double.infinity,
+              height: 150.0,
               fit: BoxFit.cover,
             ),
-            SizedBox(width: 16.0),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    title,
-                    style:
-                        TextStyle(fontSize: 16.0, fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(height: 8.0),
-                  Text(description),
-                  SizedBox(height: 8.0),
-                  Text('\$${price.toStringAsFixed(2)}'),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      IconButton(
-                        icon: Icon(Icons.favorite_border),
-                        onPressed: () {
-                          Favorites.addItem(title, price);
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                              content: Text('$title added to favorites!')));
-                        },
-                      ),
-                      IconButton(
-                        icon: Icon(Icons.add_shopping_cart),
-                        onPressed: () {
-                          ShoppingCart.addItem(title, price);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('$title added to cart!')));
-                        },
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+          ),
+          Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(fontSize: 16.0, fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 8.0),
+                Text(description),
+                SizedBox(height: 8.0),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '\$${price.toStringAsFixed(2)}',
+                      style: TextStyle(
+                          fontSize: 15.0, fontWeight: FontWeight.w500),
+                    ),
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: Icon(Icons.favorite_border),
+                          onPressed: () {
+                            Favorites.addItem(title, price);
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                content: Text('$title added to favorites!')));
+                          },
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.add_shopping_cart),
+                          onPressed: () {
+                            ShoppingCart.addItem(title, price);
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                content: Text('$title added to cart!')));
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
