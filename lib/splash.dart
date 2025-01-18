@@ -156,7 +156,7 @@ class _SplashScreenState extends State<SplashScreen>
                         onPressed: () {
                           Navigator.of(context).push(
                             MaterialPageRoute(
-                                builder: (context) => RecommendedMealsScreen()),
+                                builder: (context) => SignUpOrLoginPage()),
                           );
                         },
                         style: ElevatedButton.styleFrom(
