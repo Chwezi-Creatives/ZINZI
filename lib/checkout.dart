@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 
 class CheckoutScreen extends StatefulWidget {
-  final List<Map<String, dynamic>> cartItems; // Receiver for cart items
+  final List<Map<String, dynamic>> cartItems;
 
-  // Constructor to receive cart items
   CheckoutScreen({required this.cartItems});
 
   @override
@@ -24,14 +23,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   @override
   void dispose() {
-    _timer.cancel(); // Clean up the timer when the screen is disposed
+    _timer.cancel();
     super.dispose();
   }
 
   void _startAnimation() {
     _timer = Timer.periodic(Duration(seconds: 1), (timer) {
       setState(() {
-        // Alternate the scale factor between 1.0 and 1.2 to create the "pulsing" effect
         _scaleFactor = _scaleFactor == 1.0 ? 0.8 : 1.0;
       });
     });
@@ -41,9 +39,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        elevation: 3.0,
+        elevation: 4,
         title: Text('Checkout'),
-        backgroundColor: Colors.teal[400], // Set AppBar color to teal
+        backgroundColor: Colors.teal[800],
+        foregroundColor: Colors.white,
         leading: IconButton(
           icon: Icon(Icons.arrow_back),
           onPressed: () {
@@ -51,7 +50,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           },
         ),
       ),
-      body: Padding(
+      body: Container(
+        decoration: BoxDecoration(
+          image: DecorationImage(
+            image: AssetImage('assets/images/soft.jpg'),
+            fit: BoxFit.cover,
+            colorFilter: ColorFilter.mode(
+              Colors.white.withOpacity(0.95),
+              BlendMode.dstATop,
+            ),
+          ),
+        ),
         padding: EdgeInsets.all(16.0),
         child: SingleChildScrollView(
           child: Column(
@@ -59,7 +68,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             children: <Widget>[
               // Order Summary Card
               Card(
-                //elevation: 2.0,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                elevation: 1,
                 child: Padding(
                   padding: EdgeInsets.all(16.0),
                   child: Column(
@@ -80,13 +91,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
               // Payment Method Card
               Card(
-                //elevation: 2.0,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                elevation: 1,
                 child: Padding(
                   padding: EdgeInsets.all(16.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      _buildSectionTitle('Payment Method'),
+                      _buildSectionTitle('Choose a payment method'),
                       SizedBox(height: 16.0),
                       _buildPaymentMethods(),
                     ],
@@ -98,7 +111,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
               // Billing Information Card
               Card(
-                //elevation: 2.0,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                elevation: 1,
                 child: Padding(
                   padding: EdgeInsets.all(16.0),
                   child: Column(
@@ -108,21 +123,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       SizedBox(height: 16.0),
                       Container(
                         decoration: BoxDecoration(
-                          border: Border.all(
-                              color: Colors
-                                  .grey), // Outer border around the fields
-                          borderRadius: BorderRadius.circular(
-                              8.0), // Optional rounded corners
+                          border: Border.all(color: Colors.grey),
+                          borderRadius: BorderRadius.circular(8.0),
                         ),
                         child: Padding(
-                          padding: EdgeInsets.all(
-                              8.0), // Padding inside the container
+                          padding: EdgeInsets.all(8.0),
                           child: Column(
                             children: <Widget>[
                               _buildTextField('Full Name'),
-                              Divider(), // Divider between input fields
+                              Divider(),
                               _buildTextField('Email Address'),
-                              Divider(), // Divider between input fields
+                              Divider(),
                               _buildTextField('Special Instructions',
                                   maxLines: 3),
                             ],
@@ -147,11 +158,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       // Handle "Place Order" button press
                     },
                     child: Text(
-                      'Comfirm Order Now!',
-                      style: TextStyle(color: Colors.white), // White text
+                      'Confirm Order Now!',
+                      style: TextStyle(color: Colors.white),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.teal[400], // teal[400] background
+                      backgroundColor: Colors.teal[800],
                       padding: EdgeInsets.symmetric(
                           vertical: 12.0, horizontal: 24.0),
                     ),
@@ -165,32 +176,29 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     );
   }
 
-  // Build a section title
   Widget _buildSectionTitle(String title) {
     return Text(
       title,
       style: TextStyle(
-        fontSize: 18.0,
-        fontWeight: FontWeight.bold,
-      ),
+          fontSize: 18.0, fontWeight: FontWeight.bold, color: Colors.teal[800]),
     );
   }
 
-  // Build a price row
   Widget _buildPriceRow(String title, double value, {bool isTotal = false}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: <Widget>[
-        Text(title),
+        Text(title, style: TextStyle(color: Colors.black)),
         Text(
           '\$${value.toStringAsFixed(2)}',
-          style: isTotal ? TextStyle(fontWeight: FontWeight.bold) : null,
+          style: isTotal
+              ? TextStyle(fontWeight: FontWeight.bold, color: Colors.teal[800])
+              : null,
         ),
       ],
     );
   }
 
-  // Build horizontal payment methods
   Widget _buildPaymentMethods() {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -208,28 +216,24 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     );
   }
 
-  // Build a text input field without border
   Widget _buildTextField(String label, {int maxLines = 1}) {
     return TextField(
       maxLines: maxLines,
       decoration: InputDecoration(
         labelText: label,
-        border: InputBorder.none, // Remove the individual borders
+        border: InputBorder.none,
       ),
     );
   }
 
-  // Calculate subtotal
   double calculateSubtotal() {
     return widget.cartItems.fold(0, (sum, item) => sum + item['price']);
   }
 
-  // Simulating shipping/tax calculation
   double calculateShippingTax() {
-    return 5.0; // Fixed shipping/tax amount for simplicity
+    return 0.5;
   }
 
-  // Calculate total
   double calculateTotal() {
     return calculateSubtotal() + calculateShippingTax();
   }
@@ -244,15 +248,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         children: <Widget>[
           icon is String
               ? Image.asset(
-                  icon, // Using custom icon from assets
+                  icon,
                   height: 24.0,
                   width: 24.0,
                 )
-              : Icon(icon), // For Google Pay or other icons
-          SizedBox(width: 8.0),
+              : Icon(icon),
+          SizedBox(width: 4.0),
           Text(title),
         ],
       ),
+      style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.teal[100], foregroundColor: Colors.black),
     );
   }
 }
