@@ -681,7 +681,20 @@ def recommend_meals(user_id: int) -> List[Dict]:
     recommendations = []
 
     for meal in meals:
-        meal_id, meal_name, ingredients = meal
+        (meal_id, meal_name, ingredients, allergies, disease_management, cuisine_preferences,
+         cooking_skill_level, prep_time, complementary_dishes) = meal
+
+        # Apply additional user preferences filters
+        if any(allergy in allergies for allergy in user_preferences["allergies"]):
+            continue
+        if not any(disease in disease_management for disease in user_preferences["disease_management"]):
+            continue
+        if not any(cuisine in cuisine_preferences for cuisine in user_preferences["cuisine_preferences"]):
+            continue
+        if cooking_skill_level != user_preferences["cooking_skill_level"]:
+            continue
+        if prep_time != user_preferences["prep_time"]:
+            continue
         ingredients_list = ingredients.split(",")
 
         # Fetch ingredients from Produce table
