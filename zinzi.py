@@ -588,8 +588,7 @@ class Updatelists:
             total_fat += product['Fat_content'] * percentage_contribution
 
         return total_calories, total_cholesterol, total_protein, total_carbs, total_fat
-
-    
+        
 
 class MealRecommendation:
     def __init__(self, user_id):
@@ -655,22 +654,86 @@ class MealRecommendation:
             logging.error(f"Error fetching dietary preferences for user {self.user_id}: {e}")
             return []
 
-    def recommend_meals(self):
-        try:
-            connection = get_db_connection()
-            if connection is None:
-                return []
-            cursor = connection.cursor()
-            cursor.execute("SELECT * FROM Meal_data WHERE MealType IN (?)", (','.join(self.dietary_preferences),))
-            columns = [column[0] for column in cursor.description]
-            meal_data = [dict(zip(columns, row)) for row in cursor.fetchall()]
-            connection.close()
+def recommend_meals(user_id: int) -> List[Dict]:
+    # Fetch user preferences
+    user_preferences = fetch_user_preferences(user_id)
+    dietary_preferences = user_preferences["dietary_preferences"]
+    calorie_limit = user_preferences["calorie_limit"]
+    goal = user_preferences["Goal"]
 
-            recommended_meals = [meal for meal in meal_data if self.is_meal_suitable(meal)]
-            return recommended_meals
-        except pyodbc.Error as e:
-            logging.error(f"Error fetching meal data: {e}")
-            return []
+    # Define calorie ranges based on the goal
+    if goal == "Lose Weight":
+        calorie_limit = calorie_limit * 0.85  # Reduce calorie intake by 15%
+    elif goal == "Gain Weight":
+        calorie_limit = calorie_limit * 1.15  # Increase calorie intake by 15%
+    # Maintain weight does not modify calorie_limit
+
+    # Query suitable meals based on user preferences
+    meal_query = """
+    SELECT Meal_id, Meal_name, Ingredients
+    FROM Meal
+    WHERE [Dietary Prefference] LIKE ? AND Goal LIKE ?
+    """
+    cursor = connection.cursor()
+    cursor.execute(meal_query, (f"%{dietary_preferences}%", f"%{goal}%"))
+    meals = cursor.fetchall()
+
+    recommendations = []
+
+    for meal in meals:
+        meal_id, meal_name, ingredients = meal
+        ingredients_list = ingredients.split(",")
+
+        # Fetch ingredients from Produce table
+        produce_query = """
+        SELECT Produce, Calories, Proteins, Carbohydrates, Fats
+        FROM Produce
+        WHERE Produce_ID IN ({})
+        """.format(",".join([f"'{ingredient.strip()}'" for ingredient in ingredients_list]))
+
+        cursor.execute(produce_query)
+        ingredients_data = cursor.fetchall()
+
+        # Calculate total nutritional values
+        total_calories = sum(row[1] for row in ingredients_data)
+        total_proteins = sum(row[2] for row in ingredients_data)
+        total_carbs = sum(row[3] for row in ingredients_data)
+        total_fats = sum(row[4] for row in ingredients_data)
+
+        if (goal == "Lose Weight" and total_calories <= calorie_limit) or \
+           (goal == "Gain Weight" and total_calories >= calorie_limit) or \
+           (goal == "Maintain Weight" and abs(total_calories - calorie_limit) <= 100):
+            recommendations.append({
+                "Meal Name": meal_name,
+                "Ingredients": [
+                    {
+                        "Produce": row[0],
+                        "Calories": row[1],
+                        "Proteins": row[2],
+                        "Carbohydrates": row[3],
+                        "Fats": row[4]
+                    } for row in ingredients_data
+                ],
+                "Nutrition": {
+                    "Calories": total_calories,
+                    "Proteins": total_proteins,
+                    "Carbohydrates": total_carbs,
+                    "Fats": total_fats
+                }
+            })
+
+    return recommendations
+
+# Example Usage
+user_id = 1  # Example user ID
+meal_recommendations = recommend_meals(user_id)
+for rec in meal_recommendations:
+    print(f"Meal: {rec['Meal Name']}")
+    print("Nutrition:", rec["Nutrition"])
+    print("Ingredients:")
+    for ingredient in rec["Ingredients"]:
+        print(f"  - {ingredient['Produce']}: {ingredient}")
+
 
     def is_meal_suitable(self, meal):
         # Check dietary preferences
