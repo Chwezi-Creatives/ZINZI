@@ -13,14 +13,15 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google.auth.exceptions import RefreshError
 from email.mime.text import MIMEText
-import base64
 import paypalrestsdk
 import logging
 import stripe
 import requests
 import base64
+from base64 import b64encode
 import time
 from typing import Dict, Any
+import uuid
 
 
 # Load the .env file
@@ -844,7 +845,108 @@ def handle_stripe_payment_cancellation():
 
 
 
-# Load MoMo environment variables (ensure these are set in your environment or .env file)
+# Load environment variables
+load_dotenv()
+
+class MTNMoMoClient:
+    def __init__(self):
+        # Static credentials (from .env)
+        self.subscription_key = os.getenv("MOMO_SUBSCRIPTION_KEY")
+        self.api_user_id = os.getenv("X_REFERENCE_ID")
+        self.api_key = os.getenv("MOMO_API_KEY")
+        
+        # Token management
+        self.access_token = None
+        self.token_creation_time = 0
+        self.token_expiry = 3600  # 1 hour in seconds
+        
+        # API endpoints
+        self.token_url = "https://sandbox.momodeveloper.mtn.com/collection/token/"
+        self.payment_url = "https://sandbox.momodeveloper.mtn.com/collection/v1_0/requesttopay"
+        self.transaction_url = "https://sandbox.momodeveloper.mtn.com/collection/v1_0/requesttopay/{external_id}"
+
+    def get_access_token(self):
+        """Get new access token and update creation time"""
+        auth_str = f"{self.api_user_id}:{self.api_key}"
+        basic_auth = b64encode(auth_str.encode()).decode()
+        
+        headers = {
+            "Authorization": f"Basic {basic_auth}",
+            "Ocp-Apim-Subscription-Key": self.subscription_key,
+        }
+        
+        response = requests.post(self.token_url, headers=headers)
+        response.raise_for_status()
+        
+        self.access_token = response.json().get("access_token")
+        self.token_creation_time = time.time()
+        return self.access_token
+
+    def _refresh_token_if_needed(self):
+        """Check and refresh token if expired or missing"""
+        if not self.access_token or (time.time() - self.token_creation_time) > self.token_expiry:
+            print("Refreshing access token...")
+            self.get_access_token()
+
+    def request_payment(self, amount, msisdn):
+        """Request payment from a user"""
+        self._refresh_token_if_needed()
+        
+        external_id = str(uuid.uuid4())  # Generate unique ID for transaction
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "X-Reference-Id": external_id,
+            "X-Target-Environment": "sandbox",
+            "Content-Type": "application/json",
+            "Ocp-Apim-Subscription-Key": self.subscription_key,
+        }
+
+        payload = {
+            "amount": str(amount),
+            "currency": "UGX",
+            "externalId": external_id,
+            "payer": {
+                "partyIdType": "MSISDN",
+                "partyId": msisdn
+            },
+            "payerMessage": "Payment for ZINZI services",
+            "payeeNote": "Test payment"
+        }
+
+        try:
+            response = requests.post(self.payment_url, json=payload, headers=headers)
+            response.raise_for_status()
+            return external_id
+        except requests.exceptions.HTTPError as err:
+            if response.status_code == 401:  # Token might have expired mid-request
+                self.get_access_token()
+                headers["Authorization"] = f"Bearer {self.access_token}"
+                response = requests.post(self.payment_url, json=payload, headers=headers)
+                response.raise_for_status()
+                return external_id
+            raise
+
+    def check_transaction_status(self, external_id):
+        """Check status of a transaction"""
+        self._refresh_token_if_needed()
+        
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Ocp-Apim-Subscription-Key": self.subscription_key,
+        }
+        
+        url = self.transaction_url.format(external_id=external_id)
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        
+        return response.json()
+    
+#client = MTNMoMoClient()
+#client.request_payment('50', '+256787372100')
+
+
+
+'''# Load MoMo environment variables (ensure these are set in your environment or .env file)
 X_REFERENCE_ID = os.getenv("X_REFERENCE_ID")
 API_KEY = os.getenv("MOMO_API_KEY")
 SUBSCRIPTION_KEY = os.getenv("MOMO_SUBSCRIPTION_KEY")
@@ -1033,3 +1135,4 @@ def check_momo_payment_status(transaction_ref: str) -> Dict[str, Any]:
 
 # Initialize MoMo configuration
 configure_momo()
+'''

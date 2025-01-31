@@ -12,7 +12,8 @@ from flask_cors import CORS
 from zinzi import Authentication, Updatelists, MealRecommendation
 from zinzi import configure_paypal, create_payment_paypal, execute_payment, handle_payment_cancellation
 from zinzi import configure_stripe, create_stripe_payment, execute_stripe_payment, handle_stripe_payment_cancellation
-from zinzi import request_momo_payment, check_momo_payment_status, configure_momo
+#from zinzi import request_momo_payment, check_momo_payment_status, configure_momo
+from zinzi import MTNMoMoClient
 
 app = Flask(__name__)
 CORS(app)
@@ -20,6 +21,7 @@ CORS(app)
 # Create instances of the classes from the backend
 auth = Authentication()
 updater = Updatelists()
+momo_client = MTNMoMoClient()
 #meal_rec = MealRecommendation()  not yet active # Example user_id is 1 for testing
 
 
@@ -350,7 +352,43 @@ def cancel_payment():
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
-# MTN MoMo configuration endpoint
+'''@app.route('/api/init', methods=['GET'])
+def initialize_momo():
+    """Initialize MoMo connection"""
+    try:
+        momo_client.get_access_token()
+        return jsonify({"status": "success", "message": "MoMo client initialized"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+'''
+
+@app.route('/rr/request-payment-m', methods=['POST'])
+def request_payment():
+    data = request.json
+    try:
+        external_id = momo_client.request_payment(
+            amount=data['amount'],
+            msisdn=data['msisdn']
+        )
+        return jsonify({
+            "status": "success",
+            "external_id": external_id
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/rr/transaction-status-m/<external_id>', methods=['GET'])
+def get_transaction_status(external_id):
+    """Check transaction status"""
+    try:
+        status = momo_client.check_transaction_status(external_id)
+        return jsonify({"status": "success", "data": status})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+
+'''# MTN MoMo configuration endpoint
 @app.route('/rr/configure_momo', methods=['POST'])
 def configure_momo_route():
     """Configures MTN MoMo API credentials."""
@@ -398,7 +436,7 @@ def request_momo_payment_route():
         logging.error(f"Error in request_momo_payment_route: {e}")
         return jsonify({"status": "failure", "error": "An error occurred while processing the payment request"}), 500
 
-
+ 
 # Check MoMo payment status endpoint
 @app.route('/rr/check_momo_payment_status', methods=['GET'])
 def check_momo_payment_status_route():
@@ -461,7 +499,7 @@ def momo_callback():
     except Exception as e:
         logging.error(f"Error processing callback: {e}")
         return jsonify({"status": "failure", "error": "An unexpected error occurred"}), 500
-
+'''
 
 
 if __name__ == '__main__':
