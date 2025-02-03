@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:zinzi2/checkout.dart';
+import 'package:zinzi2/customer.dart';
+import 'package:zinzi2/dashboard_page.dart';
+import 'package:zinzi2/paymentmethod.dart';
 import 'package:zinzi2/reco.dart';
 import 'signup_or_login.dart';
 
@@ -156,7 +159,7 @@ class _SplashScreenState extends State<SplashScreen>
                         onPressed: () {
                           Navigator.of(context).push(
                             MaterialPageRoute(
-                                builder: (context) => SignUpOrLoginPage()),
+                                builder: (context) => CustomerTypeSelectionPage()),
                           );
                         },
                         style: ElevatedButton.styleFrom(
