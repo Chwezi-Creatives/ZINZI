@@ -23,28 +23,24 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
   @override
   void initState() {
     super.initState();
-
     _mealsController = AnimationController(
       duration: const Duration(seconds: 2),
       vsync: this,
     )..forward();
     _mealsAnimation =
         Tween<double>(begin: 0, end: 17).animate(_mealsController);
-
     _caloriesController = AnimationController(
       duration: const Duration(seconds: 2),
       vsync: this,
     )..forward();
     _caloriesAnimation =
         Tween<double>(begin: 0, end: 2122).animate(_caloriesController);
-
     _weightController = AnimationController(
       duration: const Duration(seconds: 2),
       vsync: this,
     )..forward();
     _weightAnimation =
         Tween<double>(begin: 0, end: -2.0).animate(_weightController);
-
     _chartController = AnimationController(
       duration: const Duration(seconds: 2),
       vsync: this,
@@ -67,7 +63,7 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
       appBar: AppBar(
         title: const Text('User Analytics Dashboard'),
         centerTitle: true,
-        backgroundColor: Colors.teal[600]!.withOpacity(0.7),
+        backgroundColor: Colors.teal[900]!.withOpacity(0.7),
         foregroundColor: Colors.white,
         elevation: 0,
       ),
@@ -81,9 +77,7 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
           ),
           SingleChildScrollView(
             child: Container(
-              decoration: BoxDecoration(
-                  //color: Colors.black.withOpacity(0.3),
-                  ),
+              decoration: BoxDecoration(),
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
@@ -97,11 +91,13 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
                     const SizedBox(height: 20),
                     _buildWeeklyMealTrendSection(),
                     const SizedBox(height: 20),
+                    _buildMessageSection(),
+                    const SizedBox(height: 20),
                     _buildMacronutrientBreakdownSection(),
                     const SizedBox(height: 20),
-                    _buildPopularCuisinesSection(),
+                    _buildCarbMessageSection(),
                     const SizedBox(height: 20),
-                    _buildMessageSection(),
+                    _buildPopularCuisinesSection(),
                   ],
                 ),
               ),
@@ -122,52 +118,56 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Key Metrics',
+              'Weekly Metrics',
               style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.teal[800]),
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.teal[800],
+              ),
             ),
             const SizedBox(height: 10),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 MetricCard(
-                  title: 'Total Meals\nthis week',
+                  title: 'Meals',
                   child: AnimatedBuilder(
                     animation: _mealsAnimation,
                     builder: (context, child) => Text(
                       '${_mealsAnimation.value.toInt()}',
                       style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.teal[800]),
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.teal[800],
+                      ),
                     ),
                   ),
                 ),
                 MetricCard(
-                  title: 'Calories this week',
+                  title: 'Calories',
                   child: AnimatedBuilder(
                     animation: _caloriesAnimation,
                     builder: (context, child) => Text(
                       '${_caloriesAnimation.value.toInt()}',
                       style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.teal[800]),
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.teal[800],
+                      ),
                     ),
                   ),
                 ),
                 MetricCard(
-                  title: 'Weight  this week',
+                  title: 'Weight',
                   child: AnimatedBuilder(
                     animation: _weightAnimation,
                     builder: (context, child) => Text(
                       '${_weightAnimation.value.toStringAsFixed(1)} kg',
                       style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.teal[800]),
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.teal[800],
+                      ),
                     ),
                   ),
                 ),
@@ -182,7 +182,7 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
   Widget _buildWeeklyMealTrendSection() {
     List<int> weeklyMealData = [3, 2, 4, 3, 5, 1, 2];
     return _buildCardSection(
-      'Number of meals ordered this week',
+      'Number of meals ordered',
       WeeklyMealTrendChart(
         mealsPerDay: weeklyMealData,
         animation: _chartAnimation,
@@ -197,12 +197,15 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
       'Caribbean': 50
     };
     return _buildCardSection(
-      'Popular Cuisines this week',
+      'Popular Cuisines',
       Row(
         children: [
           Expanded(
-              child: PopularCuisinesChart(
-                  data: cuisineData, animation: _chartAnimation)),
+            child: PopularCuisinesChart(
+              data: cuisineData,
+              animation: _chartAnimation,
+            ),
+          ),
           const SizedBox(width: 20),
           _buildCuisineLegend(cuisineData),
         ],
@@ -217,12 +220,15 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
       'Fats': 0.2
     };
     return _buildCardSection(
-      'Nutrient intake this week',
+      'Nutrient intake',
       Row(
         children: [
           Expanded(
-              child: MacronutrientBreakdownChart(
-                  data: macroData, animation: _chartAnimation)),
+            child: MacronutrientBreakdownChart(
+              data: macroData,
+              animation: _chartAnimation,
+            ),
+          ),
           const SizedBox(width: 20),
           _buildMacronutrientLegend(macroData),
         ],
@@ -240,14 +246,14 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
       FlSpot(5, 1800),
       FlSpot(6, 2000),
     ];
-
     List<FlSpot> recommendedCalories = [
       for (int i = 0; i < 7; i++) FlSpot(i.toDouble(), 1500),
     ];
-
     return _buildCardSection(
-      'Calorie intake this week',
-      _buildLineChart(calorieIntake, recommendedCalories, isWeightChart: false),
+      'Calorie intake (calories)',
+      _buildLineChart(calorieIntake, recommendedCalories,
+          isWeightChart: false,
+          labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']),
     );
   }
 
@@ -261,14 +267,14 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
       FlSpot(5, 76),
       FlSpot(6, 75),
     ];
-
     List<FlSpot> idealWeight = [
-      for (int i = 0; i < 7; i++) FlSpot(i.toDouble(), 72),
+      for (int i = 0; i < 7; i++) FlSpot(i.toDouble(), 76),
     ];
-
     return _buildCardSection(
-      'Weight Goal Progress this week',
-      _buildLineChart(weightProgress, idealWeight, isWeightChart: true),
+      'Weight Progress (Kg)',
+      _buildLineChart(weightProgress, idealWeight,
+          isWeightChart: true,
+          labels: ['wk1', 'wk2', 'wk3', 'wk4', 'wk5', 'wk6', 'wk7']),
     );
   }
 
@@ -277,6 +283,16 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
       '',
       Text(
         'You have maintained a consistent meal schedule this week. Keep up the great work!',
+        style: TextStyle(fontSize: 16, color: Colors.teal[800]),
+      ),
+    );
+  }
+
+  Widget _buildCarbMessageSection() {
+    return _buildCardSection(
+      '',
+      Text(
+        'You have consumed more carbohydrates, consider exercising.',
         style: TextStyle(fontSize: 16, color: Colors.teal[800]),
       ),
     );
@@ -295,9 +311,10 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
               Text(
                 title,
                 style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.teal[800]),
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.teal[800],
+                ),
               ),
             const SizedBox(height: 20),
             content,
@@ -308,179 +325,162 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
   }
 
   Widget _buildLineChart(List<FlSpot> data, List<FlSpot> guideData,
-      {required bool isWeightChart}) {
+      {required bool isWeightChart, required List<String> labels}) {
     final guideColor = Colors.orange[600]!;
-
     return AnimatedBuilder(
       animation: _chartAnimation,
       builder: (context, child) {
         final animatedData = data
             .map((spot) => FlSpot(spot.x, spot.y * _chartAnimation.value))
             .toList();
-
         return SizedBox(
           height: 200,
-          child: Stack(
-            children: [
-              LineChart(
-                LineChartData(
-                  lineTouchData: LineTouchData(
-                    handleBuiltInTouches: true,
-                    touchCallback:
-                        (FlTouchEvent event, LineTouchResponse? touchResponse) {
-                      setState(() {
-                        _isTouching = touchResponse != null &&
-                            touchResponse.lineBarSpots?.isNotEmpty == true;
-                      });
-                    },
-                    touchTooltipData: LineTouchTooltipData(
-                      getTooltipColor: (spot) => Colors.teal[800]!,
-                      getTooltipItems: (List<LineBarSpot> touchedSpots) {
-                        return touchedSpots.map((spot) {
-                          final textStyle = TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          );
-                          return LineTooltipItem(
-                            isWeightChart
-                                ? '${spot.y.toInt()} kg'
-                                : '${spot.y.toInt()} kcal',
-                            textStyle,
-                          );
-                        }).toList();
-                      },
-                    ),
-                  ),
-                  gridData: FlGridData(
-                    show: true,
-                    drawVerticalLine: true,
-                    horizontalInterval: isWeightChart ? 2 : 500,
-                    verticalInterval: 1,
-                    getDrawingHorizontalLine: (value) => FlLine(
-                      color: Colors.grey[300]!,
-                      strokeWidth: 1,
-                    ),
-                    getDrawingVerticalLine: (value) => FlLine(
-                      color: Colors.grey[300]!,
-                      strokeWidth: 1,
-                    ),
-                  ),
-                  titlesData: FlTitlesData(
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 22,
-                        getTitlesWidget: (value, _) {
-                          const days = [
-                            'Mon',
-                            'Tue',
-                            'Wed',
-                            'Thu',
-                            'Fri',
-                            'Sat',
-                            'Sun'
-                          ];
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 8.0),
-                            child: Text(
-                              days[value.toInt() % days.length],
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.teal[800],
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, _) {
-                          return Text(
-                            isWeightChart
-                                ? '${value.toInt()} kg'
-                                : '${value.toInt()} kcal',
-                            style: TextStyle(
-                              color: Colors.teal[800],
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          );
-                        },
-                        reservedSize: 50,
-                        interval: isWeightChart ? 2 : 500,
-                      ),
-                    ),
-                    rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                  ),
-                  borderData: FlBorderData(
-                    show: true,
-                    border: Border.all(
-                      color: Colors.grey[400]!,
-                      width: 1,
-                    ),
-                  ),
-                  minX: 0,
-                  maxX: 6,
-                  minY: isWeightChart ? 70 : 0,
-                  maxY: isWeightChart ? 85 : 2500,
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: animatedData,
-                      isCurved: true,
-                      curveSmoothness: 0.3,
-                      color: Colors.teal[400],
-                      barWidth: 3,
-                      shadow: const Shadow(
-                        color: Colors.teal,
-                        blurRadius: 10,
-                        offset: Offset(0, 2),
-                      ),
-                      belowBarData: BarAreaData(
-                        show: true,
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.teal.withOpacity(0.3),
-                            Colors.teal.withOpacity(0.3),
-                          ],
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                        ),
-                      ),
-                      dotData: FlDotData(
-                        show: true,
-                        getDotPainter: (spot, percent, barData, index) =>
-                            FlDotCirclePainter(
-                          radius: 4,
-                          color: Colors.white,
-                          strokeWidth: 2,
-                          strokeColor: Colors.teal[400]!,
-                        ),
-                      ),
-                    ),
-                    if (guideData.isNotEmpty)
-                      LineChartBarData(
-                        spots: guideData,
-                        isCurved: true,
-                        curveSmoothness: 0.3,
-                        color: guideColor,
-                        barWidth: 2,
-                        dashArray: [5, 5],
-                        dotData: const FlDotData(show: false),
-                        belowBarData: BarAreaData(show: false),
-                      ),
-                  ],
+          child: LineChart(
+            LineChartData(
+              lineTouchData: LineTouchData(
+                handleBuiltInTouches: true,
+                touchCallback:
+                    (FlTouchEvent event, LineTouchResponse? touchResponse) {
+                  setState(() {
+                    _isTouching = touchResponse != null &&
+                        touchResponse.lineBarSpots?.isNotEmpty == true;
+                  });
+                },
+                touchTooltipData: LineTouchTooltipData(
+                  getTooltipColor: (spot) => Colors.teal[800]!,
+                  getTooltipItems: (List touchedSpots) {
+                    return touchedSpots.map((spot) {
+                      final textStyle = TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      );
+                      return LineTooltipItem(
+                        isWeightChart
+                            ? '${spot.y.toInt()}'
+                            : '${spot.y.toInt()}',
+                        textStyle,
+                      );
+                    }).toList();
+                  },
                 ),
               ),
-            ],
+              gridData: FlGridData(
+                show: true,
+                drawVerticalLine: true,
+                horizontalInterval: isWeightChart ? 2 : 500,
+                verticalInterval: 1,
+                getDrawingHorizontalLine: (value) => FlLine(
+                  color: Colors.grey[300]!,
+                  strokeWidth: 1,
+                ),
+                getDrawingVerticalLine: (value) => FlLine(
+                  color: Colors.grey[300]!,
+                  strokeWidth: 1,
+                ),
+              ),
+              titlesData: FlTitlesData(
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 22,
+                    getTitlesWidget: (value, _) {
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Text(
+                          labels[value.toInt()],
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.teal[800],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                leftTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    getTitlesWidget: (value, _) {
+                      return Text(
+                        value.toInt().toString(),
+                        style: TextStyle(
+                          color: Colors.teal[800],
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      );
+                    },
+                    reservedSize: 50,
+                    interval: isWeightChart ? 2 : 500,
+                  ),
+                ),
+                rightTitles: const AxisTitles(
+                  sideTitles: SideTitles(showTitles: false),
+                ),
+                topTitles: const AxisTitles(
+                  sideTitles: SideTitles(showTitles: false),
+                ),
+              ),
+              borderData: FlBorderData(
+                show: true,
+                border: Border.all(
+                  color: Colors.grey[400]!,
+                  width: 1,
+                ),
+              ),
+              minX: 0,
+              maxX: 6,
+              minY: isWeightChart ? 70 : 0,
+              maxY: isWeightChart ? 84 : 2500,
+              lineBarsData: [
+                LineChartBarData(
+                  spots: animatedData,
+                  isCurved: true,
+                  curveSmoothness: 0.3,
+                  color: Colors.teal[400],
+                  barWidth: 3,
+                  shadow: const Shadow(
+                    color: Colors.teal,
+                    blurRadius: 10,
+                    offset: Offset(0, 2),
+                  ),
+                  belowBarData: BarAreaData(
+                    show: true,
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.teal.withOpacity(0.3),
+                        Colors.teal.withOpacity(0.3),
+                      ],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                    ),
+                  ),
+                  dotData: FlDotData(
+                    show: true,
+                    getDotPainter: (spot, percent, barData, index) =>
+                        FlDotCirclePainter(
+                      radius: 4,
+                      color: Colors.white,
+                      strokeWidth: 2,
+                      strokeColor: Colors.teal[400]!,
+                    ),
+                  ),
+                ),
+                if (guideData.isNotEmpty)
+                  LineChartBarData(
+                    spots: guideData,
+                    isCurved: true,
+                    curveSmoothness: 0.3,
+                    color: guideColor,
+                    barWidth: 2,
+                    dashArray: [5, 5],
+                    dotData: const FlDotData(show: false),
+                    belowBarData: BarAreaData(show: false),
+                  ),
+              ],
+            ),
           ),
         );
       },
@@ -490,7 +490,6 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
   Widget _buildCuisineLegend(Map<String, int> data) {
     final colors = [Colors.teal, Colors.green, Colors.orange];
     int colorIndex = 0;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: data.entries.map((entry) {
@@ -512,7 +511,6 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
   Widget _buildMacronutrientLegend(Map<String, double> data) {
     final colors = [Colors.purple, Colors.orange, Colors.cyan];
     int colorIndex = 0;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: data.entries.map((entry) {
@@ -682,7 +680,6 @@ class PopularCuisinesChart extends StatelessWidget {
     final colors = [Colors.teal[800], Colors.green, Colors.orange];
     final total = data.values.reduce((a, b) => a + b);
     int colorIndex = 0;
-
     return AnimatedBuilder(
       animation: animation,
       builder: (context, child) {
@@ -723,7 +720,6 @@ class MacronutrientBreakdownChart extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = [Colors.purple, Colors.orange, Colors.cyan];
     int colorIndex = 0;
-
     return AnimatedBuilder(
       animation: animation,
       builder: (context, child) {
