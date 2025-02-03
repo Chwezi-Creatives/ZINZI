@@ -1,0 +1,133 @@
+import 'package:flutter/material.dart';
+import 'package:zinzi2/actual.dart';
+import 'package:zinzi2/reco.dart'; // Ensure this is the correct path
+
+class RepeatCustomerSelectionPage extends StatefulWidget {
+  @override
+  _RepeatCustomerSelectionPageState createState() =>
+      _RepeatCustomerSelectionPageState();
+}
+
+class _RepeatCustomerSelectionPageState
+    extends State<RepeatCustomerSelectionPage> {
+  List<String> selectedCategories = []; // Store selected categories
+
+  // You can retrieve the category list from meals (or use a fixed list)
+  List<String> categories = [
+    'Sandwich',
+    'Chicken',
+    'Weight Loss',
+    'Omnivore',
+    'Fish',
+    'Grilled',
+    'More Energy',
+    'Vegan',
+    'Gluten-Free',
+    'Bowl',
+    'Snack',
+    'Tacos',
+    'Burger',
+    'Breakfast',
+    'Vegetarian',
+    // Add other categories as needed
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Select Meal Categories'),
+        backgroundColor: Colors.teal[800],
+        foregroundColor: Colors.white,
+      ),
+      body: Container(
+        width: double.infinity, // Stretch horizontally
+        height: double.infinity, // Stretch vertically
+        decoration: BoxDecoration(
+          image: DecorationImage(
+            image:
+                AssetImage('assets/images/soft.jpg'), // Your background image
+            fit: BoxFit.cover,
+            // Removed the color filter to let the widgets sit against the background image
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min, // Use min size to fit children
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Select one or more categories of meals you prefer:',
+                  style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w400,
+                      color: Colors.grey),
+                ),
+                SizedBox(height: 30),
+                Card(
+                  margin: EdgeInsets.symmetric(
+                      vertical: 16.0), // Space above and below the card
+                  color: Colors
+                      .teal[50], // Slightly transparent white for the card
+                  elevation: 2,
+                  child: Padding(
+                    padding: const EdgeInsets.all(
+                        16.0), // Add padding inside the card
+                    child: Wrap(
+                      spacing: 8.0,
+                      runSpacing: 8.0,
+                      children: categories.map((category) {
+                        return ChoiceChip(
+                          label: Text(category),
+                          selected: selectedCategories.contains(category),
+                          onSelected: (selected) {
+                            setState(() {
+                              if (selected) {
+                                selectedCategories.add(category);
+                              } else {
+                                selectedCategories.remove(category);
+                              }
+                            });
+                          },
+                          backgroundColor: Colors.teal[50],
+                          selectedColor: Colors.teal[100],
+                          labelStyle: TextStyle(
+                            color: Colors.teal,
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 50),
+                Center(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      // Navigate to the recommended meals page and pass the selected categories
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ActualRecommendedMealsScreen(
+                              selectedCategories: selectedCategories),
+                        ),
+                      );
+                    },
+                    child: Text('Show Recommended Meals'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      foregroundColor: Colors.white,
+                      padding:
+                          EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
