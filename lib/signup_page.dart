@@ -28,6 +28,9 @@ class _SignUpPageState extends State<SignUpPage>
   late Animation<double> _buttonFadeAnimation;
   late Animation<double> _buttonScaleAnimation;
 
+  String _passwordStrengthMessage = '';
+  Color _passwordStrengthColor = Colors.red;
+
   @override
   void initState() {
     super.initState();
@@ -71,6 +74,38 @@ class _SignUpPageState extends State<SignUpPage>
     super.dispose();
   }
 
+  // Function to check the password strength
+  void _checkPasswordStrength(String password) {
+    if (password.length < 4) {
+      setState(() {
+        _passwordStrengthMessage = 'Too short';
+        _passwordStrengthColor = Colors.red;
+      });
+    } else if (password.length < 6) {
+      setState(() {
+        _passwordStrengthMessage = 'Weak';
+        _passwordStrengthColor = Colors.orange;
+      });
+    } else if (password.length >= 7 && 
+                RegExp(r'(?=.*[0-9])(?=.*[!@#\$&*~])').hasMatch(password)) {
+      setState(() {
+        _passwordStrengthMessage = 'Moderate';
+        _passwordStrengthColor = Colors.deepPurple;
+      });
+    } else if (password.length >= 10 && 
+                RegExp(r'(?=.*[0-9])(?=.*[!@#\$&*~])(?=.*[A-Z])(?=.*[a-z])').hasMatch(password)) {
+      setState(() {
+        _passwordStrengthMessage = 'Strong';
+        _passwordStrengthColor = Colors.green;
+      });
+    } else {
+      setState(() {
+        _passwordStrengthMessage = 'Moderate';
+        _passwordStrengthColor = Colors.deepPurple;
+      });
+    }
+  }
+
   Future<void> _signUp() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -101,8 +136,12 @@ class _SignUpPageState extends State<SignUpPage>
           _createSlideFadeTransition(const EmailVerificationPage()),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Signup failed. Try again!'),
+        // Extract the error message from the response
+        final errorResponse = json.decode(response.body);
+        final errorMessage = errorResponse['message'] ?? 'Signup failed. Try again!';
+        
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(errorMessage),
         ));
       }
     } catch (error) {
@@ -169,7 +208,7 @@ class _SignUpPageState extends State<SignUpPage>
                             const SizedBox(height: 01),
                             Card(
                               elevation: 3,
-                              color: Colors.white.withOpacity(0.8),
+                              color: Colors.white.withOpacity(0.55),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
@@ -188,7 +227,7 @@ class _SignUpPageState extends State<SignUpPage>
                                     ),
                                     const SizedBox(height: 8),
                                     Text(
-                                      "Join us to Personalize, track and Achieve your health goals and more !",
+                                      "Join us to Personalize, track and Achieve your health goals and more!",
                                       style: TextStyle(
                                         fontSize: 16,
                                         color: Colors.black.withOpacity(0.9),
@@ -241,11 +280,44 @@ class _SignUpPageState extends State<SignUpPage>
                               label: "Password",
                               icon: Icons.lock,
                               obscureText: true,
-                              validator: (value) => value?.isEmpty ?? true
-                                  ? "Enter your password"
-                                  : null,
+                              validator: (value) {
+                                final trimmedValue = value?.trim();
+                                if (trimmedValue == null || trimmedValue.isEmpty) {
+                                  return "Enter your password";
+                                }
+                                return null;
+                              },
+                              onChanged: _checkPasswordStrength, // Check password strength
                             ),
-                            const SizedBox(height: 70),
+                            const SizedBox(height: 10),
+                            // Password Strength Indicator
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  _passwordStrengthMessage,
+                                  style: TextStyle(color: _passwordStrengthColor),
+                                ),
+                                const SizedBox(width: 3), // Spacing between text and Progress Indicator
+                                SizedBox(
+                                  width: 100, // Set a fixed width for LinearProgressIndicator
+                                  height: 8, // Height for the indicator
+                                  child: LinearProgressIndicator(
+                                    value: 
+                                      _passwordStrengthMessage == 'Strong'
+                                          ? 1.0
+                                          : _passwordStrengthMessage == 'Moderate' 
+                                              ? 0.7 
+                                              : _passwordStrengthMessage == 'Weak'
+                                                  ? 0.4 
+                                                  : 0.2,
+                                    backgroundColor: Colors.grey.shade300,
+                                    color: _passwordStrengthColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 40),
                             // Signup Button with fade and scale animation
                             FadeTransition(
                               opacity: _buttonFadeAnimation,
@@ -293,9 +365,11 @@ class _SignUpPageState extends State<SignUpPage>
     required IconData icon,
     bool obscureText = false,
     required String? Function(String?) validator,
+    Function(String)? onChanged, // Add onChanged here for password strength
   }) {
     return TextFormField(
       controller: controller,
+      onChanged: onChanged,  // Add onChanged to capture password input
       decoration: InputDecoration(
         labelText: label,
         labelStyle: TextStyle(color: Colors.teal.shade700),
