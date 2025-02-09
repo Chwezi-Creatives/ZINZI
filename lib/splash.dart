@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:zinzi2/checkout.dart';
+import 'package:zinzi2/chef.dart';
 import 'package:zinzi2/customer.dart';
 import 'package:zinzi2/dashboard_page.dart';
 import 'package:zinzi2/paymentmethod.dart';
 import 'package:zinzi2/reco.dart';
+import 'package:zinzi2/repeat.dart';
+import 'package:zinzi2/signup_page.dart';
 import 'signup_or_login.dart';
+import 'package:zinzi2/useranalytics.dart';
 
 class SplashScreen extends StatefulWidget {
   @override
@@ -159,7 +163,7 @@ class _SplashScreenState extends State<SplashScreen>
                         onPressed: () {
                           Navigator.of(context).push(
                             MaterialPageRoute(
-                                builder: (context) => CustomerTypeSelectionPage()),
+                                builder: (context) => SignUpOrLoginPage()),
                           );
                         },
                         style: ElevatedButton.styleFrom(
