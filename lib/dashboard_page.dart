@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi2/chart_metrics.dart';
+import 'package:zinzi2/cookoption.dart';
+import 'package:zinzi2/customer.dart';
 import 'package:zinzi2/metrics_history.dart';
 import 'dart:convert';
 import 'meal_recommendations_page.dart';
@@ -396,13 +398,13 @@ class _DashboardPageState extends State<DashboardPage>
                             ),
 
                             // Graph Widget
-                            SizedBox(
+                            /*SizedBox(
                               width: isWide
                                   ? (constraints.maxWidth - 32) / 2
                                   : constraints.maxWidth,
                               child:
                                   WeightGraph(), // Add your graph widget here
-                            ),
+                            ),*/
 
                             // Recommended Meals button
                             SizedBox(
@@ -422,7 +424,7 @@ class _DashboardPageState extends State<DashboardPage>
                                         context,
                                         MaterialPageRoute(
                                           builder: (context) =>
-                                              MealRecommendationsPage(),
+                                              CookingChoicePage(),
                                         ),
                                       );
                                     },
@@ -451,7 +453,7 @@ class _DashboardPageState extends State<DashboardPage>
                               ),
                             ),
 
-                            // Proceed to Payment button
+                            /*// Proceed to Payment button
                             SizedBox(
                               width: isWide
                                   ? (constraints.maxWidth - 32) / 2
@@ -496,7 +498,7 @@ class _DashboardPageState extends State<DashboardPage>
                                   ),
                                 ),
                               ),
-                            ),
+                            ),*/
                           ],
                         );
                       },
