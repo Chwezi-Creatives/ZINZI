@@ -46,7 +46,6 @@ def get_db_connection():
         print(f"Error: {e}")
         return None
 
-
 class Authentication:
     def signup_user(self, name, email, password):
         hashed_password = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
@@ -59,11 +58,20 @@ class Authentication:
                 return None
 
             cursor = connection.cursor()
-            query = "SELECT COUNT(*) FROM Users WHERE Email = ?"
-            cursor.execute(query, (email,))
+
+            # Check for unique email
+            email_query = "SELECT COUNT(*) FROM Users WHERE Email = ?"
+            cursor.execute(email_query, (email,))
             if cursor.fetchone()[0] > 0:
                 print("Error: Email is already registered.")
                 return None
+
+            # Check for unique name
+            name_query = "SELECT COUNT(*) FROM Users WHERE Name = ?"  # Added name check
+            cursor.execute(name_query, (name,))
+            if cursor.fetchone()[0] > 0:
+                print("Error: Name is already taken.") # More descriptive message
+                return None             
 
             insert_query = """
                 INSERT INTO Users (Name, Email, Password, Date_created, Is_verified)
@@ -85,12 +93,28 @@ class Authentication:
 
             print(f"User '{name}' registered successfully. Verification email sent to {email}.")
             return user_id
+
         except pyodbc.Error as e:
+            # More detailed error handling for debugging
             print(f"Error during signup: {e}")
+            print(f"SQLSTATE: {e.args[0]}")  # Provide SQLSTATE for better diagnostics
+            if hasattr(e, 'message'): # Print the message if it exists
+                print(f"Message: {e.message}")
             return None
         finally:
             if connection:
                 connection.close()
+
+    def generate_verification_code(self): # Example implementation
+        import random
+        import string
+        return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+
+    def send_verification_email(self, email, verification_code):
+        # Your email sending logic here.  This is a placeholder.
+        print(f"Sending verification email to {email} with code {verification_code}")
+        # Use a library like smtplib or a service like SendGrid, Mailgun, etc.
+        pass # Replace with your email sending code.
 
     def login_user(self, identifier, password):
         try:
@@ -654,7 +678,7 @@ class MealRecommendation:
             logging.error(f"Error fetching dietary preferences for user {self.user_id}: {e}")
             return []
 
-def recommend_meals(user_id: int) -> List[Dict]:
+'''def recommend_meals(user_id: int) -> List[Dict]:
     # Fetch user preferences
     user_preferences = fetch_user_preferences(user_id)
     dietary_preferences = user_preferences["dietary_preferences"]
@@ -761,7 +785,7 @@ for rec in meal_recommendations:
         if meal['Cholesterol_content'] > self.cholesterol_level * 1.1 if self.cholesterol_level else 0:
             return False
 
-        return True
+        return True'''
 
 
 #payment methds
