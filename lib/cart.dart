@@ -4,13 +4,12 @@ import 'package:zinzi2/checkout.dart';
 class ShoppingCart {
   static List<Map<String, dynamic>> items = [];
 
-  static void addItem(String title, double price, {int quantity = 1}) {
-    final existingItemIndex =
-        items.indexWhere((item) => item['title'] == title);
+  static void addItem(String title, double price, {int quantity = 1, List<Map<String, dynamic>>? bestServedWith, required selectedChef}) {
+    final existingItemIndex = items.indexWhere((item) => item['title'] == title);
     if (existingItemIndex != -1) {
       items[existingItemIndex]['quantity'] += quantity;
     } else {
-      items.add({'title': title, 'price': price, 'quantity': quantity});
+      items.add({'title': title, 'price': price, 'quantity': quantity, 'bestServedWith': bestServedWith});
     }
   }
 
@@ -19,8 +18,7 @@ class ShoppingCart {
   }
 
   static double getTotal() {
-    return items.fold(
-        0, (sum, item) => sum + (item['price'] * item['quantity']));
+    return items.fold(0, (sum, item) => sum + (item['price'] * item['quantity']));
   }
 
   static void clearCart() {
@@ -32,8 +30,7 @@ class ShoppingCart {
   }
 
   static void updateQuantity(String title, int newQuantity) {
-    final existingItemIndex =
-        items.indexWhere((item) => item['title'] == title);
+    final existingItemIndex = items.indexWhere((item) => item['title'] == title);
     if (existingItemIndex != -1) {
       if (newQuantity > 0) {
         items[existingItemIndex]['quantity'] = newQuantity;
@@ -54,7 +51,7 @@ class Favorites {
   }
 
   static void addToCart(String title, double price, {int quantity = 1}) {
-    ShoppingCart.addItem(title, price, quantity: quantity);
+    ShoppingCart.addItem(title, price, quantity: quantity, selectedChef: 'defaultChef');
   }
 
   static List<Map<String, dynamic>> getItems() {
@@ -68,6 +65,10 @@ class Favorites {
   static void removeItem(String title) {
     items.removeWhere((item) => item['title'] == title);
   }
+
+  static bool isFavorite(String title) {
+    return items.any((meal) => meal['title'] == title);
+  }
 }
 
 class ShoppingCartScreen extends StatefulWidget {
@@ -76,6 +77,8 @@ class ShoppingCartScreen extends StatefulWidget {
 }
 
 class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
+  List<String> bestServedWithInCart = [];
+
   void _refreshCart() {
     setState(() {});
   }
@@ -97,9 +100,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
             onPressed: () {
               Navigator.pushReplacement(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => ShoppingCartScreen(),
-                ),
+                MaterialPageRoute(builder: (context) => ShoppingCartScreen()),
               );
             },
           ),
@@ -121,93 +122,203 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
             ),
           ),
         ),
-        child: cartItems.isEmpty
-            ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.shopping_cart_outlined,
-                        size: 64, color: Colors.teal[300]),
-                    SizedBox(height: 24),
-                    Text('Your Cart is Empty',
-                        style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.teal[800])),
-                    SizedBox(height: 12),
-                    Text('Explore our menu to add delicious meals!',
-                        style:
-                            TextStyle(fontSize: 16, color: Colors.grey[600])),
-                  ],
-                ),
-              )
-            : Column(
-                children: [
-                  Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12, horizontal: 24),
-                    child: Row(
-                      children: [
-                        Chip(
-                          label: Text(
-                              '${cartItems.length} ${cartItems.length > 1 ? 'Items' : 'Item'}',
-                              style: TextStyle(color: Colors.white)),
-                          backgroundColor: Colors.teal[800],
-                        ),
-                        Spacer(),
-                        Text('Estimated Total:',
-                            style: TextStyle(color: Colors.grey[600])),
-                        SizedBox(width: 8),
-                        Text('\$${totalAmount.toStringAsFixed(2)}',
-                            style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.teal[800])),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: ListView.separated(
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      itemCount: cartItems.length,
-                      separatorBuilder: (context, index) =>
-                          Divider(height: 24, color: Colors.grey[200]),
-                      itemBuilder: (context, index) {
-                        return _buildCartItemCard(cartItems[index], context);
-                      },
-                    ),
-                  ),
-                ],
+        child: Padding(
+          padding: const EdgeInsets.all(16.0), // Matching MealDetailScreen
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start, // Aligning to start
+            children: [
+              _buildCartHeader(cartItems, totalAmount),
+              _buildBestServedWith(cartItems),
+              Expanded(
+                child: cartItems.isEmpty
+                    ? _buildEmptyCart()
+                    : ListView.separated(
+                        shrinkWrap: true,
+                        physics: AlwaysScrollableScrollPhysics(),
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        itemCount: cartItems.length,
+                        separatorBuilder: (context, index) => Divider(height: 24, color: Colors.grey[200]),
+                        itemBuilder: (context, index) {
+                          return _buildCartItemCard(cartItems[index], context);
+                        },
+                      ),
               ),
+            ],
+          ),
+        ),
       ),
-      bottomNavigationBar: Container(
-        height: 100,
-        padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: Colors.grey[200]!)),
-        ),
-        child: Column(
-          children: [
-            ElevatedButton.icon(
-              icon: Icon(Icons.lock_outline, size: 20),
-              label: Text('Secure Checkout', style: TextStyle(fontSize: 16)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.teal[800],
-                foregroundColor: Colors.white,
-                minimumSize: Size(double.infinity, 48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(25),
-                ),
-              ),
-              onPressed:
-                  cartItems.isNotEmpty ? () => _handleCheckout(context) : null,
-            ),
-          ],
-        ),
+      bottomNavigationBar: _buildCheckoutButton(cartItems),
+    );
+  }
+
+  Widget _buildEmptyCart() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.shopping_cart_outlined, size: 64, color: Colors.teal[300]),
+          SizedBox(height: 24),
+          Text(
+            'Your Cart is Empty',
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w500, color: Colors.teal[800]),
+          ),
+          SizedBox(height: 12),
+          Text(
+            'Explore our menu to add delicious meals!',
+            style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+          ),
+        ],
       ),
     );
   }
+
+  Widget _buildCartHeader(List<Map<String, dynamic>> cartItems, double totalAmount) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12), // Adjusted to match
+      child: Row(
+        children: [
+          Chip(
+            label: Text(
+              '${cartItems.length} ${cartItems.length > 1 ? 'Items' : 'Item'}',
+              style: TextStyle(color: Colors.white),
+            ),
+            backgroundColor: Colors.teal[800],
+          ),
+          Spacer(),
+          Text('Estimated Total:', style: TextStyle(color: Colors.grey[600])),
+          SizedBox(width: 8),
+          Text(
+            '\$${totalAmount.toStringAsFixed(2)}',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.teal[800]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBestServedWith(List<Map<String, dynamic>> cartItems) {
+    List<Map<String, dynamic>> bestServedWithItems = [];
+
+    for (var item in cartItems) {
+      if (item['bestServedWith'] != null && item['bestServedWith'].isNotEmpty) {
+        bestServedWithItems.addAll(item['bestServedWith']);
+      }
+    }
+
+    if (bestServedWithItems.isEmpty) {
+      return SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(8.0), // Adjusted padding
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Best Served With:', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+          SizedBox(height: 10),
+          SizedBox(
+            height: 130,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: bestServedWithItems.length,
+              itemBuilder: (context, index) {
+                final item = bestServedWithItems[index];
+                bool isItemInCart = bestServedWithInCart.contains(item['title']);
+
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      if (isItemInCart) {
+                        bestServedWithInCart.remove(item['title']);
+                        ShoppingCart.updateQuantity(item['title'], 0);
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${item['title']} removed from cart!')));
+                      } else {
+                        bestServedWithInCart.add(item['title']);
+                        ShoppingCart.addItem(item['title'], item['price'], selectedChef: 'defaultChef');
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${item['title']} added to cart!')));
+                      }
+                    });
+                  },
+                  child: Stack(
+                    children: [
+                      Container(
+                        width: 100,
+                        margin: EdgeInsets.only(right: 10),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          color: Colors.white,
+                          boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2))],
+                        ),
+                        child: Column(
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
+                              child: Image.asset(item['image'], height: 75, width: 100, fit: BoxFit.cover),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.all(4.0),
+                              child: Text(item['title'], style: TextStyle(fontWeight: FontWeight.bold)),
+                            ),
+                            Text('\$${(item['price'] as double? ?? 0).toStringAsFixed(2)}', style: TextStyle(color: Colors.grey[600])),
+                          ],
+                        ),
+                      ),
+                      Positioned(
+                        right: 8,
+                        top: 8,
+                        child: Container(
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.orange,
+                          ),
+                          child: Icon(
+                            isItemInCart ? Icons.check : Icons.add,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCheckoutButton(List<Map<String, dynamic>> cartItems) {
+  return Container(
+    height: 100,
+    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6), // Reduced vertical padding
+    decoration: BoxDecoration(
+      color: Colors.white,
+      border: Border(top: BorderSide(color: Colors.grey[200]!)),
+    ),
+    child: Column(
+      children: [
+        ElevatedButton.icon(
+          icon: Icon(Icons.lock_outline, size: 20),
+          label: Text('Secure Checkout', style: TextStyle(fontSize: 16)),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.teal[800],
+            foregroundColor: Colors.white,
+            minimumSize: Size(double.infinity, 48),
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8), // Reduced vertical padding
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(25),
+            ),
+          ),
+          onPressed: cartItems.isNotEmpty ? () => _handleCheckout(context) : null,
+        ),
+      ],
+    ),
+  );
+}
 
   Widget _buildCartItemCard(Map<String, dynamic> item, BuildContext context) {
     return Dismissible(
@@ -222,34 +333,23 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
         ),
         child: Icon(Icons.delete_forever, color: Colors.red[600], size: 32),
       ),
-      confirmDismiss: (direction) =>
-          _confirmItemRemoval(context, item['title']),
+      confirmDismiss: (direction) => _confirmItemRemoval(context, item['title']),
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black12,
-              blurRadius: 6,
-              offset: Offset(0, 2),
-            ),
-          ],
+          boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2))],
         ),
         child: ListTile(
           contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          leading: Icon(Icons.check_circle_outline,
-              color: Colors.teal[400], size: 28),
-          title: Text(item['title'],
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-          subtitle: Text('In Stock • Ready to Ship',
-              style: TextStyle(color: Colors.green[600], fontSize: 12)),
+          leading: Icon(Icons.check_circle_outline, color: Colors.teal[400], size: 28),
+          title: Text(item['title'], style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+          subtitle: Text('In Stock • Ready to Ship', style: TextStyle(color: Colors.green[600], fontSize: 12)),
           trailing: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text('\$${(item['price'] * item['quantity']).toStringAsFixed(2)}',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              Text('\$${(item['price'] * item['quantity']).toStringAsFixed(2)}', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               SizedBox(height: 4),
               _buildQuantityControls(item),
             ],
@@ -312,32 +412,11 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
     );
   }
 
-  void showCustomSnackBar(BuildContext context, String message) {
-    final snackBar = SnackBar(
-      behavior: SnackBarBehavior.floating,
-      margin:
-          EdgeInsets.only(top: 16.0, left: 16.0, right: 16.0, bottom: 110.0),
-      backgroundColor: Colors.teal,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12.0),
-      ),
-      content: Text(
-        message,
-        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-      ),
-    );
-
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(snackBar);
-  }
-
   void _handleCheckout(BuildContext context) {
     if (ShoppingCart.getItems().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Your cart is empty. Please add items to checkout.',
-              style: TextStyle(color: Colors.white)),
+          content: Text('Your cart is empty. Please add items to checkout.', style: TextStyle(color: Colors.white)),
           backgroundColor: Colors.teal[800],
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10.0),
@@ -348,8 +427,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) =>
-              CheckoutScreen(cartItems: ShoppingCart.getItems()),
+          builder: (context) => CheckoutScreen(cartItems: ShoppingCart.getItems()),
         ),
       );
     }
@@ -360,8 +438,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Cart Help'),
-        content:
-            Text('Need assistance with your shopping cart? Contact support.'),
+        content: Text('Need assistance with your shopping cart? Contact support.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
@@ -390,9 +467,7 @@ class FavoritesScreen extends StatelessWidget {
             onPressed: () {
               Navigator.pushReplacement(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => ShoppingCartScreen(),
-                ),
+                MaterialPageRoute(builder: (context) => ShoppingCartScreen()),
               );
             },
           ),
@@ -417,18 +492,11 @@ class FavoritesScreen extends StatelessWidget {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.favorite_border_rounded,
-                              size: 64, color: Colors.teal[300]),
+                          Icon(Icons.favorite_border_rounded, size: 64, color: Colors.teal[300]),
                           SizedBox(height: 24),
-                          Text('No Favorites Yet',
-                              style: TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w500,
-                                  color: Colors.teal[800])),
+                          Text('No Favorites Yet', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w500, color: Colors.teal[800])),
                           SizedBox(height: 12),
-                          Text('Tap the heart icon to save your favorite meals',
-                              style: TextStyle(
-                                  fontSize: 16, color: Colors.grey[600])),
+                          Text('Tap the heart icon to save your favorite meals', style: TextStyle(fontSize: 16, color: Colors.grey[600])),
                         ],
                       ),
                     )
@@ -442,135 +510,36 @@ class FavoritesScreen extends StatelessWidget {
                       ),
                       itemCount: favoritesItems.length,
                       itemBuilder: (context, index) {
-                        return _buildFavoriteItemCard(
-                            favoritesItems[index], context);
+                        final item = favoritesItems[index];
+                        return Card(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Image.asset(item['image'], fit: BoxFit.cover),
+                              SizedBox(height: 4),
+                              Text(item['title'], style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                              SizedBox(height: 4),
+                              Text('\$${item['price'].toStringAsFixed(2)}',
+                                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.teal[800])),
+                              ElevatedButton(
+                                onPressed: () {
+                                  Favorites.addToCart(item['title'], item['price']);
+                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                    content: Text('${item['title']} added to cart!'),
+                                    backgroundColor: Colors.teal[800],
+                                  ));
+                                },
+                                child: Text('Add to Cart'),
+                                style: ElevatedButton.styleFrom(backgroundColor: Colors.teal[800]),
+                              ),
+                            ],
+                          ),
+                        );
                       },
                     ),
             ),
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              child: ElevatedButton.icon(
-                icon: Icon(Icons.shopping_cart, size: 20),
-                label: Text('Go to Cart', style: TextStyle(fontSize: 16)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.teal[800],
-                  foregroundColor: Colors.white,
-                  minimumSize: Size(double.infinity, 48),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(25),
-                  ),
-                ),
-                onPressed: () {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => ShoppingCartScreen(),
-                    ),
-                  );
-                },
-              ),
-            ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildFavoriteItemCard(
-      Map<String, dynamic> item, BuildContext context) {
-    return Card(
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(15)),
-              child: Image.asset(
-                item['image'] ?? 'assets/images/meal_placeholder.jpg',
-                fit: BoxFit.cover,
-              ),
-            ),
-          ),
-          Padding(
-            padding: EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(item['title'],
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
-                SizedBox(height: 6),
-                Text('\$${item['price'].toStringAsFixed(2)}',
-                    style: TextStyle(fontSize: 14, color: Colors.teal[800])),
-                SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.teal[800],
-                          foregroundColor: Colors.white,
-                          padding: EdgeInsets.symmetric(vertical: 8),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child:
-                            Text('Add to Cart', style: TextStyle(fontSize: 12)),
-                        onPressed: () {
-                          Favorites.addToCart(item['title'], item['price']);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('${item['title']} added to cart!'),
-                              backgroundColor: Colors.teal[800],
-                              behavior: SnackBarBehavior.floating,
-                              margin: EdgeInsets.only(
-                                  top: 16.0,
-                                  left: 16.0,
-                                  right: 16.0,
-                                  bottom: 110.0),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10.0),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange,
-                          foregroundColor: Colors.white,
-                          padding: EdgeInsets.symmetric(vertical: 8),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child:
-                            Text('Order Now', style: TextStyle(fontSize: 12)),
-                        onPressed: () {
-                          Favorites.addToCart(item['title'], item['price']);
-                          Navigator.pushReplacement(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => CheckoutScreen(
-                                  cartItems: ShoppingCart.getItems()),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
