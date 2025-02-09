@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 
@@ -18,7 +19,29 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
   late Animation<double> _weightAnimation;
   late AnimationController _chartController;
   late Animation<double> _chartAnimation;
-  bool _isTouching = false;
+
+  String _selectedCalorieView = 'D'; // Calorie view selection
+  String _selectedWeightView = 'D'; // Weight view selection
+  List<String> views = ['D', 'W', 'M', '6M']; // Available views
+
+  final List<double> recommendedCalories = [
+    1500,
+    1500,
+    1500,
+    1500,
+    1500,
+    1500,
+    1500
+  ]; // Reference values for calorie intake
+  final List<double> recommendedWeights = [
+    76,
+    76,
+    76,
+    76,
+    76,
+    76,
+    76
+  ]; // Reference values for weight
 
   @override
   void initState() {
@@ -126,52 +149,57 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
               ),
             ),
             const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                MetricCard(
-                  title: 'Meals',
-                  child: AnimatedBuilder(
-                    animation: _mealsAnimation,
-                    builder: (context, child) => Text(
-                      '${_mealsAnimation.value.toInt()}',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.teal[800],
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.start,
+                children: [
+                  MetricCard(
+                    title: 'Meals',
+                    child: AnimatedBuilder(
+                      animation: _mealsAnimation,
+                      builder: (context, child) => Text(
+                        '${_mealsAnimation.value.toInt()}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.teal[800],
+                        ),
                       ),
                     ),
                   ),
-                ),
-                MetricCard(
-                  title: 'Calories',
-                  child: AnimatedBuilder(
-                    animation: _caloriesAnimation,
-                    builder: (context, child) => Text(
-                      '${_caloriesAnimation.value.toInt()}',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.teal[800],
+                  const SizedBox(width: 8), // Spacing between cards
+                  MetricCard(
+                    title: 'Calories',
+                    child: AnimatedBuilder(
+                      animation: _caloriesAnimation,
+                      builder: (context, child) => Text(
+                        '${_caloriesAnimation.value.toInt()}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.teal[800],
+                        ),
                       ),
                     ),
                   ),
-                ),
-                MetricCard(
-                  title: 'Weight',
-                  child: AnimatedBuilder(
-                    animation: _weightAnimation,
-                    builder: (context, child) => Text(
-                      '${_weightAnimation.value.toStringAsFixed(1)} kg',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.teal[800],
+                  const SizedBox(width: 8), // Spacing between cards
+                  MetricCard(
+                    title: 'Weight',
+                    child: AnimatedBuilder(
+                      animation: _weightAnimation,
+                      builder: (context, child) => Text(
+                        '${_weightAnimation.value.toStringAsFixed(1)} kg',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.teal[800],
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),
@@ -237,44 +265,150 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
   }
 
   Widget _buildCalorieIntakeSection() {
-    List<FlSpot> calorieIntake = [
-      FlSpot(0, 1000),
-      FlSpot(1, 1300),
-      FlSpot(2, 1300),
-      FlSpot(3, 1500),
-      FlSpot(4, 2000),
-      FlSpot(5, 1800),
-      FlSpot(6, 2000),
-    ];
-    List<FlSpot> recommendedCalories = [
-      for (int i = 0; i < 7; i++) FlSpot(i.toDouble(), 1500),
-    ];
+    List<FlSpot> calorieIntake;
+    List<String> labels;
+
+    switch (_selectedCalorieView) {
+      case 'W':
+        calorieIntake = [
+          FlSpot(0, 1000),
+          FlSpot(1, 1300),
+          FlSpot(2, 1200),
+          FlSpot(3, 1500),
+          FlSpot(4, 1600),
+          FlSpot(5, 1700),
+          FlSpot(6, 1800),
+        ];
+        labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        break;
+      case 'M':
+        calorieIntake = [
+          FlSpot(0, 1500),
+          FlSpot(1, 1600),
+          FlSpot(2, 1700),
+          FlSpot(3, 1900),
+          FlSpot(4, 2000),
+          FlSpot(5, 2100),
+          FlSpot(6, 2200),
+        ];
+        labels = [
+          'Wk 1',
+          'Wk 2',
+          'Wk 3',
+          'Wk 4',
+          'Wk 5',
+          'Wk 6',
+          'Wk 7'
+        ];
+        break;
+      case '6M':
+        calorieIntake = [
+          FlSpot(0, 1400),
+          FlSpot(1, 1450),
+          FlSpot(2, 1500),
+          FlSpot(3, 1550),
+          FlSpot(4, 1600),
+          FlSpot(5, 1650),
+          FlSpot(6, 1700),
+        ];
+        labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'];
+        break;
+      default: // 'D'
+        calorieIntake = [
+          FlSpot(0, 1000),
+          FlSpot(1, 1300),
+          FlSpot(2, 1200),
+          FlSpot(3, 1500),
+          FlSpot(4, 1600),
+          FlSpot(5, 1700),
+          FlSpot(6, 1800),
+        ];
+        labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        break;
+    }
+
     return _buildCardSection(
       'Calorie intake (calories)',
-      _buildLineChart(calorieIntake, recommendedCalories,
-          isWeightChart: false,
-          labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']),
+      Column(
+        children: [
+          _buildViewToggleCalorie(),
+          _buildLineChart(calorieIntake, isWeightChart: false, labels: labels),
+        ],
+      ),
     );
   }
 
   Widget _buildWeightGoalProgressSection() {
-    List<FlSpot> weightProgress = [
-      FlSpot(0, 82),
-      FlSpot(1, 80),
-      FlSpot(2, 79),
-      FlSpot(3, 78),
-      FlSpot(4, 77),
-      FlSpot(5, 76),
-      FlSpot(6, 75),
-    ];
-    List<FlSpot> idealWeight = [
-      for (int i = 0; i < 7; i++) FlSpot(i.toDouble(), 76),
-    ];
+    List<FlSpot> weightProgress;
+    List<String> labels;
+
+    switch (_selectedWeightView) {
+      case 'W':
+        weightProgress = [
+          FlSpot(0, 81),
+          FlSpot(1, 80),
+          FlSpot(2, 79),
+          FlSpot(3, 78),
+          FlSpot(4, 77),
+          FlSpot(5, 76),
+          FlSpot(6, 75),
+        ];
+        labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        break;
+      case 'M':
+        weightProgress = [
+          FlSpot(0, 80),
+          FlSpot(1, 79),
+          FlSpot(2, 78),
+          FlSpot(3, 77),
+          FlSpot(4, 76),
+          FlSpot(5, 75),
+          FlSpot(6, 74),
+        ];
+        labels = [
+          'Wk 1',
+          'Wk 2',
+          'Wk 3',
+          'Wk 4',
+          'Wk 5',
+          'Wk 6',
+          'Wk 7'
+        ];
+        break;
+      case '6M':
+        weightProgress = [
+          FlSpot(0, 82),
+          FlSpot(1, 81),
+          FlSpot(2, 79),
+          FlSpot(3, 78),
+          FlSpot(4, 76),
+          FlSpot(5, 75),
+          FlSpot(6, 74),
+        ];
+        labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'];
+        break;
+      default: // 'D'
+        weightProgress = [
+          FlSpot(0, 82),
+          FlSpot(1, 80),
+          FlSpot(2, 79),
+          FlSpot(3, 78),
+          FlSpot(4, 77),
+          FlSpot(5, 76),
+          FlSpot(6, 75),
+        ];
+        labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        break;
+    }
+
     return _buildCardSection(
       'Weight Progress (Kg)',
-      _buildLineChart(weightProgress, idealWeight,
-          isWeightChart: true,
-          labels: ['wk1', 'wk2', 'wk3', 'wk4', 'wk5', 'wk6', 'wk7']),
+      Column(
+        children: [
+          _buildViewToggleWeight(),
+          _buildLineChart(weightProgress, isWeightChart: true, labels: labels),
+        ],
+      ),
     );
   }
 
@@ -295,6 +429,56 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
         'You have consumed more carbohydrates, consider exercising.',
         style: TextStyle(fontSize: 16, color: Colors.teal[800]),
       ),
+    );
+  }
+
+  Widget _buildViewToggleCalorie() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: views.map((view) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          child: ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _selectedCalorieView == view
+                  ? Colors.orange[200]
+                  : Colors.teal[200],
+              padding: const EdgeInsets.all(6),
+            ),
+            onPressed: () {
+              setState(() {
+                _selectedCalorieView = view; // Update the selected calorie view
+              });
+            },
+            child: Text(view),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildViewToggleWeight() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: views.map((view) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4.0),
+          child: ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _selectedWeightView == view
+                  ? Colors.orange[200]
+                  : Colors.teal[200],
+              padding: const EdgeInsets.all(6),
+            ),
+            onPressed: () {
+              setState(() {
+                _selectedWeightView = view; // Update the selected weight view
+              });
+            },
+            child: Text(view),
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -324,7 +508,7 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
     );
   }
 
-  Widget _buildLineChart(List<FlSpot> data, List<FlSpot> guideData,
+  Widget _buildLineChart(List<FlSpot> data,
       {required bool isWeightChart, required List<String> labels}) {
     final guideColor = Colors.orange[600]!;
     return AnimatedBuilder(
@@ -339,29 +523,54 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
             LineChartData(
               lineTouchData: LineTouchData(
                 handleBuiltInTouches: true,
-                touchCallback:
-                    (FlTouchEvent event, LineTouchResponse? touchResponse) {
-                  setState(() {
-                    _isTouching = touchResponse != null &&
-                        touchResponse.lineBarSpots?.isNotEmpty == true;
-                  });
-                },
                 touchTooltipData: LineTouchTooltipData(
                   getTooltipColor: (spot) => Colors.teal[800]!,
-                  getTooltipItems: (List touchedSpots) {
+                  getTooltipItems: (List<LineBarSpot> touchedSpots) {
                     return touchedSpots.map((spot) {
-                      final textStyle = TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      );
-                      return LineTooltipItem(
-                        isWeightChart
-                            ? '${spot.y.toInt()}'
-                            : '${spot.y.toInt()}',
-                        textStyle,
-                      );
-                    }).toList();
+                      final index = spot.x.toInt(); // Get the index from the x value
+
+                      // Check bounds
+                      if (index >= 0 &&
+                          index < recommendedCalories.length &&
+                          index < recommendedWeights.length) {
+                        final recommendedValue = isWeightChart
+                            ? recommendedWeights[index]
+                            : recommendedCalories[index];
+                        final difference = spot.y - recommendedValue;
+
+                        String message;
+                        if (isWeightChart) {
+                          if (difference == 0) {
+                            message = 'You have reached your target weight! 🎉';
+                          } else {
+                            message = difference > 0
+                                ? 'You are ${difference.toStringAsFixed(1)} kg overweight.'
+                                : 'You are ${difference.abs().toStringAsFixed(1)} kg underweight.';
+                          }
+                        } else {
+                          if (difference == 0) {
+                            message = 'Perfect calorie intake! 🎯';
+                          } else {
+                            message = difference > 0
+                                ? 'You consumed ${difference.toStringAsFixed(1)} calories more than recommended.'
+                                : 'You consumed ${difference.abs().toStringAsFixed(1)} calories less than recommended.';
+                          }
+                        }
+
+                        final textStyle = TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        );
+
+                        return LineTooltipItem(
+                          message,
+                          textStyle,
+                        );
+                      } else {
+                        return null; // Return null for out of bounds
+                      }
+                    }).where((element) => element != null).toList(); // Filter out null tooltips
                   },
                 ),
               ),
@@ -468,17 +677,20 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
                     ),
                   ),
                 ),
-                if (guideData.isNotEmpty)
-                  LineChartBarData(
-                    spots: guideData,
-                    isCurved: true,
-                    curveSmoothness: 0.3,
-                    color: guideColor,
-                    barWidth: 2,
-                    dashArray: [5, 5],
-                    dotData: const FlDotData(show: false),
-                    belowBarData: BarAreaData(show: false),
-                  ),
+                LineChartBarData(
+                  spots: List.generate(
+                      7,
+                      (i) => FlSpot(
+                          i.toDouble(),
+                          isWeightChart
+                              ? recommendedWeights[i]
+                              : recommendedCalories[i])),
+                  isCurved: true,
+                  color: guideColor,
+                  barWidth: 1,
+                  belowBarData: BarAreaData(show: false),
+                  dotData: const FlDotData(show: false),
+                ),
               ],
             ),
           ),
@@ -582,56 +794,17 @@ class WeeklyMealTrendChart extends StatelessWidget {
       animation: animation,
       builder: (context, child) {
         return SizedBox(
-          height: 200,
-          child: BarChart(
-            BarChartData(
-              alignment: BarChartAlignment.spaceEvenly,
-              maxY: 5,
-              barTouchData: BarTouchData(
-                touchCallback:
-                    (FlTouchEvent event, BarTouchResponse? response) {
-                  if (event is FlTapUpEvent &&
-                      response != null &&
-                      response.spot != null) {
-                    const days = [
-                      'Mon',
-                      'Tue',
-                      'Wed',
-                      'Thu',
-                      'Fri',
-                      'Sat',
-                      'Sun'
-                    ];
-                    final dayIndex = response.spot!.touchedBarGroupIndex;
-                    final meals = mealsPerDay[dayIndex];
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                            'You ordered $meals meals on ${days[dayIndex]}'),
-                        duration: const Duration(seconds: 1),
-                      ),
-                    );
-                  }
-                },
-                enabled: true,
-              ),
-              barGroups: mealsPerDay.asMap().entries.map((entry) {
-                return BarChartGroupData(
-                  x: entry.key,
-                  barRods: [
-                    BarChartRodData(
-                      toY: entry.value.toDouble() * animation.value,
-                      color: Colors.teal,
-                      width: 20,
-                    ),
-                  ],
-                );
-              }).toList(),
-              titlesData: FlTitlesData(
-                bottomTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    getTitlesWidget: (value, _) {
+            height: 200,
+            child: BarChart(
+              BarChartData(
+                alignment: BarChartAlignment.spaceEvenly,
+                maxY: 5,
+                barTouchData: BarTouchData(
+                  touchCallback:
+                      (FlTouchEvent event, BarTouchResponse? response) {
+                    if (event is FlTapUpEvent &&
+                        response != null &&
+                        response.spot != null) {
                       const days = [
                         'Mon',
                         'Tue',
@@ -641,25 +814,63 @@ class WeeklyMealTrendChart extends StatelessWidget {
                         'Sat',
                         'Sun'
                       ];
-                      return Text(
-                        days[value.toInt() % days.length],
-                        style: const TextStyle(fontSize: 12),
+                      final dayIndex = response.spot!.touchedBarGroupIndex;
+                      final meals = mealsPerDay[dayIndex];
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                              'You ordered $meals meals on ${days[dayIndex]}'),
+                          duration: const Duration(seconds: 1),
+                        ),
                       );
-                    },
+                    }
+                  },
+                  enabled: true,
+                ),
+                barGroups: mealsPerDay.asMap().entries.map((entry) {
+                  return BarChartGroupData(
+                    x: entry.key,
+                    barRods: [
+                      BarChartRodData(
+                        toY: entry.value.toDouble() * animation.value,
+                        color: Colors.teal,
+                        width: 20,
+                      ),
+                    ],
+                  );
+                }).toList(),
+                titlesData: FlTitlesData(
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      getTitlesWidget: (value, _) {
+                        const days = [
+                          'Mon',
+                          'Tue',
+                          'Wed',
+                          'Thu',
+                          'Fri',
+                          'Sat',
+                          'Sun'
+                        ];
+                        return Text(
+                          days[value.toInt() % days.length],
+                          style: const TextStyle(fontSize: 12),
+                        );
+                      },
+                    ),
+                  ),
+                  leftTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  topTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
                   ),
                 ),
-                leftTitles: const AxisTitles(
-                  sideTitles: SideTitles(showTitles: false),
-                ),
-                topTitles: const AxisTitles(
-                  sideTitles: SideTitles(showTitles: false),
-                ),
+                borderData: FlBorderData(show: false),
+                gridData: FlGridData(drawHorizontalLine: true),
               ),
-              borderData: FlBorderData(show: false),
-              gridData: FlGridData(drawHorizontalLine: true),
-            ),
-          ),
-        );
+            ));
       },
     );
   }
@@ -684,23 +895,22 @@ class PopularCuisinesChart extends StatelessWidget {
       animation: animation,
       builder: (context, child) {
         return SizedBox(
-          height: 200,
-          child: PieChart(
-            PieChartData(
-              sections: data.entries.map((entry) {
-                final value = (entry.value / total) * animation.value;
-                final sectionColor = colors[colorIndex++ % colors.length];
-                return PieChartSectionData(
-                  value: value,
-                  title: '${(value * 100).toStringAsFixed(1)}%',
-                  color: sectionColor,
-                  radius: 50,
-                );
-              }).toList(),
-              centerSpaceRadius: 40,
-            ),
-          ),
-        );
+            height: 200,
+            child: PieChart(
+              PieChartData(
+                sections: data.entries.map((entry) {
+                  final value = (entry.value / total) * animation.value;
+                  final sectionColor = colors[colorIndex++ % colors.length];
+                  return PieChartSectionData(
+                    value: value,
+                    title: '${(value * 100).toStringAsFixed(1)}%',
+                    color: sectionColor,
+                    radius: 50,
+                  );
+                }).toList(),
+                centerSpaceRadius: 40,
+              ),
+            ));
       },
     );
   }
@@ -724,23 +934,22 @@ class MacronutrientBreakdownChart extends StatelessWidget {
       animation: animation,
       builder: (context, child) {
         return SizedBox(
-          height: 200,
-          child: PieChart(
-            PieChartData(
-              sections: data.entries.map((entry) {
-                final value = entry.value * 100 * animation.value;
-                final sectionColor = colors[colorIndex++ % colors.length];
-                return PieChartSectionData(
-                  value: value,
-                  title: '${(value).toStringAsFixed(1)}%',
-                  color: sectionColor,
-                  radius: 50,
-                );
-              }).toList(),
-              centerSpaceRadius: 40,
-            ),
-          ),
-        );
+            height: 200,
+            child: PieChart(
+              PieChartData(
+                sections: data.entries.map((entry) {
+                  final value = entry.value * 100 * animation.value;
+                  final sectionColor = colors[colorIndex++ % colors.length];
+                  return PieChartSectionData(
+                    value: value,
+                    title: '${(value).toStringAsFixed(1)}%',
+                    color: sectionColor,
+                    radius: 50,
+                  );
+                }).toList(),
+                centerSpaceRadius: 40,
+              ),
+            ));
       },
     );
   }
