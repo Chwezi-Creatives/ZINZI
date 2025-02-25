@@ -9,10 +9,11 @@ import zinzi
 import logging
 import json
 from flask_cors import CORS
-from zinzi import Authentication, Updatelists, MealRecommendation
+from zinzi import Authentication, Updatelists #, MealRecommendation
 from zinzi import configure_paypal, create_payment_paypal, execute_payment, handle_payment_cancellation
 from zinzi import configure_stripe, create_stripe_payment, execute_stripe_payment, handle_stripe_payment_cancellation
 from zinzi import request_momo_payment, check_momo_payment_status, configure_momo
+from zinzi import GetAllMeals
 
 app = Flask(__name__)
 CORS(app)
@@ -20,12 +21,17 @@ CORS(app)
 # Create instances of the classes from the backend
 auth = Authentication()
 updater = Updatelists()
+meal_fetcher = GetAllMeals()
 #meal_rec = MealRecommendation()  not yet active # Example user_id is 1 for testing
 
 
 @app.route('/rr')
 def welcome():
     return 'Welcome to Bonobo API.'
+@app.route('/rr/meals', methods=['GET'])
+def get_meals():
+    mealsr=meal_fetcher.Fetch_All_Meals()
+    return jsonify(mealsr)
 
 # 1. Signup User (Using the signup_user method from the Authentication class)
 @app.route('/rr/signup_user', methods=['POST'])
