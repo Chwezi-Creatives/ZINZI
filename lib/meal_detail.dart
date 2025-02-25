@@ -4,6 +4,7 @@ import 'package:zinzi2/cart.dart';
 import 'package:zinzi2/chef.dart';
 import 'package:zinzi2/useranalytics.dart';
 import 'reco.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class MealDetailScreen extends StatefulWidget {
   final Map<String, dynamic> meal;
@@ -18,6 +19,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
   bool isFavorite = false;
   bool cookForMyself = true;
   Map<String, dynamic>? selectedChef;
+  List<String> bestServedWithInCart = [];
 
   List<Map<String, dynamic>> chefs = [
     {
@@ -29,7 +31,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
     },
     {
       'image': 'assets/images/dani3.jpg',
-      'name': 'Dani',
+      'name': 'Edgar',
       'price': 5,
       'rating': 3,
       'location': 'KAMPALA',
@@ -67,42 +69,53 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
   @override
   void initState() {
     super.initState();
-    isFavorite = Favorites.isFavorite(widget.meal['title']);
+    final mealTitle = widget.meal['meal_name'] ?? 'Unknown Meal';
+    isFavorite = Favorites.isFavorite(mealTitle);
   }
 
   @override
   Widget build(BuildContext context) {
+    final mealTitle = widget.meal['meal_name'] ?? 'Unknown Meal';
+    final mealDescription =
+        widget.meal['meal_description'] ?? 'No description available';
+    final mealPrice = (widget.meal['price'] is num)
+        ? (widget.meal['price'] as num).toDouble()
+        : 5.0;
+    final mealImage =
+        widget.meal['image_link'] ?? 'assets/images/notfound.avif';
+    final ingredients = (widget.meal['ingredients'] is List)
+        ? List<String>.from(widget.meal['ingredients'])
+        : (widget.meal['ingredients']?.toString().split(', ') ?? []);
+    final complementaries = (widget.meal['complementary_names'] is List)
+        ? List<String>.from(widget.meal['complementary_names'])
+        : (widget.meal['complementary_names']?.toString().split(', ') ?? []);
+    final complementaryImages = (widget.meal['complementary_images'] is List)
+        ? List<String>.from(widget.meal['complementary_images'])
+        : (widget.meal['complementary_images']?.toString().split(', ') ?? []);
+
+    final String imageUrl = mealImage.contains('drive.google.com')
+        ? 'https://drive.google.com/uc?export=view&id=${mealImage.split('/d/')[1].split('/')[0]}'
+        : mealImage;
+
     final isInCart =
-        ShoppingCart.items.any((item) => item['title'] == widget.meal['title']);
+        ShoppingCart.items.any((item) => item['title'] == mealTitle);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.meal['title']),
+        title: Text(mealTitle),
         foregroundColor: Colors.white,
         backgroundColor: Colors.teal[800],
         elevation: 4,
         actions: [
           IconButton(
             icon: Icon(Icons.favorite),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => FavoritesScreen(),
-                ),
-              );
-            },
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (context) => FavoritesScreen())),
           ),
           IconButton(
             icon: Icon(Icons.shopping_cart),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ShoppingCartScreen(),
-                ),
-              );
-            },
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (context) => ShoppingCartScreen())),
           ),
         ],
       ),
@@ -113,14 +126,12 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
               image: AssetImage('assets/images/soft.jpg'),
               fit: BoxFit.cover,
               colorFilter: ColorFilter.mode(
-                Colors.white.withOpacity(0.95),
-                BlendMode.dstATop,
-              ),
+                  Colors.white.withOpacity(0.95), BlendMode.dstATop),
             ),
           ),
           child: SafeArea(
             child: SingleChildScrollView(
-              padding: EdgeInsets.all(16),
+              padding: EdgeInsets.all(8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -141,14 +152,25 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(15),
-                      child: Image.asset(
-                        widget.meal['image'],
-                        fit: BoxFit.cover,
-                      ),
+                      child: mealImage.startsWith(
+                              'http') // Check if it's a network image
+                          ? CachedNetworkImage(
+                              imageUrl: imageUrl,
+                              placeholder: (context, url) =>
+                                  Center(child: CircularProgressIndicator()),
+                              errorWidget: (context, url, error) => Image.asset(
+                                'assets/images/notfound.avif',
+                                fit: BoxFit.cover,
+                              ),
+                              fit: BoxFit.cover,
+                            )
+                          : Image.asset(
+                              mealImage,
+                              fit: BoxFit.cover,
+                            ),
                     ),
                   ),
-                  SizedBox(height: 24),
-
+                  SizedBox(height: 10),
                   // Meal Title with Buttons
                   Padding(
                     padding: EdgeInsets.symmetric(horizontal: 8),
@@ -160,16 +182,16 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                widget.meal['title'],
+                                mealTitle,
                                 style: TextStyle(
                                   fontSize: 28,
                                   fontWeight: FontWeight.bold,
                                   color: Colors.teal[800],
                                 ),
                               ),
-                              SizedBox(height: 12),
+                              SizedBox(height: 0),
                               Text(
-                                widget.meal['description'],
+                                mealDescription,
                                 style: TextStyle(
                                   fontSize: 16,
                                   height: 1.4,
@@ -179,190 +201,107 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                             ],
                           ),
                         ),
-                        // Add to Favorites and Cart Buttons
                         Column(
                           children: [
                             IconButton(
-                              icon: Icon(
-                                isFavorite
-                                    ? Icons.favorite
-                                    : Icons.favorite_outline,
-                                color: isFavorite ? Colors.red : null,
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  if (isFavorite) {
-                                    Favorites.removeItem(widget.meal['title']);
-                                    isFavorite = false;
-                                  } else {
-                                    Favorites.addItem(
-                                        widget.meal['title'],
-                                        widget.meal['price'],
-                                        widget.meal['image']);
-                                    showCustomSnackBar(context,
-                                        '${widget.meal['title']} added to favorites!');
-                                    isFavorite = true;
-                                  }
-                                });
-                              },
+                              icon: Icon(isFavorite
+                                  ? Icons.favorite
+                                  : Icons.favorite_outline),
+                              color: isFavorite ? Colors.red : Colors.teal[900],
+                              onPressed: () => _toggleFavorite(
+                                  mealTitle, mealPrice, mealImage),
                             ),
                             IconButton(
-                              icon: Icon(
-                                isInCart
-                                    ? Icons.shopping_cart
-                                    : Icons.add_shopping_cart,
-                                color: isInCart ? Colors.orange : null,
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  if (isInCart) {
-                                    ShoppingCart.removeItemFromCart(
-                                        widget.meal['title']);
-                                    showCustomSnackBar(context,
-                                        '${widget.meal['title']} removed from cart!');
-                                  } else {
-                                    ShoppingCart.addItem(
-                                      widget.meal['title'],
-                                      widget.meal['price'],
-                                      bestServedWith:
-                                          widget.meal['bestServedWith'],
-                                      selectedChef: selectedChef,
-                                    );
-                                    showCustomSnackBar(context,
-                                        '${widget.meal['title']} added to cart!');
-                                  }
-                                });
-                              },
+                              icon: Icon(isInCart
+                                  ? Icons.shopping_cart
+                                  : Icons.add_shopping_cart),
+                              color:
+                                  isInCart ? Colors.orange : Colors.teal[900],
+                              onPressed: () => _toggleCart(
+                                  mealTitle, mealPrice, complementaries),
                             ),
                           ],
                         ),
                       ],
                     ),
                   ),
-
-                  SizedBox(height: 24),
-
-                  // Ingredients Section
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildIngredientsSection(),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 24),
-
-                  // Properties Section
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildPropertiesSection(),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 24),
-
-                  // Skill Level and Prep Time Card
+                  SizedBox(height: 20),
+                  _buildBestServedWith(complementaries, complementaryImages),
+                  _buildIngredientsSection(ingredients),
+                  _buildPropertiesSection(),
                   _buildSkillLevelAndPrepTimeCard(),
-
-                  SizedBox(height: 20),
-
-                  // Cook for Myself Switch
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        cookForMyself ? 'Cook for Myself' : 'Hire a Chef',
-                        style: TextStyle(fontSize: 16),
-                      ),
-                      Switch(
-                        value: cookForMyself,
-                        onChanged: (bool value) async {
-                          setState(() {
-                            cookForMyself = value;
-                          });
-                          if (!cookForMyself) {
-                            final selectedChef = await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => ChooseChef(chefs: chefs),
-                              ),
-                            );
-
-                            if (selectedChef != null) {
-                              setState(() {
-                                this.selectedChef = selectedChef;
-                              });
-                              ShoppingCart.addItem(
-                                  selectedChef['name'], selectedChef['price'],
-                                  selectedChef: selectedChef);
-                              showCustomSnackBar(context,
-                                  '${selectedChef['name']} added to cart!');
-                            }
-                          } else {
-                            setState(() {
-                              selectedChef = null;
-                            });
-                          }
-                        },
-                        activeColor: Colors.teal[900],
-                        inactiveTrackColor: Colors.grey,
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 20),
-
-                  // Display selected chef information if available
-                  if (selectedChef != null) _buildChefCard(selectedChef!),
-                  SizedBox(height: 20),
+                  _buildChefSection(),
+                  SizedBox(height: 15),
                 ],
               ),
             ),
           ),
         ),
       ),
+      bottomNavigationBar: _buildProceedToCartButton(context),
     );
   }
 
-  Widget _buildIngredientsSection() {
+  void _toggleFavorite(String title, double price, String image) {
+    setState(() {
+      if (isFavorite) {
+        Favorites.removeItem(title);
+      } else {
+        // Use the actual image link from the meal being favorited
+        String imagePath = widget.meal['image_link'] ?? 'assets/images/notfound.avif';
+        Favorites.addItem(title, price, imagePath);
+        showCustomSnackBar(context, '$title added to favorites!');
+      }
+      isFavorite = !isFavorite;
+    });
+  }
+
+  void _toggleCart(String title, double price, List<String> complementaries) {
+    setState(() {
+      if (ShoppingCart.items.any((item) => item['title'] == title)) {
+        ShoppingCart.removeItemFromCart(title);
+        showCustomSnackBar(context, '$title removed from cart!');
+      } else {
+        ShoppingCart.addItem(
+          title,
+          price,
+          bestServedWith:
+              complementaries.map((item) => {'title': item}).toList(),
+          selectedChef: selectedChef ?? {},
+        );
+        showCustomSnackBar(context, '$title added to cart!');
+      }
+    });
+  }
+
+  Widget _buildIngredientsSection(List<String> ingredients) {
     return Card(
-      elevation: 1,
-      margin: EdgeInsets.symmetric(vertical: 8),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
+      elevation: 0.3,
+      margin: EdgeInsets.symmetric(vertical: 2),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: Colors.teal[50],
       child: Padding(
-        padding: EdgeInsets.all(16),
+        padding: EdgeInsets.all(10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Ingredients',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.teal[800],
-              ),
-            ),
+            Text('Ingredients', style: _sectionTitleStyle),
             SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: widget.meal['ingredients'].map<Widget>((ingredient) {
-                return Chip(
-                  label: Text(
-                    ingredient,
-                    style: TextStyle(
-                      color: Colors.teal[800],
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  backgroundColor: Colors.teal[50],
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                );
-              }).toList(),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: ingredients
+                    .map((ingredient) => Padding(
+                          padding: const EdgeInsets.only(right: 8.0),
+                          child: Chip(
+                            label: Text(ingredient, style: _chipTextStyle),
+                            backgroundColor: Colors.teal[100],
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ))
+                    .toList(),
+              ),
             ),
           ],
         ),
@@ -371,47 +310,356 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
   }
 
   Widget _buildPropertiesSection() {
+    final healthGoal = widget.meal['goal'] ?? 'General Health';
+    final allergens = (widget.meal['allergies'] is List)
+        ? List<String>.from(widget.meal['allergies'])
+        : [];
+    final diseasesManaged = (widget.meal['disease_management'] is String)
+        ? (widget.meal['disease_management'] as String).split(', ')
+        : [];
+
     return Card(
-      elevation: 1,
-      margin: EdgeInsets.symmetric(vertical: 8),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
+      elevation: 0.5,
+      margin: EdgeInsets.symmetric(vertical: 2),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: Colors.teal[50],
       child: Padding(
-        padding: EdgeInsets.all(16),
+        padding: EdgeInsets.all(8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Health info',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.teal[800],
-              ),
-            ),
+            Text('Health info', style: _sectionTitleStyle),
             SizedBox(height: 12),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                _buildPropertyChipFromAsset('assets/images/goal.png',
-                    'Health Goal', widget.meal['healthGoal']),
-                _buildPropertyChipFromAsset('assets/images/dairy_free2.png',
-                    'Allergens', widget.meal['allergens'].join(', ') ?? 'None'),
-
-                _buildPropertyChip(Icons.health_and_safety, 'Diseases Managed',
-                    widget.meal['diseasesManaged'].join(', ') ?? 'None'),
-                // Using Image.asset instead of Icon for Health Goal
-
-                _buildPropertyChipFromAsset('assets/images/recipe1.png',
-                    'Recipe', widget.meal['recipe']),
-              ],
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _buildPropertyChipFromAsset(
+                      'assets/images/goal-picsay.png', 'Health Goal', healthGoal),
+                  _buildPropertyChipFromAsset(
+                      'assets/images/allergy-picsay.png',
+                      'Allergens',
+                      allergens.isNotEmpty ? allergens.join(', ') : 'None'),
+                  _buildPropertyChip(
+                      Icons.health_and_safety,
+                      'Diseases Managed',
+                      diseasesManaged.isNotEmpty
+                          ? diseasesManaged.join(', ')
+                          : 'None'),
+                ],
+              ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildSkillLevelAndPrepTimeCard() {
+    final skillLevel = widget.meal['cooking_skill_level'] ?? 'Intermediate';
+    final prepTime = widget.meal['prep_time']?.toString() ?? '30';
+
+    return Card(
+      elevation: 0.5,
+      margin: EdgeInsets.symmetric(vertical: 2),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: Colors.teal[50],
+      child: Padding(
+        padding: EdgeInsets.all(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Cooking Info', style: _sectionTitleStyle),
+            SizedBox(height: 12),
+            Text('Skill Level: $skillLevel', style: _subtitleStyle),
+            LinearProgressIndicator(
+              value: _getSkillLevelValue(skillLevel),
+              color: Colors.green[600],
+              backgroundColor: Colors.grey[300],
+            ),
+            SizedBox(height: 16),
+            Text('Prep Time: ${prepTime} minutes', style: _subtitleStyle),
+            LinearProgressIndicator(
+              value: _getPrepTimeValue(prepTime),
+              color: Colors.green[600],
+              backgroundColor: Colors.grey[300],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChefSection() {
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              cookForMyself ? 'Cook for Myself' : 'Hire a Chef',
+              style: TextStyle(fontSize: 16, color: Colors.teal[800]),
+            ),
+            Switch(
+              value: cookForMyself,
+              onChanged: _handleCookForMyselfChange,
+              activeColor: Colors.teal[900],
+              inactiveTrackColor: Colors.grey,
+            ),
+          ],
+        ),
+        if (selectedChef != null) _buildChefCard(selectedChef!),
+      ],
+    );
+  }
+
+  Future<void> _handleCookForMyselfChange(bool value) async {
+    setState(() {
+      cookForMyself = value;
+    });
+
+    if (!cookForMyself) {
+      final selectedChef = await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ChooseChef(chefs: chefs),
+        ),
+      );
+
+      if (selectedChef != null) {
+        setState(() {
+          this.selectedChef = selectedChef;
+        });
+        ShoppingCart.addItem(selectedChef['name'], selectedChef['price'],
+            selectedChef: selectedChef);
+        showCustomSnackBar(context, '${selectedChef['name']} added to cart!');
+      }
+    } else {
+      setState(() {
+        selectedChef = null;
+      });
+    }
+  }
+
+  Widget _buildChefCard(Map<String, dynamic> chef) {
+    return Card(
+      margin: EdgeInsets.symmetric(vertical: 2),
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      child: Padding(
+        padding: EdgeInsets.all(8),
+        child: Row(
+          children: [
+            ClipOval(
+              child: Image.asset(
+                chef['image'],
+                width: 50,
+                height: 50,
+                fit: BoxFit.cover,
+              ),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    chef['name'],
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.teal[800],
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      _buildStarRating(chef['rating']),
+                      SizedBox(width: 8),
+                      Text('(${chef['location']})',
+                          style:
+                              TextStyle(fontSize: 14, color: Colors.teal[800])),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              '\$${chef['price']}',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.teal[800],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStarRating(int rating) {
+    List<Widget> stars = [];
+    for (int i = 0; i < 5; i++) {
+      stars.add(Icon(i < rating ? Icons.star : Icons.star_border,
+          color: Colors.amber, size: 16));
+    }
+    return Row(children: stars);
+  }
+
+  Widget _buildProceedToCartButton(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(8.0),
+      decoration: BoxDecoration(
+        color: Colors.teal[50],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.3),
+            spreadRadius: 0,
+            blurRadius: 0,
+            offset: Offset(0, 0),
+          ),
+        ],
+      ),
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.teal[800],
+          foregroundColor: Colors.white,
+          padding: EdgeInsets.symmetric(vertical: 16.0),
+          textStyle: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12.0),
+          ),
+        ),
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ShoppingCartScreen(),
+            ),
+          );
+        },
+        child: Text('Proceed to Cart'),
+      ),
+    );
+  }
+
+  Widget _buildBestServedWith(
+      List<String> complementaries, List<String> complementaryImages) {
+    if (complementaries.isEmpty) {
+      return SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Best Served With:',
+              style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.teal[900])),
+          SizedBox(height: 10),
+          SizedBox(
+            height: 135,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: complementaries.length,
+              itemBuilder: (context, index) {
+                final item = complementaries[index];
+                final complementaryImageUrl = complementaryImages[index];
+
+                return GestureDetector(
+                  onTap: () {
+                    // Action when tapping the complementary item
+                  },
+                  child: Stack(
+                    children: [
+                      Container(
+                        width: 100,
+                        margin: EdgeInsets.only(right: 10),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          color: Colors.teal[50],
+                          boxShadow: [
+                            BoxShadow(
+                                color: Colors.black12,
+                                blurRadius: 6,
+                                offset: Offset(0, 2))
+                          ],
+                        ),
+                        child: Column(
+                          children: [
+                            complementaryImageUrl.startsWith('http')
+                                ? CachedNetworkImage(
+                                    imageUrl: complementaryImageUrl,
+                                    width: 100,
+                                    height: 70,
+                                    fit: BoxFit.cover,
+                                    placeholder: (context, url) => Center(
+                                        child: CircularProgressIndicator()),
+                                    errorWidget: (context, url, error) =>
+                                        Image.asset(
+                                      'assets/images/notfound.avif',
+                                      fit: BoxFit.cover,
+                                    ),
+                                  )
+                                : Image.asset(
+                                    complementaryImageUrl,
+                                    width: 100,
+                                    height: 70,
+                                    fit: BoxFit.cover,
+                                  ),
+                            Padding(
+                              padding: const EdgeInsets.all(4.0),
+                              child: Text(item,
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.teal[800],
+                                      fontSize: 12)),
+                            ),
+                            Text('\$5.00',
+                                style: TextStyle(
+                                    color: Colors.grey[600], fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void showCustomSnackBar(BuildContext context, String message) {
+    final snackBar = SnackBar(
+      content: Text(message),
+      duration: Duration(seconds: 2),
+    );
+    ScaffoldMessenger.of(context).showSnackBar(snackBar);
+  }
+
+  double _getSkillLevelValue(String skillLevel) {
+    switch (skillLevel.toLowerCase()) {
+      case 'beginner':
+        return 0.33;
+      case 'intermediate':
+        return 0.67;
+      case 'advanced':
+        return 1.0;
+      default:
+        return 0.67;
+    }
+  }
+
+  double _getPrepTimeValue(String prepTime) {
+    const maxPrepTime = 60;
+    int prepMinutes = int.tryParse(prepTime) ?? 30;
+    return (prepMinutes / maxPrepTime).clamp(0.0, 1.0);
   }
 
   Widget _buildPropertyChip(IconData icon, String label, String data) {
@@ -424,7 +672,10 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
           backgroundColor: Colors.teal[50],
           child: Icon(icon, color: Colors.teal[800]),
         ),
-        label: Text(label),
+        label: Text(
+          label,
+          style: TextStyle(color: Colors.teal[800]),
+        ),
         backgroundColor: Colors.teal[50],
       ),
     );
@@ -441,7 +692,10 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
           backgroundColor: Colors.teal[50],
           child: Image.asset(assetPath, width: 24, height: 24),
         ),
-        label: Text(label),
+        label: Text(
+          label,
+          style: TextStyle(color: Colors.teal[800]),
+        ),
         backgroundColor: Colors.teal[50],
       ),
     );
@@ -465,140 +719,21 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
     );
   }
 
-  Widget _buildSkillLevelAndPrepTimeCard() {
-    double skillLevelValue =
-        getSkillLevelValue(widget.meal['cookingSkillLevel']);
-    double prepTimeValue = getPrepTimeValue(widget.meal['prepTime']);
+  final TextStyle _sectionTitleStyle = TextStyle(
+    fontSize: 20,
+    fontWeight: FontWeight.bold,
+    color: Colors.teal[800],
+  );
 
-    return Card(
-      elevation: 1,
-      margin: EdgeInsets.symmetric(vertical: 8),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Padding(
-        padding: EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Cooking time and skill',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.teal[800],
-              ),
-            ),
-            SizedBox(height: 12),
-            Text('Skill Level:  ${widget.meal['cookingSkillLevel']}'),
-            LinearProgressIndicator(
-              value: skillLevelValue,
-              color: Colors.teal[600],
-              backgroundColor: Colors.grey[300],
-            ),
-            SizedBox(height: 16),
-            Text('Prep Time: ${widget.meal['prepTime']} minutes'),
-            LinearProgressIndicator(
-              value: prepTimeValue,
-              color: Colors.teal[600],
-              backgroundColor: Colors.grey[300],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  final TextStyle _subtitleStyle = TextStyle(
+    color: Colors.teal[800],
+    fontSize: 16,
+  );
 
-  double getSkillLevelValue(String skillLevel) {
-    switch (skillLevel.toLowerCase()) {
-      case 'beginner':
-        return 0.33;
-      case 'intermediate':
-        return 0.67;
-      case 'advanced':
-        return 1.0;
-      default:
-        return 0.0;
-    }
-  }
-
-  double getPrepTimeValue(String prepTime) {
-    const maxPrepTime = 60;
-    int prepMinutes = int.parse(prepTime);
-    return (prepMinutes / maxPrepTime).clamp(0.0, 1.0);
-  }
-
-  Widget _buildChefCard(Map<String, dynamic> chef) {
-    return Card(
-      margin: EdgeInsets.symmetric(vertical: 12),
-      elevation: 1,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Padding(
-        padding: EdgeInsets.all(8),
-        child: Row(
-          children: [
-            ClipOval(
-              child: Image.asset(
-                chef['image'],
-                width: 50,
-                height: 50,
-                fit: BoxFit.cover,
-              ),
-            ),
-            SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    chef['name'],
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      _buildStarRating(chef['rating']),
-                      SizedBox(width: 8),
-                      Text('(${chef['location']})',
-                          style: TextStyle(fontSize: 14)),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            Text(
-              '\$${chef['price']}',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStarRating(int rating) {
-    List<Widget> stars = [];
-    for (int i = 0; i < 5; i++) {
-      stars.add(Icon(i < rating ? Icons.star : Icons.star_border,
-          color: Colors.amber, size: 16));
-    }
-    return Row(children: stars);
-  }
-
-  void showCustomSnackBar(BuildContext context, String message) {
-    final snackBar = SnackBar(
-      content: Text(message),
-      duration: Duration(seconds: 2),
-    );
-    ScaffoldMessenger.of(context).showSnackBar(snackBar);
-  }
+  final TextStyle _chipTextStyle = TextStyle(
+    color: Colors.teal[800],
+    fontWeight: FontWeight.w500,
+  );
 }
 
 class ChooseChef extends StatelessWidget {
@@ -614,69 +749,124 @@ class ChooseChef extends StatelessWidget {
         backgroundColor: Colors.teal[800],
         foregroundColor: Colors.white,
       ),
-      body: ListView.builder(
-        itemCount: chefs.length,
-        itemBuilder: (context, index) {
-          final chef = chefs[index];
-          return Card(
-            elevation: 1,
-            margin: const EdgeInsets.symmetric(vertical: 8),
-            child: InkWell(
-              onTap: () {
-                Navigator.pop(context, chef); // Pass the selected chef back
-              },
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Row(
-                  children: [
-                    ClipOval(
-                      child: Image.asset(
-                        chef['image'],
-                        width: 80,
-                        height: 80,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            chef['name'],
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
+      body: Container(
+        decoration: BoxDecoration(
+          image: DecorationImage(
+            image: AssetImage('assets/images/soft.jpg'),
+            fit: BoxFit.cover,
+            colorFilter: ColorFilter.mode(
+              Colors.white.withOpacity(1.0),
+              BlendMode.dstATop,
+            ),
+          ),
+        ),
+        child: Padding(
+          padding: EdgeInsets.all(8.0),
+          child: ListView.builder(
+            itemCount: chefs.length,
+            itemBuilder: (context, index) {
+              final chef = chefs[index];
+              return Card(
+                elevation: 0.0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                margin: EdgeInsets.symmetric(vertical: 1),
+                child: InkWell(
+                  onTap: () {
+                    Navigator.pop(context, chef);
+                  },
+                  child: Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: Row(
+                      children: [
+                        ClipOval(
+                          child: Image.asset(
+                            chef['image'],
+                            width: 50,
+                            height: 50,
+                            fit: BoxFit.cover,
                           ),
-                          Row(
+                        ),
+                        SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _buildStarRating(chef['rating']),
-                              SizedBox(width: 8),
-                              Text('(${chef['location']})',
-                                  style: TextStyle(fontSize: 16)),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      chef['name'],
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.teal[900],
+                                      ),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.start,
+                                      children: [
+                                        Icon(Icons.location_on,
+                                            color: Colors.teal[600], size: 16),
+                                        Text(
+                                          ' ${chef['location']}',
+                                          style: TextStyle(
+                                              fontSize: 16,
+                                              color: Colors.teal[900]),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Row(
+                                      children: [
+                                        for (int i = 0; i < chef['rating']; i++)
+                                          Icon(Icons.star,
+                                              color: Colors.teal[600],
+                                              size: 16),
+                                        for (int i = chef['rating']; i < 5; i++)
+                                          Icon(Icons.star_border,
+                                              color: Colors.teal[600],
+                                              size: 16),
+                                      ],
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.monetization_on,
+                                            color: Colors.teal[600], size: 16),
+                                        Text(
+                                          ' \$${chef['price']}',
+                                          style: TextStyle(
+                                              fontSize: 16,
+                                              color: Colors.teal[900]),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ],
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                    Text('\$${chef['price']}', style: TextStyle(fontSize: 16)),
-                  ],
+                  ),
                 ),
-              ),
-            ),
-          );
-        },
+              );
+            },
+          ),
+        ),
       ),
     );
-  }
-
-  Widget _buildStarRating(int rating) {
-    List<Widget> stars = [];
-    for (int i = 0; i < 5; i++) {
-      stars.add(Icon(i < rating ? Icons.star : Icons.star_border,
-          color: Colors.amber, size: 16));
-    }
-    return Row(children: stars);
   }
 }
