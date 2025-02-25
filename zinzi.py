@@ -796,7 +796,7 @@ for rec in meal_recommendations:
 class GetAllMeals:
     def Fetch_All_Meals(self):
         """
-        Fetch all meals from the database.
+        Fetch all meals from the database and explicitly include all columns from the CTE.
         """
         print("Fetching meals...")
         try:
@@ -811,34 +811,34 @@ class GetAllMeals:
             # Define the SQL query
             sql_query = """ 
             WITH MealDetails AS ( 
-    SELECT 
-        m.Meal_id,
-        m.Meal_name,
-        m.Meal_category,
-        m.Recipe,
-        m.Recipe_link,
-        m.Image_link,
-        m.Goal,
-        m.Dietary_preference,
-        m.Allergies,
-        m.Disease_management,
-        m.Cuisine_preferences,
-        m.Skill_level,
-        m.Prep_time,
-        m.Meal_description
-    FROM Meals m
-)
-SELECT 
-    md.*,
-    (SELECT STRING_AGG(p.Produce_name, ', ') 
-     FROM Meal_ingredients i
-     JOIN Produce p ON i.Produce_id = p.Produce_id
-     WHERE i.Meal_id = md.Meal_id) AS Ingredients,
-    (SELECT STRING_AGG(mc.Meal_name, ', ') 
-     FROM Meal_complementaries mc_link
-     JOIN Meals mc ON mc_link.Complementary_Dish_id = mc.Meal_id
-     WHERE mc_link.Meal_id = md.Meal_id) AS Complementary_dishes
-FROM MealDetails md;
+                SELECT 
+                    m.Meal_id,
+                    m.Meal_name,
+                    m.Meal_category,
+                    m.Recipe,
+                    m.Recipe_link,
+                    m.Image_link,
+                    m.Goal,
+                    m.Dietary_preference,
+                    m.Allergies,
+                    m.Disease_management,
+                    m.Cuisine_preferences,
+                    m.Skill_level,
+                    m.Prep_time,
+                    m.Meal_description
+                FROM Meals m
+            )
+            SELECT 
+                md.*,
+                (SELECT STRING_AGG(p.Produce_name, ', ') 
+                 FROM Meal_ingredients i
+                 JOIN Produce p ON i.Produce_id = p.Produce_id
+                 WHERE i.Meal_id = md.Meal_id) AS Ingredients,
+                (SELECT STRING_AGG(mc.Meal_name, ', ') 
+                 FROM Meal_complementaries mc_link
+                 JOIN Meals mc ON mc_link.Complementary_Dish_id = mc.Meal_id
+                 WHERE mc_link.Meal_id = md.Meal_id) AS Complementary_dishes
+            FROM MealDetails md;
             """
 
             print("Executing SQL query...")
@@ -847,38 +847,44 @@ FROM MealDetails md;
             print("Query executed. Fetching results...")
             results = cursor.fetchall()
 
+            # Get column names from the cursor description
+            columns = [column[0] for column in cursor.description]
+
             print("Results fetched. Processing results...")
             meal_recommendations = []
             for row in results:
-                # Correctly assign the values based on column order
-                meal_id = row[0]  # Meal_id
-                meal_name = row[1]  # Meal_name
-                meal_description = row[2]  # Meal_description
-                goal = row[3]  # Goal
-                disease_management = row[4]  # Disease_management
-                image_link = row[5]  # Image_link
-                ingredients = row[6]  # Ingredients
-                complementaries = row[7]  # Complementary meals
-                
+                # Create a dictionary mapping column names to row values
+                row_dict = dict(zip(columns, row))
+
+                # Explicitly include all columns from the CTE
                 meal = {
-                    "meal_id": meal_id,
-                    "meal_name": meal_name,
-                    "meal_description": meal_description,
-                    "goal": goal,
-                    "disease_management": disease_management,
-                    "image_link": image_link,
-                    "ingredients": ingredients,
-                    "complementaries": complementaries
+                    "Meal_id": row_dict["Meal_id"],
+                    "Meal_name": row_dict["Meal_name"],
+                    "Meal_category": row_dict["Meal_category"],
+                    "Recipe": row_dict["Recipe"],
+                    "Recipe_link": row_dict["Recipe_link"],
+                    "Image_link": row_dict["Image_link"],
+                    "Goal": row_dict["Goal"],
+                    "Dietary_preference": row_dict["Dietary_preference"],
+                    "Allergies": row_dict["Allergies"],
+                    "Disease_management": row_dict["Disease_management"],
+                    "Cuisine_preferences": row_dict["Cuisine_preferences"],
+                    "Skill_level": row_dict["Skill_level"],
+                    "Prep_time": row_dict["Prep_time"],
+                    "Meal_description": row_dict["Meal_description"],
+                    "Ingredients": row_dict["Ingredients"],
+                    "Complementary_dishes": row_dict["Complementary_dishes"]
                 }
 
                 # Clean up ingredients if they exist
-                if meal["ingredients"]:
-                    meal["ingredients"] = meal["ingredients"].replace('"', '').strip()
+                if meal["Ingredients"]:
+                    meal["Ingredients"] = meal["Ingredients"].replace('"', '').strip()
 
                 # Clean up complementaries if they exist
-                if meal["complementaries"]:
-                    meal["complementaries"] = meal["complementaries"].replace('"', '').strip()
+                if meal["Complementary_dishes"]:
+                    meal["Complementary_dishes"] = meal["Complementary_dishes"].replace('"', '').strip()
 
+                # Append the meal dictionary to the meal recommendations
                 meal_recommendations.append(meal)
 
             print("Results processed. Returning meal recommendations...")
