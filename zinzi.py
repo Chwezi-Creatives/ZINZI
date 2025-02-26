@@ -674,22 +674,23 @@ class MealRecommendation:
         user_data = self.user_data
         dietary_prefs = user_data["dietary_preferences"]
         goal = user_data["goal"]
+        weight = user_data["weight"]
         calorie_limit = user_data["calorie_limit"]
 
-        # Adjust calorie limit based on goal
+        # Adjust calorie limit with weight (simple approximation: 15 kcal/kg base)
+        base_calories = weight * 15 if weight else calorie_limit
         if goal == "Lose Weight":
-            effective_calorie_limit = calorie_limit * 0.85
+            effective_calorie_limit = base_calories * 0.85
         elif goal == "Gain Weight":
-            effective_calorie_limit = calorie_limit * 1.15
+            effective_calorie_limit = base_calories * 1.15
         else:
-            effective_calorie_limit = calorie_limit
+            effective_calorie_limit = base_calories
 
         connection = get_db_connection()
         if not connection:
             return []
         cursor = connection.cursor()
 
-        # Fetch meals with exact matches
         placeholders = ",".join(["?"] * len(dietary_prefs))
         meal_query = f"""
         SELECT Meal_id, Meal_name, Ingredients, Allergies, Disease_management,
@@ -700,14 +701,11 @@ class MealRecommendation:
         cursor.execute(meal_query, dietary_prefs + [goal, user_data["cooking_skill_level"], user_data["prep_time"]])
         meals = cursor.fetchall()
 
-        # Collect unique produce IDs
         produce_ids = set()
         for meal in meals:
-            ingredients = meal[2]
-            if ingredients:
-                produce_ids.update(pid.strip() for pid in ingredients.split(","))
+            if meal[2]:
+                produce_ids.update(pid.strip() for pid in meal[2].split(","))
 
-        # Fetch all produce data in one query
         produce_dict = {}
         if produce_ids:
             produce_query = f"""
@@ -719,7 +717,6 @@ class MealRecommendation:
             produce_data = cursor.fetchall()
             produce_dict = {row[0]: row[1:] for row in produce_data}
 
-        # Process recommendations
         recommendations = []
         for meal in meals:
             meal_id, meal_name, ingredients_str, allergies_str, disease_mgmt_str, cuisine_str, skill, prep = meal
@@ -728,7 +725,6 @@ class MealRecommendation:
             disease_mgmt = [dm.strip() for dm in disease_mgmt_str.split(",")] if disease_mgmt_str else []
             cuisines = [c.strip() for c in cuisine_str.split(",")] if cuisine_str else []
 
-            # Filter meals
             if any(allergy in allergies for allergy in user_data["allergies"]):
                 continue
             if user_data["disease_management"] and not any(dm in disease_mgmt for dm in user_data["disease_management"]):
@@ -736,7 +732,6 @@ class MealRecommendation:
             if user_data["cuisine_preferences"] and not any(c in user_data["cuisine_preferences"] for c in cuisines):
                 continue
 
-            # Calculate nutrition
             total_calories = total_proteins = total_carbs = total_fats = 0
             ingredient_details = []
             for pid in ingredients:
@@ -747,8 +742,14 @@ class MealRecommendation:
                     total_carbs += carb
                     total_fats += fat
                     ingredient_details.append({"Produce": name, "Calories": cal, "Proteins": prot, "Carbohydrates": carb, "Fats": fat})
+                else:
+                    logging.warning(f"Produce_id {pid} not found for meal {meal_name}")
 
-            # Apply calorie filter
+            # Check nutritional balance (e.g., protein > 10% of calories, assuming 4 kcal/g)
+            protein_calories = total_proteins * 4
+            if total_calories > 0 and protein_calories / total_calories < 0.1:
+                continue
+
             if (goal == "Lose Weight" and total_calories <= effective_calorie_limit) or \
                (goal == "Gain Weight" and total_calories >= effective_calorie_limit) or \
                (goal == "Maintain Weight" and abs(total_calories - effective_calorie_limit) <= 100):
