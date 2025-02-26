@@ -614,181 +614,152 @@ class Updatelists:
         return total_calories, total_cholesterol, total_protein, total_carbs, total_fat
         
 
-'''class MealRecommendation:
-    def __init__(self, user_id):
+'''import pyodbc
+import logging
+from typing import List, Dict
+
+def get_db_connection():
+    try:
+        conn = pyodbc.connect('DRIVER={SQL Server};SERVER=server;DATABASE=db;Trusted_Connection=yes;')
+        return conn
+    except pyodbc.Error as e:
+        logging.error(f"Database connection failed: {e}")
+        return None
+
+class MealRecommendation:
+    def __init__(self, user_id: str):
         self.user_id = user_id
-        self.weight = self.get_user_weight()
-        self.cholesterol_level = self.get_user_cholesterol_level()
-        self.dietary_preferences = self.get_user_dietary_preferences()
+        self.user_data = self.get_user_data()
 
-    def get_user_weight(self):
+    def get_user_data(self) -> Dict:
         try:
             connection = get_db_connection()
-            if connection is None:
+            if not connection:
                 return None
             cursor = connection.cursor()
-            query = "SELECT Weight FROM User_metrics WHERE User_id = ?"
+            query = """
+            SELECT um.Weight, um.Cholesterol_level, up.Diet_type, up.Goal, up.allergies,
+                   up.disease_management, up.cuisine_preferences, up.cooking_skill_level,
+                   up.prep_time, up.calorie_limit
+            FROM User_metrics um
+            JOIN User_preferences up ON um.User_id = up.User_id
+            WHERE um.User_id = ?
+            """
             cursor.execute(query, (self.user_id,))
             result = cursor.fetchone()
             connection.close()
             if result:
-                return result[0]
-            else:
-                logging.warning(f"No weight data found for user {self.user_id}.")
-                return None
-        except pyodbc.Error as e:
-            logging.error(f"Error fetching weight for user {self.user_id}: {e}")
-            return None
-
-    def get_user_cholesterol_level(self):
-        try:
-            connection = get_db_connection()
-            if connection is None:
-                return None
-            cursor = connection.cursor()
-            query = "SELECT Cholestrol_level FROM User_metrics WHERE User_id = ?"
-            cursor.execute(query, (self.user_id,))
-            result = cursor.fetchone()
-            connection.close()
-            if result:
-                return result[0]
-            else:
-                logging.warning(f"No cholesterol data found for user {self.user_id}.")
-                return None
-        except pyodbc.Error as e:
-            logging.error(f"Error fetching cholesterol level for user {self.user_id}: {e}")
-            return None
-
-    def get_user_dietary_preferences(self):
-        try:
-            connection = get_db_connection()
-            if connection is None:
-                return []
-            cursor = connection.cursor()
-            query = "SELECT Diet_type FROM User_preferences WHERE User_id = ?"
-            cursor.execute(query, (self.user_id,))
-            result = cursor.fetchone()
-            connection.close()
-            if result:
-                return result[0].split(",")
-            else:
-                logging.warning(f"No dietary preferences found for user {self.user_id}.")
-                return []
-        except pyodbc.Error as e:
-            logging.error(f"Error fetching dietary preferences for user {self.user_id}: {e}")
-            return []
-    
-def recommend_meals(user_id: int) -> List[Dict]:  #remember to ident this at some point
-    # Fetch user preferences
-    user_preferences = fetch_user_preferences(user_id)
-    dietary_preferences = user_preferences["dietary_preferences"]
-    calorie_limit = user_preferences["calorie_limit"]
-    goal = user_preferences["Goal"]
-    #diseaes_mamanged, allergens,etc should also be fetched to make the formula more robust. 
-
-    # Define calorie ranges based on the goal
-    if goal == "Lose Weight":
-        calorie_limit = calorie_limit * 0.85  # Reduce calorie intake by 15%
-    elif goal == "Gain Weight":
-        calorie_limit = calorie_limit * 1.15  # Increase calorie intake by 15%
-    # Maintain weight does not modify calorie_limit
-
-    # Query suitable meals based on user preferences
-    meal_query = """
-    SELECT Meal_id, Meal_name, Ingredients
-    FROM Meal
-    WHERE [Dietary Prefference] LIKE ? AND Goal LIKE ?
-    """
-    cursor = connection.cursor()
-    cursor.execute(meal_query, (f"%{dietary_preferences}%", f"%{goal}%"))
-    meals = cursor.fetchall()
-
-    recommendations = []
-
-    for meal in meals:
-        (meal_id, meal_name, ingredients, allergies, disease_management, cuisine_preferences,
-         cooking_skill_level, prep_time, complementary_dishes) = meal
-
-        # Apply additional user preferences filters
-        if any(allergy in allergies for allergy in user_preferences["allergies"]):
-            continue
-        if not any(disease in disease_management for disease in user_preferences["disease_management"]):
-            continue
-        if not any(cuisine in cuisine_preferences for cuisine in user_preferences["cuisine_preferences"]):
-            continue
-        if cooking_skill_level != user_preferences["cooking_skill_level"]:
-            continue
-        if prep_time != user_preferences["prep_time"]:
-            continue
-        ingredients_list = ingredients.split(",")
-
-        # Fetch ingredients from Produce table
-        produce_query = """
-        SELECT Produce, Calories, Proteins, Carbohydrates, Fats
-        FROM Produce
-        WHERE Produce_ID IN ({})
-        """.format(",".join([f"'{ingredient.strip()}'" for ingredient in ingredients_list]))
-
-        cursor.execute(produce_query)
-        ingredients_data = cursor.fetchall()
-
-        # Calculate total nutritional values
-        total_calories = sum(row[1] for row in ingredients_data)
-        total_proteins = sum(row[2] for row in ingredients_data)
-        total_carbs = sum(row[3] for row in ingredients_data)
-        total_fats = sum(row[4] for row in ingredients_data)
-
-        if (goal == "Lose Weight" and total_calories <= calorie_limit) or \
-           (goal == "Gain Weight" and total_calories >= calorie_limit) or \
-           (goal == "Maintain Weight" and abs(total_calories - calorie_limit) <= 100):
-            recommendations.append({
-                "Meal Name": meal_name,
-                "Ingredients": [
-                    {
-                        "Produce": row[0],
-                        "Calories": row[1],
-                        "Proteins": row[2],
-                        "Carbohydrates": row[3],
-                        "Fats": row[4]
-                    } for row in ingredients_data
-                ],
-                "Nutrition": {
-                    "Calories": total_calories,
-                    "Proteins": total_proteins,
-                    "Carbohydrates": total_carbs,
-                    "Fats": total_fats
+                return {
+                    "weight": result[0],
+                    "cholesterol_level": result[1],
+                    "dietary_preferences": result[2].split(",") if result[2] else [],
+                    "goal": result[3],
+                    "allergies": result[4].split(",") if result[4] else [],
+                    "disease_management": result[5].split(",") if result[5] else [],
+                    "cuisine_preferences": result[6].split(",") if result[6] else [],
+                    "cooking_skill_level": result[7],
+                    "prep_time": result[8],
+                    "calorie_limit": result[9]
                 }
-            })
+            logging.warning(f"No data for user {self.user_id}")
+            return None
+        except pyodbc.Error as e:
+            logging.error(f"Error fetching user data: {e}")
+            return None
 
-    return recommendations
+    def recommend_meals(self) -> List[Dict]:
+        if not self.user_data:
+            return []
+        
+        user_data = self.user_data
+        dietary_prefs = user_data["dietary_preferences"]
+        goal = user_data["goal"]
+        calorie_limit = user_data["calorie_limit"]
 
-# Example Usage
-user_id = 1  # Example user ID
-meal_recommendations = recommend_meals(user_id)
-for rec in meal_recommendations:
-    print(f"Meal: {rec['Meal Name']}")
-    print("Nutrition:", rec["Nutrition"])
-    print("Ingredients:")
-    for ingredient in rec["Ingredients"]:
-        print(f"  - {ingredient['Produce']}: {ingredient}")
+        # Adjust calorie limit based on goal
+        if goal == "Lose Weight":
+            effective_calorie_limit = calorie_limit * 0.85
+        elif goal == "Gain Weight":
+            effective_calorie_limit = calorie_limit * 1.15
+        else:
+            effective_calorie_limit = calorie_limit
 
+        connection = get_db_connection()
+        if not connection:
+            return []
+        cursor = connection.cursor()
 
+        # Fetch meals with exact matches
+        placeholders = ",".join(["?"] * len(dietary_prefs))
+        meal_query = f"""
+        SELECT Meal_id, Meal_name, Ingredients, Allergies, Disease_management,
+               Cuisine_preferences, Skill_level, Prep_time
+        FROM Meal
+        WHERE Dietary_preference IN ({placeholders}) AND Goal = ? AND Skill_level = ? AND Prep_time = ?
+        """
+        cursor.execute(meal_query, dietary_prefs + [goal, user_data["cooking_skill_level"], user_data["prep_time"]])
+        meals = cursor.fetchall()
 
+        # Collect unique produce IDs
+        produce_ids = set()
+        for meal in meals:
+            ingredients = meal[2]
+            if ingredients:
+                produce_ids.update(pid.strip() for pid in ingredients.split(","))
 
-    def is_meal_suitable(self, meal):
-        # Check dietary preferences
-        if meal['MealType'] not in self.dietary_preferences:
-            return False
+        # Fetch all produce data in one query
+        produce_dict = {}
+        if produce_ids:
+            produce_query = f"""
+            SELECT Produce_id, Produce_name, Calories, Proteins, Carbohydrates, Fats
+            FROM Produce
+            WHERE Produce_id IN ({','.join(['?' for _ in produce_ids])})
+            """
+            cursor.execute(produce_query, list(produce_ids))
+            produce_data = cursor.fetchall()
+            produce_dict = {row[0]: row[1:] for row in produce_data}
 
-        # Check calorie limit based on weight (e.g., 30 calories per kg)
-        if meal['Calories'] > (self.weight * 30 if self.weight else 0):
-            return False
+        # Process recommendations
+        recommendations = []
+        for meal in meals:
+            meal_id, meal_name, ingredients_str, allergies_str, disease_mgmt_str, cuisine_str, skill, prep = meal
+            ingredients = [pid.strip() for pid in ingredients_str.split(",")] if ingredients_str else []
+            allergies = [a.strip() for a in allergies_str.split(",")] if allergies_str else []
+            disease_mgmt = [dm.strip() for dm in disease_mgmt_str.split(",")] if disease_mgmt_str else []
+            cuisines = [c.strip() for c in cuisine_str.split(",")] if cuisine_str else []
 
-        # Check cholesterol level (allow some margin, e.g., 10% more than the user's cholesterol level)
-        if meal['Cholesterol_content'] > self.cholesterol_level * 1.1 if self.cholesterol_level else 0:
-            return False
+            # Filter meals
+            if any(allergy in allergies for allergy in user_data["allergies"]):
+                continue
+            if user_data["disease_management"] and not any(dm in disease_mgmt for dm in user_data["disease_management"]):
+                continue
+            if user_data["cuisine_preferences"] and not any(c in user_data["cuisine_preferences"] for c in cuisines):
+                continue
 
-        return True'''
+            # Calculate nutrition
+            total_calories = total_proteins = total_carbs = total_fats = 0
+            ingredient_details = []
+            for pid in ingredients:
+                if pid in produce_dict:
+                    name, cal, prot, carb, fat = produce_dict[pid]
+                    total_calories += cal
+                    total_proteins += prot
+                    total_carbs += carb
+                    total_fats += fat
+                    ingredient_details.append({"Produce": name, "Calories": cal, "Proteins": prot, "Carbohydrates": carb, "Fats": fat})
+
+            # Apply calorie filter
+            if (goal == "Lose Weight" and total_calories <= effective_calorie_limit) or \
+               (goal == "Gain Weight" and total_calories >= effective_calorie_limit) or \
+               (goal == "Maintain Weight" and abs(total_calories - effective_calorie_limit) <= 100):
+                recommendations.append({
+                    "Meal Name": meal_name,
+                    "Ingredients": ingredient_details,
+                    "Nutrition": {"Calories": total_calories, "Proteins": total_proteins, "Carbohydrates": total_carbs, "Fats": total_fats}
+                })
+
+        connection.close()
+        return recommendations'''
 
 
 
