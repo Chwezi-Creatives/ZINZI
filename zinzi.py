@@ -490,7 +490,7 @@ class Updatelists:
             if connection:
                 connection.close()
 
-    # Retrieve metrics history
+# Retrieve metrics history
     def get_metrics_history(self, user_id):
         try:
             connection = get_db_connection()
@@ -512,6 +512,75 @@ class Updatelists:
         finally:
             if connection:
                 connection.close()
+
+    #Add chefs to the database
+    def add_chef(self, data):
+        """Inserts chef data into the database."""
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                INSERT INTO Chefs (
+                    Image, Name, Price, Rating, Location, Experience,
+                    ServiceRadius, ResponseTime, MinNotice,
+                    Punctuality, TeamSize, Equipment, Bio,
+                    Availability, Languages, Specialties,
+                    Certifications, SampleMenu, Reviews
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                data['image'], data['name'], data['price'], data['rating'], data['location'],
+                data['experience'], data['service_radius'], data['response_time'],
+                data['min_notice'], data['punctuality'], data['team_size'], 
+                data['equipment'], data['bio'], data['availability'],
+                ', '.join(data['languages']),
+                ', '.join(data['specialties']),
+                ', '.join(data['certifications']),
+                ', '.join(data['sample_menu']),
+                str(data['reviews'])
+            ))
+
+            # Commit the transaction
+            conn.commit()
+            return True
+        except Exception as e:
+            print("Error occurred while adding chef:", str(e))
+            return False
+        finally:
+            cursor.close()
+            conn.close()
+
+    #implementation to retrieve chefs from database
+    def get_chefs():
+        """Retrieves all chef records from the database."""
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            cursor.execute('SELECT * FROM Chefs')
+            
+            columns = [column[0] for column in cursor.description]
+            chefs = []
+            for row in cursor.fetchall():
+                chef = dict(zip(columns, row))
+                # Deserialize array fields back to lists if necessary
+                chef['Languages'] = chef['Languages'].split(', ') if chef['Languages'] else []
+                chef['Specialties'] = chef['Specialties'].split(', ') if chef['Specialties'] else []
+                chef['Certifications'] = chef['Certifications'].split(', ') if chef['Certifications'] else []
+                chef['SampleMenu'] = chef['SampleMenu'].split(', ') if chef['SampleMenu'] else []
+                # Assuming reviews might need to be handled in a specific way
+                # Process Reviews field as appropriate for your application
+
+                chefs.append(chef)
+
+            return chefs
+        except Exception as e:
+            print("Error occurred while retrieving chefs:", str(e))
+            return []
+        finally:
+            cursor.close()
+            conn.close()
 
 
     # Add product to catalog
