@@ -255,6 +255,23 @@ def get_metrics_history():
     except Exception as e:
         print(f"Error: {e}")
         return jsonify({'error': f'Error fetching metrics history: {str(e)}'}), 500
+    
+
+@app.route('/rr/achefs', methods=['POST'])
+def add_chef_endpoint():
+    data = request.json
+    success = updater.add_chef(data)
+    
+    if success:
+        return jsonify({'message': 'Chef data added successfully!'}), 201
+    else:
+        return jsonify({'error': 'Failed to add chef data.'}), 500
+
+@app.route('/rr/rchefs', methods=['GET'])
+def get_chefs_endpoint():
+    chefs = updater.get_chefs()
+    return jsonify(chefs), 200
+
 
 
 # 5. Get Meal Recommendations (Using the recommend_meals method from the MealRecommendation class)
