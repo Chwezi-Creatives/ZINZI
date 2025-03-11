@@ -108,7 +108,7 @@ class MealRecommendation2:
         """Calculate the user's daily calorie budget based on TDEE and health goals."""
         if not self.user_metrics or not self.user_preferences:
             logging.warning("User metrics or preferences not found. Using default calorie budget.")
-            return 2000  # Default calorie budget
+            return 2000  # Default calorie budget # Mifflin-St Jeor equation for BMR and TDEE calculation
 
         weight = self.user_metrics["weight"]
         height = self.user_metrics["height"]
@@ -297,14 +297,24 @@ class MealRecommendation2:
         calorie_density = total_calories / total_weight if total_weight > 0 else 0
         return round(calorie_density, 1)  # Round to 1 decimal place
 
-    def calculate_serving_size(self, meal) -> float:
-        """Calculate the serving size (in grams) for a meal based on the user's calorie budget."""
+    def calculate_serving_size(self, meal, meal_type: str) -> float:
+        """Calculate the serving size (in grams) for a meal based on the user's calorie budget and meal type."""
         calorie_density = self.calculate_calorie_density(meal)
         if calorie_density <= 0:
             return 0
 
-        # Calculate serving size to fit within the user's daily calorie budget
-        serving_size = self.daily_calorie_budget / calorie_density
+        # Adjust calorie budget based on meal type
+        meal_type_calorie_contribution = {
+            "breakfast": 0.25,
+            "lunch": 0.35,
+            "dinner": 0.35,
+            "snack": 0.05,
+        }.get(meal_type.lower(), 0.25)  # Default to 25% if meal type is unknown
+
+        adjusted_calorie_budget = self.daily_calorie_budget * meal_type_calorie_contribution
+
+        # Calculate serving size to fit within the adjusted calorie budget
+        serving_size = adjusted_calorie_budget / calorie_density
         return round(serving_size, 1)  # Round to 1 decimal place
 
     def filter_meals(self) -> List[Dict]:
@@ -315,8 +325,11 @@ class MealRecommendation2:
 
         filtered_meals = []
         for meal in meals:
+            # Determine meal type (default to "lunch" if not specified)
+            meal_type = meal.get("meal_category", "lunch").lower()
+
             # Calorie budget filter
-            serving_size = self.calculate_serving_size(meal)
+            serving_size = self.calculate_serving_size(meal, meal_type)
             if serving_size > 0:
                 meal["amount_to_serve"] = round(serving_size, 1)  # Round to 1 decimal place
 
@@ -338,7 +351,7 @@ class MealRecommendation2:
 
 # Example usage
 #if __name__ == "__main__":
-    #user_id = 138
-    #meal_recommender2 = MealRecommendation2(user_id)
-    #recommendations = meal_recommender2.recommend_meals()
-    #print(recommendations)
+user_id = 138
+meal_recommender2 = MealRecommendation2(user_id)
+recommendations = meal_recommender2.recommend_meals()
+print(recommendations)
