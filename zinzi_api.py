@@ -4,25 +4,10 @@ import logging
 import json
 from flask_cors import CORS
 from datetime import datetime
-from zinzi import (
-    Authentication,
-    Updatelists, GetAllMeals,
-    MealRecommendation2,
-    configure_paypal,
-    create_payment_paypal,
-    execute_payment,
-    handle_payment_cancellation,
-    configure_stripe,
-    create_stripe_payment,
-    execute_stripe_payment,
-    handle_stripe_payment_cancellation,
-)
-from momo import (
-    request_momo_payment,
-    check_momo_payment_status,
-    configure_momo,
-)
-from crud import Database, Users, Chefs, Herbals, Meals, Produce, Producers, Gadgets, Spices, Stakeholders, MetricsHistory, Orders
+import zinzi
+import momo
+import crud
+from database import get_db_connection
 
 app = Flask(__name__)
 CORS(app)
@@ -32,23 +17,23 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Create instances of the classes from the backend
-auth = Authentication()
-updater = Updatelists()
-meal_fetcher = GetAllMeals()
+auth = zinzi.Authentication()
+updater = zinzi.Updatelists()
+meal_fetcher = zinzi.GetAllMeals()
 
 # Initialize database and CRUD classes
-db = Database()
-users = Users(db)
-chefs = Chefs(db)
-herbals = Herbals(db)
-meals = Meals(db)
-produce = Produce(db)
-producers = Producers(db)
-gadgets = Gadgets(db)
-spices = Spices(db)
-stakeholders = Stakeholders(db)
-metrics_history = MetricsHistory(db)
-orders = Orders(db)
+# Instantiate CRUD classes. They will get connections internally via get_db_connection.
+users = crud.Users()
+chefs = crud.Chefs()
+herbals = crud.Herbals()
+meals = crud.Meals()
+produce = crud.Produce()
+producers = crud.Producers()
+gadgets = crud.Gadgets()
+spices = crud.Spices()
+stakeholders = crud.Stakeholders()
+# Metrics history methods are part of the Users class in crud.py
+orders = crud.Orders()
 
 @app.route('/rr')
 def welcome():
@@ -75,7 +60,7 @@ def recommend_meals_f():
         logger.error('User ID is required.')
         return jsonify({'error': 'User ID is required'}), 400
     try:
-        meal_recommender = MealRecommendation2(user_id=int(user_id))
+        meal_recommender = zinzi.MealRecommendation2(user_id=int(user_id))
         recommended_meals = meal_recommender.recommend_meals()
         if recommended_meals:
             return jsonify({
@@ -201,7 +186,7 @@ def login_producer():
         logger.error('Missing required fields during producer login.')
         return jsonify({'error': 'Missing required fields'}), 400
     try:
-        result, status_code = producers.login_user(identifier, password)
+        result, status_code = producers.login_producer(identifier, password) # Correct method name
         if status_code == 200:
             return jsonify({
                 'message': result['message'],
@@ -275,9 +260,9 @@ def create_metric_endpoint():
 
 @app.route('/rr/metrics', methods=['GET'])
 def list_metrics_endpoint():
-    metric_id = request.args.get('metric_id')  # Optional parameter
+    user_id = request.args.get('user_id')  # Optional parameter to filter by user
     try:
-        metrics = users.list_metrics(metric_id=metric_id)
+        metrics = users.list_metrics(user_id=user_id) # Pass user_id, not metric_id
         logger.info('Fetched metrics list successfully.')
         return jsonify({
             'message': 'Metrics retrieved successfully.',
@@ -395,9 +380,10 @@ def add_herbal_endpoint():
 
 @app.route('/rr/rherbals', methods=['GET'])
 def get_herbals_endpoint():
-    herbal_id = request.args.get('herbal_id')  # Optional parameter
+    # herbal_id = request.args.get('herbal_id')  # Optional parameter - Temporarily disabled
     try:
-        herbals_list = herbals.list_herbals(herbal_id)
+        # Call list_herbals without arguments to get all herbals
+        herbals_list = herbals.list_herbals()
         logger.info('Fetched herbal list successfully.')
         return jsonify({
             'message': 'Herbals retrieved successfully.',
@@ -453,9 +439,10 @@ def add_produce_endpoint():
 
 @app.route('/rr/produce', methods=['GET'])
 def get_produce_endpoint():
-    produce_id = request.args.get('produce_id')  # Optional parameter
+    # produce_id = request.args.get('produce_id')  # Optional parameter - Temporarily disabled
     try:
-        produce_list = produce.list_produce(produce_id)
+        # Call list_produce without arguments to get all produce
+        produce_list = produce.list_produce()
         logger.info('Fetched produce list successfully.')
         return jsonify({
             'message': 'Produce retrieved successfully.',
@@ -511,9 +498,10 @@ def add_gadget_endpoint():
 
 @app.route('/rr/gadgets', methods=['GET'])
 def get_gadgets_endpoint():
-    gadget_id = request.args.get('gadget_id')  # Optional parameter
+    # gadget_id = request.args.get('gadget_id')  # Optional parameter - Temporarily disabled
     try:
-        gadgets_list = gadgets.list_gadgets(gadget_id)
+        # Call list_gadgets without arguments to get all gadgets
+        gadgets_list = gadgets.list_gadgets()
         logger.info('Fetched gadgets list successfully.')
         return jsonify({
             'message': 'Gadgets retrieved successfully.',
@@ -540,9 +528,10 @@ def add_spice_endpoint():
 
 @app.route('/rr/rspices', methods=['GET'])
 def get_spices_endpoint():
-    spice_id = request.args.get('spice_id')  # Optional parameter
+    # spice_id = request.args.get('spice_id')  # Optional parameter - Temporarily disabled
     try:
-        spices_list = spices.list_spices(spice_id)
+        # Call list_spices without arguments to get all spices
+        spices_list = spices.list_spices()
         logger.info('Fetched spices list successfully.')
         return jsonify({
             'message': 'Spices retrieved successfully.',
@@ -581,7 +570,6 @@ def get_stakeholders_endpoint():
         logger.error(f'Error fetching stakeholders: {e}')
         return jsonify({'error': f'Error fetching stakeholders: {str(e)}'}), 500
 
-# Orders Management
 @app.route('/rr/orders', methods=['GET'])
 def get_orders_endpoint():
     chef_id = request.args.get('chef_id')
@@ -599,6 +587,7 @@ def get_orders_endpoint():
         logger.error(f'Error fetching orders: {e}')
         return jsonify({'error': f'Error fetching orders: {str(e)}'}), 500
 
+
 @app.route('/rr/order', methods=['POST'])
 def add_order():
     data = request.json
@@ -607,13 +596,16 @@ def add_order():
         user_id = data.get('user_id')
         order_type = data.get('order_type')
         delivery_address = data.get('delivery_address')
-        total_price = data.get('total_price')
         notes = data.get('notes', "")
         payment_mode = data.get('payment_mode')
         payment_status = data.get('payment_status', 'Pending')
         items = data.get('items', [])
+        
         if not user_id or not order_type:
             return jsonify({'error': 'Missing required fields: user_id or order_type'}), 400
+        if not isinstance(items, list) or len(items) == 0:
+            return jsonify({'error': 'Order items must be provided as a non-empty list.'}), 400
+        
         created_orders = []
         for item in items:
             product_id = item.get('product_id')
@@ -621,32 +613,49 @@ def add_order():
             producer_id = item.get('producer_id')
             quantity = item.get('quantity', 1)
             price = item.get('price', 0)
-            result = orders.create_order(
-                user_id=user_id,
-                order_type=order_type,
-                product_id=product_id,
-                chef_id=chef_id,
-                producer_id=producer_id,
-                delivery_address=delivery_address,
-                total_price=price * quantity,
-                notes=notes,
-                payment_mode=payment_mode,
-                payment_status=payment_status,
-                amount_paid=0,
-                transaction_id=None,
-                quantity=quantity
-            )
-            if not result['success']:
-                return jsonify({'error': result['error']}), 500
-            created_orders.append(result)
+
+            # Validate that at least one of chef_id or producer_id is provided
+            if not chef_id and not producer_id:
+                return jsonify({'error': 'At least one of chef_id or producer_id must be provided.'}), 400
+            if chef_id and producer_id:
+                return jsonify({'error': 'Please provide either chef_id or producer_id, not both.'}), 400
+
+            # Ensure zero or positive quantity and price
+            if quantity <= 0 or price < 0:
+                return jsonify({'error': 'Quantity must be a positive number, and price must be non-negative.'}), 400
+
+            try:
+                result = orders.create_order(
+                    user_id=user_id,
+                    order_type=order_type,
+                    product_id=product_id,
+                    chef_id=chef_id if chef_id else None,
+                    producer_id=producer_id if producer_id else None,
+                    delivery_address=delivery_address,
+                    total_price=price * quantity,
+                    notes=notes,
+                    payment_mode=payment_mode,
+                    payment_status=payment_status,
+                    amount_paid=0,
+                    transaction_id=None,
+                    quantity=quantity
+                )
+                if not result['success']:
+                    return jsonify({'error': result['error']}), 500
+                created_orders.append(result)
+            except Exception as e:
+                logger.error(f'Error creating individual order: {e}')
+                return jsonify({'error': f'Error creating individual order: {str(e)}'}), 500
         logger.info('Order(s) added successfully.')
         return jsonify({'success': True, 'message': 'Order(s) created successfully', 'orders': created_orders}), 201
+
     except ValueError as ve:
         logger.error(f'Validation error while adding order: {ve}')
         return jsonify({'error': str(ve)}), 400
     except Exception as e:
         logger.error(f'Error adding order: {e}')
         return jsonify({'error': f'Error adding order: {str(e)}'}), 500
+
 
 @app.route('/rr/orders/<int:order_id>', methods=['GET'])
 def get_order_by_id(order_id):
@@ -666,7 +675,7 @@ def get_order_by_id(order_id):
         return jsonify({'error': f'Error fetching order: {str(e)}'}), 500
 
 # Payment Management
-configure_paypal('sandbox', 'YOUR_CLIENT_ID', 'YOUR_SECRET')
+zinzi.configure_paypal('sandbox', 'YOUR_CLIENT_ID', 'YOUR_SECRET')
 
 @app.route('/rr/pay', methods=['POST'])
 def create_payment_route():
@@ -676,7 +685,7 @@ def create_payment_route():
     if amount is None:
         logger.error('Amount is required for payment.')
         return jsonify({"error": "Amount is required"}), 400
-    response = create_payment_paypal(amount, description)
+    response = zinzi.create_payment_paypal(amount, description)
     logger.info(f'Payment created: {response}')
     return jsonify({
         'message': 'Payment created successfully.',
@@ -690,7 +699,7 @@ def execute_payment_route():
     if not payment_id or not payer_id:
         logger.error('Both paymentId and PayerID are required to execute a payment.')
         return jsonify({"error": "Both paymentId and PayerID are required"}), 400
-    response = execute_payment(payment_id, payer_id)
+    response = zinzi.execute_payment(payment_id, payer_id)
     logger.info(f'Executed payment: {response}')
     return jsonify({
         'message': 'Payment executed successfully.',
@@ -699,7 +708,7 @@ def execute_payment_route():
 
 @app.route('/rr/cancel', methods=['GET'])
 def handle_payment_cancellation_route():
-    response = handle_payment_cancellation()
+    response = zinzi.handle_payment_cancellation()
     logger.info(f'Payment cancelled: {response}')
     return jsonify({
         'message': 'Payment cancelled successfully.',
@@ -708,7 +717,7 @@ def handle_payment_cancellation_route():
 
 # Stripe Management
 STRIPE_SECRET_KEY = "YOUR_SECRET_KEY"
-configure_stripe(STRIPE_SECRET_KEY)
+zinzi.configure_stripe(STRIPE_SECRET_KEY)
 
 @app.route('/rr/create_stripe_payment', methods=['POST'])
 def create_stripe_payment_route():
@@ -718,7 +727,7 @@ def create_stripe_payment_route():
         if not amount:
             logger.error("Missing amount for Stripe payment.")
             return jsonify({"error": "Missing amount"}), 400
-        response = create_stripe_payment(amount)
+        response = zinzi.create_stripe_payment(amount)
         logger.info(f'Stripe payment created: {response}')
         return jsonify({
             'message': 'Stripe payment created successfully.',
@@ -737,7 +746,7 @@ def confirm_stripe_payment():
         if not payment_intent_id:
             logger.error("Missing paymentIntentId for Stripe payment confirmation.")
             return jsonify({"error": "Missing paymentIntentId"}), 400
-        response = execute_stripe_payment(payment_intent_id, payment_method_id)
+        response = zinzi.execute_stripe_payment(payment_intent_id, payment_method_id)
         logger.info(f'Stripe payment confirmed: {response}')
         return jsonify({
             'message': 'Stripe payment confirmed successfully.',
@@ -750,7 +759,7 @@ def confirm_stripe_payment():
 @app.route('/rr/cancel_stripe_payment', methods=['POST'])
 def cancel_stripe_payment():
     try:
-        response = handle_stripe_payment_cancellation()
+        response = zinzi.handle_stripe_payment_cancellation()
         logger.info(f'Stripe payment cancelled: {response}')
         return jsonify({
             'message': 'Stripe payment cancelled successfully.',
@@ -768,7 +777,7 @@ def configure_momo_route():
         api_user = data.get('api_user')
         api_key = data.get('api_key')
         subscription_key = data.get('subscription_key')
-        result = configure_momo(api_user, api_key, subscription_key)
+        result = momo.configure_momo(api_user, api_key, subscription_key)
         logger.info(f"MoMo API configured: {json.dumps(result)}")
         return jsonify({
             'message': 'MoMo configured successfully.',
@@ -788,7 +797,7 @@ def request_momo_payment_route():
         payer_number = data.get('payer_number', '+256787372100')
         payer_message = data.get('payer_message', 'Payment for ZINZI')
         payee_note = data.get('payee_note', 'You have a payment request from ZINZI')
-        result = request_momo_payment(amount, currency, external_id, payer_number, payer_message, payee_note)
+        result = momo.request_momo_payment(amount, currency, external_id, payer_number, payer_message, payee_note)
         logger.info(f"MoMo payment request result: {json.dumps(result)}")
         return jsonify({
             'message': 'MoMo payment requested successfully.',
@@ -805,7 +814,7 @@ def check_momo_payment_status_route():
         if not transaction_ref:
             logger.error("Transaction reference is required to check payment status.")
             return jsonify({"error": "Transaction reference is required."}), 400
-        result = check_momo_payment_status(transaction_ref)
+        result = momo.check_momo_payment_status(transaction_ref)
         return jsonify({
             'message': 'MoMo payment status checked successfully.',
             'data': result
