@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:zinzi2/onboard.dart';
+import 'package:zinzi2/recommend_meals.dart';
 import 'dashboard_page.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'Profile.dart';
 
-final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';
+final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -81,7 +84,7 @@ class _LoginPageState extends State<LoginPage>
             context,
             PageRouteBuilder(
               pageBuilder: (context, animation, secondaryAnimation) =>
-                  const DashboardPage(),
+                   LandingPage(),
               transitionsBuilder:
                   (context, animation, secondaryAnimation, child) {
                 const curve = Curves.easeInOut;
@@ -135,7 +138,7 @@ class _LoginPageState extends State<LoginPage>
           position: _slideAnimation,
           child: const Text(
             'Login',
-            style: TextStyle(color: Colors.black),
+            style: TextStyle(color: Colors.white, fontSize: 24),
           ),
         ),
         foregroundColor: Colors.white,
@@ -176,7 +179,7 @@ class _LoginPageState extends State<LoginPage>
                               width: 170,
                               child: Image.asset('assets/images/Gru green.png'),
                             ),
-                            const SizedBox(height: 9),
+                            const SizedBox(height: 1),
                             // Welcome text
                             Container(
                               padding: const EdgeInsets.all(16.0),
@@ -195,7 +198,7 @@ class _LoginPageState extends State<LoginPage>
                                 crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
                                   Text(
-                                    'Welcome Back!',
+                                    'WELCOME BACK,',
                                     style: TextStyle(
                                       fontSize: 24,
                                       fontWeight: FontWeight.bold,
@@ -203,12 +206,12 @@ class _LoginPageState extends State<LoginPage>
                                       letterSpacing: 1.5,
                                     ),
                                   ),
-                                  const SizedBox(height: 9),
+                                  const SizedBox(height: 3),
                                   Text(
-                                    'Enter name/email and password to access a Personalized dashboard and features.',
+                                    'Lets continue your health journey!',
                                     style: TextStyle(
                                       fontSize: 16,
-                                      color: Colors.black.withOpacity(0.9),
+                                      color: Colors.teal.shade800,
                                     ),
                                   ),
                                 ],
@@ -294,7 +297,7 @@ class _LoginPageState extends State<LoginPage>
                                     ? const CircularProgressIndicator(
                                         color: Colors.white)
                                     : const Text(
-                                        'Login',
+                                        'LOG IN',
                                         style: TextStyle(
                                             fontSize: 16, color: Colors.white),
                                       ),
