@@ -1,1459 +1,1187 @@
-import pyodbc
-from datetime import datetime
-from database import get_db_connection  # Import the connection function
+import psycopg2 # Replaced pyodbc
+from datetime import datetime, date # Added date for type checking
+import uuid # For MoMo X-Reference-Id
+import random # For generating random numbers
+
+# Assuming database.py is in the same directory or Python path
+# and contains the get_db_connection function configured for PgBouncer
+from database import get_db_connection
 import logging
 import bcrypt
+import json # For potential future use with JSONB columns if needed
+
+# --- Configuration Loading ---
+from dotenv import load_dotenv # Moved import to top
+load_dotenv()
 
 # Configure logging for error reporting
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class Database:
-    def __init__(self):
-        self.conn = get_db_connection()  # Connect to the database
-        if self.conn is not None:
-            self.cursor = self.conn.cursor()
-        else:
-            raise Exception("Failed to connect to the database.")
-
-    def close(self):
-        if hasattr(self, 'cursor'):
-            self.cursor.close()
-        if hasattr(self, 'conn'):
-            self.conn.close()
-
-# Utility function to check required fields
+# --- Helper Functions (Unchanged, assuming they are correct) ---
 def check_required_fields(data, required_fields):
-    missing_fields = [field for field in required_fields if not data.get(field)]
+    """Checks if all required fields are present in the data dictionary."""
+    data_keys_lower = {k.lower() for k in data.keys()}
+    missing_fields = [field for field in required_fields if field.lower() not in data_keys_lower or not data.get(field)]
     if missing_fields:
         raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
 
-# Serialize/deserialize helper functions for lists
 def serialize_list(data_list):
-    return ','.join(data_list) if isinstance(data_list, list) else ''
+    """Serializes a list into a comma-separated string."""
+    return ','.join(map(str, data_list)) if isinstance(data_list, list) else ''
 
 def deserialize_list(data_string):
+    """Deserializes a comma-separated string into a list."""
     return data_string.split(',') if data_string else []
+# --- End Helper Functions ---
 
-# CRUD operations for Users
-class Users:
-    def __init__(self, db):
-        self.db = db
+# --- Base Class for Common DB Operations ---
+class BaseRepository:
+    def _execute_query(self, sql, params=None, fetch_one=False, fetch_all=False, commit=False, returning_id_column=None):
+        """Executes a query, handles connection and cursor management.
+           returning_id_column specifies the name of the ID column to return.
+        """
+        conn = None
+        results = None
+        returned_id = None
+        try:
+            conn = get_db_connection()
+            if not conn:
+                raise ConnectionError("Failed to get database connection.")
+
+            # Use context manager for cursor
+            with conn.cursor() as cursor:
+                logger.debug(f"Executing SQL: {sql} with params: {params}")
+                cursor.execute(sql, params or ())
+
+                if returning_id_column: # Check if we expect an ID back
+                    fetched = cursor.fetchone()
+                    if fetched:
+                        returned_id = fetched[0] # Get the actual ID value
+                    logger.debug(f"Returning {returning_id_column}: {returned_id}")
+
+                elif fetch_one: # Only fetch if not returning an ID
+                    results = cursor.fetchone()
+                    # If fetchone returns data, maybe convert to dict?
+                    if results and cursor.description:
+                         columns = [desc[0] for desc in cursor.description]
+                         results = dict(zip(columns, results))
+                    logger.debug(f"Fetched one: {results}")
+
+                elif fetch_all: # Only fetch if not returning an ID
+                    # Fetch column names for dict conversion
+                    if cursor.description:
+                         columns = [desc[0] for desc in cursor.description]
+                         results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+                    else:
+                         results = [] # Handle cases like empty results
+                    logger.debug(f"Fetched all ({len(results)} rows)")
+
+                if commit:
+                    conn.commit()
+                    logger.debug("Transaction committed.")
+
+            # Return based on what was requested
+            if returning_id_column:
+                return returned_id
+            else:
+                return results
+
+        except (psycopg2.Error, Exception) as e:
+            logger.error(f"Database Error executing query: {sql} | Params: {params} | Error: {e}", exc_info=True)
+            if conn:
+                try:
+                    conn.rollback() # Rollback on error
+                    logger.debug("Transaction rolled back due to error.")
+                except psycopg2.Error as rb_err:
+                    logger.error(f"Error during rollback: {rb_err}")
+            # Re-raise a more specific or generic error for the caller
+            raise ValueError(f"Database operation failed: {e}")
+        finally:
+            if conn:
+                conn.close() # IMPORTANT: Release connection back to the pool
+                logger.debug("Database connection closed.")
+
+# --- CRUD operations for Users ---
+class Users(BaseRepository):
 
     def hash_password(self, password):
-        return bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+        """Hashes a password using bcrypt."""
+        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
     def create_user(self, user_data):
-        try:
-            check_required_fields(user_data, ['Name', 'Password', 'Email'])
-            existing_email_sql = "SELECT COUNT(*) FROM Users WHERE Email = ?"
-            self.db.cursor.execute(existing_email_sql, (user_data['Email'],))
-            email_count = self.db.cursor.fetchone()[0]
+        """Creates a new user in the database."""
+        user_data_lower = {k.lower(): v for k, v in user_data.items()}
+        check_required_fields(user_data_lower, ['name', 'password', 'email'])
 
-            if email_count > 0:
-                raise ValueError("A user with this email already exists.")
+        email = user_data_lower['email']
+        # 1. Check if email exists
+        # user_id is correct
+        check_sql = "SELECT user_id FROM users WHERE lower(email) = lower(%s)"
+        existing_user = self._execute_query(check_sql, (email,), fetch_one=True)
 
-            hashed_password = self.hash_password(user_data['Password'])
-            user_type = user_data.get('User_Type', 'user')
+        if existing_user:
+            raise ValueError(f"A user with email '{email}' already exists.")
 
-            sql = """
-                INSERT INTO Users (Name, Email, Hashed_Password, Is_Email_Verified, User_Type, Is_Active,
-                Rating, Phone_Number, Registration_Date, Location, Added_By, Added_By_Type, Last_Login)
-                OUTPUT INSERTED.User_id
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            self.db.cursor.execute(sql, (
-                user_data['Name'], user_data['Email'], hashed_password,
-                user_data.get('Is_Email_Verified', 0), user_type,
-                user_data.get('Is_Active', 1), user_data.get('Rating', 0),
-                user_data.get('Phone_Number'), datetime.now(),
-                user_data.get('Location'), user_data.get('Added_By', 0),
-                user_data.get('Added_By_Type', user_type), datetime.now()
-            ))
-            user_id = self.db.cursor.fetchone()[0]
-            self.db.conn.commit()
-            logger.info(f"Created user with ID: {user_id} and User Type: {user_type}")
+        # 2. Insert new user
+        hashed_password = self.hash_password(user_data_lower['password'])
+        user_type = user_data_lower.get('user_type', 'user')
+        is_email_verified = user_data_lower.get('is_email_verified', False) # Use boolean
+        is_active = user_data_lower.get('is_active', True) # Use boolean
+        added_by = user_data_lower.get('added_by', 0) # Assuming 0 or None indicates self-registration
+
+        sql = """
+            INSERT INTO users (name, email, hashed_password, is_email_verified, user_type, is_active,
+            rating, phone_number, registration_date, location, added_by, added_by_type, last_login)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s, %s, %s, NOW())
+            RETURNING user_id
+        """
+        params = (
+            user_data_lower['name'], email, hashed_password,
+            is_email_verified, user_type, is_active,
+            user_data_lower.get('rating', 0.0), # Use float for rating
+            user_data_lower.get('phone_number'),
+            user_data_lower.get('location'),
+            added_by,
+            user_data_lower.get('added_by_type', user_type) # Default to own type
+        )
+        # user_id is correct
+        user_id = self._execute_query(sql, params, commit=True, returning_id_column='user_id')
+
+        if user_id:
+            logger.info(f"Created user with ID: {user_id}, Email: {email}, User Type: {user_type}")
             return {"UserId": user_id, "UserType": user_type}
+        else:
+            raise ValueError("User creation failed, no ID returned.")
 
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while creating user: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error creating user: {e}")
-            raise ValueError(str(e))
 
     def list_users(self, user_id=None):
-        try:
-            sql = "SELECT * FROM Users"
-            parameters = []
+        """Lists users, optionally filtered by user_id."""
+        sql = "SELECT * FROM users"
+        params = []
+        if user_id:
+            # user_id is correct
+            sql += " WHERE user_id = %s"
+            params.append(user_id)
 
-            if user_id:
-                sql += " WHERE User_id=?"
-                parameters.append(user_id)
+        users_list = self._execute_query(sql, params, fetch_all=True)
+        if user_id and not users_list:
+             logger.warning(f"No user found with ID: {user_id}")
+             return None
+        return users_list
 
-            self.db.cursor.execute(sql, parameters)
-
-            if self.db.cursor.description is None:
-                raise ValueError("No results returned from the database query.")
-
-            columns = [column[0] for column in self.db.cursor.description]
-            return [dict(zip(columns, row)) for row in self.db.cursor.fetchall()]
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while listing users: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error listing users: {e}")
-            raise ValueError(str(e))
 
     def login_user(self, identifier, password):
-        try:
-            connection = get_db_connection()
-            cursor = connection.cursor()
-            query = "SELECT User_id, Hashed_Password, User_Type FROM Users WHERE Name = ? OR Email = ?"
-            cursor.execute(query, (identifier, identifier))
-            result = cursor.fetchone()
+        """Authenticates a user by name or email."""
+        sql = """
+            SELECT user_id, hashed_password, user_type, is_email_verified -- Added verification check
+            FROM users
+            WHERE lower(name) = lower(%s) OR lower(email) = lower(%s) -- Case-insensitive
+        """
+        params = (identifier, identifier)
 
-            if not result:
-                return {'message': 'Invalid credentials or account not found.'}, 401
+        result_dict = self._execute_query(sql, params, fetch_all=True) # fetch_all returns list of dicts
+        result = result_dict[0] if result_dict else None # Get the first dict if exists
 
-            user_id, stored_hashed_password, user_type = result
+        if not result:
+            logger.warning(f"Login attempt failed: Identifier '{identifier}' not found.")
+            return {'message': 'Invalid credentials or account not found.'}, 401
 
-            if bcrypt.checkpw(password.encode(), stored_hashed_password.encode()):
-                return {'message': 'Login successful', 'user_id': user_id, 'user_type': user_type}, 200
-            else:
-                return {'message': 'Invalid credentials.'}, 401
-        except pyodbc.Error as e:
-            logger.error(f"Error during login: {e}")
-            return {'message': 'Error during login'}, 500
-        finally:
-            if connection:
-                connection.close()
+        # Access by key from the dictionary
+        user_id = result['user_id'] # user_id is correct
+        stored_hashed_password = result['hashed_password']
+        user_type = result['user_type']
+        is_verified = result['is_email_verified'] # Check verification status
 
-    # CRUD operations for Metrics
+
+        # Ensure stored_hashed_password is bytes for bcrypt
+        if isinstance(stored_hashed_password, str):
+            stored_hashed_password_bytes = stored_hashed_password.encode('utf-8')
+        elif isinstance(stored_hashed_password, bytes):
+             stored_hashed_password_bytes = stored_hashed_password
+        else:
+             logger.error(f"Unexpected password hash type for user {user_id}: {type(stored_hashed_password)}")
+             return {'message': 'Internal server error during login.'}, 500
+
+
+        if bcrypt.checkpw(password.encode('utf-8'), stored_hashed_password_bytes):
+            if not is_verified:
+                 logger.warning(f"Login attempt for user ID {user_id}: Account not verified.")
+                 return {'message': 'Account not verified. Please check your email.', 'user_id': user_id, 'verified': False}, 403
+
+            # update_sql = "UPDATE users SET last_login = NOW() WHERE user_id = %s"
+            # self._execute_query(update_sql, (user_id,), commit=True)
+            logger.info(f"Login successful for identifier '{identifier}', User ID: {user_id}")
+            # Return user_id which is correct
+            return {'message': 'Login successful', 'user_id': user_id, 'user_type': user_type, 'verified': True}, 200
+        else:
+            logger.warning(f"Login attempt failed: Invalid password for identifier '{identifier}'.")
+            return {'message': 'Invalid credentials.'}, 401
+
+    # --- Metrics Methods ---
     def create_metric(self, metric_data):
-        try:
-            check_required_fields(metric_data, ['User_id', 'Weight', 'Height', 'Cholesterol_level', 'Sys_bp', 'Dia_bp', 'Pulse'])
-            sql = """
-                INSERT INTO User_metrics (User_id, Age_range, Weight, Height, Cholesterol_level,
-                Sys_bp, Dia_bp, Pulse, Recorded_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            self.db.cursor.execute(sql, (
-                metric_data['User_id'], metric_data['Age_range'], metric_data['Weight'], metric_data['Height'],
-                metric_data['Cholesterol_level'], metric_data['Sys_bp'], metric_data['Dia_bp'],
-                metric_data['Pulse'], datetime.now()
-            ))
-            self.db.conn.commit()
-            return {"MetricId": self.db.cursor.execute("SELECT SCOPE_IDENTITY()").fetchval()}
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while creating metric: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error creating metric: {e}")
-            raise ValueError(str(e))
+        metric_data_lower = {k.lower(): v for k, v in metric_data.items()}
+        check_required_fields(metric_data_lower, ['user_id', 'weight', 'height', 'cholesterol_level', 'sys_bp', 'dia_bp', 'pulse'])
+        sql = """
+            INSERT INTO user_metrics (user_id, age_range, weight, height, cholesterol_level,
+            sys_bp, dia_bp, pulse, recorded_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            RETURNING metric_id
+        """
+        params = (
+            metric_data_lower['user_id'], metric_data_lower.get('age_range'), metric_data_lower['weight'],
+            metric_data_lower['height'], metric_data_lower['cholesterol_level'], metric_data_lower['sys_bp'],
+            metric_data_lower['dia_bp'], metric_data_lower['pulse']
+        )
+        # Corrected: metricid -> metric_id
+        metric_id = self._execute_query(sql, params, commit=True, returning_id_column='metric_id')
+        logger.info(f"Created metric with ID: {metric_id} for User ID: {metric_data_lower['user_id']}")
+        # Corrected: MetricId -> metric_id (consistent key name)
+        return {"metric_id": metric_id}
 
     def update_metric(self, metric_id, updates):
-        try:
-            if not updates:
-                raise ValueError("At least one field must be provided for updates.")
+        updates_lower = {k.lower(): v for k, v in updates.items()}
+        if not updates_lower:
+            raise ValueError("At least one field must be provided for updates.")
 
-            sql = "UPDATE User_metrics SET "
-            set_statements = []
-            parameters = []
+        set_clauses = [f"{key} = %s" for key in updates_lower.keys()]
+        # Corrected: WHERE metricid -> WHERE metric_id
+        sql = f"UPDATE user_metrics SET {', '.join(set_clauses)} WHERE metric_id = %s"
+        params = list(updates_lower.values()) + [metric_id]
 
-            for key, value in updates.items():
-                set_statements.append(f"{key}=?")
-                parameters.append(value)
+        self._execute_query(sql, tuple(params), commit=True)
+        logger.info(f"Updated metric with ID: {metric_id}")
 
-            sql += ", ".join(set_statements)
-            sql += " WHERE Metric_id=?"
-            parameters.append(metric_id)
-
-            self.db.cursor.execute(sql, parameters)
-            self.db.conn.commit()
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while updating metric (ID: {metric_id}): {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error updating metric (ID: {metric_id}): {e}")
-            raise ValueError(str(e))
 
     def list_metrics(self, user_id=None):
-        try:
-            sql = "SELECT * FROM User_metrics"
-            parameters = []
+        sql = "SELECT * FROM user_metrics"
+        params = []
+        if user_id:
+            # user_id is correct
+            sql += " WHERE user_id = %s"
+            params.append(user_id)
+        return self._execute_query(sql, params, fetch_all=True)
 
-            if user_id:
-                sql += " WHERE User_id=?"
-                parameters.append(user_id)
-
-            self.db.cursor.execute(sql, parameters)
-
-            if self.db.cursor.description is None:
-                raise ValueError("No results returned from the database query.")
-
-            columns = [column[0] for column in self.db.cursor.description]
-            return [dict(zip(columns, row)) for row in self.db.cursor.fetchall()]
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while listing metrics: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error listing metrics: {e}")
-            raise ValueError(str(e))
-
-    # CRUD operations for Metrics History
+    # --- Metric History Methods ---
     def create_metric_history(self, metric_history_data):
-        try:
-            check_required_fields(metric_history_data, ['User_id', 'Weight'])
-            sql = """
-                INSERT INTO Metrics_history (User_id, Weight, Logged_at) VALUES (?, ?, ?)
-            """
-            self.db.cursor.execute(sql, (
-                metric_history_data['User_id'], metric_history_data['Weight'], datetime.now()
-            ))
-            self.db.conn.commit()
-            return {"MetricHistoryId": self.db.cursor.execute("SELECT SCOPE_IDENTITY()").fetchval()}
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while creating metric history: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error creating metric history: {e}")
-            raise ValueError(str(e))
+        metric_history_data_lower = {k.lower(): v for k, v in metric_history_data.items()}
+        check_required_fields(metric_history_data_lower, ['user_id', 'weight'])
+        sql = """
+            INSERT INTO metrics_history (user_id, weight, logged_at) VALUES (%s, %s, NOW())
+            RETURNING log_id
+        """
+        params = (metric_history_data_lower['user_id'], metric_history_data_lower['weight'])
+        # Corrected: logid -> log_id
+        log_id = self._execute_query(sql, params, commit=True, returning_id_column='log_id')
+        logger.info(f"Created metric history with Log ID: {log_id} for User ID: {metric_history_data_lower['user_id']}")
+        # Corrected: MetricHistoryId -> log_id
+        return {"log_id": log_id}
 
     def update_metric_history(self, log_id, updates):
-        try:
-            if not updates:
-                raise ValueError("At least one field must be provided for updates.")
+        updates_lower = {k.lower(): v for k, v in updates.items()}
+        if not updates_lower:
+            raise ValueError("At least one field must be provided for updates.")
 
-            sql = "UPDATE Metrics_history SET "
-            set_statements = []
-            parameters = []
+        set_clauses = [f"{key} = %s" for key in updates_lower.keys()]
+        # Corrected: WHERE logid -> WHERE log_id
+        sql = f"UPDATE metrics_history SET {', '.join(set_clauses)} WHERE log_id = %s"
+        params = list(updates_lower.values()) + [log_id]
 
-            for key, value in updates.items():
-                set_statements.append(f"{key}=?")
-                parameters.append(value)
-
-            sql += ", ".join(set_statements)
-            sql += " WHERE Log_id=?"
-            parameters.append(log_id)
-
-            self.db.cursor.execute(sql, parameters)
-            self.db.conn.commit()
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while updating metric history (Log ID: {log_id}): {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error updating metric history (Log ID: {log_id}): {e}")
-            raise ValueError(str(e))
+        self._execute_query(sql, tuple(params), commit=True)
+        logger.info(f"Updated metric history with Log ID: {log_id}")
 
     def list_metric_history(self, user_id=None):
-        try:
-            sql = "SELECT * FROM Metrics_history"
-            parameters = []
+        sql = "SELECT * FROM metrics_history"
+        params = []
+        if user_id:
+            # user_id correct
+            sql += " WHERE user_id = %s"
+            params.append(user_id)
+        return self._execute_query(sql, params, fetch_all=True)
 
-            if user_id:
-                sql += " WHERE User_id=?"
-                parameters.append(user_id)
-
-            self.db.cursor.execute(sql, parameters)
-
-            if self.db.cursor.description is None:
-                raise ValueError("No results returned from the database query.")
-
-            columns = [column[0] for column in self.db.cursor.description]
-            return [dict(zip(columns, row)) for row in self.db.cursor.fetchall()]
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while listing metric history: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error listing metric history: {e}")
-            raise ValueError(str(e))
-
+    # --- Preferences Methods ---
     def create_preference(self, preference_data):
-        try:
-            check_required_fields(preference_data, ['User_id', 'Goals', 'Diet_type'])
-            sql = """
-                INSERT INTO User_preferences (User_id, Goals, Diet_type, Food_restrictions, Cuisine_preferences)
-                OUTPUT INSERTED.Preference_id
-                VALUES (?, ?, ?, ?, ?)
-            """
-            self.db.cursor.execute(sql, (
-                preference_data['User_id'], preference_data['Goals'],
-                preference_data['Diet_type'], preference_data.get('Food_restrictions', None),
-                preference_data.get('Cuisine_preferences', None)
-            ))
-            self.db.conn.commit()
-            return {"PreferenceId": self.db.cursor.fetchone()[0]}
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while creating preference: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error creating preference: {e}")
-            raise ValueError(str(e))
+        preference_data_lower = {k.lower(): v for k, v in preference_data.items()}
+        check_required_fields(preference_data_lower, ['user_id', 'goals', 'diet_type'])
+        sql = """
+            INSERT INTO user_preferences (user_id, goals, diet_type, food_restrictions, cuisine_preferences)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING preference_id
+        """
+        params = (
+            preference_data_lower['user_id'], preference_data_lower['goals'],
+            preference_data_lower['diet_type'], preference_data_lower.get('food_restrictions'),
+            preference_data_lower.get('cuisine_preferences')
+        )
+        # Corrected: preferenceid -> preference_id
+        preference_id = self._execute_query(sql, params, commit=True, returning_id_column='preference_id')
+        logger.info(f"Created preference with ID: {preference_id} for User ID: {preference_data_lower['user_id']}")
+        # Corrected: PreferenceId -> preference_id
+        return {"preference_id": preference_id}
 
     def update_preference(self, preference_id, updates):
-        try:
-            if not updates:
-                raise ValueError("At least one field must be provided for updates.")
+        updates_lower = {k.lower(): v for k, v in updates.items()}
+        if not updates_lower:
+            raise ValueError("At least one field must be provided for updates.")
 
-            sql = "UPDATE UserPreferences SET "
-            set_statements = []
-            parameters = []
+        set_clauses = [f"{key} = %s" for key in updates_lower.keys()]
+        # Corrected: WHERE preferenceid -> WHERE preference_id
+        sql = f"UPDATE user_preferences SET {', '.join(set_clauses)} WHERE preference_id = %s"
+        params = list(updates_lower.values()) + [preference_id]
 
-            for key, value in updates.items():
-                set_statements.append(f"{key}=?")
-                parameters.append(value)
-
-            sql += ", ".join(set_statements)
-            sql += " WHERE Preference_id=?"
-            parameters.append(preference_id)
-
-            self.db.cursor.execute(sql, parameters)
-            self.db.conn.commit()
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while updating preference (ID: {preference_id}): {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error updating preference (ID: {preference_id}): {e}")
-            raise ValueError(str(e))
+        self._execute_query(sql, tuple(params), commit=True)
+        logger.info(f"Updated preference with ID: {preference_id}")
 
     def list_preferences(self, user_id=None):
-        try:
-            sql = "SELECT * FROM User_preferences"
-            parameters = []
+        sql = "SELECT * FROM user_preferences"
+        params = []
+        if user_id:
+            # user_id correct
+            sql += " WHERE user_id = %s"
+            params.append(user_id)
+        return self._execute_query(sql, params, fetch_all=True)
 
-            if user_id:
-                sql += " WHERE User_id=?"
-                parameters.append(user_id)
 
-            self.db.cursor.execute(sql, parameters)
-
-            if self.db.cursor.description is None:
-                raise ValueError("No results returned from the database query.")
-
-            columns = [column[0] for column in self.db.cursor.description]
-            return [dict(zip(columns, row)) for row in self.db.cursor.fetchall()]
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while listing preferences: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error listing preferences: {e}")
-            raise ValueError(str(e))
-
-# CRUD operations for Chefs
-class Chefs:
-    def __init__(self, db):
-        self.db = db
-        logger.info("Chefs class initialized.")
-
+# --- CRUD operations for Chefs ---
+class Chefs(BaseRepository):
     def hash_password(self, password):
-        return bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
     def create_chef(self, chef_data):
-        try:
-            check_required_fields(chef_data, ['Name', 'Password'])
-            equipment = serialize_list(chef_data.get('Equipment', []))
-            availability = serialize_list(chef_data.get('Availability', []))
-            languages = serialize_list(chef_data.get('Languages', []))
-            specialties = serialize_list(chef_data.get('Specialties', []))
-            certifications = serialize_list(chef_data.get('Certifications', []))
+        chef_data_lower = {k.lower(): v for k, v in chef_data.items()}
+        check_required_fields(chef_data_lower, ['name', 'password', 'email'])
 
-            hashed_password = self.hash_password(chef_data['Password'])
-            user_type = chef_data.get('User_Type', 'chef')
+        email = chef_data_lower['email']
+        # chefid is correct (as per user instruction)
+        check_sql = "SELECT chefid FROM chefs WHERE lower(email) = lower(%s)"
+        existing_chef = self._execute_query(check_sql, (email,), fetch_one=True)
+        if existing_chef:
+            raise ValueError(f"A chef with email '{email}' already exists.")
 
-            sql = """
-                INSERT INTO Chefs (Name, Image, Email, Hashed_Password, Is_Email_Verified, User_Type,
-                Chef_Type, Is_Active, Rating, Price, Phone_Number, Experience, ServiceRadius,
-                ResponseTime, MinNotice, Punctuality, TeamSize, Equipment, Bio, Availability,
-                Languages, Specialties, Certifications, SampleMenu, Reviews,
-                Registration_Date, Location, Added_By, Added_By_Type, Last_Login)
-                OUTPUT INSERTED.ChefID
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            logger.debug(f"Executing SQL for creating chef: {chef_data}")
+        equipment = serialize_list(chef_data_lower.get('equipment', []))
+        availability = serialize_list(chef_data_lower.get('availability', []))
+        languages = serialize_list(chef_data_lower.get('languages', []))
+        specialties = serialize_list(chef_data_lower.get('specialties', []))
+        certifications = serialize_list(chef_data_lower.get('certifications', []))
 
-            self.db.cursor.execute(sql, (
-                chef_data.get('Name'), chef_data.get('Image'), chef_data.get('Email'),
-                hashed_password, chef_data.get('Is_Email_Verified', 0), user_type,
-                chef_data.get('Chef_Type', 'Individual'), chef_data.get('Is_Active', 1),
-                chef_data.get('Rating', 0), chef_data.get('Price'), chef_data.get('Phone_Number'),
-                chef_data.get('Experience'), chef_data.get('ServiceRadius'),
-                chef_data.get('ResponseTime'), chef_data.get('MinNotice'),
-                chef_data.get('Punctuality', 0), chef_data.get('TeamSize'), equipment,
-                chef_data.get('Bio'), availability, languages, specialties, certifications,
-                chef_data.get('SampleMenu'), chef_data.get('Reviews'), datetime.now(),
-                chef_data.get('Location'), chef_data.get('Added_By', 0),
-                chef_data.get('Added_By_Type', user_type), datetime.now()
-            ))
-            chef_id = self.db.cursor.fetchone()[0]
-            self.db.conn.commit()
-            logger.info(f"Created chef with ID: {chef_id} and User Type: {user_type}")
+        hashed_password = self.hash_password(chef_data_lower['password'])
+        user_type = chef_data_lower.get('user_type', 'chef')
+        is_email_verified = chef_data_lower.get('is_email_verified', False)
+        is_active = chef_data_lower.get('is_active', True)
+        added_by = chef_data_lower.get('added_by', 0)
+
+        sql = """
+            INSERT INTO chefs (name, image, email, hashed_password, is_email_verified, user_type,
+            chef_type, is_active, rating, price, phone_number, experience, serviceradius,
+            responsetime, minnotice, punctuality, teamsize, equipment, bio, availability,
+            languages, specialties, certifications, samplemenu, reviews,
+            registration_date, location, added_by, added_by_type, last_login)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s, %s, %s, NOW())
+            RETURNING chefid
+        """
+        params = (
+            chef_data_lower['name'], chef_data_lower.get('image'), email,
+            hashed_password, is_email_verified, user_type,
+            chef_data_lower.get('chef_type', 'Individual'), is_active,
+            chef_data_lower.get('rating', 0.0), chef_data_lower.get('price'), chef_data_lower.get('phone_number'),
+            chef_data_lower.get('experience'), chef_data_lower.get('serviceradius'),
+            chef_data_lower.get('responsetime'), chef_data_lower.get('minnotice'),
+            chef_data_lower.get('punctuality', 0.0), chef_data_lower.get('teamsize'), equipment,
+            chef_data_lower.get('bio'), availability, languages, specialties, certifications,
+            chef_data_lower.get('samplemenu'), chef_data_lower.get('reviews'),
+            chef_data_lower.get('location'), added_by,
+            chef_data_lower.get('added_by_type', user_type)
+        )
+        # chefid is correct
+        chef_id = self._execute_query(sql, params, commit=True, returning_id_column='chefid')
+        if chef_id:
+            logger.info(f"Created chef with ID: {chef_id}, Email: {email}, User Type: {user_type}")
+            # ChefID key correct
             return {"ChefID": chef_id, "UserType": user_type}
+        else:
+            raise ValueError("Chef creation failed, no ID returned.")
 
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while creating chef: {sql_error.args}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error creating chef: {e}")
-            raise ValueError(str(e))
 
     def list_chefs(self, chef_id=None):
-        try:
-            if chef_id is not None:
-                sql = "SELECT * FROM Chefs WHERE ChefID = ?"
-                logger.debug(f"Listing chef with ID: {chef_id}")
-                self.db.cursor.execute(sql, chef_id)
-            else:
-                sql = "SELECT * FROM Chefs"
-                logger.debug("Listing all chefs.")
-                self.db.cursor.execute(sql)
+        sql = "SELECT * FROM chefs"
+        params = []
+        if chef_id is not None:
+            # chefid is correct
+            sql += " WHERE chefid = %s"
+            params.append(chef_id)
 
-            if self.db.cursor.description is None:
-                raise ValueError("No results returned from the database query.")
+        chefs_list = self._execute_query(sql, params, fetch_all=True)
+        if chef_id and not chefs_list:
+             logger.warning(f"No chef found with ID: {chef_id}")
+             return None
+        return chefs_list
 
-            columns = [column[0] for column in self.db.cursor.description]
-            results = [dict(zip(columns, row)) for row in self.db.cursor.fetchall()]
-            logger.info(f"Fetched {len(results)} chefs.")
-            return results
-        
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while listing chefs: {sql_error.args}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error listing chefs: {e}")
-            raise ValueError(str(e))
 
     def update_chef(self, chef_id, updates):
-        try:
-            if not updates:
-                raise ValueError("At least one field must be provided for updates.")
+        updates_lower = {k.lower(): v for k, v in updates.items()}
+        if not updates_lower:
+            raise ValueError("At least one field must be provided for updates.")
 
-            sql = "UPDATE Chefs SET "
-            set_statements = []
-            parameters = []
+        for key in ['equipment', 'availability', 'languages', 'specialties', 'certifications']:
+             if key in updates_lower and isinstance(updates_lower[key], list):
+                 updates_lower[key] = serialize_list(updates_lower[key])
 
-            for key, value in updates.items():
-                set_statements.append(f"{key}=?")
-                parameters.append(value)
+        set_clauses = [f"{key} = %s" for key in updates_lower.keys()]
+        # chefid is correct
+        sql = f"UPDATE chefs SET {', '.join(set_clauses)} WHERE chefid = %s"
+        params = list(updates_lower.values()) + [chef_id]
 
-            sql += ", ".join(set_statements)
-            sql += " WHERE ChefID=?"
-            parameters.append(chef_id)
+        self._execute_query(sql, tuple(params), commit=True)
+        logger.info(f"Updated chef with ID: {chef_id}")
 
-            logger.debug(f"Executing SQL for updating chef ID {chef_id}: {parameters}")
-            self.db.cursor.execute(sql, parameters)
-            self.db.conn.commit()
-            logger.info(f"Updated chef with ID: {chef_id}")
 
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while updating chef (ID: {chef_id}): {sql_error.args}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error updating chef (ID: {chef_id}): {e}")
-            raise ValueError(str(e))
+    def login_chef(self, identifier, password):
+        sql = """
+            SELECT chefid, hashed_password, user_type
+            FROM chefs
+            WHERE lower(name) = lower(%s) OR lower(email) = lower(%s) -- Case-insensitive
+        """
+        params = (identifier, identifier)
+        result_dict = self._execute_query(sql, params, fetch_all=True) # fetch_all returns list of dicts
+        result = result_dict[0] if result_dict else None # Get the first dict if exists
 
-    def login_user(self, identifier, password):
-        try:
-            connection = get_db_connection()
-            cursor = connection.cursor()
-            query = "SELECT ChefID, Hashed_Password, User_Type FROM Chefs WHERE Name = ? OR Email = ?"
-            cursor.execute(query, (identifier, identifier))
-            result = cursor.fetchone()
+        if not result:
+            logger.warning(f"Chef login attempt failed: Identifier '{identifier}' not found.")
+            return {'message': 'Invalid credentials or account not found.'}, 401
 
-            if not result:
-                logger.warning(f"Invalid credentials provided for identifier: {identifier}")
-                return {'message': 'Invalid credentials or account not found.'}, 401
+        # chefid is correct
+        chef_id = result['chefid']
+        stored_hashed_password = result['hashed_password']
+        user_type = result['user_type']
 
-            chef_id, stored_hashed_password, user_type = result
+        if isinstance(stored_hashed_password, str):
+             stored_hashed_password_bytes = stored_hashed_password.encode('utf-8')
+        elif isinstance(stored_hashed_password, bytes):
+             stored_hashed_password_bytes = stored_hashed_password
+        else:
+            logger.error(f"Unexpected password hash type for chef {chef_id}: {type(stored_hashed_password)}")
+            return {'message': 'Internal server error during login.'}, 500
 
-            if bcrypt.checkpw(password.encode(), stored_hashed_password.encode()):
-                logger.info(f"Login successful for user: {identifier} (ID: {chef_id})")
-                return {'message': 'Login successful', 'chef_id': chef_id, 'user_type': user_type}, 200
-            else:
-                logger.warning(f"Invalid password for user: {identifier}.")
-                return {'message': 'Invalid credentials.'}, 401
-            
-        except pyodbc.Error as e:
-            logger.error(f"Error during login for user: {identifier}. Error: {e.args}")
-            return {'message': 'Error during login'}, 500
-        except Exception as e:
-            logger.error(f"Unexpected error during login for user: {identifier}. Error: {e}")
-            return {'message': 'Error during login'}, 500
-        finally:
-            if connection:
-                connection.close()
+        if bcrypt.checkpw(password.encode('utf-8'), stored_hashed_password_bytes):
+            logger.info(f"Chef login successful for identifier '{identifier}', Chef ID: {chef_id}")
+            # chef_id is correct
+            return {'message': 'Login successful', 'chef_id': chef_id, 'user_type': user_type}, 200
+        else:
+            logger.warning(f"Chef login attempt failed: Invalid password for identifier '{identifier}'.")
+            return {'message': 'Invalid credentials.'}, 401
 
-# CRUD operations for Producers
-class Producers:
-    def __init__(self, db):
-        self.db = db
-
+# --- CRUD operations for Producers ---
+class Producers(BaseRepository):
     def hash_password(self, password):
-        return bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
     def create_producer(self, producer_data):
-        try:
-            check_required_fields(producer_data, ['Name', 'Password', 'Email'])
+        producer_data_lower = {k.lower(): v for k, v in producer_data.items()}
+        check_required_fields(producer_data_lower, ['name', 'password', 'email'])
 
-            existing_email_sql = "SELECT COUNT(*) FROM Producers WHERE Email = ?"
-            self.db.cursor.execute(existing_email_sql, (producer_data['Email'],))
-            email_count = self.db.cursor.fetchone()[0]
+        email = producer_data_lower['email']
+        # Corrected: producerid -> producer_id
+        check_sql = "SELECT producer_id FROM producers WHERE lower(email) = lower(%s)"
+        existing_producer = self._execute_query(check_sql, (email,), fetch_one=True)
+        if existing_producer:
+            raise ValueError(f"A producer with email '{email}' already exists.")
 
-            if email_count > 0:
-                raise ValueError("A producer with this email already exists.")
+        hashed_password = self.hash_password(producer_data_lower['password'])
+        user_type = producer_data_lower.get('user_type', 'producer')
+        is_email_verified = producer_data_lower.get('is_email_verified', False)
+        is_active = producer_data_lower.get('is_active', True)
+        added_by = producer_data_lower.get('added_by', 0)
 
-            hashed_password = self.hash_password(producer_data['Password'])
-            user_type = producer_data.get('User_Type', 'Producer')
+        sql = """
+            INSERT INTO producers (name, image, email, hashed_password, is_email_verified, user_type,
+            producer_type, is_active, rating, phone_number, registration_date,
+            location, added_by, added_by_type, last_login)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s, %s, %s, NOW())
+            RETURNING producer_id
+        """
+        params = (
+            producer_data_lower['name'], producer_data_lower.get('image'), email,
+            hashed_password, is_email_verified, user_type,
+            producer_data_lower.get('producer_type', 'Individual'), is_active,
+            producer_data_lower.get('rating', 0.0), producer_data_lower.get('phone_number'),
+            producer_data_lower.get('location'), added_by,
+            producer_data_lower.get('added_by_type', user_type)
+        )
+        # Corrected: producerid -> producer_id
+        producer_id = self._execute_query(sql, params, commit=True, returning_id_column='producer_id')
+        if producer_id:
+            logger.info(f"Created producer with ID: {producer_id}, Email: {email}, User Type: {user_type}")
+            # Corrected: ProducerID -> producer_id
+            return {"producer_id": producer_id, "UserType": user_type}
+        else:
+            raise ValueError("Producer creation failed, no ID returned.")
 
-            sql = """
-                INSERT INTO Producers (Name, Image, Email, Hashed_Password, Is_Email_Verified, User_Type,
-                Producer_Type, Is_Active, Rating, Phone_Number, Registration_Date,
-                Location, Added_By, Added_By_Type, Last_Login) OUTPUT INSERTED.Producer_Id
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            self.db.cursor.execute(sql, (
-                producer_data['Name'], producer_data.get('Image'), producer_data['Email'],
-                hashed_password, producer_data.get('Is_Email_Verified', 0), user_type,
-                producer_data.get('Producer_Type', 'Individual'), producer_data.get('Is_Active', 1),
-                producer_data.get('Rating', 0), producer_data.get('Phone_Number'),
-                datetime.now(), producer_data.get('Location'), producer_data.get('Added_By', 0),
-                producer_data.get('Added_By_Type', user_type), datetime.now()
-            ))
-            producer_id = self.db.cursor.fetchone()[0]
-            self.db.conn.commit()
-            logger.info(f"Created producer with ID: {producer_id} and User Type: {user_type}")
-            return {"ProducerID": producer_id, "UserType": user_type}
-
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while creating producer: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error creating producer: {e}")
-            raise ValueError(str(e))
 
     def list_producers(self, producer_id=None):
-        try:
-            if producer_id:
-                sql = "SELECT * FROM Producers WHERE Producer_Id = ?"
-                self.db.cursor.execute(sql, [producer_id])
-            else:
-                sql = "SELECT * FROM Producers"
-                self.db.cursor.execute(sql)
+        sql = "SELECT * FROM producers"
+        params = []
+        if producer_id:
+            # Corrected: producerid -> producer_id
+            sql += " WHERE producer_id = %s"
+            params.append(producer_id)
 
-            if self.db.cursor.description is None:
-                raise ValueError("No results returned from the database query.")
+        producers_list = self._execute_query(sql, params, fetch_all=True)
+        if producer_id and not producers_list:
+             logger.warning(f"No producer found with ID: {producer_id}")
+             return None
+        return producers_list
 
-            columns = [column[0] for column in self.db.cursor.description]
-            results = self.db.cursor.fetchall()
-            if producer_id and not results:
-                raise ValueError(f"No producer found with ID: {producer_id}")
-
-            return [dict(zip(columns, row)) for row in results]
-
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while listing producers: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error listing producers: {e}")
-            raise ValueError(str(e))
 
     def update_producer(self, producer_id, updates):
-        try:
-            if not updates:
-                raise ValueError("At least one field must be provided for updates.")
+        updates_lower = {k.lower(): v for k, v in updates.items()}
+        if not updates_lower:
+            raise ValueError("At least one field must be provided for updates.")
 
-            sql = "UPDATE Producers SET "
-            set_statements = []
-            parameters = []
+        set_clauses = [f"{key} = %s" for key in updates_lower.keys()]
+        # Corrected: WHERE producerid -> WHERE producer_id
+        sql = f"UPDATE producers SET {', '.join(set_clauses)} WHERE producer_id = %s"
+        params = list(updates_lower.values()) + [producer_id]
 
-            for key, value in updates.items():
-                set_statements.append(f"{key}=?")
-                parameters.append(value)
+        self._execute_query(sql, tuple(params), commit=True)
+        logger.info(f"Updated producer with ID: {producer_id}")
 
-            sql += ", ".join(set_statements)
-            sql += " WHERE Producer_Id=?"
-            parameters.append(producer_id)
 
-            self.db.cursor.execute(sql, parameters)
-            self.db.conn.commit()
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while updating producer (ID: {producer_id}): {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error updating producer (ID: {producer_id}): {e}")
-            raise ValueError(str(e))
+    def login_producer(self, identifier, password):
+        sql = """
+            SELECT producer_id, hashed_password, user_type
+            FROM producers
+            WHERE lower(name) = lower(%s) OR lower(email) = lower(%s) -- Case-insensitive
+        """
+        params = (identifier, identifier)
+        result_dict = self._execute_query(sql, params, fetch_all=True)
+        result = result_dict[0] if result_dict else None
 
-    def login_user(self, identifier, password):
-        try:
-            connection = get_db_connection()
-            cursor = connection.cursor()
-            query = "SELECT Producer_Id, Hashed_Password, User_Type FROM Producers WHERE Name = ? OR Email = ?"
-            cursor.execute(query, (identifier, identifier))
-            result = cursor.fetchone()
+        if not result:
+            logger.warning(f"Producer login attempt failed: Identifier '{identifier}' not found.")
+            return {'message': 'Invalid credentials or account not found.'}, 401
 
-            if not result:
-                return {'message': 'Invalid credentials or account not found.'}, 401
+        # Corrected: producerid -> producer_id
+        producer_id = result['producer_id']
+        stored_hashed_password = result['hashed_password']
+        user_type = result['user_type']
 
-            producer_id, stored_hashed_password, user_type = result
+        if isinstance(stored_hashed_password, str):
+             stored_hashed_password_bytes = stored_hashed_password.encode('utf-8')
+        elif isinstance(stored_hashed_password, bytes):
+             stored_hashed_password_bytes = stored_hashed_password
+        else:
+            logger.error(f"Unexpected password hash type for producer {producer_id}: {type(stored_hashed_password)}")
+            return {'message': 'Internal server error during login.'}, 500
 
-            if bcrypt.checkpw(password.encode(), stored_hashed_password.encode()):
-                return {'message': 'Login successful', 'producer_id': producer_id, 'user_type': user_type}, 200
-            else:
-                return {'message': 'Invalid credentials.'}, 401
-        except pyodbc.Error as e:
-            logger.error(f"Error during login: {e}")
-            return {'message': 'Error during login'}, 500
-        finally:
-            if connection:
-                connection.close()
 
-# CRUD operations for Stakeholders
-class Stakeholders:
-    def __init__(self, db):
-        self.db = db
+        if bcrypt.checkpw(password.encode('utf-8'), stored_hashed_password_bytes):
+            logger.info(f"Producer login successful for identifier '{identifier}', Producer ID: {producer_id}")
+            # Corrected: producer_id key
+            return {'message': 'Login successful', 'producer_id': producer_id, 'user_type': user_type}, 200
+        else:
+            logger.warning(f"Producer login attempt failed: Invalid password for identifier '{identifier}'.")
+            return {'message': 'Invalid credentials.'}, 401
 
+
+# --- CRUD operations for Stakeholders ---
+class Stakeholders(BaseRepository):
     def hash_password(self, password):
-        return bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
     def create_stakeholder(self, stakeholder_data):
-        try:
-            check_required_fields(stakeholder_data, ['Name', 'Password', 'Email', 'Full_Name'])
+        stakeholder_data_lower = {k.lower(): v for k, v in stakeholder_data.items()}
+        check_required_fields(stakeholder_data_lower, ['name', 'password', 'email', 'full_name'])
 
-            existing_email_sql = "SELECT COUNT(*) FROM Stakeholders WHERE Email = ?"
-            self.db.cursor.execute(existing_email_sql, (stakeholder_data['Email'],))
-            email_count = self.db.cursor.fetchone()[0]
+        email = stakeholder_data_lower['email']
+        # Corrected: stakeholderid -> stakeholder_id
+        check_sql = "SELECT stakeholder_id FROM stakeholders WHERE lower(email) = lower(%s)"
+        existing_stakeholder = self._execute_query(check_sql, (email,), fetch_one=True)
+        if existing_stakeholder:
+            raise ValueError(f"A stakeholder with email '{email}' already exists.")
 
-            if email_count > 0:
-                raise ValueError("A stakeholder with this email already exists.")
+        hashed_password = self.hash_password(stakeholder_data_lower['password'])
+        user_type = stakeholder_data_lower.get('user_type', 'stakeholder')
+        is_email_verified = stakeholder_data_lower.get('is_email_verified', False)
+        is_active = stakeholder_data_lower.get('is_active', True)
+        added_by = stakeholder_data_lower.get('added_by', 0)
 
-            hashed_password = self.hash_password(stakeholder_data['Password'])
-            user_type = stakeholder_data.get('User_Type', 'stakeholder')
+        sql = """
+            INSERT INTO stakeholders (name, full_name, image, email, hashed_password,
+            is_email_verified, user_type, is_active, rating, phone_number,
+            registration_date, location, added_by, added_by_type, last_login)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s, %s, %s, NOW())
+            RETURNING stakeholder_id
+        """
+        params = (
+            stakeholder_data_lower['name'], stakeholder_data_lower['full_name'], stakeholder_data_lower.get('image'),
+            email, hashed_password, is_email_verified,
+            user_type, is_active, stakeholder_data_lower.get('rating', 0.0),
+            stakeholder_data_lower.get('phone_number'), stakeholder_data_lower.get('location'),
+            added_by, stakeholder_data_lower.get('added_by_type', user_type)
+        )
+        # Corrected: stakeholderid -> stakeholder_id
+        stakeholder_id = self._execute_query(sql, params, commit=True, returning_id_column='stakeholder_id')
+        if stakeholder_id:
+            logger.info(f"Created stakeholder with ID: {stakeholder_id}, Email: {email}, User Type: {user_type}")
+            # Corrected: StakeholderID -> stakeholder_id
+            return {"stakeholder_id": stakeholder_id, "UserType": user_type}
+        else:
+            raise ValueError("Stakeholder creation failed, no ID returned.")
 
-            sql = """
-                INSERT INTO Stakeholders (Name, Full_Name, Image, Email, Hashed_Password,
-                Is_Email_Verified, User_Type, Is_Active, Rating, Phone_Number,
-                Registration_Date, Location, Added_By, Added_By_Type, Last_Login)
-                OUTPUT INSERTED.Stakeholder_Id
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            self.db.cursor.execute(sql, (
-                stakeholder_data['Name'], stakeholder_data['Full_Name'], stakeholder_data.get('Image'),
-                stakeholder_data['Email'], hashed_password, stakeholder_data.get('Is_Email_Verified', 0),
-                user_type, stakeholder_data.get('Is_Active', 1), stakeholder_data.get('Rating', 0),
-                stakeholder_data.get('Phone_Number'), datetime.now(), stakeholder_data.get('Location'),
-                stakeholder_data.get('Added_By', '0'), stakeholder_data.get('Added_By_Type', user_type),
-                datetime.now()
-            ))
-            stakeholder_id = self.db.cursor.fetchone()[0]
-            self.db.conn.commit()
-            logger.info(f"Created stakeholder with ID: {stakeholder_id} and User Type: {user_type}")
-            return {"StakeholderID": stakeholder_id, "UserType": user_type}
-
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while creating stakeholder: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error creating stakeholder: {e}")
-            raise ValueError(str(e))
 
     def list_stakeholders(self):
-        try:
-            sql = "SELECT * FROM Stakeholders"
-            self.db.cursor.execute(sql)
+        sql = "SELECT * FROM stakeholders"
+        return self._execute_query(sql, fetch_all=True)
 
-            if self.db.cursor.description is None:
-                raise ValueError("No results returned from the database query.")
+    def get_stakeholder_by_id(self, stakeholder_id):
+         # Corrected: stakeholderid -> stakeholder_id
+         sql = "SELECT * FROM stakeholders WHERE stakeholder_id = %s"
+         result = self._execute_query(sql, (stakeholder_id,), fetch_all=True)
+         return result[0] if result else None
 
-            columns = [column[0] for column in self.db.cursor.description]
-            return [dict(zip(columns, row)) for row in self.db.cursor.fetchall()]
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while listing stakeholders: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error listing stakeholders: {e}")
-            raise ValueError(str(e))
 
     def update_stakeholder(self, stakeholder_id, updates):
-        try:
-            if not updates:
-                raise ValueError("At least one field must be provided for updates.")
+        updates_lower = {k.lower(): v for k, v in updates.items()}
+        if not updates_lower:
+            raise ValueError("At least one field must be provided for updates.")
 
-            sql = "UPDATE Stakeholders SET "
-            set_statements = []
-            parameters = []
+        set_clauses = [f"{key} = %s" for key in updates_lower.keys()]
+        # Corrected: WHERE stakeholderid -> WHERE stakeholder_id
+        sql = f"UPDATE stakeholders SET {', '.join(set_clauses)} WHERE stakeholder_id = %s"
+        params = list(updates_lower.values()) + [stakeholder_id]
 
-            for key, value in updates.items():
-                set_statements.append(f"{key}=?")
-                parameters.append(value)
+        self._execute_query(sql, tuple(params), commit=True)
+        logger.info(f"Updated stakeholder with ID: {stakeholder_id}")
 
-            sql += ", ".join(set_statements)
-            sql += " WHERE Stakeholder_Id=?"
-            parameters.append(stakeholder_id)
 
-            self.db.cursor.execute(sql, parameters)
-            self.db.conn.commit()
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while updating stakeholder (ID: {stakeholder_id}): {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error updating stakeholder (ID: {stakeholder_id}): {e}")
-            raise ValueError(str(e))
+    def login_stakeholder(self, identifier, password):
+        sql = """
+            SELECT stakeholder_id, hashed_password, user_type
+            FROM stakeholders
+            WHERE lower(name) = lower(%s) OR lower(email) = lower(%s) -- Case-insensitive
+        """
+        params = (identifier, identifier)
+        result_dict = self._execute_query(sql, params, fetch_all=True)
+        result = result_dict[0] if result_dict else None
 
-    def login_user(self, identifier, password):
-        try:
-            connection = get_db_connection()
-            cursor = connection.cursor()
-            query = "SELECT Stakeholder_Id, Hashed_Password, User_Type FROM Stakeholders WHERE Name = ? OR Email = ?"
-            cursor.execute(query, (identifier, identifier))
-            result = cursor.fetchone()
+        if not result:
+            logger.warning(f"Stakeholder login attempt failed: Identifier '{identifier}' not found.")
+            return {'message': 'Invalid credentials or account not found.'}, 401
 
-            if not result:
-                return {'message': 'Invalid credentials or account not found.'}, 401
+        # Corrected: stakeholderid -> stakeholder_id
+        stakeholder_id = result['stakeholder_id']
+        stored_hashed_password = result['hashed_password']
+        user_type = result['user_type']
 
-            stakeholder_id, stored_hashed_password, user_type = result
+        if isinstance(stored_hashed_password, str):
+             stored_hashed_password_bytes = stored_hashed_password.encode('utf-8')
+        elif isinstance(stored_hashed_password, bytes):
+             stored_hashed_password_bytes = stored_hashed_password
+        else:
+            logger.error(f"Unexpected password hash type for stakeholder {stakeholder_id}: {type(stored_hashed_password)}")
+            return {'message': 'Internal server error during login.'}, 500
 
-            if bcrypt.checkpw(password.encode(), stored_hashed_password.encode()):
-                return {'message': 'Login successful', 'stakeholder_id': stakeholder_id, 'user_type': user_type}, 200
-            else:
-                return {'message': 'Invalid credentials.'}, 401
-        except pyodbc.Error as e:
-            logger.error(f"Error during login: {e}")
-            return {'message': 'Error during login'}, 500
-        finally:
-            if connection:
-                connection.close()
+        if bcrypt.checkpw(password.encode('utf-8'), stored_hashed_password_bytes):
+            logger.info(f"Stakeholder login successful for identifier '{identifier}', Stakeholder ID: {stakeholder_id}")
+            # Corrected: stakeholder_id key
+            return {'message': 'Login successful', 'stakeholder_id': stakeholder_id, 'user_type': user_type}, 200
+        else:
+            logger.warning(f"Stakeholder login attempt failed: Invalid password for identifier '{identifier}'.")
+            return {'message': 'Invalid credentials.'}, 401
 
-# CRUD operations for Herbals
-class Herbals:
-    def __init__(self, db):
-        self.db = db
-
+# --- CRUD operations for Herbals ---
+class Herbals(BaseRepository):
     def create_herbal(self, herbal_data):
-        try:
-            check_required_fields(herbal_data, ['herbal_name', 'description', 'unit', 'price'])
-
-            user_type = herbal_data.get('User_Type', 'herbal')
-
-            sql = """
-                INSERT INTO Herbals (herbal_name, description, unit, price, image_url, date_added,
-                added_by, added_by_type, User_type) OUTPUT INSERTED.HerbalID
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            self.db.cursor.execute(sql, (
-                herbal_data['herbal_name'], herbal_data['description'], herbal_data['unit'],
-                herbal_data['price'], herbal_data.get('image_url'), datetime.now(),
-                herbal_data.get('added_by'), herbal_data.get('added_by_type', user_type), user_type
-            ))
-            herbal_id = self.db.cursor.fetchone()[0]
-            self.db.conn.commit()
-            logger.info(f"Created herbal with ID: {herbal_id} and User Type: {user_type}")
-            return {"HerbalID": herbal_id, "UserType": user_type}
-
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while creating herbal: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error creating herbal: {e}")
-            raise ValueError(str(e))
+        herbal_data_lower = {k.lower(): v for k, v in herbal_data.items()}
+        check_required_fields(herbal_data_lower, ['herbal_name', 'description', 'unit', 'price'])
+        user_type = herbal_data_lower.get('user_type', 'herbal')
+        sql = """
+            INSERT INTO herbals (herbal_name, description, unit, price, image_url, date_added,
+            added_by, added_by_type, user_type)
+            VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s, %s)
+            RETURNING herbal_id -- Corrected: herbalid -> herbal_id
+        """
+        params = (
+            herbal_data_lower['herbal_name'], herbal_data_lower['description'], herbal_data_lower['unit'],
+            herbal_data_lower['price'], herbal_data_lower.get('image_url'),
+            herbal_data_lower.get('added_by'), herbal_data_lower.get('added_by_type', user_type), user_type
+        )
+        herbal_id = self._execute_query(sql, params, commit=True, returning_id_column='herbal_id')
+        logger.info(f"Created herbal with ID: {herbal_id}")
+        # Corrected: HerbalID -> herbal_id
+        return {"herbal_id": herbal_id, "UserType": user_type}
 
     def update_herbal(self, herbal_id, updates):
-        try:
-            if not updates:
-                raise ValueError("At least one field must be provided for updates.")
-
-            sql = "UPDATE Herbals SET "
-            set_statements = []
-            parameters = []
-
-            for key, value in updates.items():
-                set_statements.append(f"{key}=?")
-                parameters.append(value)
-
-            sql += ", ".join(set_statements)
-            sql += " WHERE herbal_id=?"
-            parameters.append(herbal_id)
-
-            self.db.cursor.execute(sql, parameters)
-            self.db.conn.commit()
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while updating herbal (ID: {herbal_id}): {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error updating herbal (ID: {herbal_id}): {e}")
-            raise ValueError(str(e))
+        updates_lower = {k.lower(): v for k, v in updates.items()}
+        if not updates_lower: raise ValueError("No updates provided.")
+        set_clauses = [f"{k} = %s" for k in updates_lower.keys()]
+        sql = f"UPDATE herbals SET {', '.join(set_clauses)} WHERE herbal_id = %s"
+        params = list(updates_lower.values()) + [herbal_id]
+        self._execute_query(sql, tuple(params), commit=True)
+        logger.info(f"Updated herbal ID: {herbal_id}")
 
     def list_herbals(self):
-        try:
-            sql = "SELECT * FROM Herbals"
-            self.db.cursor.execute(sql)
+        sql = "SELECT * FROM herbals"
+        return self._execute_query(sql, fetch_all=True)
 
-            if self.db.cursor.description is None:
-                raise ValueError("No results returned from the database query.")
+# --- CRUD operations for Meals ---
+class Meals(BaseRepository):
+     def create_meal(self, meal_data):
+        meal_data_lower = {k.lower(): v for k, v in meal_data.items()}
+        check_required_fields(meal_data_lower, ['meal_name', 'meal_category', 'ingredients'])
+        user_type = meal_data_lower.get('user_type', 'meal')
+        sql = """
+            INSERT INTO meals (meal_name, meal_category, ingredients,
+            complementary_dishes, recipe, recipe_link, image_link,
+            goal, dietary_preference, allergies, disease_management,
+            cuisine_preferences, skill_level, prep_time, meal_description,
+            date_added, date_last_edited, added_by, added_by_type, user_type)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), %s, %s, %s)
+            RETURNING meal_id -- Corrected: mealid -> meal_id
+        """
+        params = (
+            meal_data_lower['meal_name'], meal_data_lower['meal_category'], meal_data_lower['ingredients'],
+            meal_data_lower.get('complementary_dishes'), meal_data_lower.get('recipe'), meal_data_lower.get('recipe_link'),
+            meal_data_lower.get('image_link'), meal_data_lower.get('goal'), meal_data_lower.get('dietary_preference'),
+            meal_data_lower.get('allergies'), meal_data_lower.get('disease_management'),
+            meal_data_lower.get('cuisine_preferences'), meal_data_lower.get('skill_level'),
+            meal_data_lower.get('prep_time'), meal_data_lower.get('meal_description'),
+            meal_data_lower.get('added_by'), meal_data_lower.get('added_by_type', user_type), user_type
+        )
+        meal_id = self._execute_query(sql, params, commit=True, returning_id_column='meal_id')
+        logger.info(f"Created meal with ID: {meal_id}")
+        # Corrected: MealID -> meal_id
+        return {"meal_id": meal_id, "UserType": user_type}
 
-            columns = [column[0] for column in self.db.cursor.description]
-            return [dict(zip(columns, row)) for row in self.db.cursor.fetchall()]
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while listing herbals: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error listing herbals: {e}")
-            raise ValueError(str(e))
+     def update_meal(self, meal_id, updates):
+        updates_lower = {k.lower(): v for k, v in updates.items()}
+        if not updates_lower: raise ValueError("No updates provided.")
+        updates_lower['date_last_edited'] = datetime.now()
+        set_clauses = [f"{k} = %s" for k in updates_lower.keys()]
+        sql = f"UPDATE meals SET {', '.join(set_clauses)} WHERE meal_id = %s"
+        params = list(updates_lower.values()) + [meal_id]
+        self._execute_query(sql, tuple(params), commit=True)
+        logger.info(f"Updated meal ID: {meal_id}")
 
-# CRUD operations for Meals
-class Meals:
-    def __init__(self, db):
-        self.db = db
+     def list_meals(self):
+        sql = "SELECT * FROM meals"
+        return self._execute_query(sql, fetch_all=True)
 
-    def create_meal(self, meal_data):
-        try:
-            check_required_fields(meal_data, ['Meal_name', 'Meal_category', 'Ingredients'])
-
-            user_type = meal_data.get('User_Type', 'meal')
-
-            sql = """
-                INSERT INTO Meals (Meal_name, Meal_category, Ingredients,
-                Complementary_dishes, Recipe, Recipe_link, Image_link,
-                Goal, Dietary_preference, Allergies, Disease_management,
-                Cuisine_preferences, Skill_level, Prep_time, meal_description,
-                date_added, date_last_edited, added_by, added_by_type, User_type)
-                OUTPUT INSERTED.MealID VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            self.db.cursor.execute(sql, (
-                meal_data['Meal_name'], meal_data['Meal_category'], meal_data['Ingredients'],
-                meal_data.get('Complementary_dishes'), meal_data.get('Recipe'), meal_data.get('Recipe_link'),
-                meal_data.get('Image_link'), meal_data.get('Goal'), meal_data.get('Dietary_preference'),
-                meal_data.get('Allergies'), meal_data.get('Disease_management'),
-                meal_data.get('Cuisine_preferences'), meal_data.get('Skill_level'),
-                meal_data.get('Prep_time'), meal_data.get('meal_description'),
-                datetime.now(), datetime.now(), meal_data.get('added_by'),
-                meal_data.get('added_by_type', user_type), user_type
-            ))
-            meal_id = self.db.cursor.fetchone()[0]
-            self.db.conn.commit()
-            logger.info(f"Created meal with ID: {meal_id} and User Type: {user_type}")
-            return {"MealID": meal_id, "UserType": user_type}
-
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while creating meal: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error creating meal: {e}")
-            raise ValueError(str(e))
-
-    def update_meal(self, meal_id, updates):
-        try:
-            if not updates:
-                raise ValueError("At least one field must be provided for updates.")
-
-            sql = "UPDATE Meals SET "
-            set_statements = []
-            parameters = []
-
-            for key, value in updates.items():
-                set_statements.append(f"{key}=?")
-                parameters.append(value)
-
-            sql += ", ".join(set_statements)
-            sql += " WHERE Meal_id=?"
-            parameters.append(meal_id)
-
-            self.db.cursor.execute(sql, parameters)
-            self.db.conn.commit()
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while updating meal (ID: {meal_id}): {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error updating meal (ID: {meal_id}): {e}")
-            raise ValueError(str(e))
-
-    def list_meals(self):
-        try:
-            sql = "SELECT * FROM Meals"
-            self.db.cursor.execute(sql)
-
-            if self.db.cursor.description is None:
-                raise ValueError("No results returned from the database query.")
-
-            columns = [column[0] for column in self.db.cursor.description]
-            return [dict(zip(columns, row)) for row in self.db.cursor.fetchall()]
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while listing meals: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error listing meals: {e}")
-            raise ValueError(str(e))
-
-# CRUD operations for Produce
-class Produce:
-    def __init__(self, db):
-        self.db = db
-
+# --- CRUD operations for Produce ---
+class Produce(BaseRepository):
     def create_produce(self, produce_data):
-        try:
-            check_required_fields(produce_data, ['Produce_name', 'Unit_grams', 'Calories'])
-
-            user_type = produce_data.get('User_Type', 'produce')
-
-            sql = """
-                INSERT INTO Produce (Produce_name, Unit_grams, Calories, Cholesterol,
-                Carbohydrates, Proteins, Fats, Fiber, Sugars, Meal_type,
-                Source, Nutritional_info, date_added, date_last_edited,
-                added_by, added_by_type, User_type) OUTPUT INSERTED.ProduceID
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            self.db.cursor.execute(sql, (
-                produce_data['Produce_name'], produce_data['Unit_grams'], produce_data['Calories'],
-                produce_data.get('Cholesterol', None), produce_data.get('Carbohydrates', None),
-                produce_data.get('Proteins', None), produce_data.get('Fats', None),
-                produce_data.get('Fiber', None), produce_data.get('Sugars', None),
-                produce_data.get('Meal_type', None), produce_data.get('Source', None),
-                produce_data.get('Nutritional_info', None), datetime.now(), datetime.now(),
-                produce_data.get('added_by'), produce_data.get('added_by_type', user_type), user_type
-            ))
-            produce_id = self.db.cursor.fetchone()[0]
-            self.db.conn.commit()
-            logger.info(f"Created produce with ID: {produce_id} and User Type: {user_type}")
-            return {"ProduceID": produce_id, "UserType": user_type}
-
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while creating produce: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error creating produce: {e}")
-            raise ValueError(str(e))
+        produce_data_lower = {k.lower(): v for k, v in produce_data.items()}
+        check_required_fields(produce_data_lower, ['produce_name', 'unit_grams', 'calories'])
+        user_type = produce_data_lower.get('user_type', 'produce')
+        sql = """
+            INSERT INTO produce (produce_name, unit_grams, calories, cholesterol,
+            carbohydrates, proteins, fats, fiber, sugars, meal_type,
+            source, nutritional_info, date_added, date_last_edited,
+            added_by, added_by_type, user_type)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), %s, %s, %s)
+            RETURNING produce_id -- Corrected: produceid -> produce_id
+        """
+        params = (
+            produce_data_lower['produce_name'], produce_data_lower['unit_grams'], produce_data_lower['calories'],
+            produce_data_lower.get('cholesterol'), produce_data_lower.get('carbohydrates'),
+            produce_data_lower.get('proteins'), produce_data_lower.get('fats'),
+            produce_data_lower.get('fiber'), produce_data_lower.get('sugars'),
+            produce_data_lower.get('meal_type'), produce_data_lower.get('source'),
+            produce_data_lower.get('nutritional_info'),
+            produce_data_lower.get('added_by'), produce_data_lower.get('added_by_type', user_type), user_type
+        )
+        produce_id = self._execute_query(sql, params, commit=True, returning_id_column='produce_id')
+        logger.info(f"Created produce with ID: {produce_id}")
+        # Corrected: ProduceID -> produce_id
+        return {"produce_id": produce_id, "UserType": user_type}
 
     def update_produce(self, produce_id, updates):
-        try:
-            if not updates:
-                raise ValueError("At least one field must be provided for updates.")
-
-            sql = "UPDATE Produce SET "
-            set_statements = []
-            parameters = []
-
-            for key, value in updates.items():
-                set_statements.append(f"{key}=?")
-                parameters.append(value)
-
-            sql += ", ".join(set_statements)
-            sql += " WHERE Produce_id=?"
-            parameters.append(produce_id)
-
-            self.db.cursor.execute(sql, parameters)
-            self.db.conn.commit()
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while updating produce (ID: {produce_id}): {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error updating produce (ID: {produce_id}): {e}")
-            raise ValueError(str(e))
+        updates_lower = {k.lower(): v for k, v in updates.items()}
+        if not updates_lower: raise ValueError("No updates provided.")
+        updates_lower['date_last_edited'] = datetime.now()
+        set_clauses = [f"{k} = %s" for k in updates_lower.keys()]
+        sql = f"UPDATE produce SET {', '.join(set_clauses)} WHERE produce_id = %s"
+        params = list(updates_lower.values()) + [produce_id]
+        self._execute_query(sql, tuple(params), commit=True)
+        logger.info(f"Updated produce ID: {produce_id}")
 
     def list_produce(self):
-        try:
-            sql = "SELECT * FROM Produce"
-            self.db.cursor.execute(sql)
+        sql = "SELECT * FROM produce"
+        return self._execute_query(sql, fetch_all=True)
 
-            if self.db.cursor.description is None:
-                raise ValueError("No results returned from the database query.")
-
-            columns = [column[0] for column in self.db.cursor.description]
-            return [dict(zip(columns, row)) for row in self.db.cursor.fetchall()]
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while listing produce: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error listing produce: {e}")
-            raise ValueError(str(e))
-
-# CRUD operations for Gadgets
-class Gadgets:
-    def __init__(self, db):
-        self.db = db
-
+# --- CRUD operations for Gadgets ---
+class Gadgets(BaseRepository):
     def create_gadget(self, gadget_data):
-        try:
-            check_required_fields(gadget_data, ['gadget_name', 'description'])
-
-            user_type = gadget_data.get('User_Type', 'gadget')
-
-            sql = """
-                INSERT INTO Gadgets (gadget_name, description, brand, model,
-                price, image_url, date_added, added_by, added_by_type, User_type)
-                OUTPUT INSERTED.GadgetID
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            self.db.cursor.execute(sql, (
-                gadget_data['gadget_name'], gadget_data['description'],
-                gadget_data.get('brand', None), gadget_data.get('model', None),
-                gadget_data['price'], gadget_data.get('image_url', None),
-                datetime.now(), gadget_data.get('added_by'), gadget_data.get('added_by_type', user_type), user_type
-            ))
-            gadget_id = self.db.cursor.fetchone()[0]
-            self.db.conn.commit()
-            logger.info(f"Created gadget with ID: {gadget_id} and User Type: {user_type}")
-            return {"GadgetID": gadget_id, "UserType": user_type}
-
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while creating gadget: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error creating gadget: {e}")
-            raise ValueError(str(e))
+        gadget_data_lower = {k.lower(): v for k, v in gadget_data.items()}
+        check_required_fields(gadget_data_lower, ['gadget_name', 'description', 'price'])
+        user_type = gadget_data_lower.get('user_type', 'gadget')
+        sql = """
+            INSERT INTO gadgets (gadget_name, description, brand, model,
+            price, image_url, date_added, added_by, added_by_type, user_type)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s, %s, %s)
+            RETURNING gadget_id -- Corrected: gadgetid -> gadget_id
+        """
+        params = (
+            gadget_data_lower['gadget_name'], gadget_data_lower['description'],
+            gadget_data_lower.get('brand'), gadget_data_lower.get('model'),
+            gadget_data_lower['price'], gadget_data_lower.get('image_url'),
+            gadget_data_lower.get('added_by'), gadget_data_lower.get('added_by_type', user_type), user_type
+        )
+        gadget_id = self._execute_query(sql, params, commit=True, returning_id_column='gadget_id')
+        logger.info(f"Created gadget with ID: {gadget_id}")
+        # Corrected: GadgetID -> gadget_id
+        return {"gadget_id": gadget_id, "UserType": user_type}
 
     def update_gadget(self, gadget_id, updates):
-        try:
-            if not updates:
-                raise ValueError("At least one field must be provided for updates.")
-
-            sql = "UPDATE Gadgets SET "
-            set_statements = []
-            parameters = []
-
-            for key, value in updates.items():
-                set_statements.append(f"{key}=?")
-                parameters.append(value)
-
-            sql += ", ".join(set_statements)
-            sql += " WHERE gadget_id=?"
-            parameters.append(gadget_id)
-
-            self.db.cursor.execute(sql, parameters)
-            self.db.conn.commit()
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while updating gadget (ID: {gadget_id}): {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error updating gadget (ID: {gadget_id}): {e}")
-            raise ValueError(str(e))
+        updates_lower = {k.lower(): v for k, v in updates.items()}
+        if not updates_lower: raise ValueError("No updates provided.")
+        set_clauses = [f"{k} = %s" for k in updates_lower.keys()]
+        sql = f"UPDATE gadgets SET {', '.join(set_clauses)} WHERE gadget_id = %s"
+        params = list(updates_lower.values()) + [gadget_id]
+        self._execute_query(sql, tuple(params), commit=True)
+        logger.info(f"Updated gadget ID: {gadget_id}")
 
     def list_gadgets(self):
-        try:
-            sql = "SELECT * FROM Gadgets"
-            self.db.cursor.execute(sql)
+        sql = "SELECT * FROM gadgets"
+        return self._execute_query(sql, fetch_all=True)
 
-            if self.db.cursor.description is None:
-                raise ValueError("No results returned from the database query.")
-
-            columns = [column[0] for column in self.db.cursor.description]
-            return [dict(zip(columns, row)) for row in self.db.cursor.fetchall()]
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while listing gadgets: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error listing gadgets: {e}")
-            raise ValueError(str(e))
-
-# CRUD operations for Spices
-class Spices:
-    def __init__(self, db):
-        self.db = db
-
+# --- CRUD operations for Spices ---
+class Spices(BaseRepository):
     def create_spice(self, spice_data):
-        try:
-            check_required_fields(spice_data, ['spice_name', 'description'])
-
-            user_type = spice_data.get('User_Type', 'spice')
-
-            sql = """
-                INSERT INTO Spices (spice_name, description, unit, price,
-                image_url, date_added, added_by, added_by_type, User_type)
-                OUTPUT INSERTED.SpiceID
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            self.db.cursor.execute(sql, (
-                spice_data['spice_name'], spice_data['description'],
-                spice_data.get('unit', None), spice_data['price'],
-                spice_data.get('image_url', None), datetime.now(),
-                spice_data['added_by'], spice_data.get('added_by_type', user_type), user_type
-            ))
-            spice_id = self.db.cursor.fetchone()[0]
-            self.db.conn.commit()
-            logger.info(f"Created spice with ID: {spice_id} and User Type: {user_type}")
-            return {"SpiceID": spice_id, "UserType": user_type}
-
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while creating spice: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error creating spice: {e}")
-            raise ValueError(str(e))
+        spice_data_lower = {k.lower(): v for k, v in spice_data.items()}
+        check_required_fields(spice_data_lower, ['spice_name', 'description', 'price', 'added_by'])
+        user_type = spice_data_lower.get('user_type', 'spice')
+        sql = """
+            INSERT INTO spices (spice_name, description, unit, price,
+            image_url, date_added, added_by, added_by_type, user_type)
+            VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s, %s)
+            RETURNING spice_id -- Corrected: spiceid -> spice_id
+        """
+        params = (
+            spice_data_lower['spice_name'], spice_data_lower['description'],
+            spice_data_lower.get('unit'), spice_data_lower['price'],
+            spice_data_lower.get('image_url'),
+            spice_data_lower['added_by'], spice_data_lower.get('added_by_type', user_type), user_type
+        )
+        spice_id = self._execute_query(sql, params, commit=True, returning_id_column='spice_id')
+        logger.info(f"Created spice with ID: {spice_id}")
+        # Corrected: SpiceID -> spice_id
+        return {"spice_id": spice_id, "UserType": user_type}
 
     def update_spice(self, spice_id, updates):
-        try:
-            if not updates:
-                raise ValueError("At least one field must be provided for updates.")
-
-            sql = "UPDATE Spices SET "
-            set_statements = []
-            parameters = []
-
-            for key, value in updates.items():
-                set_statements.append(f"{key}=?")
-                parameters.append(value)
-
-            sql += ", ".join(set_statements)
-            sql += " WHERE spice_id=?"
-            parameters.append(spice_id)
-
-            self.db.cursor.execute(sql, parameters)
-            self.db.conn.commit()
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while updating spice (ID: {spice_id}): {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error updating spice (ID: {spice_id}): {e}")
-            raise ValueError(str(e))
+        updates_lower = {k.lower(): v for k, v in updates.items()}
+        if not updates_lower: raise ValueError("No updates provided.")
+        set_clauses = [f"{k} = %s" for k in updates_lower.keys()]
+        sql = f"UPDATE spices SET {', '.join(set_clauses)} WHERE spice_id = %s"
+        params = list(updates_lower.values()) + [spice_id]
+        self._execute_query(sql, tuple(params), commit=True)
+        logger.info(f"Updated spice ID: {spice_id}")
 
     def list_spices(self):
+        sql = "SELECT * FROM spices"
+        return self._execute_query(sql, fetch_all=True)
+
+# --- CRUD operations for Orders ---
+class Orders(BaseRepository):
+    ALLOWED_ORDER_TYPES = {'supplement', 'herbal', 'gadget', 'spice', 'produce', 'meal'}
+    ALLOWED_ORDER_STATUSES = {'cancelled', 'delivered', 'shipped', 'preparing', 'confirmed', 'pending'}
+    ALLOWED_PAYMENT_STATUSES = {'failed', 'refunded', 'paid', 'pending'}
+    ALLOWED_PAYMENT_MODES = {'cash', 'momo', 'mobile money', 'Airtel Card', 'paypal', 'stripe', 'debit card', 'credit card'}
+
+    def create_order(self, user_id, order_type, product_id=None, chef_id=None, producer_id=None,
+                     delivery_address=None, order_status="Pending", total_price=0.0,
+                     notes=None, payment_status="Pending", payment_mode="cash",
+                     amount_paid=0.0, transaction_id=None, quantity=1):
+
+        order_type = str(order_type).lower()
+        order_status = str(order_status).lower()
+        payment_status = str(payment_status).lower()
+        payment_mode = str(payment_mode).lower() if payment_mode else "cash"
+
+        if not user_id: raise ValueError("user_id is required")
+        if not order_type: raise ValueError("order_type is required")
+        if order_type not in self.ALLOWED_ORDER_TYPES: raise ValueError(f"Invalid order_type: {order_type}")
+        if order_status not in self.ALLOWED_ORDER_STATUSES: raise ValueError(f"Invalid order_status: {order_status}")
+        if payment_status not in self.ALLOWED_PAYMENT_STATUSES: raise ValueError(f"Invalid payment_status: {payment_status}")
+        if payment_mode not in self.ALLOWED_PAYMENT_MODES: raise ValueError(f"Invalid payment_mode: {payment_mode}")
+
+        delivery_address = delivery_address or "Not specified"
+        notes = notes or "No special instructions"
+
         try:
-            sql = "SELECT * FROM Spices"
-            self.db.cursor.execute(sql)
+             total_price = float(total_price)
+             amount_paid = float(amount_paid)
+             quantity = int(quantity)
+             user_id = int(user_id)
+             # product_id depends on order_type, handle potential None
+             product_id = int(product_id) if product_id is not None else None
+             chef_id = int(chef_id) if chef_id is not None else None # chefid remains chefid
+             producer_id = int(producer_id) if producer_id is not None else None # Corrected: producerid -> producer_id
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Invalid numeric value provided for order: {e}")
 
-            if self.db.cursor.description is None:
-                raise ValueError("No results returned from the database query.")
-
-            columns = [column[0] for column in self.db.cursor.description]
-            return [dict(zip(columns, row)) for row in self.db.cursor.fetchall()]
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while listing spices: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error listing spices: {e}")
-            raise ValueError(str(e))
-
-# CRUD operations for Orders
-# CRUD operations for Orders
-import pyodbc
-import logging
-
-logger = logging.getLogger(__name__)
-
-class Orders:
-    def __init__(self, db):
-        self.db = db
-
-    def create_order(self, user_id, order_type, product_id=None, chef_id=None, producer_id=None, 
-                     delivery_address=None, order_status="Pending", total_price=0, 
-                     notes=None, payment_status="Pending", payment_mode=None, 
-                     amount_paid=0, transaction_id=None, quantity=1):
-        try:
-            # Validate required fields
-            if not user_id:
-                raise ValueError("user_id is required")
-            if not order_type:
-                raise ValueError("order_type is required")
-
-            # Validate order_type
-            allowed_order_types = {'supplement', 'herbal', 'gadget', 'spice', 'produce', 'meal'}
-            if order_type.lower() not in allowed_order_types:
-                raise ValueError(f"Invalid order_type: {order_type}. Allowed values are {allowed_order_types}.")
-
-            # Validate order_status
-            allowed_order_statuses = {'cancelled', 'delivered', 'shipped', 'preparing', 'confirmed', 'pending'}
-            if order_status.lower() not in allowed_order_statuses:
-                raise ValueError(f"Invalid order_status: {order_status}. Allowed values are {allowed_order_statuses}.")
-
-            # Validate payment_status
-            allowed_payment_statuses = {'failed', 'refunded', 'paid', 'pending'}
-            if payment_status.lower() not in allowed_payment_statuses:
-                raise ValueError(f"Invalid payment_status: {payment_status}. Allowed values are {allowed_payment_statuses}.")
-
-            # Validate payment_mode
-            allowed_payment_modes = {'cash', 'momo', 'mobile money', 'Airtel Card', 'paypal', 'stripe', 'debit card', 'credit card'}
-            if payment_mode and payment_mode.lower() not in allowed_payment_modes:
-                raise ValueError(f"Invalid payment_mode: {payment_mode}. Allowed values are {allowed_payment_modes}.")
-
-            # Set default values for optional fields
-            delivery_address = delivery_address or "Not specified"
-            notes = notes or "No special instructions"
-            payment_mode = payment_mode or "cash"
-
-            # Normalize case for constrained columns
-            order_type = order_type.lower()
-            order_status = order_status.lower()
-            payment_status = payment_status.lower()
-            payment_mode = payment_mode.lower()
-
-            # Insert the order into the database using OUTPUT clause
-            sql = """
-                INSERT INTO Orders (
-                    user_id, order_type, product_id, chef_id, producer_id, 
-                    order_date, delivery_address, order_status, total_price, 
-                    notes, payment_status, payment_mode, 
-                    amount_paid, transaction_id, quantity
-                )
-                OUTPUT INSERTED.order_id
-                VALUES (?, ?, ?, ?, ?, GETDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-
-            parameters = [
-                user_id, order_type, product_id, chef_id, producer_id, 
-                delivery_address, order_status, total_price, 
-                notes, payment_status, payment_mode, 
+        # chefid is correct, producer_id is correct
+        sql = """
+            INSERT INTO orders (
+                user_id, order_type, product_id, chef_id, producer_id,
+                order_date, delivery_address, order_status, total_price,
+                notes, payment_status, payment_mode,
                 amount_paid, transaction_id, quantity
-            ]
+            )
+            VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING order_id
+        """
+        params = (
+            user_id, order_type, product_id, chef_id, producer_id,
+            delivery_address, order_status, total_price,
+            notes, payment_status, payment_mode,
+            amount_paid, transaction_id, quantity
+        )
 
-            result = self.db.cursor.execute(sql, parameters)
-            order_id = result.fetchone()[0]  # Retrieve the generated order_id
-            self.db.conn.commit()
-
-            logger.info(f"Order successfully created with order_id: {order_id}")
-            return {
-                "message": "Order(s) created successfully",
-                "orders": [
-                    {
-                        "message": "Order created successfully",
-                        "order_id": order_id,
-                        "success": True
-                    }
-                ],
-                "success": True
-            }
-
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while creating order: {sql_error}")
-            return {
-                "message": "Error creating order",
-                "orders": [
-                    {
-                        "message": "Failed to create order",
-                        "order_id": None,
-                        "success": False
-                    }
-                ],
-                "success": False
-            }
+        try:
+            # Corrected: orderid -> order_id
+            order_id = self._execute_query(sql, params, commit=True, returning_id_column='order_id')
+            if order_id:
+                logger.info(f"Order successfully created with order_id: {order_id}")
+                return {
+                    "message": "Order created successfully",
+                    "orders": [{"message": "Order created successfully", "order_id": order_id, "success": True}],
+                    "success": True
+                }
+            else:
+                 raise ValueError("Order creation failed, no ID returned.")
+        except ValueError as ve:
+             logger.error(f"Error creating order: {ve}", exc_info=True)
+             return {"message": str(ve), "orders": [{"message": str(ve), "order_id": None, "success": False}], "success": False}
         except Exception as e:
-            logger.error(f"Error creating order: {str(e)}", exc_info=True)
-            return {
-                "message": "Error creating order",
-                "orders": [
-                    {
-                        "message": "Failed to create order",
-                        "order_id": None,
-                        "success": False
-                    }
-                ],
-                "success": False
-            }
+            logger.error(f"Unexpected error creating order: {e}", exc_info=True)
+            err_msg = "Failed to create order due to a server error."
+            return {"message": err_msg, "orders": [{"message": err_msg, "order_id": None, "success": False}], "success": False}
+
 
     def read_orders(self, order_id=None, chef_id=None, producer_id=None, user_id=None):
-        try:
-            # Define SQL query with CTE for meal details and ingredient aggregation
-            sql = """
-                WITH MealDetails AS (
-                    SELECT 
-                        m.Meal_id,
-                        m.Meal_name,
-                        COALESCE(
-                            (SELECT STRING_AGG(p.Produce_name, ', ') 
-                             FROM Meal_Ingredients i
-                             JOIN Produce p ON i.Produce_ID = p.Produce_ID
-                             WHERE i.Meal_id = m.Meal_id), 
-                            ''
-                        ) AS Ingredients
-                    FROM Meals m
-                )
-                SELECT 
-                    o.order_id,
-                    o.user_id,
-                    o.order_type,
-                    o.product_id,
-                    o.chef_id,
-                    o.producer_id,
-                    o.order_date,
-                    o.delivery_address,
-                    o.order_status,
-                    o.total_price,
-                    o.notes,
-                    o.payment_status,
-                    o.payment_mode,
-                    o.amount_paid,
-                    o.transaction_id,
-                    o.quantity,
-                    md.Meal_name AS meal_name,
-                    md.Ingredients AS ingredients,
-                    p.Name AS producer_name, -- Correct column name from Producers table
-                    c.Name AS chef_name      -- Correct column name from Chefs table
-                FROM Orders o
-                LEFT JOIN MealDetails md ON o.product_id = md.Meal_id
-                LEFT JOIN Producers p ON o.producer_id = p.Producer_Id -- Correct column name from Producers table
-                LEFT JOIN Chefs c ON o.chef_id = c.ChefID             -- Correct column name from Chefs table
-                WHERE 1=1
-            """
-            parameters = []
+        # Corrected: mealid -> meal_id, produceid -> produce_id
+        sql = """
+            WITH MealDetails AS (
+                SELECT
+                    m.meal_id,
+                    m.meal_name,
+                    COALESCE(STRING_AGG(p.produce_name, ', ' ORDER BY p.produce_name), '') AS ingredients
+                FROM meals m
+                LEFT JOIN meal_ingredients mi ON mi.meal_id = m.meal_id
+                LEFT JOIN produce p ON mi.produce_id = p.produce_id
+                GROUP BY m.meal_id, m.meal_name
+            )
+            SELECT
+                o.order_id, o.user_id, o.order_type, o.product_id,
+                o.chef_id, o.producer_id, o.order_date, o.delivery_address,
+                o.order_status, o.total_price, o.notes, o.payment_status,
+                o.payment_mode, o.amount_paid, o.transaction_id, o.quantity,
+                md.meal_name,
+                md.ingredients,
+                p.name AS producer_name,
+                c.name AS chef_name
+            FROM orders o
+            LEFT JOIN MealDetails md ON o.product_id = md.meal_id -- Assumes product_id refers to meal_id here
+            LEFT JOIN producers p ON o.producer_id = p.producer_id -- producer_id correct
+            LEFT JOIN chefs c ON o.chef_id = c.chefid -- chefid correct
+            WHERE 1=1
+        """
+        params = []
 
-            # Add filters based on provided arguments
-            if order_id:
-                sql += " AND o.order_id=?"
-                parameters.append(order_id)
-            if chef_id:
-                sql += " AND o.chef_id=?"
-                parameters.append(chef_id)
-            if producer_id:
-                sql += " AND o.producer_id=?"
-                parameters.append(producer_id)
-            if user_id:
-                sql += " AND o.user_id=?"
-                parameters.append(user_id)
+        if order_id is not None:
+            # Corrected: orderid -> order_id
+            sql += " AND o.order_id = %s"
+            params.append(order_id)
+        if chef_id is not None:
+            # chefid correct
+            sql += " AND o.chef_id = %s"
+            params.append(chef_id)
+        if producer_id is not None:
+            # Corrected: producerid -> producer_id
+            sql += " AND o.producer_id = %s"
+            params.append(producer_id)
+        if user_id is not None:
+            # user_id correct
+            sql += " AND o.user_id = %s"
+            params.append(user_id)
 
-            # Execute the query
-            self.db.cursor.execute(sql, parameters)
+        sql += " ORDER BY o.order_date DESC"
 
-            # Check if results are returned
-            if self.db.cursor.description is None:
-                raise ValueError("No results returned from the database query.")
+        results = self._execute_query(sql, tuple(params), fetch_all=True)
+        logger.info(f"Retrieved {len(results)} orders matching criteria.")
+        return results
 
-            # Convert results into a list of dictionaries
-            columns = [column[0] for column in self.db.cursor.description]
-            results = [dict(zip(columns, row)) for row in self.db.cursor.fetchall()]
 
-            # Log the retrieved orders
-            logger.info(f"Retrieved {len(results)} orders")
-            return results
-
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while reading orders: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error reading orders: {str(e)}", exc_info=True)
-            raise ValueError(str(e))
-
-# CRUD operations for Metrics History
-class MetricsHistory:
-    def __init__(self, db):
-        self.db = db
-
-    def create_metric_history(self, metric_history_data):
-        try:
-            check_required_fields(metric_history_data, ['User_id', 'Weight'])
-            sql = """
-                INSERT INTO Metrics_history (User_id, Weight, Logged_at) VALUES (?, ?, ?)
-            """
-            self.db.cursor.execute(sql, (
-                metric_history_data['User_id'], metric_history_data['Weight'], datetime.now()
-            ))
-            self.db.conn.commit()
-            return {"MetricHistoryId": self.db.cursor.execute("SELECT SCOPE_IDENTITY()").fetchval()}
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while creating metric history: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error creating metric history: {e}")
-            raise ValueError(str(e))
-
-    def update_metric_history(self, log_id, updates):
-        try:
-            if not updates:
-                raise ValueError("At least one field must be provided for updates.")
-
-            sql = "UPDATE Metrics_history SET "
-            set_statements = []
-            parameters = []
-
-            for key, value in updates.items():
-                set_statements.append(f"{key}=?")
-                parameters.append(value)
-
-            sql += ", ".join(set_statements)
-            sql += " WHERE Log_id=?"
-            parameters.append(log_id)
-
-            self.db.cursor.execute(sql, parameters)
-            self.db.conn.commit()
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while updating metric history (Log ID: {log_id}): {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error updating metric history (Log ID: {log_id}): {e}")
-            raise ValueError(str(e))
-
-    def list_metric_history(self, user_id=None):
-        try:
-            sql = "SELECT * FROM Metrics_history"
-            parameters = []
-
-            if user_id:
-                sql += " WHERE User_id=?"
-                parameters.append(user_id)
-
-            self.db.cursor.execute(sql, parameters)
-
-            if self.db.cursor.description is None:
-                raise ValueError("No results returned from the database query.")
-
-            columns = [column[0] for column in self.db.cursor.description]
-            return [dict(zip(columns, row)) for row in self.db.cursor.fetchall()]
-        except pyodbc.Error as sql_error:
-            logger.error(f"SQL error while listing metric history: {sql_error}")
-            raise ValueError(f"Database error: {sql_error}")
-        except Exception as e:
-            logger.error(f"Error listing metric history: {e}")
-            raise ValueError(str(e))
-
-# Usage example (for testing)
+# --- Usage Example (Updated PK names in response keys for consistency) ---
 if __name__ == "__main__":
-    db = Database()
+    # Instantiate repositories directly
+    users_repo = Users()
+    chefs_repo = Chefs()
+    producers_repo = Producers()
+    stakeholders_repo = Stakeholders()
+    herbals_repo = Herbals()
+    meals_repo = Meals()
+    produce_repo = Produce()
+    gadgets_repo = Gadgets()
+    spices_repo = Spices()
+    orders_repo = Orders()
+
     try:
-        users = Users(db)
-        created_user_response = users.create_user({
-            'Name': 'Alice', 
-            'Password': 'password123', 
-            'Email': 'alice@example.com'
+        print("--- Testing User Operations ---")
+        # Create a unique user for testing each run
+        test_email = f"testuser_{random.randint(10000, 99999)}@example.com"
+        test_name = f"Test User {random.randint(1000,9999)}"
+        created_user_response = users_repo.create_user({
+            'name': test_name,
+            'password': 'password123',
+            'email': test_email,
+            'phone_number': '555-0123',
+            'location': 'Testville'
         })
         print(f"Created User Response: {created_user_response}")
+        user_id = created_user_response['UserId'] # This key comes from the return dict, keep as is unless modifying return
 
-        login_response = users.login_user('alice@example.com', 'password123')
-        print(f"Login Response: {login_response}")
+        login_response, status_code = users_repo.login_user(test_email, 'password123')
+        print(f"Login Response (Status {status_code}): {login_response}")
 
         # Create a metric for the user
-        metric_response = users.create_metric({
-            'User_id': created_user_response['UserId'],
-            'Age_range': '26-35',
-            'Weight': 70,
-            'Height': 170,
-            'Cholesterol_level': 190,
-            'Sys_bp': 120,
-            'Dia_bp': 80,
-            'Pulse': 70
+        metric_response = users_repo.create_metric({
+            'user_id': user_id,
+            'age_range': '36-45',
+            'weight': 85.5,
+            'height': 180,
+            'cholesterol_level': 210,
+            'sys_bp': 130,
+            'dia_bp': 85,
+            'pulse': 75
         })
         print(f"Created Metric Response: {metric_response}")
+        metric_id = metric_response['metric_id'] # Use corrected key
+
+        # Update metric
+        users_repo.update_metric(metric_id, {'weight': 84.0, 'pulse': 72})
+        print(f"Updated metric ID: {metric_id}")
+
 
         # Create a metric history for the user
-        metric_history_response = users.create_metric_history({
-            'User_id': created_user_response['UserId'],
-            'Weight': 68
+        metric_history_response = users_repo.create_metric_history({
+            'user_id': user_id,
+            'weight': 86.0
         })
         print(f"Created Metric History Response: {metric_history_response}")
+        log_id = metric_history_response['log_id'] # Use corrected key
 
         # List all metrics for the user
-        all_metrics = users.list_metrics(user_id=created_user_response['UserId'])
-        print("All Metrics:", all_metrics)
+        metrics_result = users_repo.list_metrics(user_id=user_id) # list_metrics returns the list directly
+        print(f"\nAll Metrics for User ID {user_id}:")
+        if metrics_result:
+             for metric in metrics_result:
+                 print(metric)
+        else:
+             print("No metrics found.")
+
 
         # List all metric history for the user
-        all_metric_history = users.list_metric_history(user_id=created_user_response['UserId'])
-        print("All Metric History:", all_metric_history)
+        history_result = users_repo.list_metric_history(user_id=user_id) # list_metric_history returns the list
+        print(f"\nAll Metric History for User ID {user_id}:")
+        if history_result:
+            for history in history_result:
+                 print(history)
+        else:
+             print("No metric history found.")
 
         # Create user preferences
-        preference_response = users.create_preference({
-            'User_id': created_user_response['UserId'],
-            'Goals': 'Weight Loss',
-            'Diet_type': 'Vegan',
-            'Food_restrictions': 'Nuts',
-            'Cuisine_preferences': 'Asian'
+        preference_response = users_repo.create_preference({
+            'user_id': user_id,
+            'goals': 'Maintain Weight',
+            'diet_type': 'Mediterranean',
+            'food_restrictions': 'Shellfish',
+            'cuisine_preferences': 'Italian, Greek'
         })
-        print(f"Created Preference Response: {preference_response}")
+        print(f"\nCreated Preference Response: {preference_response}")
+        preference_id = preference_response['preference_id'] # Use corrected key
 
         # Update the user's preferences
-        users.update_preference(preference_response['PreferenceId'], {'Goals': 'Muscle Gain'})
+        users_repo.update_preference(preference_id, {'goals': 'Improve Cardio', 'cuisine_preferences': 'Italian, Greek, Spanish'})
+        print(f"Updated preference ID: {preference_id}")
+
 
         # List preferences for the user
-        all_preferences = users.list_preferences(user_id=created_user_response['UserId'])
-        print("All Preferences:", all_preferences)
+        preferences_result = users_repo.list_preferences(user_id=user_id) # list_preferences returns the list
+        print(f"\nAll Preferences for User ID {user_id}:")
+        if preferences_result:
+             for pref in preferences_result:
+                 print(pref)
+        else:
+             print("No preferences found.")
+
+
+        print("\n--- Testing Chef Operations ---")
+        # Create a unique chef
+        test_chef_email = f"chef_{random.randint(1000,9999)}@examplechef.com"
+        test_chef_name = f"Chef Gustava {random.randint(100,999)}"
+        created_chef_response = chefs_repo.create_chef({
+             'name': test_chef_name,
+             'email': test_chef_email,
+             'password': 'chefpassword!',
+             'price': 50.0,
+             'experience': 10,
+             'specialties': ['French', 'Pastry']
+        })
+        print(f"Created Chef Response: {created_chef_response}")
+        chef_id = created_chef_response['ChefID'] # Keep original response key
+
+        chef_login_resp, chef_status = chefs_repo.login_chef(test_chef_email, 'chefpassword!')
+        print(f"Chef Login Response (Status {chef_status}): {chef_login_resp}")
+
+        all_chefs = chefs_repo.list_chefs() # list_chefs returns the list
+        print(f"\nListed {len(all_chefs)} Chefs.")
+
+
+        print("\n--- Testing Order Operations ---")
+        # First, create a gadget to order
+        gadget = gadgets_repo.create_gadget({
+            'gadget_name': 'Smart Blender X2',
+            'description': 'High power blender Pro',
+            'price': 130.00,
+            'brand': 'BlendMaster'
+        })
+        gadget_id = gadget['gadget_id'] # Use corrected key
+
+        order_response = orders_repo.create_order(
+            user_id=user_id,
+            order_type='gadget',
+            product_id=gadget_id,
+            # producer_id=some_producer_id, # Example if needed
+            chef_id=chef_id, # Example linking an order to a chef
+            total_price=135.50,
+            quantity=1,
+            delivery_address='456 Oak Ave, Testville',
+            payment_mode='stripe',
+            payment_status='paid',
+            amount_paid=135.50,
+            transaction_id='pi_123xyz'
+        )
+        print(f"Create Order Response: {order_response}")
+        # order_id is correct in the response dict
+
+        # List orders for the user
+        user_orders = orders_repo.read_orders(user_id=user_id) # read_orders returns the list
+        print(f"\nOrders for User ID {user_id}:")
+        if user_orders:
+             for order in user_orders:
+                 print(order)
+        else:
+             print("No orders found for this user.")
+
 
     except ValueError as ve:
+        logger.error(f"Validation Error in main execution: {ve}", exc_info=True)
         print(f"ValueError: {ve}")
+    except ConnectionError as ce:
+         logger.error(f"Connection Error in main execution: {ce}", exc_info=True)
+         print(f"ConnectionError: {ce}")
     except Exception as ex:
+        logger.error(f"Unexpected error in main execution: {ex}", exc_info=True)
         print(f"Unexpected error: {ex}")
-    finally:
-        db.close()
