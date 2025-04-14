@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'user_metrics.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-final apibaseurl = dotenv.env['API_BASE_URL'] ??
+final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ??
     'https://default.url'; // Ensure API base URL is available
 
 class EmailVerificationPage extends StatefulWidget {
@@ -142,7 +142,7 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 80),
                   const Text(
                     'Enter your verification code:',
                     style: TextStyle(

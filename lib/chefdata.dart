@@ -1,0 +1,47 @@
+class ChefData {
+  static List<Map<String, dynamic>> chefs = [
+    {
+      'image': 'assets/images/kharol.jpg',
+      'name': 'Kharol',
+      'price': 7,
+      'rating': 3,
+      'location': 'KATWE',
+    },
+    {
+      'image': 'assets/images/dani3.jpg',
+      'name': 'Edgar',
+      'price': 5,
+      'rating': 3,
+      'location': 'KAMPALA',
+    },
+    {
+      'image': 'assets/images/abdul.jpg',
+      'name': 'Abdul',
+      'price': 5,
+      'rating': 3,
+      'location': 'KAMPALA',
+    },
+    {
+      'image': 'assets/images/zay.jpg',
+      'name': 'Nick',
+      'price': 45,
+      'rating': 5,
+      'location': 'NEW YORK',
+    },
+    {
+      'image': 'assets/images/victor.jpg',
+      'name': 'Victor',
+      'price': 5,
+      'rating': 3,
+      'location': 'KAMPALA',
+    },
+    {
+      'image': 'assets/images/dante.jpg',
+      'name': 'Dante',
+      'price': 4,
+      'rating': 2,
+      'location': 'MAWANDA Rd',
+    },
+    // Add more chefs here...
+  ];
+}

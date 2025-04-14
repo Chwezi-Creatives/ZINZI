@@ -4,6 +4,7 @@ import 'package:zinzi2/cart.dart';
 import 'package:zinzi2/chef.dart';
 import 'package:zinzi2/useranalytics.dart';
 import 'reco.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class MealDetailScreen3 extends StatefulWidget {
   final Map<String, dynamic> meal;
@@ -64,8 +65,6 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
     },
   ];
 
-  List<String> bestServedWithInCart = [];
-
   @override
   void initState() {
     super.initState();
@@ -74,12 +73,12 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
 
   @override
   Widget build(BuildContext context) {
-    final isInCart =
-        ShoppingCart.items.any((item) => item['title'] == widget.meal['title']);
+    final mealData = _getMealData();
+    final isInCart = ShoppingCart.items.any((item) => item['title'] == mealData['title']);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.meal['title']),
+        title: Text(mealData['title']),
         foregroundColor: Colors.white,
         backgroundColor: Colors.teal[800],
         elevation: 4,
@@ -89,9 +88,7 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => FavoritesScreen(),
-                ),
+                MaterialPageRoute(builder: (context) => FavoritesScreen()),
               );
             },
           ),
@@ -100,9 +97,7 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => ShoppingCartScreen(),
-                ),
+                MaterialPageRoute(builder: (context) => ShoppingCartScreen()),
               );
             },
           ),
@@ -115,9 +110,7 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
               image: AssetImage('assets/images/soft.jpg'),
               fit: BoxFit.cover,
               colorFilter: ColorFilter.mode(
-                Colors.white.withOpacity(0.95),
-                BlendMode.dstATop,
-              ),
+                  Colors.white.withOpacity(0.95), BlendMode.dstATop),
             ),
           ),
           child: SafeArea(
@@ -143,8 +136,10 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(15),
-                      child: Image.asset(
-                        widget.meal['image'],
+                      child: CachedNetworkImage(
+                        imageUrl: mealData['image'],
+                        placeholder: (context, url) => Center(child: CircularProgressIndicator()),
+                        errorWidget: (context, url, error) => Image.asset('assets/images/notfound.avif', fit: BoxFit.cover),
                         fit: BoxFit.cover,
                       ),
                     ),
@@ -162,7 +157,7 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                widget.meal['title'],
+                                mealData['title'],
                                 style: TextStyle(
                                   fontSize: 28,
                                   fontWeight: FontWeight.bold,
@@ -171,7 +166,7 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
                               ),
                               SizedBox(height: 12),
                               Text(
-                                widget.meal['description'],
+                                mealData['description'],
                                 style: TextStyle(
                                   fontSize: 16,
                                   height: 1.4,
@@ -186,23 +181,21 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
                           children: [
                             IconButton(
                               icon: Icon(
-                                isFavorite
-                                    ? Icons.favorite
-                                    : Icons.favorite_outline,
+                                isFavorite ? Icons.favorite : Icons.favorite_outline,
                                 color: isFavorite ? Colors.red : null,
                               ),
                               onPressed: () {
                                 setState(() {
                                   if (isFavorite) {
-                                    Favorites.removeItem(widget.meal['title']);
+                                    Favorites.removeItem(mealData['title']);
                                     isFavorite = false;
                                   } else {
                                     Favorites.addItem(
-                                        widget.meal['title'],
-                                        widget.meal['price'],
-                                        widget.meal['image']);
+                                        mealData['title'],
+                                        mealData['price'],
+                                        mealData['image']);
                                     showCustomSnackBar(context,
-                                        '${widget.meal['title']} added to favorites!');
+                                        '${mealData['title']} added to favorites!');
                                     isFavorite = true;
                                   }
                                 });
@@ -210,26 +203,33 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
                             ),
                             IconButton(
                               icon: Icon(
-                                isInCart
-                                    ? Icons.shopping_cart
-                                    : Icons.add_shopping_cart,
+                                isInCart ? Icons.shopping_cart : Icons.add_shopping_cart,
                                 color: isInCart ? Colors.orange : null,
                               ),
                               onPressed: () {
                                 setState(() {
                                   if (isInCart) {
-                                    ShoppingCart.removeItemFromCart(
-                                        widget.meal['title']);
+                                    ShoppingCart.removeItemFromCart(mealData['title']);
                                     showCustomSnackBar(context,
-                                        '${widget.meal['title']} removed from cart!');
+                                        '${mealData['title']} removed from cart!');
                                   } else {
-                                    ShoppingCart.addItem(
-                                      widget.meal['title'],
-                                      widget.meal['price'],
-                                      selectedChef: selectedChef,
-                                    );
-                                    showCustomSnackBar(context,
-                                        '${widget.meal['title']} added to cart!');
+                                    if (selectedChef != null) {
+                                      ShoppingCart.addItem(
+                                        mealData['title'],
+                                        mealData['price'],
+                                        selectedchef: selectedChef!,
+                                        meal: {
+                                          'name': mealData['title'],
+                                          'imagePath': mealData['image'],
+                                          'description': mealData['description'],
+                                          'price': mealData['price']
+                                        }, bestservedwith: [],
+                                      );
+                                      showCustomSnackBar(context,
+                                          '${mealData['title']} added to cart!');
+                                    } else {
+                                      showCustomSnackBar(context, 'Please select a chef before adding to cart.');
+                                    }
                                   }
                                 });
                               },
@@ -243,9 +243,7 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
                   SizedBox(height: 24),
 
                   // Best Served With Section
-                  if (widget.meal['bestServedWith'] != null &&
-                      widget.meal['bestServedWith'] is List) 
-                  ...[
+                  if (mealData['bestServedWith'] != null && mealData['bestServedWith'] is List) ...[
                     Text(
                       'Best Served With:',
                       style: TextStyle(
@@ -256,26 +254,15 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
                     ),
                     SizedBox(height: 8),
                     SizedBox(
-                      height: 100, // Adjust height as necessary
+                      height: 100,
                       child: ListView.builder(
                         scrollDirection: Axis.horizontal,
-                        itemCount: widget.meal['bestServedWith'].length,
+                        itemCount: mealData['bestServedWith'].length,
                         itemBuilder: (context, index) {
-                          final item = widget.meal['bestServedWith'][index];
-                          bool isItemInCart = bestServedWithInCart.contains(item['title']);
+                          final item = mealData['bestServedWith'][index];
                           return GestureDetector(
                             onTap: () {
-                              setState(() {
-                                if (isItemInCart) {
-                                  bestServedWithInCart.remove(item['title']);
-                                  ShoppingCart.updateQuantity(item['title'], 0);
-                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${item['title']} removed from cart!')));
-                                } else {
-                                  bestServedWithInCart.add(item['title']);
-                                  ShoppingCart.addItem(item['title'], item['price'], selectedChef: 'defaultChef');
-                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${item['title']} added to cart!')));
-                                }
-                              });
+                              // Handle best served with item tap
                             },
                             child: Container(
                               width: 80,
@@ -307,27 +294,15 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
                   ],
 
                   // Ingredients Section
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildIngredientsSection(),
-                      ),
-                    ],
-                  ),
+                  _buildIngredientsSection(mealData['ingredients']),
                   SizedBox(height: 24),
 
                   // Properties Section
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildPropertiesSection(),
-                      ),
-                    ],
-                  ),
+                  _buildPropertiesSection(),
                   SizedBox(height: 24),
 
                   // Skill Level and Prep Time Card
-                  _buildSkillLevelAndPrepTimeCard(),
+                  _buildSkillLevelAndPrepTimeCard(mealData),
 
                   SizedBox(height: 20),
 
@@ -335,10 +310,7 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        cookForMyself ? 'Cook for Myself' : 'Pick a Chef',
-                        style: TextStyle(fontSize: 16),
-                      ),
+                      Text(cookForMyself ? 'Cook for Myself' : 'Pick a Chef', style: TextStyle(fontSize: 16)),
                       Switch(
                         value: cookForMyself,
                         onChanged: (bool value) async {
@@ -359,7 +331,13 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
                               });
                               ShoppingCart.addItem(
                                   selectedChef['name'], selectedChef['price'],
-                                  selectedChef: selectedChef);
+                                  selectedchef: selectedChef,
+                                  meal: {
+                                    'name': mealData['title'],
+                                    'imagePath': mealData['image'],
+                                    'description': mealData['description'],
+                                    'price': mealData['price']
+                                  }, bestservedwith: []);
                               showCustomSnackBar(context,
                                   '${selectedChef['name']} added to cart!');
                             }
@@ -388,7 +366,18 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
     );
   }
 
-  Widget _buildIngredientsSection() {
+  Map<String, dynamic> _getMealData() {
+    return {
+      'title': widget.meal['title'] ?? 'Unknown Meal',
+      'description': widget.meal['description'] ?? 'No description available',
+      'price': (widget.meal['price'] is num) ? (widget.meal['price'] as num).toDouble() : 5.0,
+      'image': widget.meal['image'] ?? 'assets/images/notfound.avif',
+      'ingredients': List<String>.from(widget.meal['ingredients'] ?? []),
+      'bestServedWith': widget.meal['bestServedWith'] ?? [],
+    };
+  }
+
+  Widget _buildIngredientsSection(List<String> ingredients) {
     return Card(
       elevation: 1,
       margin: EdgeInsets.symmetric(vertical: 8),
@@ -412,7 +401,7 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: widget.meal['ingredients'].map<Widget>((ingredient) {
+              children: ingredients.map<Widget>((ingredient) {
                 return Chip(
                   label: Text(
                     ingredient,
@@ -421,7 +410,7 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  backgroundColor: Colors.teal[50],
+                  backgroundColor: Colors.teal[100],
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -455,21 +444,15 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
               ),
             ),
             SizedBox(height: 12),
+            // Add more property chips as necessary
             Wrap(
               spacing: 10,
               runSpacing: 10,
               children: [
-                _buildPropertyChipFromAsset('assets/images/goal.png',
-                    'Health Goal', widget.meal['healthGoal']),
-                _buildPropertyChipFromAsset('assets/images/dairy_free2.png',
-                    'Allergens', widget.meal['allergens'].join(', ') ?? 'None'),
-
-                _buildPropertyChip(Icons.health_and_safety, 'Diseases Managed',
-                    widget.meal['diseasesManaged'].join(', ') ?? 'None'),
-                // Using Image.asset instead of Icon for Health Goal
-
-                _buildPropertyChipFromAsset('assets/images/recipe1.png',
-                    'Recipe', widget.meal['recipe']),
+                _buildPropertyChipFromAsset('assets/images/goal.png', 'Health Goal', widget.meal['healthGoal'] ?? 'None'),
+                _buildPropertyChipFromAsset('assets/images/allergy.png', 'Allergens', (widget.meal['allergens'] is List) ? widget.meal['allergens'].join(', ') : 'None'),
+                _buildPropertyChip(Icons.health_and_safety, 'Diseases Managed', (widget.meal['diseasesManaged'] is List) ? widget.meal['diseasesManaged'].join(', ') : 'None'),
+                _buildPropertyChipFromAsset('assets/images/recipe1.png', 'Recipe', widget.meal['recipe'] ?? 'No Recipe Available'),
               ],
             ),
           ],
@@ -494,8 +477,7 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
     );
   }
 
-  Widget _buildPropertyChipFromAsset(
-      String assetPath, String label, String data) {
+  Widget _buildPropertyChipFromAsset(String assetPath, String label, String data) {
     return InkWell(
       onTap: () {
         _showPopup(context, label, data);
@@ -529,10 +511,9 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
     );
   }
 
-  Widget _buildSkillLevelAndPrepTimeCard() {
-    double skillLevelValue =
-        getSkillLevelValue(widget.meal['cookingSkillLevel']);
-    double prepTimeValue = getPrepTimeValue(widget.meal['prepTime']);
+  Widget _buildSkillLevelAndPrepTimeCard(Map<String, dynamic> mealData) {
+    double skillLevelValue = getSkillLevelValue(mealData['cookingSkillLevel'] ?? 'Intermediate');
+    double prepTimeValue = getPrepTimeValue(mealData['prepTime'] ?? '30');
 
     return Card(
       elevation: 1,
@@ -554,14 +535,14 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
               ),
             ),
             SizedBox(height: 12),
-            Text('Skill Level:  ${widget.meal['cookingSkillLevel']}'),
+            Text('Skill Level:  ${mealData['cookingSkillLevel'] ?? 'Unknown'}'),
             LinearProgressIndicator(
               value: skillLevelValue,
               color: Colors.teal[600],
               backgroundColor: Colors.grey[300],
             ),
             SizedBox(height: 16),
-            Text('Prep Time: ${widget.meal['prepTime']} minutes'),
+            Text('Prep Time: ${mealData['prepTime'] ?? 'Unknown'} minutes'),
             LinearProgressIndicator(
               value: prepTimeValue,
               color: Colors.teal[600],
@@ -588,7 +569,7 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
 
   double getPrepTimeValue(String prepTime) {
     const maxPrepTime = 60;
-    int prepMinutes = int.parse(prepTime);
+    int prepMinutes = int.tryParse(prepTime) ?? 30;
     return (prepMinutes / maxPrepTime).clamp(0.0, 1.0);
   }
 
@@ -717,14 +698,19 @@ class ChooseChef extends StatelessWidget {
                             children: [
                               _buildStarRating(chef['rating']),
                               SizedBox(width: 8),
-                              Text('(${chef['location']})',
-                                  style: TextStyle(fontSize: 16)),
+                              Text(
+                                '${chef['location']}',
+                                style: TextStyle(fontSize: 16),
+                              ),
                             ],
                           ),
                         ],
                       ),
                     ),
-                    Text('\$${chef['price']}', style: TextStyle(fontSize: 16)),
+                    Text(
+                      '\$${chef['price']}', 
+                      style: const TextStyle(fontSize: 16),
+                    ),
                   ],
                 ),
               ),

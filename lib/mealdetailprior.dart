@@ -6,51 +6,91 @@ import 'package:zinzi2/useranalytics.dart';
 import 'reco.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
-class MealDetailScreen2 extends StatefulWidget {
+class MealDetailScreenPrior extends StatefulWidget {
   final Map<String, dynamic> meal;
 
-  MealDetailScreen2({required this.meal});
+  MealDetailScreenPrior({required this.meal});
 
   @override
-  _MealDetailScreen2State createState() => _MealDetailScreen2State();
+  _MealDetailScreenPriorState createState() => _MealDetailScreenPriorState();
 }
 
-class _MealDetailScreen2State extends State<MealDetailScreen2> {
+class _MealDetailScreenPriorState extends State<MealDetailScreenPrior> {
   bool isFavorite = false;
   bool cookForMyself = true;
   Map<String, dynamic>? selectedChef;
-  List<String> bestServedWithInCart = [];
 
   List<Map<String, dynamic>> chefs = [
-    // Define your chefs here
     {
       'image': 'assets/images/kharol.jpg',
-      'name': 'Chef Kharol',
+      'name': 'Kharol',
       'price': 7,
       'rating': 3,
       'location': 'KATWE',
     },
-    // Add more chefs...
+    {
+      'image': 'assets/images/dani3.jpg',
+      'name': 'Edgar',
+      'price': 5,
+      'rating': 3,
+      'location': 'KAMPALA',
+    },
+    {
+      'image': 'assets/images/abdul.jpg',
+      'name': 'Abdul',
+      'price': 5,
+      'rating': 3,
+      'location': 'KAMPALA',
+    },
+    {
+      'image': 'assets/images/zay.jpg',
+      'name': 'Nick',
+      'price': 45,
+      'rating': 5,
+      'location': 'NEW YORK',
+    },
+    {
+      'image': 'assets/images/victor.jpg',
+      'name': 'Victor',
+      'price': 5,
+      'rating': 3,
+      'location': 'KAMPALA',
+    },
+    {
+      'image': 'assets/images/dante.jpg',
+      'name': 'Dante',
+      'price': 4,
+      'rating': 2,
+      'location': 'MAWANDA Rd',
+    },
   ];
 
   @override
   void initState() {
     super.initState();
-    final mealTitle = widget.meal['meal_name'] ?? 'Unknown Meal';
+    final mealTitle = widget.meal['Meal_name'] ?? 'Unknown Meal';
     isFavorite = Favorites.isFavorite(mealTitle);
   }
 
   @override
   Widget build(BuildContext context) {
-    final mealData = _getMealData();
-    
-    final mealTitle = mealData['title'];
-    final mealDescription = mealData['description'];
-    final mealPrice = mealData['price'];
-    final mealImage = mealData['image'];
-    final ingredients = mealData['ingredients'];
-    final complementaries = mealData['complementary_names'];
-    final complementaryImages = mealData['complementary_images'];
+    final mealTitle = widget.meal['Meal_name'] ?? 'Unknown Meal';
+    final mealDescription = widget.meal['Meal_description'] ?? 'No description available';
+    final mealPrice = (widget.meal['price'] is num) ? (widget.meal['price'] as num).toDouble() : 5.0;
+    final mealImage = widget.meal['Image_link'] ?? 'assets/images/mealimageplaceholder.jpg';
+    final ingredients = (widget.meal['Ingredients'] is List)
+        ? List<String>.from(widget.meal['Ingredients'])
+        : (widget.meal['Ingredients']?.toString().split(', ') ?? []);
+    final complementaries = (widget.meal['Complementary_dishes'] is List)
+        ? List<String>.from(widget.meal['Complementary_dishes'])
+        : (widget.meal['Complementary_dishes']?.toString().split(', ') ?? []);
+    final complementaryImages = (widget.meal['Complementary_images'] is List)
+        ? List<String>.from(widget.meal['Complementary_images'])
+        : (widget.meal['Complementary_images']?.toString().split(', ') ?? []);
+
+    final String imageUrl = mealImage.contains('drive.google.com')
+        ? 'https://drive.google.com/uc?export=view&id=${mealImage.split('/d/')[1].split('/')[0]}'
+        : mealImage;
 
     final isInCart = ShoppingCart.items.any((item) => item['title'] == mealTitle);
 
@@ -108,16 +148,19 @@ class _MealDetailScreen2State extends State<MealDetailScreen2> {
                       borderRadius: BorderRadius.circular(15),
                       child: mealImage.startsWith('http')
                           ? CachedNetworkImage(
-                              imageUrl: mealImage,
+                              imageUrl: imageUrl,
                               placeholder: (context, url) =>
                                   Center(child: CircularProgressIndicator()),
                               errorWidget: (context, url, error) => Image.asset(
-                                'assets/images/notfound.avif',
+                                'assets/images/mealimageplaceholder.jpg',
                                 fit: BoxFit.cover,
                               ),
                               fit: BoxFit.cover,
                             )
-                          : Image.asset(mealImage, fit: BoxFit.cover),
+                          : Image.asset(
+                              mealImage,
+                              fit: BoxFit.cover,
+                            ),
                     ),
                   ),
                   SizedBox(height: 10),
@@ -190,40 +233,13 @@ class _MealDetailScreen2State extends State<MealDetailScreen2> {
     );
   }
 
-  Map<String, dynamic> _getMealData() {
-    final mealTitle = widget.meal['meal_name'] ?? 'Unknown Meal';
-    final mealDescription = widget.meal['meal_description'] ?? 'No description available';
-    final mealPrice = (widget.meal['price'] is num)
-        ? (widget.meal['price'] as num).toDouble()
-        : 5.0;
-    final mealImage = widget.meal['image_link'] ?? 'assets/images/notfound.avif';
-    final ingredients = (widget.meal['ingredients'] is List)
-        ? List<String>.from(widget.meal['ingredients'])
-        : [];
-    final complementaries = (widget.meal['complementary_names'] is List)
-        ? List<String>.from(widget.meal['complementary_names'])
-        : [];
-    final complementaryImages = (widget.meal['complementary_images'] is List)
-        ? List<String>.from(widget.meal['complementary_images'])
-        : [];
-
-    return {
-      'title': mealTitle,
-      'description': mealDescription,
-      'price': mealPrice,
-      'image': mealImage,
-      'ingredients': ingredients,
-      'complementary_names': complementaries,
-      'complementary_images': complementaryImages,
-    };
-  }
-
   void _toggleFavorite(String title, double price, String image) {
     setState(() {
       if (isFavorite) {
         Favorites.removeItem(title);
       } else {
-        Favorites.addItem(title, price, image);
+        String imagePath = widget.meal['Image_link'] ?? 'assets/images/mealimageplaceholder.jpg';
+        Favorites.addItem(title, price, imagePath);
         showCustomSnackBar(context, '$title added to favorites!');
       }
       isFavorite = !isFavorite;
@@ -240,67 +256,17 @@ class _MealDetailScreen2State extends State<MealDetailScreen2> {
           title,
           price,
           bestservedwith: complementaries.map((item) => {'title': item}).toList(),
-          selectedchef: selectedChef,
+          selectedchef: selectedChef ?? {},
           meal: {
             'name': title,
-            'imagePath': widget.meal['image_link'] ?? 'assets/images/notfound.avif',
-            'description': widget.meal['meal_description'] ?? 'No description available',
+            'imagePath': widget.meal['Image_link'] ?? 'assets/images/mealimageplaceholder.jpg',
+            'description': widget.meal['Meal_description'] ?? 'No description available',
             'price': price,
           },
         );
         showCustomSnackBar(context, '$title added to cart!');
       }
     });
-  }
-
-  Widget _buildBestServedWith(List<String> complementaries, List<String> complementaryImages) {
-    return Card(
-      elevation: 0.3,
-      margin: EdgeInsets.symmetric(vertical: 2),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      color: Colors.teal[50],
-      child: Padding(
-        padding: EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Best Served With', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal[800])),
-            SizedBox(height: 12),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: List.generate(complementaries.length, (index) {
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8.0),
-                    child: Column(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: complementaryImages.isNotEmpty && index < complementaryImages.length
-                              ? Image.network(
-                                  complementaryImages[index],
-                                  width: 60,
-                                  height: 60,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) => Icon(Icons.broken_image, size: 60),
-                                )
-                              : Icon(Icons.fastfood, size: 60),
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          complementaries[index],
-                          style: TextStyle(color: Colors.teal[800], fontWeight: FontWeight.w500),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _buildIngredientsSection(List<String> ingredients) {
@@ -314,7 +280,7 @@ class _MealDetailScreen2State extends State<MealDetailScreen2> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Ingredients', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal[800])),
+            Text('Ingredients', style: _sectionTitleStyle),
             SizedBox(height: 12),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
@@ -323,11 +289,10 @@ class _MealDetailScreen2State extends State<MealDetailScreen2> {
                   return Padding(
                     padding: const EdgeInsets.only(right: 8.0),
                     child: Chip(
-                      label: Text(ingredient, style: TextStyle(color: Colors.teal[800], fontWeight: FontWeight.w500)),
+                      label: Text(ingredient, style: _chipTextStyle),
                       backgroundColor: Colors.teal[100],
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
+                          borderRadius: BorderRadius.circular(8)),
                     ),
                   );
                 }).toList(),
@@ -340,12 +305,12 @@ class _MealDetailScreen2State extends State<MealDetailScreen2> {
   }
 
   Widget _buildPropertiesSection() {
-    final healthGoal = widget.meal['goal'] ?? 'General Health';
-    final allergens = (widget.meal['allergies'] is List)
-        ? List<String>.from(widget.meal['allergies'])
+    final healthGoal = widget.meal['Goal'] ?? 'General Health';
+    final allergens = (widget.meal['Allergies'] is List)
+        ? List<String>.from(widget.meal['Allergies'])
         : [];
-    final diseasesManaged = (widget.meal['disease_management'] is String)
-        ? (widget.meal['disease_management'] as String).split(', ')
+    final diseasesManaged = (widget.meal['Disease_management'] is String)
+        ? (widget.meal['Disease_management'] as String).split(', ')
         : [];
 
     return Card(
@@ -358,13 +323,14 @@ class _MealDetailScreen2State extends State<MealDetailScreen2> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Health info', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal[800])),
+            Text('Health info', style: _sectionTitleStyle),
             SizedBox(height: 12),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  _buildPropertyChipFromAsset('assets/images/goal-picsay.png', 'Health Goal', healthGoal),
+                  _buildPropertyChipFromAsset(
+                      'assets/images/goal-picsay.png', 'Health Goal', healthGoal),
                   _buildPropertyChipFromAsset(
                       'assets/images/allergy-picsay.png',
                       'Allergens',
@@ -385,8 +351,8 @@ class _MealDetailScreen2State extends State<MealDetailScreen2> {
   }
 
   Widget _buildSkillLevelAndPrepTimeCard() {
-    final skillLevel = widget.meal['cooking_skill_level'] ?? 'Intermediate';
-    final prepTime = widget.meal['prep_time']?.toString() ?? '30';
+    final skillLevel = widget.meal['Skill_level'] ?? 'Intermediate';
+    final prepTime = widget.meal['Prep_time']?.toString() ?? '30';
 
     return Card(
       elevation: 0.5,
@@ -398,20 +364,72 @@ class _MealDetailScreen2State extends State<MealDetailScreen2> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Cooking Info', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal[800])),
+            Text('Cooking Info', style: _sectionTitleStyle),
             SizedBox(height: 12),
-            Text('Skill Level: $skillLevel', style: TextStyle(fontSize: 16, color: Colors.teal[800])),
+            Text('Skill Level: $skillLevel', style: _subtitleStyle),
             LinearProgressIndicator(
               value: _getSkillLevelValue(skillLevel),
               color: Colors.green[600],
               backgroundColor: Colors.grey[300],
             ),
             SizedBox(height: 16),
-            Text('Prep Time: ${prepTime} minutes', style: TextStyle(fontSize: 16, color: Colors.teal[800])),
+            Text('Prep Time: ${prepTime} minutes', style: _subtitleStyle),
             LinearProgressIndicator(
               value: _getPrepTimeValue(prepTime),
               color: Colors.green[600],
               backgroundColor: Colors.grey[300],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBestServedWith(List<String> complementaries, List<String> complementaryImages) {
+    return Card(
+      elevation: 0.3,
+      margin: EdgeInsets.symmetric(vertical: 2),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: Colors.teal[50],
+      child: Padding(
+        padding: EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Best Served With', style: _sectionTitleStyle),
+            SizedBox(height: 12),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: List.generate(complementaries.length, (index) {
+                  final complementary = complementaries[index];
+                  final image = complementaryImages.isNotEmpty && index < complementaryImages.length
+                      ? complementaryImages[index]
+                      : 'assets/images/mealimageplaceholder.jpg';
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8.0),
+                    child: Column(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.asset(
+                            image,
+                            width: 80,
+                            height: 80,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          complementary,
+                          style: _chipTextStyle,
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              ),
             ),
           ],
         ),
@@ -459,13 +477,15 @@ class _MealDetailScreen2State extends State<MealDetailScreen2> {
         setState(() {
           this.selectedChef = selectedChef;
         });
-        ShoppingCart.addItem(selectedChef['name'], selectedChef['price'],
-            meal: {
-              'name': widget.meal['meal_name'] ?? 'Unknown Meal',
-              'imagePath': widget.meal['image_link'] ?? 'assets/images/notfound.avif',
-              'description': widget.meal['meal_description'] ?? 'No description available',
-              'price': widget.meal['price'],
-            },
+        ShoppingCart.addItem(
+          selectedChef['name'],
+          selectedChef['price'],
+          meal: {
+            'name': widget.meal['Meal_name'] ?? 'Unknown Meal',
+            'imagePath': widget.meal['Image_link'] ?? 'assets/images/mealimageplaceholder.jpg',
+            'description': widget.meal['Meal_description'] ?? 'No description available',
+            'price': widget.meal['price'] ?? 0.0,
+          },
             selectedchef: selectedChef, bestservedwith: []);
         showCustomSnackBar(context, '${selectedChef['name']} added to cart!');
       }
@@ -565,7 +585,6 @@ class _MealDetailScreen2State extends State<MealDetailScreen2> {
           ),
         ),
         onPressed: () {
-          // Handle navigation to cart if needed
           Navigator.push(
             context,
             MaterialPageRoute(
@@ -624,8 +643,7 @@ class _MealDetailScreen2State extends State<MealDetailScreen2> {
     );
   }
 
-  Widget _buildPropertyChipFromAsset(
-      String assetPath, String label, String data) {
+  Widget _buildPropertyChipFromAsset(String assetPath, String label, String data) {
     return InkWell(
       onTap: () {
         _showPopup(context, label, data);
@@ -682,7 +700,7 @@ class _MealDetailScreen2State extends State<MealDetailScreen2> {
 class ChooseChef extends StatelessWidget {
   final List<Map<String, dynamic>> chefs;
 
-  ChooseChef({Key? key, required this.chefs}) : super(key: key);
+  const ChooseChef({Key? key, required this.chefs}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -725,22 +743,35 @@ class ChooseChef extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              chef['name'],
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.teal[900],
-                              ),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    chef['name'],
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.teal[900],
+                                    ),
+                                  ),
+                                ),
+                                // Add location display
+                                Text(
+                                  'Location: ${chef['location']}',
+                                  style: TextStyle(fontSize: 16, color: Colors.teal[900]),
+                                ),
+                              ],
                             ),
                             Row(
                               children: [
-                                _buildStarRating(chef['rating']),
+                                for (int i = 0; i < chef['rating']; i++)
+                                  Icon(Icons.star, color: Colors.teal[600]),
+                                for (int i = chef['rating']; i < 5; i++)
+                                  Icon(Icons.star_border, color: Colors.teal[600]),
                                 SizedBox(width: 8),
                                 Text(
                                   '\$${chef['price']}',
-                                  style: TextStyle(
-                                      fontSize: 16, color: Colors.teal[900]),
+                                  style: TextStyle(fontSize: 16, color: Colors.teal[900]),
                                 ),
                               ],
                             ),
@@ -756,14 +787,5 @@ class ChooseChef extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  Widget _buildStarRating(int rating) {
-    List<Widget> stars = [];
-    for (int i = 0; i < 5; i++) {
-      stars.add(Icon(i < rating ? Icons.star : Icons.star_border,
-          color: Colors.amber, size: 16));
-    }
-    return Row(children: stars);
   }
 }

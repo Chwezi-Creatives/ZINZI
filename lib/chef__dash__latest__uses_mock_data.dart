@@ -1,0 +1,1392 @@
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart'; // Add intl package: flutter pub add intl
+
+// --- Data Models ---
+
+class ChefProfile {
+  final int chefid;
+  final String name;
+  final String? bio;
+  final String? image; // URL
+  final String? availability;
+  final String? certifications;
+  final String chefType;
+  final int experience;
+  final String? languages;
+  final String? location;
+  final String? minNotice;
+  final String? price;
+  final String? responseTime;
+  final String? sampleMenu;
+  final String? specialties;
+  final String teamSize;
+  bool isActive; // Made mutable for toggle example
+  final String? equipment;
+
+  ChefProfile({
+    required this.chefid,
+    required this.name,
+    this.bio,
+    this.image,
+    this.availability,
+    this.certifications,
+    required this.chefType,
+    required this.experience,
+    this.languages,
+    this.location,
+    this.minNotice,
+    this.price,
+    this.responseTime,
+    this.sampleMenu,
+    this.specialties,
+    required this.teamSize,
+    required this.isActive,
+    this.equipment,
+  });
+
+  // Factory constructor to parse JSON - simplified for mock data
+  factory ChefProfile.fromMockJson(Map<String, dynamic> json) {
+    return ChefProfile(
+      chefid: json['chefid'] ?? 0,
+      name: json['name'] ?? 'N/A',
+      bio: json['bio'],
+      // Use a placeholder image, original URL is problematic
+      image: 'https://via.placeholder.com/150/teal/white?text=Chef',
+      // image: json['image'],
+      availability: json['availability'],
+      certifications: json['certifications'],
+      chefType: json['chef_type'] ?? 'N/A',
+      experience: json['experience'] ?? 0,
+      languages: json['languages'],
+      location: json['location'],
+      minNotice: json['minnotice'],
+      price: json['price'],
+      responseTime: json['responsetime'],
+      sampleMenu: json['samplemenu'],
+      specialties: json['specialties'],
+      teamSize: json['teamsize'] ?? 'N/A',
+      isActive: json['is_active'] ?? false,
+      equipment: json['equipment'],
+    );
+  }
+}
+
+class Order {
+  final int orderId;
+  final String mealName;
+  final String? producerName;
+  final DateTime orderDate;
+  String orderStatus; // Mutable for status updates
+  final String paymentStatus;
+  final String totalPrice;
+  final String? deliveryAddress;
+  final String? ingredients;
+  final String? notes;
+  final int quantity;
+  final int userId;
+
+  Order({
+    required this.orderId,
+    required this.mealName,
+    this.producerName,
+    required this.orderDate,
+    required this.orderStatus,
+    required this.paymentStatus,
+    required this.totalPrice,
+    this.deliveryAddress,
+    this.ingredients,
+    this.notes,
+    required this.quantity,
+    required this.userId,
+  });
+
+  // Factory constructor to parse JSON - simplified
+  factory Order.fromMockJson(Map<String, dynamic> json) {
+    return Order(
+      orderId: json['order_id'] ?? 0,
+      mealName: json['meal_name'] ?? 'N/A',
+      producerName: json['producer_name'],
+      // Basic date parsing, assumes GMT - use intl for robust parsing if needed
+      orderDate: DateTime.tryParse(json['order_date'] ?? '') ?? DateTime.now(),
+      orderStatus: json['order_status'] ?? 'Unknown',
+      paymentStatus: json['payment_status'] ?? 'Unknown',
+      totalPrice: json['total_price'] ?? '0.00',
+      deliveryAddress: json['delivery_address'],
+      ingredients: json['ingredients'],
+      notes: json['notes'],
+      quantity: json['quantity'] ?? 0,
+      userId: json['user_id'] ?? 0,
+    );
+  }
+}
+
+class MealProduct {
+  final String mealId;
+  final String mealName;
+  final String? mealDescription;
+  final String? imageLink; // URL
+  final double price;
+  final String? ingredients;
+  final String? prepTime;
+  final String? skillLevel;
+  final String? mealCategory;
+  final String? complementaryDishes;
+  final String? dietaryPreference;
+  final String? allergies;
+
+  MealProduct({
+    required this.mealId,
+    required this.mealName,
+    this.mealDescription,
+    this.imageLink,
+    required this.price,
+    this.ingredients,
+    this.prepTime,
+    this.skillLevel,
+    this.mealCategory,
+    this.complementaryDishes,
+    this.dietaryPreference,
+    this.allergies,
+  });
+
+  // Factory constructor to parse JSON - simplified
+  factory MealProduct.fromMockJson(Map<String, dynamic> json) {
+    return MealProduct(
+      mealId: json['meal_id'] ?? 'N/A',
+      mealName: json['meal_name'] ?? 'N/A',
+      mealDescription: json['meal_description'],
+      // Use placeholder if original link is invalid or missing
+      imageLink: (json['image_link'] != null &&
+              (json['image_link'] as String).startsWith('http'))
+          ? json['image_link']
+          : 'https://via.placeholder.com/150/teal/white?text=Meal',
+      price: (json['price'] is int)
+          ? (json['price'] as int).toDouble()
+          : (json['price'] is double)
+              ? json['price']
+              : 0.0,
+      ingredients: json['ingredients'],
+      prepTime: json['prep_time'],
+      skillLevel: json['skill_level'],
+      mealCategory: json['meal_category'],
+      complementaryDishes: json['complementary_dishes'],
+      dietaryPreference: json['dietary_preference'],
+      allergies: json['allergies'],
+    );
+  }
+}
+
+// --- Mock Data Service ---
+
+class MockApiService {
+  // Simulate network delay
+  static Future<void> _simulateDelay() =>
+      Future.delayed(const Duration(milliseconds: 800));
+
+  static Future<ChefProfile> fetchChefProfile() async {
+    await _simulateDelay();
+    // TODO: Implement API call to fetch chef profile data
+    // Replace this mock data with actual API call result
+    final mockProfileJson = {
+      "chefid": 1,
+      "name": "Chef Mzamiru",
+      "bio":
+          "Passionate chef specializing in local and international cuisine. Bringing fresh flavors to your table.",
+      "image": "xvideos.com", // Placeholder will be used in model
+      "availability": "Monday, Tuesday, Wednesday, Friday",
+      "certifications": "Food Safety Level 2, Culinary Arts Diploma",
+      "chef_type": "Individual",
+      "experience": 5,
+      "languages": "English, Luganda, Swahili",
+      "location": "Kampala, Uganda", // Simplified from coordinates for display
+      "minnotice": "2 hours",
+      "price": "15.00", // Assuming per hour or per plate
+      "responsetime": "< 1 Hour",
+      "samplemenu": "Luwombo, Katogo, Grilled Tilapia, Beef Stir-fry",
+      "specialties": "Ugandan Cuisine, Grilling, Healthy Meals",
+      "teamsize": "1",
+      "is_active": true,
+      "equipment": "Standard Kitchen Equipment, Outdoor Grill"
+      // Add other relevant fields if needed
+    };
+    return ChefProfile.fromMockJson(mockProfileJson);
+  }
+
+  static Future<List<Order>> fetchOrders() async {
+    await _simulateDelay();
+    // TODO: Implement API call to fetch orders data
+    final mockOrdersJson = [
+      {
+        "order_id": 2069,
+        "meal_name": "Pineapple Chia Seed Juice",
+        "producer_name": "Healthy Bites Co.",
+        "order_date": "Sat, 05 Apr 2025 03:12:50 GMT",
+        "order_status": "Pending",
+        "payment_status": "Pending",
+        "total_price": "5.00",
+        "delivery_address": "Makerere University, Kimera Road, Kampala",
+        "ingredients": "Chia seeds, Mint, Pineapple",
+        "notes": "Extra mint please.",
+        "quantity": 2,
+        "user_id": 138
+      },
+      {
+        "order_id": 1074,
+        "meal_name": "Chapati (2 pcs)",
+        "producer_name": "Chef Mark's Kitchen",
+        "order_date": "Thu, 03 Apr 2025 05:42:38 GMT",
+        "order_status": "Preparing", // Different status example
+        "payment_status": "Paid",
+        "total_price": "3.00",
+        "delivery_address": "Makerere University, Kimera Road, Kampala",
+        "ingredients": "Carrots, Ginger, Green paper, Onions, Salt , Wheat",
+        "notes": "Make them soft.",
+        "quantity": 1,
+        "user_id": 138
+      },
+      {
+        "order_id": 1073,
+        "meal_name": "Beef Gravy Special",
+        "producer_name": "King Kobra Meals",
+        "order_date": "Thu, 03 Apr 2025 05:31:21 GMT",
+        "order_status": "Delivered", // Different status example
+        "payment_status": "Paid",
+        "total_price": "12.50",
+        "delivery_address": "Makerere Kavule, Kawempe, Kampala",
+        "ingredients":
+            "Beef, Carrots, Coriander, Bell peppers, Garlic, Ginger, Onions, Salt, Spring onions, Tomatoes",
+        "notes": "No special instructions",
+        "quantity": 1,
+        "user_id": 139
+      },
+    ];
+    return mockOrdersJson.map((json) => Order.fromMockJson(json)).toList();
+  }
+
+  static Future<List<MealProduct>> fetchProducts() async {
+    await _simulateDelay();
+    // TODO: Implement API call to fetch products/meals data
+    final mockProductsJson = [
+      {
+        "meal_id": "M101",
+        "meal_name": "Air Fried Beef",
+        "meal_description":
+            "Tender, flavorful and protein-packed with a crispy finish.",
+        "image_link":
+            "https://images.unsplash.com/photo-1604190577317- भाभी-0e8f39a9a2?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=60", // Example placeholder
+        "price": 10000, // Assuming local currency
+        "ingredients": "Beef, Garlic, Ginger, Onions, Pineapple, Salt",
+        "prep_time": "Under 1 hour",
+        "skill_level": "Beginner",
+        "meal_category": "Lunch, Dinner",
+        "complementary_dishes": "Steamed sweet potatoes, Kachumbari",
+        "dietary_preference": "Halal, Gluten-Free, High-Protein",
+        "allergies": "None specified"
+      },
+      {
+        "meal_id": "M102",
+        "meal_name": "Air Fried Chicken",
+        "meal_description":
+            "Juicy, flavorful, and perfectly crispy with a savory glaze.",
+        "image_link":
+            "https://images.unsplash.com/photo-1562967916-1efa73281443?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=60", // Example placeholder
+        "price": 8500,
+        "ingredients": "Chicken, Garlic, Ginger, Onions, Salt, Herbs",
+        "prep_time": "Under 1 hour",
+        "skill_level": "Beginner",
+        "meal_category": "Lunch, Dinner",
+        "complementary_dishes": "Fried irish, Roasted vegetable salad",
+        "dietary_preference": "Halal, Gluten-Free, High-Protein",
+        "allergies": "None specified"
+      },
+      {
+        "meal_id": "M115",
+        "meal_name": "Chapati",
+        "meal_description": "Soft, layered flatbread, perfect accompaniment.",
+        "image_link":
+            "https://images.unsplash.com/photo-1604190577317- भाभी-0e8f39a9a2?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=60", // Example placeholder (replace)
+        "price": 1500,
+        "ingredients": "Wheat flour, Water, Salt, Oil",
+        "prep_time": "30 minutes",
+        "skill_level": "Intermediate",
+        "meal_category": "Breakfast, Side Dish",
+        "complementary_dishes": "Beef Gravy, Bean Stew",
+        "dietary_preference": "Vegetarian",
+        "allergies": "Gluten"
+      },
+    ];
+    return mockProductsJson
+        .map((json) => MealProduct.fromMockJson(json))
+        .toList();
+  }
+
+  // --- Mock CRUD Operations ---
+  static Future<bool> updateProfileStatus(int chefId, bool isActive) async {
+    await _simulateDelay();
+    // TODO: Implement API call to update chef active status
+    print("API CALL (Mock): Updating Chef $chefId status to $isActive");
+    return true; // Simulate success
+  }
+
+  static Future<bool> updateOrderStatus(int orderId, String newStatus) async {
+    await _simulateDelay();
+    // TODO: Implement API call to update order status
+    print("API CALL (Mock): Updating Order $orderId status to $newStatus");
+    return true; // Simulate success
+  }
+
+  static Future<MealProduct?> addProduct(
+      Map<String, dynamic> productData) async {
+    await _simulateDelay();
+    // TODO: Implement API call to ADD a new product
+    print("API CALL (Mock): Adding new product: ${productData['meal_name']}");
+    // Simulate returning the newly created product with an ID
+    productData['meal_id'] = 'M${DateTime.now().millisecondsSinceEpoch}';
+    productData['price'] =
+        double.tryParse(productData['price']?.toString() ?? '0.0') ?? 0.0;
+    return MealProduct.fromMockJson(productData);
+  }
+
+  static Future<bool> updateProduct(
+      String mealId, Map<String, dynamic> productData) async {
+    await _simulateDelay();
+    // TODO: Implement API call to UPDATE product with mealId
+    print("API CALL (Mock): Updating product $mealId");
+    return true; // Simulate success
+  }
+
+  static Future<bool> deleteProduct(String mealId) async {
+    await _simulateDelay();
+    // TODO: Implement API call to DELETE product with mealId
+    print("API CALL (Mock): Deleting product $mealId");
+    return true; // Simulate success
+  }
+}
+
+// --- Main Application Widget ---
+
+class ChefDash_mock extends StatelessWidget {
+  const ChefDash_mock({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Chef Dashboard',
+      theme: ThemeData(
+        primarySwatch: Colors.teal,
+        scaffoldBackgroundColor: Colors.teal[50],
+        appBarTheme: AppBarTheme(
+          backgroundColor: Colors.teal[700],
+          foregroundColor: Colors.white,
+          elevation: 2,
+          titleTextStyle: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        cardTheme: CardTheme(
+          elevation: 1,
+          margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+        chipTheme: ChipThemeData(
+          backgroundColor: Colors.teal[100],
+          labelStyle: TextStyle(color: Colors.teal[800]),
+          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
+        ),
+        textTheme: TextTheme(
+          titleMedium: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: Colors.teal[900],
+              fontSize: 16), // For card titles
+          bodyMedium: TextStyle(color: Colors.grey[800], fontSize: 14),
+          bodySmall: TextStyle(color: Colors.grey[600], fontSize: 12),
+          labelLarge: const TextStyle(
+            // For Buttons
+            color: Colors.white,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        floatingActionButtonTheme: FloatingActionButtonThemeData(
+          backgroundColor: Colors.teal[600],
+          foregroundColor: Colors.white,
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          focusedBorder: OutlineInputBorder(
+            borderSide: BorderSide(color: Colors.teal[700]!, width: 2.0),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          labelStyle: TextStyle(color: Colors.teal[800]),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: Colors.teal[700],
+          ),
+        ),
+      ),
+      home: const ChefDashboardScreen(),
+      debugShowCheckedModeBanner: false,
+    );
+  }
+}
+
+// --- Main Dashboard Screen (with Tabs) ---
+
+class ChefDashboardScreen extends StatefulWidget {
+  const ChefDashboardScreen({super.key});
+
+  @override
+  State<ChefDashboardScreen> createState() => _ChefDashboardScreenState();
+}
+
+class _ChefDashboardScreenState extends State<ChefDashboardScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Chef Dashboard'),
+        bottom: TabBar(
+          controller: _tabController,
+          indicatorColor: Colors.white,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.teal[100],
+          tabs: const [
+            Tab(icon: Icon(Icons.person_outline), text: 'Profile'),
+            Tab(icon: Icon(Icons.receipt_long_outlined), text: 'Orders'),
+            Tab(icon: Icon(Icons.restaurant_menu_outlined), text: 'Products'),
+          ],
+        ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: const [
+          ProfileTab(),
+          OrdersTab(),
+          ProductsTab(),
+        ],
+      ),
+    );
+  }
+}
+
+// --- Profile Tab Widget ---
+
+class ProfileTab extends StatefulWidget {
+  const ProfileTab({super.key});
+
+  @override
+  State<ProfileTab> createState() => _ProfileTabState();
+}
+
+class _ProfileTabState extends State<ProfileTab> {
+  Future<ChefProfile>? _profileFuture;
+  bool _isLoadingStatus = false;
+  ChefProfile? _currentProfile; // To hold the fetched profile for status update
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  void _loadProfile() {
+    setState(() {
+      _profileFuture = MockApiService.fetchChefProfile();
+      // Store the profile once fetched to allow modification
+      _profileFuture!.then((profile) {
+        if (mounted) {
+          setState(() {
+            _currentProfile = profile;
+          });
+        }
+      });
+    });
+  }
+
+  Future<void> _toggleActiveStatus(bool newValue) async {
+    if (_currentProfile == null) return;
+
+    setState(() {
+      _isLoadingStatus = true;
+    });
+
+    // Optimistic UI update
+    setState(() {
+      _currentProfile!.isActive = newValue;
+    });
+
+    bool success = await MockApiService.updateProfileStatus(
+        _currentProfile!.chefid, newValue);
+
+    setState(() {
+      _isLoadingStatus = false;
+    });
+
+    if (!success && mounted) {
+      // Revert if API call failed
+      setState(() {
+        _currentProfile!.isActive = !newValue; // Revert back
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Failed to update status. Please try again.'),
+            backgroundColor: Colors.red),
+      );
+    } else if (success && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('Status updated successfully.'),
+            backgroundColor: Colors.green),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<ChefProfile>(
+      future: _profileFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        } else if (snapshot.hasError) {
+          return Center(
+              child: Text('Error loading profile: ${snapshot.error}'));
+        } else if (snapshot.hasData && _currentProfile != null) {
+          final profile = _currentProfile!; // Use the state variable
+          return RefreshIndicator(
+            onRefresh: () async => _loadProfile(),
+            child: ListView(
+              padding: const EdgeInsets.all(16.0),
+              children: [
+                _buildProfileHeader(context, profile),
+                const SizedBox(height: 16),
+                _buildActiveStatusToggle(context, profile),
+                const SizedBox(height: 16),
+                _buildProfileDetailsCard(context, profile),
+              ],
+            ),
+          );
+        } else {
+          return const Center(child: Text('No profile data found.'));
+        }
+      },
+    );
+  }
+
+  Widget _buildProfileHeader(BuildContext context, ChefProfile profile) {
+    return Row(
+      children: [
+        CircleAvatar(
+          radius: 40,
+          backgroundColor: Colors.teal[100],
+          backgroundImage:
+              NetworkImage(profile.image ?? ''), // Use NetworkImage
+          onBackgroundImageError: (_, __) {/* Handle error if needed */},
+          child: profile.image == null || profile.image!.isEmpty
+              ? Icon(Icons.person,
+                  size: 40, color: Colors.teal[700]) // Fallback icon
+              : null, // Show image if URL is valid
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                profile.name,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold, color: Colors.teal[800]),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                profile.chefType,
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(color: Colors.grey[700]),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActiveStatusToggle(BuildContext context, ChefProfile profile) {
+    return Card(
+      child: SwitchListTile(
+        title: Text('Active Status',
+            style: Theme.of(context).textTheme.titleMedium),
+        value: profile.isActive,
+        onChanged: _isLoadingStatus
+            ? null
+            : (bool value) {
+                _toggleActiveStatus(value);
+              },
+        secondary: _isLoadingStatus
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2))
+            : Icon(profile.isActive ? Icons.check_circle : Icons.cancel,
+                color: profile.isActive ? Colors.green[600] : Colors.red[600]),
+        activeColor: Colors.teal[600],
+      ),
+    );
+  }
+
+  Widget _buildProfileDetailsCard(BuildContext context, ChefProfile profile) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Details',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(color: Colors.teal[900])),
+            const Divider(height: 20, thickness: 1),
+            _buildInfoRow(context, Icons.info_outline, 'Bio', profile.bio),
+            _buildInfoRow(
+                context, Icons.star_border, 'Specialties', profile.specialties),
+            _buildInfoRow(context, Icons.menu_book_outlined, 'Sample Menu',
+                profile.sampleMenu),
+            _buildInfoRow(context, Icons.timer_outlined, 'Experience',
+                '${profile.experience} years'),
+            _buildInfoRow(context, Icons.attach_money_outlined, 'Est. Price',
+                profile.price),
+            _buildInfoRow(context, Icons.schedule_outlined, 'Min. Notice',
+                profile.minNotice),
+            _buildInfoRow(context, Icons.access_time_outlined, 'Response Time',
+                profile.responseTime),
+            _buildInfoRow(context, Icons.language_outlined, 'Languages',
+                profile.languages),
+            _buildInfoRow(context, Icons.build_circle_outlined, 'Equipment',
+                profile.equipment),
+            _buildInfoRow(context, Icons.calendar_today_outlined,
+                'Availability', profile.availability),
+            _buildInfoRow(context, Icons.verified_user_outlined,
+                'Certifications', profile.certifications),
+            _buildInfoRow(context, Icons.location_on_outlined, 'Location',
+                profile.location),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(
+      BuildContext context, IconData icon, String label, String? value) {
+    if (value == null || value.isEmpty)
+      return const SizedBox.shrink(); // Don't show empty rows
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: Colors.teal[600], size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600, color: Colors.grey[600])),
+                const SizedBox(height: 2),
+                Text(value, style: Theme.of(context).textTheme.bodyMedium),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// --- Orders Tab Widget ---
+
+class OrdersTab extends StatefulWidget {
+  const OrdersTab({super.key});
+
+  @override
+  State<OrdersTab> createState() => _OrdersTabState();
+}
+
+class _OrdersTabState extends State<OrdersTab> {
+  Future<List<Order>>? _ordersFuture;
+  List<Order> _orders = []; // Store the fetched list to allow modification
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOrders();
+  }
+
+  void _loadOrders() {
+    setState(() {
+      _ordersFuture = MockApiService.fetchOrders();
+      _ordersFuture!.then((orders) {
+        if (mounted) {
+          setState(() {
+            _orders = orders;
+            // Sort orders initially (e.g., by date descending)
+            _orders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
+          });
+        }
+      }).catchError((error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text('Error loading orders: $error'),
+                backgroundColor: Colors.red),
+          );
+        }
+      });
+    });
+  }
+
+  // Method to update order status locally and trigger mock API call
+  Future<void> _updateOrderStatus(Order order, String newStatus) async {
+    int orderIndex = _orders.indexWhere((o) => o.orderId == order.orderId);
+    if (orderIndex == -1) return;
+
+    // Optimistic UI Update
+    setState(() {
+      _orders[orderIndex].orderStatus = newStatus;
+    });
+
+    bool success =
+        await MockApiService.updateOrderStatus(order.orderId, newStatus);
+
+    if (!success && mounted) {
+      // Revert UI if API call fails
+      setState(() {
+        // Find the original status maybe? Or just show error.
+        // For simplicity, we'll just show error. Reverting needs storing original state.
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('Failed to update order ${order.orderId} status.'),
+            backgroundColor: Colors.red),
+      );
+    } else if (success && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content:
+                Text('Order ${order.orderId} status updated to $newStatus.'),
+            backgroundColor: Colors.green),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Order>>(
+      future: _ordersFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            _orders.isEmpty) {
+          return const Center(child: CircularProgressIndicator());
+        } else if (snapshot.hasError && _orders.isEmpty) {
+          return Center(child: Text('Error loading orders: ${snapshot.error}'));
+        } else if (_orders.isEmpty &&
+            snapshot.connectionState != ConnectionState.waiting) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.inbox_outlined, size: 60, color: Colors.grey[400]),
+                const SizedBox(height: 16),
+                Text('No orders found.',
+                    style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Refresh'),
+                  onPressed: _loadOrders,
+                )
+              ],
+            ),
+          );
+        } else {
+          // Display the list, potentially using _orders which might be updated
+          return RefreshIndicator(
+            onRefresh: () async => _loadOrders(),
+            child: ListView.builder(
+              padding: const EdgeInsets.only(top: 8.0, bottom: 8.0),
+              itemCount: _orders.length,
+              itemBuilder: (context, index) {
+                final order = _orders[index];
+                return _buildOrderCard(context, order);
+              },
+            ),
+          );
+        }
+      },
+    );
+  }
+
+  Widget _buildOrderCard(BuildContext context, Order order) {
+    final DateFormat dateFormat =
+        DateFormat('MMM d, yyyy \'at\' h:mm a'); // e.g., Apr 5, 2025 at 3:12 AM
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+      child: ExpansionTile(
+        key: PageStorageKey<int>(
+            order.orderId), // Helps maintain state on scroll
+        tilePadding:
+            const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+        title: Text(
+          order.mealName,
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 4.0),
+          child: Text(
+            'Order #${order.orderId} • ${dateFormat.format(order.orderDate.toLocal())}',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+        leading: CircleAvatar(
+          backgroundColor: _getStatusColor(order.orderStatus).withOpacity(0.1),
+          child: Icon(_getStatusIcon(order.orderStatus),
+              color: _getStatusColor(order.orderStatus), size: 20),
+        ),
+        trailing: Chip(
+          label: Text(order.orderStatus),
+          backgroundColor: _getStatusColor(order.orderStatus).withOpacity(0.2),
+          labelStyle: TextStyle(
+              color: _getStatusColor(order.orderStatus),
+              fontWeight: FontWeight.w500),
+          padding: const EdgeInsets.symmetric(horizontal: 8.0),
+          visualDensity: VisualDensity.compact,
+        ),
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0)
+                .copyWith(top: 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Divider(height: 1),
+                _buildDetailRow(context, Icons.person_outline, 'Customer ID',
+                    order.userId.toString()),
+                _buildDetailRow(context, Icons.storefront_outlined, 'Producer',
+                    order.producerName),
+                _buildDetailRow(context, Icons.shopping_bag_outlined,
+                    'Quantity', order.quantity.toString()),
+                _buildDetailRow(context, Icons.payment_outlined, 'Payment',
+                    '${order.paymentStatus} (\$${order.totalPrice})'),
+                _buildDetailRow(context, Icons.location_on_outlined,
+                    'Delivery Address', order.deliveryAddress),
+                _buildDetailRow(context, Icons.restaurant_outlined,
+                    'Ingredients', order.ingredients),
+                _buildDetailRow(
+                    context, Icons.notes_outlined, 'Notes', order.notes),
+                const SizedBox(height: 12),
+                // Action Buttons
+                if (order.orderStatus == 'Pending' ||
+                    order.orderStatus == 'Preparing')
+                  _buildActionButtons(context, order),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButtons(BuildContext context, Order order) {
+    return Wrap(
+      // Use Wrap for responsiveness if buttons might overflow
+      spacing: 8.0, // Horizontal space between buttons
+      runSpacing: 4.0, // Vertical space if buttons wrap
+      alignment: WrapAlignment.end,
+      children: [
+        if (order.orderStatus == 'Pending')
+          TextButton.icon(
+            icon: const Icon(Icons.check_circle_outline, size: 18),
+            label: const Text('Accept'),
+            style: TextButton.styleFrom(foregroundColor: Colors.green[700]),
+            onPressed: () => _updateOrderStatus(order, 'Preparing'),
+          ),
+        if (order.orderStatus == 'Preparing')
+          TextButton.icon(
+            icon: const Icon(Icons.delivery_dining_outlined, size: 18),
+            label: const Text('Mark Shipped'), // Example next step
+            style: TextButton.styleFrom(foregroundColor: Colors.blue[700]),
+            onPressed: () => _updateOrderStatus(order, 'Shipped'),
+          ),
+        if (order.orderStatus == 'Pending' ||
+            order.orderStatus ==
+                'Preparing') // Allow cancelling before shipping
+          TextButton.icon(
+            icon: const Icon(Icons.cancel_outlined, size: 18),
+            label: const Text('Reject'),
+            style: TextButton.styleFrom(foregroundColor: Colors.red[700]),
+            onPressed: () => _updateOrderStatus(order, 'Cancelled'),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildDetailRow(
+      BuildContext context, IconData icon, String label, String? value) {
+    if (value == null || value.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: Colors.grey[600]),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                      text: '$label: ',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.w500)),
+                  TextSpan(
+                      text: value,
+                      style: Theme.of(context).textTheme.bodyMedium),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- Helper functions for order status styling ---
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'pending':
+        return Colors.orange[700]!;
+      case 'preparing':
+        return Colors.blue[700]!;
+      case 'shipped':
+      case 'out for delivery':
+        return Colors.purple[700]!;
+      case 'delivered':
+      case 'completed':
+        return Colors.green[700]!;
+      case 'cancelled':
+      case 'rejected':
+        return Colors.red[700]!;
+      default:
+        return Colors.grey[700]!;
+    }
+  }
+
+  IconData _getStatusIcon(String status) {
+    switch (status.toLowerCase()) {
+      case 'pending':
+        return Icons.hourglass_empty_outlined;
+      case 'preparing':
+        return Icons.soup_kitchen_outlined;
+      case 'shipped':
+      case 'out for delivery':
+        return Icons.local_shipping_outlined;
+      case 'delivered':
+      case 'completed':
+        return Icons.check_circle_outline;
+      case 'cancelled':
+      case 'rejected':
+        return Icons.cancel_outlined;
+      default:
+        return Icons.help_outline;
+    }
+  }
+}
+
+// --- Products Tab Widget ---
+
+class ProductsTab extends StatefulWidget {
+  const ProductsTab({super.key});
+
+  @override
+  State<ProductsTab> createState() => _ProductsTabState();
+}
+
+class _ProductsTabState extends State<ProductsTab> {
+  Future<List<MealProduct>>? _productsFuture;
+  List<MealProduct> _products = []; // Store locally for CRUD simulation
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProducts();
+  }
+
+  void _loadProducts() {
+    setState(() {
+      _productsFuture = MockApiService.fetchProducts();
+      _productsFuture!.then((products) {
+        if (mounted) {
+          setState(() {
+            _products = products;
+          });
+        }
+      }).catchError((error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text('Error loading products: $error'),
+                backgroundColor: Colors.red),
+          );
+        }
+      });
+    });
+  }
+
+  // --- CRUD Action Handlers (Placeholders) ---
+
+  void _showAddProductDialog() {
+    final nameController = TextEditingController();
+    final descriptionController = TextEditingController();
+    final priceController = TextEditingController();
+    final ingredientsController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text("Add New Meal"),
+          content: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  TextFormField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: 'Meal Name'),
+                    validator: (value) =>
+                        value == null || value.isEmpty ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: descriptionController,
+                    decoration: const InputDecoration(labelText: 'Description'),
+                    maxLines: 2,
+                    validator: (value) =>
+                        value == null || value.isEmpty ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                      controller: priceController,
+                      decoration: const InputDecoration(
+                          labelText: 'Price', prefixText: '\$'),
+                      keyboardType:
+                          TextInputType.numberWithOptions(decimal: true),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) return 'Required';
+                        if (double.tryParse(value) == null)
+                          return 'Invalid number';
+                        return null;
+                      }),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: ingredientsController,
+                    decoration: const InputDecoration(
+                        labelText: 'Ingredients (comma-separated)'),
+                  ),
+                  // Add more fields as needed (prep time, category, etc.)
+                ],
+              ),
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text("Cancel"),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            ElevatedButton(
+              child: const Text("Add Meal"),
+              onPressed: () async {
+                if (formKey.currentState!.validate()) {
+                  // Prepare data for mock API call
+                  final newProductData = {
+                    'meal_name': nameController.text,
+                    'meal_description': descriptionController.text,
+                    'price': priceController.text, // API model expects double
+                    'ingredients': ingredientsController.text,
+                    // Add default/other values if needed
+                    'image_link':
+                        'https://via.placeholder.com/150/teal/white?text=New', // Default image
+                    'prep_time': 'N/A',
+                    'skill_level': 'N/A',
+                    'meal_category': 'N/A',
+                  };
+
+                  Navigator.of(context).pop(); // Close dialog first
+                  MealProduct? addedProduct =
+                      await MockApiService.addProduct(newProductData);
+
+                  if (addedProduct != null && mounted) {
+                    setState(() {
+                      _products.insert(0, addedProduct); // Add to top of list
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                          content: Text(
+                              '${addedProduct.mealName} added successfully!'),
+                          backgroundColor: Colors.green),
+                    );
+                  } else if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text('Failed to add product.'),
+                          backgroundColor: Colors.red),
+                    );
+                  }
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showEditProductDialog(MealProduct product) {
+    // Similar dialog as add, pre-filled with product data
+    // On save, call MockApiService.updateProduct(...)
+    // Update the _products list upon success
+    print("Placeholder: Show edit dialog for ${product.mealName}");
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('TODO: Implement Edit for ${product.mealName}')),
+    );
+  }
+
+  void _confirmDeleteProduct(MealProduct product) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text("Confirm Deletion"),
+          content:
+              Text("Are you sure you want to delete '${product.mealName}'?"),
+          actions: <Widget>[
+            TextButton(
+              child: const Text("Cancel"),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            TextButton(
+              child: const Text("Delete", style: TextStyle(color: Colors.red)),
+              onPressed: () async {
+                Navigator.of(context).pop(); // Close dialog first
+                bool success =
+                    await MockApiService.deleteProduct(product.mealId);
+                if (success && mounted) {
+                  setState(() {
+                    _products.removeWhere((p) => p.mealId == product.mealId);
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                        content: Text('${product.mealName} deleted.'),
+                        backgroundColor: Colors.orange),
+                  );
+                } else if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('Failed to delete product.'),
+                        backgroundColor: Colors.red),
+                  );
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      // Add Scaffold for FAB
+      body: FutureBuilder<List<MealProduct>>(
+        future: _productsFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting &&
+              _products.isEmpty) {
+            return const Center(child: CircularProgressIndicator());
+          } else if (snapshot.hasError && _products.isEmpty) {
+            return Center(
+                child: Text('Error loading products: ${snapshot.error}'));
+          } else if (_products.isEmpty &&
+              snapshot.connectionState != ConnectionState.waiting) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.no_food_outlined,
+                      size: 60, color: Colors.grey[400]),
+                  const SizedBox(height: 16),
+                  Text('No products found.',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Refresh'),
+                    onPressed: _loadProducts,
+                  )
+                ],
+              ),
+            );
+          } else {
+            return RefreshIndicator(
+              onRefresh: () async => _loadProducts(),
+              child: ListView.builder(
+                padding: const EdgeInsets.only(
+                    top: 8.0, bottom: 80.0), // Padding for FAB
+                itemCount: _products.length,
+                itemBuilder: (context, index) {
+                  final product = _products[index];
+                  return _buildProductCard(context, product);
+                },
+              ),
+            );
+          }
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showAddProductDialog,
+        tooltip: 'Add Meal',
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  Widget _buildProductCard(BuildContext context, MealProduct product) {
+    final formatCurrency = NumberFormat.simpleCurrency(
+        decimalDigits: 2, name: ''); // Adjust currency symbol/name if needed
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Image
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8.0),
+              child: Image.network(
+                product.imageLink ??
+                    'https://via.placeholder.com/80/teal/white?text=Meal', // Fallback
+                width: 80,
+                height: 80,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => Container(
+                    width: 80,
+                    height: 80,
+                    color: Colors.grey[200],
+                    child: Icon(Icons.broken_image_outlined,
+                        color: Colors.grey[400])),
+                loadingBuilder: (BuildContext context, Widget child,
+                    ImageChunkEvent? loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return Container(
+                    // Placeholder during loading
+                    width: 80, height: 80,
+                    color: Colors.grey[200],
+                    child: Center(
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.0,
+                        value: loadingProgress.expectedTotalBytes != null
+                            ? loadingProgress.cumulativeBytesLoaded /
+                                loadingProgress.expectedTotalBytes!
+                            : null,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Details
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    product.mealName,
+                    style: Theme.of(context).textTheme.titleMedium,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    product.mealDescription ?? 'No description available.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '\$${formatCurrency.format(product.price)}', // Format price
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.bold, color: Colors.teal[800]),
+                  ),
+                ],
+              ),
+            ),
+            // Action Buttons
+            Column(
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: [
+                IconButton(
+                  icon: Icon(Icons.edit_outlined,
+                      color: Colors.blueGrey[600], size: 20),
+                  tooltip: 'Edit Meal',
+                  onPressed: () => _showEditProductDialog(product),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                ),
+                IconButton(
+                  icon: Icon(Icons.delete_outline,
+                      color: Colors.red[600], size: 20),
+                  tooltip: 'Delete Meal',
+                  onPressed: () => _confirmDeleteProduct(product),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                ),
+              ],
+            )
+          ],
+        ),
+      ),
+    );
+  }
+}

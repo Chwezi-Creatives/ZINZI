@@ -426,7 +426,8 @@ class ChefDetailScreen extends StatelessWidget {
                       chef['name'],
                       (chef['price'] as num).toDouble(),
                       quantity: 1,
-                      selectedChef: chef,
+                      selectedchef: chef,
+                      meal: {}, bestservedwith: [],
                     );
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
@@ -434,7 +435,7 @@ class ChefDetailScreen extends StatelessWidget {
                         duration: Duration(seconds: 2),
                       ),
                     );
-                    Navigator.push(
+                    Navigator.push( 
                       context,
                       MaterialPageRoute(
                         builder: (context) => AllMealsScreen(),

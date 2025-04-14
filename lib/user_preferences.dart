@@ -4,8 +4,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:zinzi2/dashboard_page.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:zinzi2/profile.dart';
 
-final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';
+final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 
 class UserPreferencesPage extends StatefulWidget {
   const UserPreferencesPage({super.key});
@@ -77,7 +78,7 @@ class _UserPreferencesPageState extends State<UserPreferencesPage>
 
     try {
       final response = await http.post(
-        Uri.parse('$apibaseurl/rr/add_user_preferences'),
+        Uri.parse('$apibaseurl/rr/preferences'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'user_id': _userId,
@@ -87,12 +88,12 @@ class _UserPreferencesPageState extends State<UserPreferencesPage>
         }),
       );
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 201) {
         Navigator.push(
           context,
           PageRouteBuilder(
             pageBuilder: (context, animation, secondaryAnimation) =>
-                const DashboardPage(),
+                const ProfilePage(),
             transitionsBuilder:
                 (context, animation, secondaryAnimation, child) {
               const slideBegin = Offset(1.0, 0.0); // Slide in from the right

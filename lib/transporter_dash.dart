@@ -1,0 +1,2453 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // For SystemUiOverlayStyle & input formatters
+import 'package:intl/intl.dart';
+import 'dart:convert'; // For jsonDecode, jsonEncode
+import 'package:http/http.dart' as http; // Import the http package
+import 'package:shared_preferences/shared_preferences.dart'; // Import SharedPreferences
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import flutter_dotenv
+import 'package:cached_network_image/cached_network_image.dart'; // Image caching
+import 'package:shimmer/shimmer.dart'; // Shimmer effect
+import 'dart:io'; // For File in profile editing
+import 'package:image_picker/image_picker.dart'; // For profile editing
+import 'package:geolocator/geolocator.dart';
+import 'package:zinzi2/Transporter_login.dart'; // Assuming this is your login page path
+
+// --- Hardcoded Colors ---
+const Color primaryTeal = Color(0xFF00796B);
+const Color lightTeal = Color(0xFFB2DFDB);
+const Color lighterTeal = Color(0xFFE0F2F1);
+const Color darkTeal = Color(0xFF004D40);
+const Color accentTeal = Color(0xFF009688);
+const Color whiteColor = Colors.white;
+const Color lightBackgroundColor = Color(0xFFF5F5F5);
+const Color textFieldFillColor = Color(0x8AFFFFFF);
+const Color subtleTextColor = Color(0xFF757575);
+const Color errorColor = Color(0xFFD32F2F);
+const Color starColor = Color(0xFFFFC107);
+const Color cardBackground = whiteColor;
+const Color dividerColor = Color(0xFFE0E0E0);
+final Color assignedColor = Colors.blueGrey.shade500;
+final Color pickedUpColor = Colors.blue.shade600;
+final Color deliveringColor = Colors.purple.shade500;
+final Color deliveredColor = Colors.green.shade600;
+final Color cancelledColor = Colors.red.shade600;
+final Color defaultStatusColor = Colors.grey.shade600;
+const Color actionButtonBackground = Color(0xFFE0F2F1);
+const Color actionButtonForeground = darkTeal;
+const Color destructiveButtonBackground = Color(0xFFFFEBEE);
+const Color destructiveButtonForeground = Color(0xFFC62828);
+const Color textOnWhite = Color(0xFF212121); // Added for consistency
+const Color textOnTeal = Colors.white; // Added for consistency
+
+// --- API Base URL & Imgur ID (Ensure dotenv is loaded in main.dart) ---
+final String apibaseurl =
+    dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url/api';
+final String? imgurClientId = dotenv.env['IMGUR_CLIENT_ID'];
+
+// Path for placeholder image (ensure this exists in your assets folder and pubspec.yaml)
+const String placeholderImagePath = 'assets/images/placeholder_avatar.png';
+
+// ===================================
+// === DATA MODELS (Defined Inline) ==
+// ===================================
+
+// --- Transporter Profile Model ---
+class TransporterProfile {
+  final int transporterId;
+  final String name;
+  final String email;
+  final String? phoneNumber;
+  final String? profileImageUrl;
+  final String? vehicleType;
+  final String? licensePlate;
+  final bool isActive;
+  final double? rating;
+  final String? location; // Storing location as string for now
+  final DateTime? registrationDate;
+
+  TransporterProfile({
+    required this.transporterId,
+    required this.name,
+    required this.email,
+    this.phoneNumber,
+    this.profileImageUrl,
+    this.vehicleType,
+    this.licensePlate,
+    required this.isActive,
+    this.rating,
+    this.location,
+    this.registrationDate,
+  });
+
+  factory TransporterProfile.fromJson(Map<String, dynamic> json) {
+    // --- Reusable JSON parsing helpers ---
+    String? getStringSafe(dynamic value) => value?.toString();
+    int parseIntSafe(dynamic value, {int defaultValue = 0}) {
+      if (value == null) return defaultValue;
+      if (value is int) return value;
+      if (value is String) return int.tryParse(value) ?? defaultValue;
+      if (value is double) return value.toInt();
+      return defaultValue;
+    }
+
+    double? parseDoubleNullable(dynamic value) {
+      if (value == null) return null;
+      if (value is double) return value;
+      if (value is int) return value.toDouble();
+      if (value is String) return double.tryParse(value);
+      return null;
+    }
+
+    bool parseBoolSafe(dynamic value) => value is bool
+        ? value
+        : (value == 'true' || value == 1 || value == 'True');
+    DateTime? parseDateSafe(dynamic value) {
+      if (value == null) return null;
+      try {
+        // First try standard ISO format
+        return DateTime.tryParse(value.toString())?.toLocal();
+      } catch (_) {
+        try {
+          // Fallback to the specific GMT format if ISO fails
+          return DateFormat("E, dd MMM yyyy HH:mm:ss 'GMT'", 'en_US')
+              .parseUtc(value.toString())
+              .toLocal();
+        } catch (e) {
+          print("Could not parse date: $value - Error: $e");
+          return null; // Return null if both fail
+        }
+      }
+    }
+
+    bool isValidUrl(String? url) {
+      if (url == null || url.isEmpty) return false;
+      try {
+        final uri = Uri.parse(url);
+        return uri.isScheme('HTTP') || uri.isScheme('HTTPS');
+      } catch (_) {
+        return false;
+      }
+    }
+
+    // --- Parsing Logic ---
+    return TransporterProfile(
+      // Look for various possible keys for ID
+      transporterId: parseIntSafe(
+          json['transporter_id'] ?? json['rider_id'] ?? json['id']),
+      name: getStringSafe(json['name']) ?? 'N/A',
+      email: getStringSafe(json['email']) ?? 'N/A',
+      phoneNumber: getStringSafe(json['phone_number']),
+      profileImageUrl:
+          isValidUrl(getStringSafe(json['image'] ?? json['profile_image_url']))
+              ? getStringSafe(json['image'] ?? json['profile_image_url'])
+              : null, // Return null if invalid URL
+      vehicleType: getStringSafe(json['vehicle_type']),
+      licensePlate: getStringSafe(json['license_plate']),
+      // Check for 'online_status' as a fallback for 'is_active'
+      isActive:
+          parseBoolSafe(json['is_active'] ?? json['online_status'] ?? false),
+      // Safely parse rating which might be a string
+      rating: parseDoubleNullable(json['rating']),
+      location:
+          getStringSafe(json['location']), // Keep location as string for now
+      registrationDate: parseDateSafe(json['registration_date']),
+    );
+  }
+
+  // copyWith method is useful if you need to update local state optimistically
+  TransporterProfile copyWith({
+    int? transporterId,
+    String? name,
+    String? email,
+    ValueGetter<String?>?
+        phoneNumber, // Use ValueGetter for nullability control
+    ValueGetter<String?>? profileImageUrl,
+    ValueGetter<String?>? vehicleType,
+    ValueGetter<String?>? licensePlate,
+    bool? isActive,
+    ValueGetter<double?>? rating,
+    ValueGetter<String?>? location,
+    ValueGetter<DateTime?>? registrationDate,
+  }) {
+    return TransporterProfile(
+      transporterId: transporterId ?? this.transporterId,
+      name: name ?? this.name,
+      email: email ?? this.email,
+      phoneNumber: phoneNumber != null ? phoneNumber() : this.phoneNumber,
+      profileImageUrl:
+          profileImageUrl != null ? profileImageUrl() : this.profileImageUrl,
+      vehicleType: vehicleType != null ? vehicleType() : this.vehicleType,
+      licensePlate: licensePlate != null ? licensePlate() : this.licensePlate,
+      isActive: isActive ?? this.isActive,
+      rating: rating != null ? rating() : this.rating,
+      location: location != null ? location() : this.location,
+      registrationDate:
+          registrationDate != null ? registrationDate() : this.registrationDate,
+    );
+  }
+}
+
+// --- Order Model (Adapted for Transporter View) ---
+class Order {
+  final int orderId;
+  final int? userId;
+  final String mealName; // Included for context
+  final String? ingredients; // Included for context
+  final int quantity; // Included for context
+  final double totalPrice; // Need total price
+  final String orderStatus;
+  final String paymentStatus;
+  final String paymentMode;
+  final String? deliveryAddress; // Customer's address
+  final DateTime orderDate;
+  final String? notes;
+  final String? orderType;
+  final String? productId; // Or mealId
+  final int? chefId; // May not be relevant to transporter
+  final String? chefName; // May not be relevant
+  final double? amountPaid; // May not be relevant
+  final String? transactionId; // May not be relevant
+  final int? producerId; // ID of the pickup location
+  final String? producerName; // Name of the pickup location
+  // Add producer address if available from API, useful for navigation
+  final String? producerAddress;
+
+  // Static constants for status strings (good practice)
+  static const STATUS_PENDING = 'Pending';
+  static const STATUS_ACCEPTED =
+      'Accepted'; // By Producer, ready for rider assignment/pickup
+  static const STATUS_PREPARING = 'Preparing'; // By Producer
+  static const STATUS_DISPATCHED = 'Dispatched'; // Could mean assigned to Rider
+  static const STATUS_PICKED_UP = 'Picked Up'; // By Rider
+  static const STATUS_DELIVERING = 'Delivering'; // By Rider
+  static const STATUS_DELIVERED = 'Delivered'; // By Rider
+  static const STATUS_COMPLETED =
+      'Completed'; // General term, often same as Delivered
+  static const STATUS_CANCELLED = 'Cancelled';
+
+  Order({
+    required this.orderId,
+    this.userId,
+    required this.mealName,
+    this.ingredients,
+    required this.quantity,
+    required this.totalPrice,
+    required this.orderStatus,
+    required this.paymentStatus,
+    required this.paymentMode,
+    this.deliveryAddress,
+    required this.orderDate,
+    this.notes,
+    this.orderType,
+    this.productId,
+    this.chefId,
+    this.chefName,
+    this.amountPaid,
+    this.transactionId,
+    this.producerId,
+    this.producerName,
+    this.producerAddress, // Added producer address
+  });
+
+  factory Order.fromJson(Map<String, dynamic> json) {
+    // --- Reusable JSON parsing helpers ---
+    String? getStringSafe(dynamic value) => value?.toString();
+    int? parseIntNullable(dynamic value) {
+      if (value == null) return null;
+      if (value is int) return value;
+      if (value is String) return int.tryParse(value);
+      if (value is double) return value.toInt();
+      return null;
+    }
+
+    int parseIntSafe(dynamic value, {int defaultValue = 0}) =>
+        parseIntNullable(value) ?? defaultValue;
+    double? parseDoubleNullable(dynamic value) {
+      if (value == null) return null;
+      if (value is double) return value;
+      if (value is int) return value.toDouble();
+      if (value is String) return double.tryParse(value);
+      return null;
+    }
+
+    double parseDoubleSafe(dynamic value, {double defaultValue = 0.0}) =>
+        parseDoubleNullable(value) ?? defaultValue;
+    DateTime parseDateSafe(dynamic value) {
+      if (value == null) return DateTime.now().toUtc();
+      try {
+        return DateTime.tryParse(value.toString())?.toLocal() ??
+            DateTime.now().toUtc();
+      } catch (_) {
+        try {
+          return DateFormat("E, dd MMM yyyy HH:mm:ss 'GMT'", 'en_US')
+              .parseUtc(value.toString())
+              .toLocal();
+        } catch (e) {
+          print("Could not parse date: $value - Error: $e");
+          return DateTime.now().toUtc();
+        }
+      }
+    }
+
+    // --- Parsing Logic ---
+    return Order(
+      orderId: parseIntSafe(json['order_id']),
+      userId: parseIntNullable(json['user_id']),
+      mealName: getStringSafe(json['meal_name']) ?? 'N/A',
+      ingredients: getStringSafe(json['ingredients']),
+      quantity: parseIntSafe(json['quantity'], defaultValue: 1),
+      totalPrice: parseDoubleSafe(json['total_price']),
+      orderStatus: getStringSafe(json['order_status']) ?? 'Unknown',
+      paymentStatus: getStringSafe(json['payment_status']) ?? 'Unknown',
+      paymentMode: getStringSafe(json['payment_mode']) ?? 'Unknown',
+      deliveryAddress: getStringSafe(json['delivery_address']),
+      orderDate: parseDateSafe(json['order_date']),
+      notes: getStringSafe(json['notes']),
+      orderType: getStringSafe(json['order_type']),
+      productId: getStringSafe(json['product_id']),
+      chefId: parseIntNullable(json['chef_id']),
+      chefName: getStringSafe(json['chef_name']),
+      amountPaid: parseDoubleNullable(json['amount_paid']),
+      transactionId: getStringSafe(json['transaction_id']),
+      producerId: parseIntNullable(json['producer_id']),
+      producerName: getStringSafe(json['producer_name']),
+      // **VERIFY JSON KEY**: Assuming producer address might be in the order details
+      producerAddress: getStringSafe(json['producer_address']),
+    );
+  }
+
+  // copyWith method is useful if you need to update local state optimistically
+  Order copyWith({
+    String? orderStatus,
+    // Add other fields if they can be updated locally
+  }) {
+    return Order(
+      orderId: orderId, userId: userId, mealName: mealName,
+      ingredients: ingredients,
+      quantity: quantity, totalPrice: totalPrice,
+      orderStatus: orderStatus ?? this.orderStatus, // Update status
+      paymentStatus: paymentStatus, paymentMode: paymentMode,
+      deliveryAddress: deliveryAddress,
+      orderDate: orderDate, notes: notes, orderType: orderType,
+      productId: productId,
+      chefId: chefId, chefName: chefName, amountPaid: amountPaid,
+      transactionId: transactionId,
+      producerId: producerId, producerName: producerName,
+      producerAddress: producerAddress,
+    );
+  }
+}
+
+// Product model - Copied from ProducerDash, needed for type consistency if shared code exists
+// NOTE: This model is NOT directly used in the Transporter Dashboard UI provided,
+// but might be needed if there's shared logic or future features.
+class Product {
+  final String produceId;
+  final String produceName;
+  final double? calories;
+  final double? proteins;
+  final double? carbohydrates;
+  final double? fats;
+  final double? unitGrams;
+  final String? source;
+  // Add other fields from your JSON if needed (e.g., cholesterol, fiber)
+
+  Product({
+    required this.produceId,
+    required this.produceName,
+    this.calories,
+    this.proteins,
+    this.carbohydrates,
+    this.fats,
+    this.unitGrams,
+    this.source,
+  });
+
+  factory Product.fromJson(Map<String, dynamic> json) {
+    String? getStringSafe(dynamic value) => value?.toString();
+    double? parseDoubleNullable(dynamic value) {
+      if (value == null) return null;
+      if (value is double) return value;
+      if (value is int) return value.toDouble();
+      if (value is String) return double.tryParse(value);
+      return null;
+    }
+
+    return Product(
+      produceId: getStringSafe(json['produce_id']) ?? 'N/A_ID',
+      produceName: getStringSafe(json['produce_name']) ?? 'Unnamed Produce',
+      calories: parseDoubleNullable(json['calories']),
+      proteins: parseDoubleNullable(json['proteins']),
+      carbohydrates: parseDoubleNullable(json['carbohydrates']),
+      fats: parseDoubleNullable(json['fats']),
+      unitGrams: parseDoubleNullable(json['unit_grams']),
+      source: getStringSafe(json['source']),
+    );
+  }
+
+  Product copyWith({
+    String? produceName,
+    ValueGetter<double?>? calories,
+    ValueGetter<double?>? proteins,
+    ValueGetter<double?>? carbohydrates,
+    ValueGetter<double?>? fats,
+    ValueGetter<double?>? unitGrams,
+    ValueGetter<String?>? source,
+  }) {
+    return Product(
+      produceId: produceId,
+      produceName: produceName ?? this.produceName,
+      calories: calories != null ? calories() : this.calories,
+      proteins: proteins != null ? proteins() : this.proteins,
+      carbohydrates:
+          carbohydrates != null ? carbohydrates() : this.carbohydrates,
+      fats: fats != null ? fats() : this.fats,
+      unitGrams: unitGrams != null ? unitGrams() : this.unitGrams,
+      source: source != null ? source() : this.source,
+    );
+  }
+}
+
+// ===================================
+// === TRANSPORTER API SERVICE =======
+// ===================================
+// (ApiService remains the same as previous response)
+class TransporterApiService {
+  static Future<String?> _getTransporterId() async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      // Use the unified key for transporter_id as set by signup/login
+      return prefs.getString('transporter_id');
+    } catch (e) {
+      print("Error accessing SharedPreferences for transporter ID: $e");
+      return null;
+    }
+  }
+
+  static dynamic _handleApiResponse(dynamic responseData) {
+    if (responseData is List) return responseData;
+    if (responseData is Map && responseData.containsKey('data'))
+      return responseData['data'];
+    if (responseData is Map) return responseData;
+    print(
+        "API Warning: Unhandled transporter response format. Got: ${responseData.runtimeType}");
+    return null;
+  }
+
+  static Future<TransporterProfile> fetchTransporterProfile() async {
+    final transporterId = await _getTransporterId();
+    if (transporterId == null || transporterId.isEmpty) {
+      throw Exception('Transporter ID not found. Please log in again.');
+    }
+    final Uri uri =
+        Uri.parse('$apibaseurl/rr/transporters?transporter_id=$transporterId');
+    print("Fetching transporter profile from: $uri");
+    try {
+      final response =
+          await http.get(uri, headers: _getWriteHeaders(requiresAuth: true));
+      if (response.statusCode == 200) {
+        final dynamic rawData = json.decode(response.body);
+        final dynamic handledData = _handleApiResponse(rawData);
+        if (handledData == null) {
+          throw Exception(
+              'Failed to parse profile: Unexpected API response format.');
+        }
+        if (handledData is Map<String, dynamic>) {
+          return TransporterProfile.fromJson(handledData);
+        } else if (handledData is List &&
+            handledData.isNotEmpty &&
+            handledData[0] is Map<String, dynamic>) {
+          return TransporterProfile.fromJson(handledData[0]);
+        } else {
+          throw Exception(
+              'Failed to parse profile: Expected a Map but got ${handledData.runtimeType}');
+        }
+      } else {
+        print(
+            "Error fetching transporter profile: ${response.statusCode} ${response.body}");
+        throw Exception(
+            'Failed to load transporter profile (Code: ${response.statusCode})');
+      }
+    } catch (e) {
+      print("Exception fetching transporter profile: $e");
+      if (e is Exception) rethrow;
+      throw Exception('Failed to load transporter profile: $e');
+    }
+  }
+
+  static Future<List<Order>> fetchAssignedOrders() async {
+    final transporterId = await _getTransporterId();
+    if (transporterId == null || transporterId.isEmpty) {
+      throw Exception('Transporter ID not found.');
+    }
+    final Uri uri =
+        Uri.parse('$apibaseurl/rr/orders?transporter_id=$transporterId');
+    print("Fetching assigned orders from: $uri");
+    try {
+      final response =
+          await http.get(uri, headers: _getWriteHeaders(requiresAuth: true));
+      if (response.statusCode == 200) {
+        final dynamic rawData = json.decode(response.body);
+        final dynamic ordersList = _handleApiResponse(rawData);
+        if (ordersList is List) {
+          return ordersList
+              .map((item) => Order.fromJson(item as Map<String, dynamic>))
+              .toList();
+        } else {
+          print(
+              "Assigned orders API response format unexpected: Expected List, got ${ordersList?.runtimeType}");
+          return [];
+        }
+      } else {
+        print(
+            "Error fetching assigned orders: ${response.statusCode} ${response.body}");
+        throw Exception('Failed to load orders (Code: ${response.statusCode})');
+      }
+    } catch (e) {
+      print("Exception fetching assigned orders: $e");
+      if (e is Exception) rethrow;
+      throw Exception('Failed to load orders: $e');
+    }
+  }
+
+  static Map<String, String> _getWriteHeaders({bool requiresAuth = true}) {
+    String? authToken = null;
+    Map<String, String> headers = {
+      'Content-Type': 'application/json; charset=UTF-8',
+      'Accept': 'application/json',
+    };
+    if (requiresAuth && authToken != null && authToken.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $authToken';
+    }
+    return headers;
+  }
+
+  static Future<bool> updateOrderStatusByTransporter(
+      int orderId, String newStatus) async {
+    final Uri uri =
+        Uri.parse('$apibaseurl/rr/orders/$orderId/transporter-status');
+    print(
+        "Updating order $orderId status by transporter to $newStatus via $uri");
+    try {
+      final response = await http.patch(
+        uri,
+        headers: _getWriteHeaders(requiresAuth: true),
+        body: jsonEncode({'status': newStatus}),
+      );
+      if (response.statusCode == 200 || response.statusCode == 204)
+        return true;
+      else {
+        print(
+            "Error updating order status (Transporter): ${response.statusCode} ${response.body}");
+        return false;
+      }
+    } catch (e) {
+      print("Exception updating order status (Transporter): $e");
+      return false;
+    }
+  }
+
+  static Future<bool> updateTransporterStatus(bool isActive) async {
+    final transporterId = await _getTransporterId();
+    if (transporterId == null || transporterId.isEmpty)
+      throw Exception('Transporter ID not found.');
+    final Uri uri = Uri.parse(
+        '$apibaseurl/rr/transporters/$transporterId/status');
+    print("Updating transporter status to $isActive via $uri");
+    try {
+      final response = await http.patch(
+        uri,
+        headers: _getWriteHeaders(requiresAuth: true),
+        body: jsonEncode({'is_active': isActive}),
+      );
+      if (response.statusCode == 200 || response.statusCode == 204)
+        return true;
+      else {
+        print(
+            "Error updating transporter status: ${response.statusCode} ${response.body}");
+        return false;
+      }
+    } catch (e) {
+      print("Exception updating transporter status: $e");
+      return false;
+    }
+  }
+
+  static Future<bool> updateTransporterProfile(
+      Map<String, dynamic> updateData) async {
+    final transporterId = await _getTransporterId();
+    if (transporterId == null || transporterId.isEmpty)
+      throw Exception('Transporter ID not found.');
+    final Uri uri = Uri.parse('$apibaseurl/rr/transporters/$transporterId');
+    updateData.removeWhere(
+        (key, value) => value == null || (value is String && value.isEmpty));
+    print(
+        "Updating transporter profile $transporterId with data: ${jsonEncode(updateData)}");
+    try {
+      final response = await http.patch(
+        uri,
+        headers: _getWriteHeaders(requiresAuth: true),
+        body: jsonEncode(updateData),
+      );
+      if (response.statusCode == 200 || response.statusCode == 204)
+        return true;
+      else {
+        print(
+            "Error updating transporter profile: ${response.statusCode} ${response.body}");
+        return false;
+      }
+    } catch (e) {
+      print("Exception updating transporter profile: $e");
+      return false;
+    }
+  }
+
+  static Future<String?> uploadImageToImgur(File imageFile) async {
+    if (imgurClientId == null || imgurClientId!.isEmpty) {
+      print("Imgur Client ID missing in .env");
+      throw Exception("Image upload configuration missing.");
+    }
+    try {
+      var request = http.MultipartRequest(
+          'POST', Uri.parse('https://api.imgur.com/3/image'));
+      request.headers['Authorization'] = 'Client-ID $imgurClientId';
+      request.files
+          .add(await http.MultipartFile.fromPath('image', imageFile.path));
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        if (responseData['success'] == true &&
+            responseData['data']?['link'] != null) {
+          return responseData['data']['link'];
+        } else {
+          throw Exception('Imgur upload failed: Invalid response structure.');
+        }
+      } else {
+        throw Exception(
+            'Imgur upload failed: ${response.statusCode} ${response.body}');
+      }
+    } catch (e) {
+      print("Imgur upload error: $e");
+      throw Exception("Failed to upload image: $e");
+    }
+  }
+} // End of TransporterApiService
+
+// ===================================
+// === CACHED IMAGE WIDGET ===========
+// ===================================
+// (Remains the same)
+class CachedImageWithShimmer extends StatelessWidget {
+  final String? imageUrl;
+  final double width;
+  final double height;
+  final BoxFit fit;
+  final double borderRadius;
+  final IconData errorIcon;
+  final double iconSize;
+  final String? errorText;
+  const CachedImageWithShimmer({
+    super.key,
+    required this.imageUrl,
+    required this.width,
+    required this.height,
+    this.fit = BoxFit.cover,
+    this.borderRadius = 8.0,
+    this.errorIcon = Icons.image_not_supported_outlined,
+    this.iconSize = 35,
+    this.errorText,
+  });
+  String? _getDirectImageLink(String? url) {
+    if (url == null ||
+        url.isEmpty ||
+        !(url.startsWith('http://') || url.startsWith('https://'))) {
+      return null;
+    }
+    if (url.contains('drive.google.com')) {
+      try {
+        Uri uri = Uri.parse(url);
+        String? fileId;
+        if (uri.pathSegments.contains('d')) {
+          int idIndex = uri.pathSegments.indexOf('d');
+          if (idIndex >= 0 && idIndex + 1 < uri.pathSegments.length) {
+            fileId = uri.pathSegments[idIndex + 1];
+          }
+        } else if (uri.queryParameters.containsKey('id')) {
+          fileId = uri.queryParameters['id'];
+        }
+        if (fileId != null && fileId.isNotEmpty && !fileId.contains('/')) {
+          fileId = fileId.split('&').first;
+          return 'https://drive.google.com/uc?export=view&id=$fileId';
+        }
+      } catch (e) {
+        print("Error parsing GDrive URL: $url - $e");
+      }
+      return null;
+    }
+    return url;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final String? processedUrl = _getDirectImageLink(imageUrl);
+    final shimmerBase = Theme.of(context).brightness == Brightness.light
+        ? Colors.grey.shade300
+        : Colors.grey.shade700;
+    final shimmerHighlight = Theme.of(context).brightness == Brightness.light
+        ? Colors.grey.shade100
+        : Colors.grey.shade500;
+    if (processedUrl == null || processedUrl.isEmpty) {
+      return _buildErrorWidget(context, shimmerBase, shimmerHighlight);
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(borderRadius),
+      child: CachedNetworkImage(
+          imageUrl: processedUrl,
+          width: width,
+          height: height,
+          fit: fit,
+          placeholder: (context, url) => Shimmer.fromColors(
+                baseColor: shimmerBase,
+                highlightColor: shimmerHighlight,
+                child: Container(
+                  width: width,
+                  height: height,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(borderRadius),
+                  ),
+                ),
+              ),
+          errorWidget: (context, url, error) {
+            print("CachedNetworkImage Error: Failed to load $url - $error");
+            return _buildErrorWidget(context, shimmerBase, shimmerHighlight);
+          }),
+    );
+  }
+
+  Widget _buildErrorWidget(
+      BuildContext context, Color baseColor, Color highlightColor) {
+    final textTheme = Theme.of(context).textTheme;
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: baseColor.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(borderRadius),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            errorIcon,
+            color: Colors.grey.shade500,
+            size: iconSize,
+          ),
+          if (errorText != null) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4.0),
+              child: Text(
+                errorText!,
+                style:
+                    textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            )
+          ]
+        ],
+      ),
+    );
+  }
+}
+
+// ===================================
+// === MAIN DASHBOARD SCREEN =========
+// ===================================
+class TransporterDashboardScreen extends StatefulWidget {
+  const TransporterDashboardScreen({super.key});
+
+  @override
+  State<TransporterDashboardScreen> createState() =>
+      _TransporterDashboardScreenState();
+}
+
+class _TransporterDashboardScreenState extends State<TransporterDashboardScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  String _appBarTitle = 'Rider Dashboard';
+  TransporterProfile? _currentProfileData;
+  bool _isAppBarLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(_handleTabSelection);
+    _loadInitialProfileForAppBar();
+  }
+
+  void _handleTabSelection() {
+    if (!mounted) return;
+    if (_tabController.indexIsChanging ||
+        _tabController.index != _tabController.previousIndex) {
+      setState(() {
+        switch (_tabController.index) {
+          case 0:
+            _appBarTitle = 'Rider Profile';
+            break;
+          case 1:
+            _appBarTitle = 'Assigned Orders';
+            break;
+          default:
+            _appBarTitle = 'Rider Dashboard';
+        }
+      });
+    }
+  }
+
+  Future<void> _loadInitialProfileForAppBar() async {
+    if (!mounted) return;
+    setState(() => _isAppBarLoading = true);
+    try {
+      final profile = await TransporterApiService.fetchTransporterProfile();
+      if (mounted) {
+        setState(() {
+          _currentProfileData = profile;
+          _handleTabSelection();
+          _isAppBarLoading = false;
+        });
+      }
+    } catch (e) {
+      print("Error loading profile for AppBar: $e");
+      if (mounted) setState(() => _isAppBarLoading = false);
+    }
+  }
+
+  Future<void> _logout() async {
+    final bool? confirmLogout = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: whiteColor,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          title:
+              const Text('Confirm Logout', style: TextStyle(color: darkTeal)),
+          content: const Text('Are you sure you want to log out?',
+              style: TextStyle(color: subtleTextColor)),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel',
+                  style: TextStyle(color: subtleTextColor)),
+              onPressed: () => Navigator.of(context).pop(false),
+            ),
+            TextButton(
+              child: const Text('Logout', style: TextStyle(color: errorColor)),
+              onPressed: () => Navigator.of(context).pop(true),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmLogout == true) {
+      try {
+        SharedPreferences prefs = await SharedPreferences.getInstance();
+        await prefs.remove('transporter_token'); // ** VERIFY KEY NAME **
+        await prefs.remove('transporter_user_id'); // ** VERIFY KEY NAME **
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+                builder: (context) => const TransporterLoginPage()),
+            (Route<dynamic> route) => false,
+          );
+        }
+      } catch (e) {
+        print("Error clearing prefs during logout: $e");
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+                builder: (context) => const TransporterLoginPage()),
+            (Route<dynamic> route) => false,
+          );
+        }
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController.removeListener(_handleTabSelection);
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // AppBar avatar shimmer logic
+    Widget appBarAvatar;
+    if (_isAppBarLoading) {
+      appBarAvatar = Shimmer.fromColors(
+        baseColor: Colors.grey.shade300,
+        highlightColor: Colors.grey.shade100,
+        child: CircleAvatar(
+          radius: 18,
+          backgroundColor: Colors.grey.shade200,
+        ),
+      );
+    } else if (_currentProfileData?.profileImageUrl != null &&
+        _currentProfileData!.profileImageUrl!.isNotEmpty) {
+      appBarAvatar = CircleAvatar(
+        radius: 18,
+        backgroundColor: lightTeal.withOpacity(0.5),
+        backgroundImage: NetworkImage(_currentProfileData!.profileImageUrl!),
+        onBackgroundImageError: (exception, stackTrace) {
+          debugPrint('Error loading AppBar avatar: $exception');
+        },
+      );
+    } else {
+      appBarAvatar = CircleAvatar(
+        radius: 18,
+        backgroundColor: lightTeal.withOpacity(0.5),
+        child: const Icon(Icons.person_outline, color: darkTeal, size: 18),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: lightBackgroundColor,
+      appBar: AppBar(
+        title: Text(_appBarTitle,
+            style: const TextStyle(
+                color: whiteColor, fontWeight: FontWeight.w600)),
+        backgroundColor: primaryTeal,
+        elevation: 1.0,
+        automaticallyImplyLeading: false,
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 10.0),
+            child: appBarAvatar,
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout_outlined, color: whiteColor),
+            tooltip: 'Logout',
+            onPressed: _logout,
+          ),
+          const SizedBox(width: 8),
+        ],
+        bottom: TabBar(
+          controller: _tabController,
+          indicatorColor: whiteColor,
+          labelColor: whiteColor,
+          unselectedLabelColor: lightTeal,
+          labelStyle:
+              const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+          unselectedLabelStyle:
+              const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+          tabs: const [
+            Tab(
+                icon: Icon(Icons.person_pin_circle_outlined, size: 22),
+                text: 'Profile'),
+            Tab(icon: Icon(Icons.list_alt_outlined, size: 22), text: 'Orders'),
+          ],
+        ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: const [
+          TransporterProfileTab(),
+          TransporterOrdersTab(),
+        ],
+      ),
+    );
+  }
+}
+
+// ===================================
+// === TRANSPORTER PROFILE TAB =======
+// ===================================
+class TransporterProfileTab extends StatefulWidget {
+  const TransporterProfileTab({super.key});
+
+  @override
+  State<TransporterProfileTab> createState() => _TransporterProfileTabState();
+}
+
+class _TransporterProfileTabState extends State<TransporterProfileTab> with AutomaticKeepAliveClientMixin {
+  TransporterProfile? _currentProfile;
+  bool _isLoading = true;
+  String _error = '';
+  bool _isLoadingStatus = false; // For online/offline toggle
+  bool _isEditing = false;
+  bool _isUploadingEditImage = false; // Specific state for image uploading
+
+  final _profileFormKey = GlobalKey<FormState>();
+  late TextEditingController _nameController;
+  late TextEditingController _phoneController;
+  late TextEditingController _vehicleTypeController;
+  late TextEditingController _licensePlateController;
+  late TextEditingController _locationController;
+  File? _editImageFile;
+  String? _editUploadedImageUrl;
+  String _locationCoordinates = '';
+  String _humanReadableAddress = '';
+  final ImagePicker _picker = ImagePicker();
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController();
+    _phoneController = TextEditingController();
+    _vehicleTypeController = TextEditingController();
+    _licensePlateController = TextEditingController();
+    _locationController = TextEditingController();
+    _loadProfile(); // Load data when tab is initialized
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _phoneController.dispose();
+    _vehicleTypeController.dispose();
+    _licensePlateController.dispose();
+    _locationController.dispose();
+    super.dispose();
+  }
+
+  // --- Acquire Location for Edit ---
+  Future<void> _acquireLocation() async {
+    setState(() => _isLoadingStatus = true);
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        _showErrorSnackbar('Location services are disabled.');
+        setState(() => _isLoadingStatus = false);
+        return;
+      }
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied ||
+            permission == LocationPermission.deniedForever) {
+          _showErrorSnackbar('Location permissions are denied.');
+          setState(() => _isLoadingStatus = false);
+          return;
+        }
+      }
+      Position position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high);
+      _locationCoordinates = "${position.latitude}, ${position.longitude}";
+      // Reverse geocode
+      try {
+        final String geocodeUrl =
+            'https://geocode.maps.co/reverse?lat=${position.latitude}&lon=${position.longitude}';
+        final response = await http
+            .get(Uri.parse(geocodeUrl))
+            .timeout(const Duration(seconds: 10));
+        if (response.statusCode == 200) {
+          _humanReadableAddress =
+              json.decode(response.body)['display_name'] ?? '';
+        }
+      } catch (_) {}
+      _locationController.text = _humanReadableAddress.isNotEmpty
+          ? "$_humanReadableAddress ($_locationCoordinates)"
+          : _locationCoordinates;
+      _showSnackBar("Location acquired.", isError: false);
+    } catch (e) {
+      _showErrorSnackbar('Error getting location: $e');
+    } finally {
+      setState(() => _isLoadingStatus = false);
+    }
+  }
+
+  // --- Load Profile Data via API ---
+  Future<void> _loadProfile() async {
+    if (!mounted) return;
+    // Do not use ScaffoldMessenger here!
+    _cancelEditMode(); // Ensure edit mode is off on load/reload
+    setState(() {
+      _isLoading = true;
+      _error = '';
+    });
+
+    try {
+      final profile = await TransporterApiService.fetchTransporterProfile();
+      if (mounted) {
+        setState(() {
+          _currentProfile = profile;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print("Error loading transporter profile: $e");
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _error = 'Failed to load profile: $e';
+        });
+      }
+    }
+  }
+
+  // --- Image Handling for Edit ---
+  Future<void> _pickEditImage(ImageSource source) async {
+    if (_isUploadingEditImage) return;
+    try {
+      final XFile? pickedFile = await _picker.pickImage(
+        source: source,
+        imageQuality: 70,
+        maxWidth: 800,
+      );
+      if (pickedFile != null && mounted) {
+        setState(() {
+          _editImageFile = File(pickedFile.path);
+          _editUploadedImageUrl = null;
+        });
+        _uploadEditImageToImgur();
+      }
+    } catch (e) {
+      if (mounted) _showSnackBar("Failed to pick image.", isError: true);
+    }
+  }
+
+  void _showEditImageSourceActionSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: whiteColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(15.0)),
+      ),
+      builder: (context) => SafeArea(
+          child: Wrap(
+        children: [
+          ListTile(
+              leading: const Icon(Icons.photo_library, color: primaryTeal),
+              title: const Text('Gallery', style: TextStyle(color: darkTeal)),
+              onTap: () {
+                Navigator.of(context).pop();
+                _pickEditImage(ImageSource.gallery);
+              }),
+          ListTile(
+              leading: const Icon(Icons.photo_camera, color: primaryTeal),
+              title: const Text('Camera', style: TextStyle(color: darkTeal)),
+              onTap: () {
+                Navigator.of(context).pop();
+                _pickEditImage(ImageSource.camera);
+              }),
+        ],
+      )),
+    );
+  }
+
+  Future<void> _uploadEditImageToImgur() async {
+    if (_editImageFile == null) return;
+    setState(() => _isUploadingEditImage = true);
+    _editUploadedImageUrl = null;
+    try {
+      _editUploadedImageUrl =
+          await TransporterApiService.uploadImageToImgur(_editImageFile!);
+      if (!mounted) return;
+      setState(() => _isUploadingEditImage = false);
+      if (_editUploadedImageUrl != null) {
+        _showSnackBar("New image uploaded. Save profile to apply.",
+            isError: false);
+      } else {
+        _showErrorSnackbar("Image upload failed.");
+      }
+    } catch (e) {
+      print("Error in _uploadEditImageToImgur UI: $e");
+      if (!mounted) return;
+      setState(() => _isUploadingEditImage = false);
+      _showErrorSnackbar("Image upload failed: $e");
+    }
+  }
+
+  // --- Edit Mode Toggles ---
+  void _enterEditMode() {
+    if (_currentProfile == null || !mounted) return;
+    setState(() {
+      _isEditing = true;
+      _nameController.text = _currentProfile!.name;
+      _phoneController.text = _currentProfile!.phoneNumber ?? '';
+      _vehicleTypeController.text = _currentProfile!.vehicleType ?? '';
+      _licensePlateController.text = _currentProfile!.licensePlate ?? '';
+      _locationController.text = _currentProfile!.location ?? '';
+      _editImageFile = null;
+      _editUploadedImageUrl = null;
+    });
+  }
+
+  void _cancelEditMode() {
+    if (!mounted) return;
+    setState(() {
+      _isEditing = false;
+      _editImageFile = null;
+      _editUploadedImageUrl = null;
+      _profileFormKey.currentState?.reset();
+    });
+  }
+
+  // --- Save Profile Changes ---
+  Future<void> _saveChanges() async {
+    if (_currentProfile == null || !_isEditing || !mounted) return;
+    FocusScope.of(context).unfocus();
+
+    if (_profileFormKey.currentState?.validate() ?? false) {
+      if (_isUploadingEditImage) {
+        _showErrorSnackbar('Image is still uploading. Please wait.');
+        return;
+      }
+      setState(() => _isLoadingStatus = true);
+      _showLoadingSnackbar("Saving profile...");
+
+      Map<String, dynamic> updateData = {
+        'name': _nameController.text.trim(),
+        'phone_number': _phoneController.text.trim(),
+        'vehicle_type': _vehicleTypeController.text.trim(),
+        'license_plate': _licensePlateController.text.trim(),
+        if (_editUploadedImageUrl != null)
+          'profile_image_url': _editUploadedImageUrl,
+        'location': _locationController.text.trim(),
+      };
+
+      try {
+        bool success =
+            await TransporterApiService.updateTransporterProfile(updateData);
+        _dismissLoadingSnackbar();
+        if (!mounted) return;
+        setState(() => _isLoadingStatus = false);
+        if (success) {
+          _showSuccessSnackbar('Profile updated successfully!');
+          _loadProfile();
+        } // Reload to see changes
+        else {
+          _showErrorSnackbar('Failed to save profile changes.');
+        }
+      } catch (e) {
+        print("Error saving profile changes via API: $e");
+        _dismissLoadingSnackbar();
+        if (mounted) {
+          setState(() => _isLoadingStatus = false);
+          _showErrorSnackbar('An error occurred: $e');
+        }
+      }
+    } else {
+      _showSnackBar('Please fix form errors.', isError: true);
+    }
+  }
+
+  // --- Toggle Active Status ---
+  Future<void> _toggleActiveStatus(bool newValue) async {
+    if (_currentProfile == null || !mounted || _isEditing) return;
+    setState(() => _isLoadingStatus = true);
+    _showLoadingSnackbar(newValue ? "Going Online..." : "Going Offline...");
+
+    try {
+      bool success =
+          await TransporterApiService.updateTransporterStatus(newValue);
+      _dismissLoadingSnackbar();
+      if (!mounted) return;
+      setState(() => _isLoadingStatus = false);
+      if (success) {
+        setState(() {
+          _currentProfile = _currentProfile!.copyWith(isActive: newValue);
+        });
+        _showSuccessSnackbar(
+            newValue ? 'You are now Online!' : 'You are now Offline.');
+      } else {
+        _showErrorSnackbar('Failed to update status.');
+      }
+    } catch (e) {
+      print("Error toggling active status: $e");
+      _dismissLoadingSnackbar();
+      if (mounted) {
+        setState(() => _isLoadingStatus = false);
+        _showErrorSnackbar('An error occurred: $e');
+      }
+    }
+  }
+
+  // --- Snackbar Helpers ---
+  void _showSnackBar(String message,
+      {bool isError = false, int durationSeconds = 3}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message,
+            style: TextStyle(color: isError ? whiteColor : textOnTeal),
+            textAlign: TextAlign.center),
+        backgroundColor: isError
+            ? errorColor.withOpacity(0.9)
+            : primaryTeal.withOpacity(0.9),
+        duration: Duration(seconds: durationSeconds),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 15.0),
+        padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 15.0),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)),
+        elevation: 4.0,
+      ),
+    );
+  }
+
+  void _showErrorSnackbar(String message) {
+    _showSnackBar(message, isError: true, durationSeconds: 4);
+  }
+
+  void _showSuccessSnackbar(String message) {
+    _showSnackBar(message, isError: false);
+  }
+
+  void _showLoadingSnackbar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: Colors.white)),
+          const SizedBox(width: 12),
+          Text(message, style: const TextStyle(color: Colors.white))
+        ],
+      ),
+      backgroundColor: Colors.black.withOpacity(0.7),
+      duration: const Duration(seconds: 60),
+      behavior: SnackBarBehavior.floating,
+      margin: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 50.0),
+      padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 15.0),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.0)),
+    ));
+  }
+
+  void _dismissLoadingSnackbar() {
+    if (mounted) ScaffoldMessenger.of(context).removeCurrentSnackBar();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return _buildProfileShimmer();
+    }
+    if (_error.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _error.isNotEmpty) {
+          ScaffoldMessenger.of(context).removeCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(_error), backgroundColor: errorColor),
+          );
+        }
+      });
+      return _buildErrorState(_error);
+    }
+    if (_currentProfile == null) {
+      return _buildEmptyState(
+          "Profile Not Found", "Could not load your profile details.");
+    }
+
+    final profile = _currentProfile!;
+    return RefreshIndicator(
+      onRefresh: _loadProfile,
+      color: primaryTeal,
+      child: Form(
+        key: _profileFormKey,
+        child: ListView(
+          padding: const EdgeInsets.all(16.0),
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            _buildProfileHeaderSection(profile),
+            const SizedBox(height: 20),
+            _buildVehicleInfoSection(profile),
+            const SizedBox(height: 20),
+            _buildAccountStatusSection(profile),
+            const SizedBox(height: 80),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- UI Building Helpers (Copied/Adapted) ---
+  Widget _buildProfileShimmer() {
+    final shimmerBase = Theme.of(context).brightness == Brightness.light
+        ? Colors.grey.shade300
+        : Colors.grey.shade700;
+    final shimmerHighlight = Theme.of(context).brightness == Brightness.light
+        ? Colors.grey.shade100
+        : Colors.grey.shade500;
+    return Shimmer.fromColors(
+      baseColor: shimmerBase,
+      highlightColor: shimmerHighlight,
+      child: ListView(
+        padding: const EdgeInsets.all(16.0),
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 90,
+                height: 90,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(45),
+                ),
+              ),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                        width: MediaQuery.of(context).size.width * 0.5,
+                        height: 24,
+                        color: Colors.white),
+                    const SizedBox(height: 8),
+                    Container(
+                        width: MediaQuery.of(context).size.width * 0.3,
+                        height: 18,
+                        color: Colors.white),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Container(
+            width: double.infinity,
+            height: 150,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Container(
+            width: double.infinity,
+            height: 200,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState(String errorMsg) {
+    return Center(
+        child: Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.person_off_outlined, color: errorColor, size: 50),
+          const SizedBox(height: 16),
+          Text(
+            'Could Not Load Profile',
+            style: Theme.of(context)
+                .textTheme
+                .titleLarge
+                ?.copyWith(color: errorColor),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            errorMsg,
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: Colors.grey[600]),
+            textAlign: TextAlign.center,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.refresh_rounded, size: 20),
+            label: const Text('Retry'),
+            onPressed: _loadProfile,
+          )
+        ],
+      ),
+    ));
+  }
+
+  Widget _buildEmptyState(String title, String subtitle) {
+    return Center(
+        child: Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.person_search_rounded, size: 60, color: Colors.grey[400]),
+          const SizedBox(height: 16),
+          Text(
+            title,
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(color: Colors.grey[600]),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: Colors.grey[600]),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    ));
+  }
+
+  Widget _buildProfileHeaderSection(TransporterProfile profile) {
+    ImageProvider displayImage =
+        const AssetImage(placeholderImagePath); // Default
+    if (_isEditing && _editImageFile != null) {
+      displayImage = FileImage(_editImageFile!);
+    } else if (profile.profileImageUrl != null) {
+      try {
+        displayImage = NetworkImage(profile.profileImageUrl!);
+      } catch (_) {}
+    }
+
+    return Card(
+      elevation: 1.0,
+      color: cardBackground.withOpacity(0.95),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            _isEditing
+                ? _buildEditableProfileImage(displayImage)
+                : CachedImageWithShimmer(
+                    imageUrl: profile.profileImageUrl,
+                    width: 90,
+                    height: 90,
+                    borderRadius: 45,
+                    fit: BoxFit.cover,
+                    errorIcon: Icons.person_outline,
+                    iconSize: 40,
+                    errorText: "No Image",
+                  ),
+            const SizedBox(height: 12),
+            _isEditing
+                ? TextFormField(
+                    controller: _nameController,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: darkTeal),
+                    decoration: _inputDecorationFlat('Rider Name'),
+                    validator: (v) =>
+                        (v == null || v.isEmpty) ? 'Name required' : null,
+                  )
+                : Text(
+                    profile.name,
+                    style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: darkTeal),
+                    textAlign: TextAlign.center,
+                  ),
+            const SizedBox(height: 4),
+            Text(
+              profile.email,
+              style: const TextStyle(fontSize: 14, color: subtleTextColor),
+            ),
+            if (profile.rating != null) ...[
+              const SizedBox(height: 8),
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Icon(Icons.star_rounded, color: starColor, size: 18),
+                const SizedBox(width: 4),
+                Text(profile.rating!.toStringAsFixed(1),
+                    style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: darkTeal)),
+              ]),
+            ],
+            const SizedBox(height: 12),
+            _buildEditToggleButtons(), // Contains Save/Cancel or Edit button
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEditableProfileImage(ImageProvider currentImage) {
+    return Center(
+      child: Stack(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: lightTeal, width: 2),
+            ),
+            child: CircleAvatar(
+              radius: 50,
+              backgroundColor: lighterTeal,
+              backgroundImage: currentImage,
+              onBackgroundImageError: (_, __) {},
+              child: _isUploadingEditImage
+                  ? Container(
+                      decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.5),
+                          shape: BoxShape.circle),
+                      child: const Center(
+                          child: CircularProgressIndicator(
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(whiteColor),
+                              strokeWidth: 2)))
+                  : null,
+            ),
+          ),
+          Positioned(
+              bottom: 0,
+              right: 0,
+              child: Material(
+                color: primaryTeal,
+                shape: const CircleBorder(),
+                elevation: 1.0,
+                child: InkWell(
+                  onTap: _isUploadingEditImage
+                      ? null
+                      : _showEditImageSourceActionSheet,
+                  customBorder: const CircleBorder(),
+                  child: const Padding(
+                    padding: EdgeInsets.all(7.0),
+                    child: Icon(Icons.edit, color: whiteColor, size: 18),
+                  ),
+                ),
+              )),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVehicleInfoSection(TransporterProfile profile) {
+    return _buildSectionCard(
+      title: "Vehicle Details",
+      icon: Icons.directions_bike_outlined,
+      children: [
+        _isEditing
+            ? TextFormField(
+                controller: _vehicleTypeController,
+                decoration: _inputDecoration('Vehicle Type'),
+                style: const TextStyle(color: darkTeal, fontSize: 14),
+                validator: (v) =>
+                    (v == null || v.isEmpty) ? 'Vehicle type required' : null,
+              )
+            : _buildDetailRow(Icons.two_wheeler_outlined, 'Vehicle:',
+                profile.vehicleType ?? 'Not Set'),
+        const SizedBox(height: 8),
+        _isEditing
+            ? TextFormField(
+                controller: _licensePlateController,
+                decoration: _inputDecoration('License Plate'),
+                style: const TextStyle(color: darkTeal, fontSize: 14),
+                textCapitalization: TextCapitalization.characters,
+              )
+            : _buildDetailRow(Icons.badge_outlined, 'Plate:',
+                profile.licensePlate ?? 'Not Set'),
+        const SizedBox(height: 8),
+        _isEditing
+            ? GestureDetector(
+                onTap: _acquireLocation,
+                child: AbsorbPointer(
+                  child: TextFormField(
+                    controller: _locationController,
+                    decoration: _inputDecoration('Location (Tap to acquire)'),
+                    style: const TextStyle(color: darkTeal, fontSize: 14),
+                    validator: (v) =>
+                        (v == null || v.isEmpty) ? 'Location required' : null,
+                    readOnly: true,
+                  ),
+                ),
+              )
+            : _buildDetailRow(Icons.location_on_outlined, 'Location:',
+                profile.location ?? 'Not Set'),
+      ],
+    );
+  }
+
+  Widget _buildAccountStatusSection(TransporterProfile profile) {
+    return _buildSectionCard(
+        title: "Account Status",
+        icon: Icons.settings_outlined,
+        children: [
+          _isEditing
+              ? TextFormField(
+                  controller: _phoneController,
+                  decoration: _inputDecoration('Phone Number'),
+                  style: const TextStyle(color: darkTeal, fontSize: 14),
+                  keyboardType: TextInputType.phone,
+                  validator: (v) =>
+                      (v == null || v.isEmpty) ? 'Phone required' : null,
+                )
+              : _buildDetailRow(Icons.phone_outlined, 'Phone:',
+                  profile.phoneNumber ?? 'Not Set'),
+          const SizedBox(height: 10),
+          SwitchListTile(
+            value: profile.isActive,
+            onChanged:
+                _isEditing || _isLoadingStatus ? null : _toggleActiveStatus,
+            title: Text(
+              profile.isActive ? 'Online' : 'Offline',
+              style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: _isEditing ? subtleTextColor : darkTeal),
+            ),
+            subtitle: Text(
+              profile.isActive ? 'Receiving Orders' : 'Not Receiving Orders',
+              style: TextStyle(
+                  fontSize: 11,
+                  color: _isEditing
+                      ? subtleTextColor.withOpacity(0.7)
+                      : subtleTextColor),
+            ),
+            secondary: Icon(
+              profile.isActive
+                  ? Icons.wifi_tethering_rounded
+                  : Icons.wifi_tethering_off_rounded,
+              color: _isEditing
+                  ? subtleTextColor
+                  : (profile.isActive ? accentTeal : Colors.grey),
+            ),
+            activeColor: accentTeal,
+            inactiveThumbColor: Colors.grey.shade400,
+            inactiveTrackColor: Colors.grey.shade200,
+            contentPadding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+            controlAffinity: ListTileControlAffinity.trailing,
+          ),
+        ]);
+  }
+
+  Widget _buildSectionCard(
+      {required String title,
+      required IconData icon,
+      required List<Widget> children}) {
+    return Card(
+      elevation: 1.0,
+      color: whiteColor.withOpacity(0.9),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      child: Padding(
+        padding: const EdgeInsets.all(14.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(icon, color: primaryTeal, size: 18),
+              const SizedBox(width: 8),
+              Text(title,
+                  style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: darkTeal)),
+            ]),
+            const Divider(height: 16, thickness: 0.7, color: dividerColor),
+            ...children,
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(children: [
+        Icon(icon, size: 16, color: primaryTeal.withOpacity(0.8)),
+        const SizedBox(width: 12),
+        SizedBox(
+            width: 65,
+            child: Text(label,
+                style: const TextStyle(fontSize: 13, color: subtleTextColor))),
+        Expanded(
+            child: Text(value.isEmpty ? '-' : value,
+                style: const TextStyle(
+                    fontSize: 14,
+                    color: darkTeal,
+                    fontWeight: FontWeight.w500))),
+      ]),
+    );
+  }
+
+  InputDecoration _inputDecoration(String label) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: primaryTeal, fontSize: 13),
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+      border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: lightTeal)),
+      enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: lightTeal)),
+      focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: primaryTeal, width: 1.5)),
+      errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: errorColor)),
+      focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: errorColor, width: 1.5)),
+      errorStyle: const TextStyle(fontSize: 10, color: errorColor),
+    );
+  }
+
+  InputDecoration _inputDecorationFlat(String label) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: primaryTeal, fontSize: 13),
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(vertical: 8),
+      border: InputBorder.none,
+      focusedBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: primaryTeal)),
+      enabledBorder:
+          const UnderlineInputBorder(borderSide: BorderSide(color: lightTeal)),
+      errorBorder:
+          const UnderlineInputBorder(borderSide: BorderSide(color: errorColor)),
+      focusedErrorBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: errorColor, width: 1.5)),
+      errorStyle: const TextStyle(fontSize: 10, color: errorColor),
+    );
+  }
+
+  Widget _buildEditToggleButtons() {
+    if (_isEditing) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          TextButton(
+            onPressed: _cancelEditMode,
+            child:
+                const Text('Cancel', style: TextStyle(color: subtleTextColor)),
+          ),
+          const SizedBox(width: 8),
+          ElevatedButton(
+            onPressed: _isLoadingStatus ? null : _saveChanges,
+            style: ElevatedButton.styleFrom(
+                backgroundColor: primaryTeal,
+                foregroundColor: whiteColor,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8))),
+            child: _isLoadingStatus
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: whiteColor))
+                : const Text('Save'),
+          ),
+        ],
+      );
+    } else {
+      return Align(
+        alignment: Alignment.centerRight,
+        child: TextButton.icon(
+          icon: const Icon(Icons.edit_outlined, size: 16),
+          label: const Text('Edit Profile'),
+          style: TextButton.styleFrom(foregroundColor: primaryTeal),
+          onPressed: _enterEditMode,
+        ),
+      );
+    }
+  }
+} // End of _TransporterProfileTabState
+
+// ===================================
+// === TRANSPORTER ORDERS TAB ========
+// ===================================
+class TransporterOrdersTab extends StatefulWidget {
+  const TransporterOrdersTab({super.key});
+
+  @override
+  State<TransporterOrdersTab> createState() => _TransporterOrdersTabState();
+}
+
+class _TransporterOrdersTabState extends State<TransporterOrdersTab> with AutomaticKeepAliveClientMixin {
+  List<Order> _assignedOrders = [];
+  bool _isLoading = true;
+  String _error = '';
+  bool _isUpdatingStatus = false; // State for disabling buttons during update
+  bool _didLoadOrders = false; // Ensure orders are loaded only once
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    // _loadOrders(); // Moved to didChangeDependencies
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_didLoadOrders) {
+      _didLoadOrders = true;
+      _loadOrders();
+    }
+  }
+
+  // --- Load Orders Data via API ---
+  Future<void> _loadOrders() async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    setState(() {
+      _isLoading = true;
+      _error = '';
+    });
+
+    try {
+      final orders = await TransporterApiService.fetchAssignedOrders();
+      if (mounted) {
+        setState(() {
+          _assignedOrders = orders;
+          _assignedOrders.sort((a, b) {
+            int sc = _getTransporterStatusPriority(a.orderStatus)
+                .compareTo(_getTransporterStatusPriority(b.orderStatus));
+            return sc != 0 ? sc : b.orderDate.compareTo(a.orderDate);
+          });
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print("Error loading assigned orders: $e");
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _error = 'Failed to load orders: $e';
+        });
+        _showErrorSnackbar(_error);
+      }
+    }
+  }
+
+  // --- Update Order Status via API ---
+  Future<void> _updateStatus(Order order, String newStatus) async {
+    if (_isUpdatingStatus) return;
+    setState(() => _isUpdatingStatus = true);
+    _showLoadingSnackbar('Updating to $newStatus...');
+
+    try {
+      bool success = await TransporterApiService.updateOrderStatusByTransporter(
+          order.orderId, newStatus);
+      _dismissLoadingSnackbar();
+      if (!mounted) return;
+      setState(() => _isUpdatingStatus = false);
+      if (success) {
+        _showSuccessSnackbar('Order #${order.orderId} marked as $newStatus.');
+        // Update local list to reflect change immediately
+        int index =
+            _assignedOrders.indexWhere((o) => o.orderId == order.orderId);
+        if (index != -1) {
+          setState(() {
+            _assignedOrders[index] =
+                _assignedOrders[index].copyWith(orderStatus: newStatus);
+            _assignedOrders.sort((a, b) {
+              int sc = _getTransporterStatusPriority(a.orderStatus)
+                  .compareTo(_getTransporterStatusPriority(b.orderStatus));
+              return sc != 0 ? sc : b.orderDate.compareTo(a.orderDate);
+            });
+          });
+        } else {
+          _loadOrders();
+        } // Fallback reload
+      } else {
+        _showErrorSnackbar('Failed to update status.');
+      }
+    } catch (e) {
+      print("Error updating order status (transporter): $e");
+      _dismissLoadingSnackbar();
+      if (mounted) {
+        setState(() => _isUpdatingStatus = false);
+        _showErrorSnackbar('An error occurred: $e');
+      }
+    }
+  }
+
+  // --- Snackbar Helpers ---
+  void _showSnackBar(String message,
+      {bool isError = false, int durationSeconds = 3}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message,
+            style: TextStyle(color: isError ? whiteColor : textOnTeal),
+            textAlign: TextAlign.center),
+        backgroundColor: isError
+            ? errorColor.withOpacity(0.9)
+            : primaryTeal.withOpacity(0.9),
+        duration: Duration(seconds: durationSeconds),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 15.0),
+        padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 15.0),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)),
+        elevation: 4.0,
+      ),
+    );
+  }
+
+  void _showErrorSnackbar(String message) {
+    _showSnackBar(message, isError: true, durationSeconds: 4);
+  }
+
+  void _showSuccessSnackbar(String message) {
+    _showSnackBar(message, isError: false);
+  }
+
+  void _showLoadingSnackbar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: Colors.white)),
+          const SizedBox(width: 12),
+          Text(message, style: const TextStyle(color: Colors.white))
+        ],
+      ),
+      backgroundColor: Colors.black.withOpacity(0.7),
+      duration: const Duration(seconds: 60),
+      behavior: SnackBarBehavior.floating,
+      margin: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 50.0),
+      padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 15.0),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.0)),
+    ));
+  }
+
+  void _dismissLoadingSnackbar() {
+    if (mounted) ScaffoldMessenger.of(context).removeCurrentSnackBar();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return _buildOrdersShimmer();
+    }
+    if (_error.isNotEmpty) {
+      return _buildErrorState(_error);
+    }
+    if (_assignedOrders.isEmpty) {
+      return _buildEmptyState(
+          'No Assigned Orders', 'New delivery tasks will appear here.');
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadOrders,
+      color: primaryTeal,
+      child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 80.0),
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: _assignedOrders.length + 1,
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            // Banner at the top
+            return Card(
+              color: Colors.teal.shade50,
+              margin: const EdgeInsets.only(bottom: 12.0),
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 12.0),
+                child: Row(
+                  children: const [
+                    Icon(Icons.refresh, color: Colors.teal, size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Pull down to refresh orders",
+                        style: TextStyle(
+                          color: Colors.teal,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+          final orderIndex = index - 1;
+          return Padding(
+            padding: EdgeInsets.only(
+                bottom: orderIndex == _assignedOrders.length - 1 ? 0 : 12.0),
+            child: _buildAssignedOrderCard(_assignedOrders[orderIndex]),
+          );
+        },
+      ),
+    );
+  }
+
+  // --- UI Building Helpers (Copied/Adapted) ---
+  Widget _buildOrdersShimmer() {
+    final shimmerBase = Theme.of(context).brightness == Brightness.light
+        ? Colors.grey.shade300
+        : Colors.grey.shade700;
+    final shimmerHighlight = Theme.of(context).brightness == Brightness.light
+        ? Colors.grey.shade100
+        : Colors.grey.shade500;
+    return Shimmer.fromColors(
+      baseColor: shimmerBase,
+      highlightColor: shimmerHighlight,
+      child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 80.0),
+        itemCount: 5,
+        itemBuilder: (_, __) => Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          elevation: 1.5,
+          color: whiteColor,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          child: Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Container(width: 20, height: 20, color: Colors.white),
+                    const SizedBox(width: 8),
+                    Expanded(child: Container(height: 18, color: Colors.white)),
+                    Container(width: 40, height: 18, color: Colors.white),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Container(
+                    width: double.infinity,
+                    height: 30,
+                    color: Colors.white,
+                    margin: const EdgeInsets.symmetric(vertical: 5)),
+                Container(
+                    width: double.infinity,
+                    height: 30,
+                    color: Colors.white,
+                    margin: const EdgeInsets.symmetric(vertical: 5)),
+                const SizedBox(height: 10),
+                Align(
+                    alignment: Alignment.centerRight,
+                    child:
+                        Container(width: 120, height: 30, color: Colors.white)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorState(String errorMsg) {
+    return Center(
+        child: Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.cloud_off_rounded, color: errorColor, size: 50),
+          const SizedBox(height: 16),
+          Text(
+            'Could Not Load Orders',
+            style: Theme.of(context)
+                .textTheme
+                .titleLarge
+                ?.copyWith(color: errorColor),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            errorMsg,
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: Colors.grey[600]),
+            textAlign: TextAlign.center,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.refresh_rounded, size: 20),
+            label: const Text('Retry'),
+            onPressed: _loadOrders,
+          )
+        ],
+      ),
+    ));
+  }
+
+  Widget _buildEmptyState(String title, String subtitle) {
+    return Center(
+        child: Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.list_alt_outlined, size: 60, color: Colors.grey[400]),
+          const SizedBox(height: 16),
+          Text(
+            title,
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(color: Colors.grey[600]),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: Colors.grey[600]),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    ));
+  }
+
+  Widget _buildAssignedOrderCard(Order order) {
+    final dateFormat = DateFormat('MMM d, hh:mm a');
+    final statusColor = _getTransporterStatusColor(order.orderStatus);
+    final statusIcon = _getTransporterStatusIcon(order.orderStatus);
+    return Card(
+      elevation: 1.5,
+      margin: EdgeInsets.zero,
+      color: whiteColor.withOpacity(0.95),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: statusColor.withOpacity(0.5), width: 1),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(statusIcon, color: statusColor, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    order.mealName,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                        color: darkTeal),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Text(
+                  '#${order.orderId}',
+                  style: const TextStyle(fontSize: 12, color: subtleTextColor),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Assigned: ${dateFormat.format(order.orderDate.toLocal())}',
+              style: const TextStyle(fontSize: 11, color: subtleTextColor),
+            ),
+            const Divider(height: 16, thickness: 0.6, color: dividerColor),
+            // Use producerAddress if available, otherwise fallback to producerName
+            _buildLocationRow(
+                Icons.storefront_outlined,
+                'Pickup From:',
+                order.producerName ?? 'Unknown Producer',
+                order.producerAddress ?? ''),
+            const SizedBox(height: 10),
+            _buildLocationRow(
+              Icons.home_outlined,
+              'Deliver To:',
+              'Customer Location',
+              order.deliveryAddress ?? 'Address not provided',
+            ),
+            const SizedBox(height: 12),
+            _buildTransporterActionButtons(order),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLocationRow(
+      IconData icon, String title, String name, String address) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 18, color: primaryTeal),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title,
+                  style: const TextStyle(fontSize: 11, color: subtleTextColor)),
+              Text(name,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w500,
+                      fontSize: 13,
+                      color: darkTeal)),
+              if (address.isNotEmpty)
+                Text(
+                  address,
+                  style: const TextStyle(fontSize: 12, color: subtleTextColor),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+            ],
+          ),
+        ),
+        // Potential Map Button
+        // IconButton(icon: Icon(Icons.map_outlined, size: 20, color: accentTeal), onPressed: () { /* Map Intent */ }, ...)
+      ],
+    );
+  }
+
+  Widget _buildTransporterActionButtons(Order order) {
+    List<Widget> buttons = [];
+    String currentStatus = order.orderStatus; // Use exact status string
+
+    // Match exact status strings defined in Order model
+    if (currentStatus == Order.STATUS_ACCEPTED) {
+      buttons.add(_actionButton("Mark Picked Up", Icons.inventory_2_outlined,
+          () => _updateStatus(order, Order.STATUS_PICKED_UP),
+          color: pickedUpColor));
+    } else if (currentStatus == Order.STATUS_PICKED_UP ||
+        currentStatus == Order.STATUS_DELIVERING) {
+      buttons.add(_actionButton(
+          "Mark Delivered",
+          Icons.check_circle_outline_rounded,
+          () => _updateStatus(order, Order.STATUS_DELIVERED),
+          color: deliveredColor));
+    }
+
+    if (buttons.isEmpty) {
+      return Align(
+          alignment: Alignment.centerRight,
+          child: Text("Status: ${order.orderStatus}",
+              style: TextStyle(
+                  color: _getTransporterStatusColor(order.orderStatus),
+                  fontStyle: FontStyle.italic,
+                  fontSize: 12)));
+    }
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Wrap(
+          spacing: 8.0,
+          runSpacing: 6.0,
+          alignment: WrapAlignment.end,
+          children: buttons),
+    );
+  }
+
+  Widget _actionButton(String label, IconData icon, VoidCallback onPressed,
+      {required Color color}) {
+    return ElevatedButton.icon(
+      icon: Icon(icon, size: 14),
+      label: Text(label),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: color.withOpacity(0.15),
+        foregroundColor: color,
+        elevation: 0,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        visualDensity: VisualDensity.compact,
+        minimumSize: const Size(0, 30),
+        disabledBackgroundColor: Colors.grey.shade200,
+        disabledForegroundColor: Colors.grey.shade500,
+      ),
+      onPressed: _isUpdatingStatus ? null : onPressed,
+    );
+  }
+
+  Color _getTransporterStatusColor(String status) {
+    switch (status) {
+      case Order.STATUS_ACCEPTED:
+        return assignedColor;
+      case Order.STATUS_PICKED_UP:
+        return pickedUpColor;
+      case Order.STATUS_DELIVERING:
+        return deliveringColor;
+      case Order.STATUS_DELIVERED:
+        return deliveredColor;
+      case Order.STATUS_COMPLETED:
+        return deliveredColor;
+      case Order.STATUS_CANCELLED:
+        return cancelledColor;
+      default:
+        return defaultStatusColor;
+    }
+  }
+
+  IconData _getTransporterStatusIcon(String status) {
+    switch (status) {
+      case Order.STATUS_ACCEPTED:
+        return Icons.assignment_turned_in_outlined;
+      case Order.STATUS_PICKED_UP:
+        return Icons.inventory_2_outlined;
+      case Order.STATUS_DELIVERING:
+        return Icons.local_shipping_outlined;
+      case Order.STATUS_DELIVERED:
+        return Icons.check_circle_outline_rounded;
+      case Order.STATUS_COMPLETED:
+        return Icons.check_circle_rounded;
+      case Order.STATUS_CANCELLED:
+        return Icons.cancel_outlined;
+      default:
+        return Icons.hourglass_top_rounded;
+    }
+  }
+
+  int _getTransporterStatusPriority(String status) {
+    switch (status) {
+      case Order.STATUS_ACCEPTED:
+        return 0;
+      case Order.STATUS_PICKED_UP:
+        return 1;
+      case Order.STATUS_DELIVERING:
+        return 2;
+      case Order.STATUS_DELIVERED:
+        return 3;
+      case Order.STATUS_COMPLETED:
+        return 4;
+      case Order.STATUS_CANCELLED:
+        return 5;
+      default:
+        return 6;
+    }
+  }
+} // End of _TransporterOrdersTabState

@@ -6,7 +6,7 @@ import 'package:zinzi2/producer_network_testing.dart';
 import 'chef_form_netwroked.dart';
 import 'package:zinzi2/nutri+.dart';
 import 'package:zinzi2/sensei_view.dart';
-import 'Sensei_chat_in_house.dart';
+import 'chat.dart';
 
 class LandingPage extends StatelessWidget {
   @override
@@ -65,7 +65,7 @@ class LandingPage extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  _buildChoiceCard(context, 'Nutrition +', NutritionPage(), //ChooseProducerNetwork() ,
+                  _buildChoiceCard(context, 'Nutrition +', NutritionChatApp(), //ChooseProducerNetwork() ,
                       'assets/images/DrugRG.png'),
                   _buildDisabledCard(context, 'Sensei', 'assets/images/SenseiRG.png'),
                 ],
@@ -133,7 +133,9 @@ class LandingPage extends StatelessWidget {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => NutritionChatApp(),
+            builder: (context) => SenseiWebView(
+              url: 'https://chwezi.app.n8n.cloud/webhook/f450bf45-ea64-4a7f-bfa3-c8981f3f4996/chat',
+            ),
           ),
         );
       },

@@ -5,7 +5,7 @@ import 'dart:convert';
 import 'package:zinzi2/user_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';
+final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 
 class UserMetricsPage extends StatefulWidget {
   const UserMetricsPage({super.key});
@@ -95,7 +95,7 @@ class _UserMetricsPageState extends State<UserMetricsPage>
 
     try {
       final response = await http.post(
-        Uri.parse('$apibaseurl/rr/add_user_metrics'),
+        Uri.parse('$apibaseurl/rr/metrics'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'user_id': _userId,
@@ -111,7 +111,7 @@ class _UserMetricsPageState extends State<UserMetricsPage>
         }),
       );
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 201) {
         Navigator.push(
           context,
           PageRouteBuilder(

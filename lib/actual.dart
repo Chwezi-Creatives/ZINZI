@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:zinzi2/checkout.dart';
-import 'package:zinzi2/cart.dart';
+import 'package:zinzi2/cart.dart' as cart;
 import 'package:zinzi2/meal_detail.dart';
+import 'package:zinzi2/mealdetail2.dart';
+import 'package:zinzi2/mealdetail3.dart';
 import 'package:zinzi2/useranalytics.dart'; // Ensure the necessary imports
 import 'dart:math';
 import 'package:zinzi2/blogview.dart';
@@ -32,11 +34,17 @@ class _ActualRecommendedMealsScreenState
       'price': 8.99,
       'ingredients': ['Chicken', 'Bread', 'Lettuce', 'Tomato'],
       'categories': ['Sandwich', 'Chicken', 'Weight Loss', 'Omnivore'],
-      'bestServedWith': [
+      'bestservedwith': [
         {'title': 'Fries', 'image': 'assets/images/fries.jpg', 'price': 2.99},
         {'title': 'Salad', 'image': 'assets/images/salad.jpg', 'price': 4.50},
         {'title': 'Chips', 'image': 'assets/images/chips.jpg', 'price': 1.50},
       ],
+      'preptime': '10',
+      'cookingskilllevel': 'Beginner',
+      'healthgoal': 'Weight Loss',
+      'diseasesmanaged': ['none'],
+      'allergens': ['Gluten', 'Dairy'],
+      'recipe': 'Grill chicken, place on bread with lettuce and tomato.'
     },
     {
       'title': 'Grilled Salmon',
@@ -45,7 +53,7 @@ class _ActualRecommendedMealsScreenState
       'price': 12.50,
       'ingredients': ['Salmon', 'Lemon', 'Butter'],
       'categories': ['Fish', 'Grilled', 'More Energy', 'Omnivore'],
-      'bestServedWith': [
+      'bestservedwith': [
         {
           'title': 'Steamed Vegetables',
           'image': 'assets/images/steamed_vegetables.jpg',
@@ -62,6 +70,12 @@ class _ActualRecommendedMealsScreenState
           'price': 2.25
         },
       ],
+      'preptime': '15',
+      'cookingskilllevel': 'Intermediate',
+      'healthgoal': 'More Energy',
+      'diseasesmanaged': ['Heart Disease'],
+      'allergens': ['Fish', 'Dairy'],
+      'recipe': 'Grill salmon and serve with lemon butter sauce.'
     },
     {
       'title': 'Fried Cassava',
@@ -70,7 +84,7 @@ class _ActualRecommendedMealsScreenState
       'price': 7.99,
       'ingredients': ['Cassava'],
       'categories': ['Snack', 'Vegan', 'Gluten-Free', 'Weight Loss'],
-      'bestServedWith': [
+      'bestservedwith': [
         {
           'title': 'Guacamole',
           'image': 'assets/images/guacamole.jpg',
@@ -79,6 +93,12 @@ class _ActualRecommendedMealsScreenState
         {'title': 'Salsa', 'image': 'assets/images/salsa.jpg', 'price': 1.75},
         {'title': 'Queso', 'image': 'assets/images/queso.jpg', 'price': 2.50},
       ],
+      'preptime': '20',
+      'cookingskilllevel': 'Beginner',
+      'healthgoal': 'Weight Loss',
+      'diseasesmanaged': ['none'],
+      'allergens': ['none'],
+      'recipe': 'Fry cassava until crispy and serve with dip.'
     },
     {
       'title': 'Quinoa Salad',
@@ -87,7 +107,7 @@ class _ActualRecommendedMealsScreenState
       'price': 10.50,
       'ingredients': ['Quinoa', 'Vegetables'],
       'categories': ['Bowl', 'Vegan', 'Gluten-Free', 'Muscle Gain'],
-      'bestServedWith': [
+      'bestservedwith': [
         {'title': 'Hummus', 'image': 'assets/images/hummus.jpg', 'price': 3.00},
         {
           'title': 'Pita Bread',
@@ -100,6 +120,12 @@ class _ActualRecommendedMealsScreenState
           'price': 5.00
         },
       ],
+      'preptime': '15',
+      'cookingskilllevel': 'Beginner',
+      'healthgoal': 'Muscle Gain',
+      'diseasesmanaged': ['none'],
+      'allergens': ['none'],
+      'recipe': 'Cook quinoa and mix with chopped vegetables.'
     },
     {
       'title': 'Beef Tacos',
@@ -108,7 +134,7 @@ class _ActualRecommendedMealsScreenState
       'price': 9.50,
       'ingredients': ['Beef', 'Tortilla', 'Lettuce', 'Cheese'],
       'categories': ['Tacos', 'Beef', 'Weight Gain', 'Omnivore'],
-      'bestServedWith': [
+      'bestservedwith': [
         {
           'title': 'Mexican Rice',
           'image': 'assets/images/mexican_rice.jpg',
@@ -125,6 +151,12 @@ class _ActualRecommendedMealsScreenState
           'price': 1.00
         },
       ],
+      'preptime': '10',
+      'cookingskilllevel': 'Intermediate',
+      'healthgoal': 'Weight Gain',
+      'diseasesmanaged': ['none'],
+      'allergens': ['Gluten', 'Dairy'],
+      'recipe': 'Season beef, cook and serve in tortillas with toppings.'
     },
     {
       'title': 'Veggie Wrap',
@@ -133,7 +165,7 @@ class _ActualRecommendedMealsScreenState
       'price': 8.50,
       'ingredients': ['Vegetables', 'Wrap'],
       'categories': ['Wrap', 'Vegetarian', 'Weight Loss'],
-      'bestServedWith': [
+      'bestservedwith': [
         {
           'title': 'Sweet Potato Fries',
           'image': 'assets/images/sweet_potato_fries.jpg',
@@ -150,6 +182,12 @@ class _ActualRecommendedMealsScreenState
           'price': 1.25
         },
       ],
+      'preptime': '10',
+      'cookingskilllevel': 'Beginner',
+      'healthgoal': 'Weight Loss',
+      'diseasesmanaged': ['none'],
+      'allergens': ['Gluten'],
+      'recipe': 'Wrap fresh vegetables in a tortilla and serve.'
     },
     {
       'title': 'Pasta Primavera',
@@ -158,7 +196,7 @@ class _ActualRecommendedMealsScreenState
       'price': 11.00,
       'ingredients': ['Pasta', 'Vegetables'],
       'categories': ['Pasta', 'Vegetarian', 'More Energy'],
-      'bestServedWith': [
+      'bestservedwith': [
         {
           'title': 'Garlic Breadsticks',
           'image': 'assets/images/garlic_breadsticks.jpg',
@@ -175,6 +213,12 @@ class _ActualRecommendedMealsScreenState
           'price': 1.50
         },
       ],
+      'preptime': '20',
+      'cookingskilllevel': 'Intermediate',
+      'healthgoal': 'More Energy',
+      'diseasesmanaged': ['none'],
+      'allergens': ['Gluten', 'Dairy'],
+      'recipe': 'Cook pasta, sauté vegetables, and mix together.'
     },
     {
       'title': 'Caesar Salad',
@@ -183,7 +227,7 @@ class _ActualRecommendedMealsScreenState
       'price': 10.00,
       'ingredients': ['Lettuce', 'Croutons', 'Caesar Dressing'],
       'categories': ['Salad', 'Chicken', 'Weight Loss', 'Omnivore'],
-      'bestServedWith': [
+      'bestservedwith': [
         {
           'title': 'Grilled Chicken',
           'image': 'assets/images/grilled_chicken.jpg',
@@ -196,6 +240,12 @@ class _ActualRecommendedMealsScreenState
         },
         {'title': 'Olives', 'image': 'assets/images/olives.jpg', 'price': 1.00},
       ],
+      'preptime': '10',
+      'cookingskilllevel': 'Beginner',
+      'healthgoal': 'Weight Loss',
+      'diseasesmanaged': ['none'],
+      'allergens': ['Gluten', 'Dairy'],
+      'recipe': 'Toss lettuce with dressing and top with croutons.'
     },
     {
       'title': 'Smoothie Bowl',
@@ -204,7 +254,7 @@ class _ActualRecommendedMealsScreenState
       'price': 6.50,
       'ingredients': ['Fruits', 'Yogurt'],
       'categories': ['Breakfast', 'Vegan', 'Gluten-Free', 'More Energy'],
-      'bestServedWith': [
+      'bestservedwith': [
         {
           'title': 'Granola',
           'image': 'assets/images/granola.jpg',
@@ -217,6 +267,12 @@ class _ActualRecommendedMealsScreenState
         },
         {'title': 'Honey', 'image': 'assets/images/honey.jpg', 'price': 1.00},
       ],
+      'preptime': '5',
+      'cookingskilllevel': 'Beginner',
+      'healthgoal': 'More Energy',
+      'diseasesmanaged': ['none'],
+      'allergens': ['Dairy'],
+      'recipe': 'Blend fruits with yogurt and top with seeds and granola.'
     },
     {
       'title': 'Chicken Curry',
@@ -225,7 +281,7 @@ class _ActualRecommendedMealsScreenState
       'price': 12.50,
       'ingredients': ['Chicken', 'Curry Sauce'],
       'categories': ['Curry', 'Chicken', 'Weight Gain', 'Omnivore'],
-      'bestServedWith': [
+      'bestservedwith': [
         {
           'title': 'Naan Bread',
           'image': 'assets/images/naan_bread.jpg',
@@ -238,6 +294,12 @@ class _ActualRecommendedMealsScreenState
           'price': 1.00
         },
       ],
+      'preptime': '30',
+      'cookingskilllevel': 'Advanced',
+      'healthgoal': 'Weight Gain',
+      'diseasesmanaged': ['none'],
+      'allergens': ['Dairy'],
+      'recipe': 'Cook chicken with curry sauce and serve with rice.'
     },
     {
       'title': 'Avocado Toast',
@@ -246,7 +308,7 @@ class _ActualRecommendedMealsScreenState
       'price': 5.99,
       'ingredients': ['Avocado', 'Bread'],
       'categories': ['Snack', 'Vegan', 'Gluten-Free', 'More Energy'],
-      'bestServedWith': [
+      'bestservedwith': [
         {'title': 'Eggs', 'image': 'assets/images/eggs.jpg', 'price': 2.50},
         {
           'title': 'Tomato Salsa',
@@ -259,6 +321,12 @@ class _ActualRecommendedMealsScreenState
           'price': 0.75
         },
       ],
+      'preptime': '5',
+      'cookingskilllevel': 'Beginner',
+      'healthgoal': 'More Energy',
+      'diseasesmanaged': ['none'],
+      'allergens': ['Gluten'],
+      'recipe': 'Smash avocado on toasted bread and top with seasonings.'
     },
     {
       'title': 'Stuffed Peppers',
@@ -267,7 +335,7 @@ class _ActualRecommendedMealsScreenState
       'price': 9.00,
       'ingredients': ['Peppers', 'Beans', 'Spices'],
       'categories': ['Baked', 'Vegetarian', 'Weight Loss', 'Gluten-Free'],
-      'bestServedWith': [
+      'bestservedwith': [
         {'title': 'Quinoa', 'image': 'assets/images/quinoa.jpg', 'price': 2.50},
         {
           'title': 'Salsa Verde',
@@ -280,6 +348,12 @@ class _ActualRecommendedMealsScreenState
           'price': 2.00
         },
       ],
+      'preptime': '20',
+      'cookingskilllevel': 'Intermediate',
+      'healthgoal': 'Weight Loss',
+      'diseasesmanaged': ['none'],
+      'allergens': ['none'],
+      'recipe': 'Stuff peppers with mixture and bake until tender.'
     },
     {
       'title': 'Shrimp Fried Rice',
@@ -288,7 +362,7 @@ class _ActualRecommendedMealsScreenState
       'price': 10.50,
       'ingredients': ['Shrimp', 'Vegetables'],
       'categories': ['Rice', 'Shrimp', 'Weight Gain', 'Omnivore'],
-      'bestServedWith': [
+      'bestservedwith': [
         {
           'title': 'Spring Rolls',
           'image': 'assets/images/spring_rolls.jpg',
@@ -305,6 +379,12 @@ class _ActualRecommendedMealsScreenState
           'price': 1.50
         },
       ],
+      'preptime': '15',
+      'cookingskilllevel': 'Intermediate',
+      'healthgoal': 'Weight Gain',
+      'diseasesmanaged': ['none'],
+      'allergens': ['Shellfish', 'Soy'],
+      'recipe': 'Stir-fry shrimp and vegetables, mix with rice.'
     },
     {
       'title': 'Chickpea Salad',
@@ -313,10 +393,10 @@ class _ActualRecommendedMealsScreenState
       'price': 7.50,
       'ingredients': ['Chickpeas', 'Vegetables'],
       'categories': ['Salad', 'Vegan', 'Gluten-Free', 'Muscle Gain'],
-      'bestServedWith': [
+      'bestservedwith': [
         {
           'title': 'Whole Wheat Pita',
-          'image': 'assets/images/whole_wheat_pita.jpg',
+          'image': 'assets/images/wheat_pita.jpg',
           'price': 1.75
         },
         {
@@ -330,6 +410,12 @@ class _ActualRecommendedMealsScreenState
           'price': 1.50
         },
       ],
+      'preptime': '10',
+      'cookingskilllevel': 'Beginner',
+      'healthgoal': 'Muscle Gain',
+      'diseasesmanaged': ['none'],
+      'allergens': ['Legumes', 'Dairy'],
+      'recipe': 'Mix chickpeas with diced vegetables and dressing.'
     },
     {
       'title': 'Pumpkin Soup',
@@ -338,7 +424,7 @@ class _ActualRecommendedMealsScreenState
       'price': 6.50,
       'ingredients': ['Pumpkin', 'Cream', 'Spices'],
       'categories': ['Soup', 'Vegan', 'Gluten-Free', 'Weight Loss'],
-      'bestServedWith': [
+      'bestservedwith': [
         {
           'title': 'Crusty Bread',
           'image': 'assets/images/crusty_bread.jpg',
@@ -355,6 +441,12 @@ class _ActualRecommendedMealsScreenState
           'price': 1.00
         },
       ],
+      'preptime': '20',
+      'cookingskilllevel': 'Intermediate',
+      'healthgoal': 'Weight Loss',
+      'diseasesmanaged': ['none'],
+      'allergens': ['Dairy'],
+      'recipe': 'Blend cooked pumpkin with spices and cream.'
     },
     {
       'title': 'Eggplant Parmesan',
@@ -363,7 +455,7 @@ class _ActualRecommendedMealsScreenState
       'price': 11.50,
       'ingredients': ['Eggplant', 'Cheese', 'Marinara Sauce'],
       'categories': ['Baked', 'Vegetarian', 'Weight Gain'],
-      'bestServedWith': [
+      'bestservedwith': [
         {
           'title': 'Garlic Bread',
           'image': 'assets/images/garlic_bread_small.jpg',
@@ -380,6 +472,12 @@ class _ActualRecommendedMealsScreenState
           'price': 5.50
         },
       ],
+      'preptime': '30',
+      'cookingskilllevel': 'Advanced',
+      'healthgoal': 'Weight Gain',
+      'diseasesmanaged': ['none'],
+      'allergens': ['Gluten', 'Dairy', 'Eggplant'],
+      'recipe': 'Layer eggplant with sauce and cheese, bake until golden.'
     },
     {
       'title': 'Couscous Bowl',
@@ -388,7 +486,7 @@ class _ActualRecommendedMealsScreenState
       'price': 9.50,
       'ingredients': ['Couscous', 'Vegetables'],
       'categories': ['Bowl', 'Vegetarian', 'More Energy'],
-      'bestServedWith': [
+      'bestservedwith': [
         {
           'title': 'Grilled Vegetables',
           'image': 'assets/images/grilled_vegetables.jpg',
@@ -405,6 +503,12 @@ class _ActualRecommendedMealsScreenState
           'price': 1.50
         },
       ],
+      'preptime': '10',
+      'cookingskilllevel': 'Beginner',
+      'healthgoal': 'More Energy',
+      'diseasesmanaged': ['none'],
+      'allergens': ['Tree Nuts'],
+      'recipe': 'Prepare couscous and top with sautéed vegetables.'
     },
     {
       'title': 'Turkey Burger',
@@ -413,7 +517,7 @@ class _ActualRecommendedMealsScreenState
       'price': 10.50,
       'ingredients': ['Turkey', 'Burger Bun', 'Lettuce', 'Tomato'],
       'categories': ['Burger', 'Turkey', 'Weight Gain', 'Omnivore'],
-      'bestServedWith': [
+      'bestservedwith': [
         {
           'title': 'Onion Rings',
           'image': 'assets/images/onion_rings.jpg',
@@ -430,6 +534,12 @@ class _ActualRecommendedMealsScreenState
           'price': 0.75
         },
       ],
+      'preptime': '15',
+      'cookingskilllevel': 'Intermediate',
+      'healthgoal': 'Weight Gain',
+      'diseasesmanaged': ['none'],
+      'allergens': ['Gluten', 'Dairy'],
+      'recipe': 'Cook turkey patty, serve on bun with toppings.'
     },
     {
       'title': 'Greek Yogurt Parfait',
@@ -438,7 +548,7 @@ class _ActualRecommendedMealsScreenState
       'price': 6.00,
       'ingredients': ['Yogurt', 'Granola', 'Berries'],
       'categories': ['Breakfast', 'Dairy', 'More Energy', 'Omnivore'],
-      'bestServedWith': [
+      'bestservedwith': [
         {
           'title': 'Honey Drizzle',
           'image': 'assets/images/honey_drizzle.jpg',
@@ -455,6 +565,12 @@ class _ActualRecommendedMealsScreenState
           'price': 0.75
         },
       ],
+      'preptime': '5',
+      'cookingskilllevel': 'Beginner',
+      'healthgoal': 'More Energy',
+      'diseasesmanaged': ['none'],
+      'allergens': ['Dairy', 'Nuts'],
+      'recipe': 'Layer yogurt with granola and berries.'
     },
     {
       'title': 'Lentil Soup',
@@ -463,7 +579,7 @@ class _ActualRecommendedMealsScreenState
       'price': 7.00,
       'ingredients': ['Lentils', 'Vegetables', 'Spices'],
       'categories': ['Soup', 'Vegan', 'Gluten-Free', 'Weight Loss'],
-      'bestServedWith': [
+      'bestservedwith': [
         {
           'title': 'Crusty Bread',
           'image': 'assets/images/crusty_bread_small.jpg',
@@ -480,6 +596,12 @@ class _ActualRecommendedMealsScreenState
           'price': 0.50
         },
       ],
+      'preptime': '15',
+      'cookingskilllevel': 'Beginner',
+      'healthGoal': 'Weight Loss',
+      'diseasesManaged': ['none'],
+      'allergens': ['none'],
+      'recipe': 'Cook lentils with vegetables and spices until soft.'
     },
   ];
 
@@ -602,7 +724,7 @@ class _ActualRecommendedMealsScreenState
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                              builder: (context) => ShoppingCartScreen()),
+                              builder: (context) => cart.ShoppingCartScreen()),
                         );
                       },
                     ),
@@ -714,7 +836,7 @@ class _ActualRecommendedMealsScreenState
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => MealDetailScreen(meal: meal),
+                            builder: (context) => MealDetailScreen3(meal: meal),
                           ),
                         );
                       },

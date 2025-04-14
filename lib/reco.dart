@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:zinzi2/checkout.dart';
-import 'package:zinzi2/cart.dart';
-import 'package:zinzi2/meal_detail.dart';
+import 'package:zinzi2/cart.dart' as cart;
+import 'package:zinzi2/meal_detail.dart' as meal_detail;
+import 'package:zinzi2/mealdetail3.dart';
+import 'package:zinzi2/profile.dart';
 import 'package:zinzi2/useranalytics.dart';
 import 'dart:math';
 import 'package:zinzi2/blogview.dart';
+import 'package:zinzi2/mealdetail2.dart';
 
 class RecommendedMealsScreen extends StatefulWidget {
   @override
@@ -31,6 +34,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
         {'title': 'Salad', 'image': 'assets/images/salad.jpg', 'price': 4.50},
         {'title': 'Chips', 'image': 'assets/images/chips.jpg', 'price': 1.50},
       ],
+      'prepTime': '10',
+      'cookingSkillLevel': 'Beginner',
+      'healthGoal': 'Weight Loss',
+     'diseasesManaged': ['none'],
+      'allergens': ['Gluten', 'Dairy'],
+      'recipe': 'Grill chicken, place on bread with lettuce and tomato.'
     },
     {
       'title': 'Grilled Salmon',
@@ -56,6 +65,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
           'price': 2.25
         },
       ],
+      'prepTime': '15',
+      'cookingSkillLevel': 'Intermediate',
+      'healthGoal': 'More Energy',
+      'diseasesManaged': ['Heart Disease'],
+      'allergens': ['Fish', 'Dairy'],
+      'recipe': 'Grill salmon and serve with lemon butter sauce.'
     },
     {
       'title': 'Fried Cassava',
@@ -73,6 +88,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
         {'title': 'Salsa', 'image': 'assets/images/salsa.jpg', 'price': 1.75},
         {'title': 'Queso', 'image': 'assets/images/queso.jpg', 'price': 2.50},
       ],
+      'prepTime': '20',
+      'cookingSkillLevel': 'Beginner',
+      'healthGoal': 'Weight Loss',
+     'diseasesManaged': ['none'],
+      'allergens': ['none'],
+      'recipe': 'Fry cassava until crispy and serve with dip.'
     },
     {
       'title': 'Quinoa Salad',
@@ -94,6 +115,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
           'price': 5.00
         },
       ],
+      'prepTime': '15',
+      'cookingSkillLevel': 'Beginner',
+      'healthGoal': 'Muscle Gain',
+     'diseasesManaged': ['none'],
+      'allergens': ['none'],
+      'recipe': 'Cook quinoa and mix with chopped vegetables.'
     },
     {
       'title': 'Beef Tacos',
@@ -119,6 +146,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
           'price': 1.00
         },
       ],
+      'prepTime': '10',
+      'cookingSkillLevel': 'Intermediate',
+      'healthGoal': 'Weight Gain',
+     'diseasesManaged': ['none'],
+      'allergens': ['Gluten', 'Dairy'],
+      'recipe': 'Season beef, cook and serve in tortillas with toppings.'
     },
     {
       'title': 'Veggie Wrap',
@@ -144,6 +177,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
           'price': 1.25
         },
       ],
+      'prepTime': '10',
+      'cookingSkillLevel': 'Beginner',
+      'healthGoal': 'Weight Loss',
+     'diseasesManaged': ['none'],
+      'allergens': ['Gluten'],
+      'recipe': 'Wrap fresh vegetables in a tortilla and serve.'
     },
     {
       'title': 'Pasta Primavera',
@@ -169,6 +208,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
           'price': 1.50
         },
       ],
+      'prepTime': '20',
+      'cookingSkillLevel': 'Intermediate',
+      'healthGoal': 'More Energy',
+     'diseasesManaged': ['none'],
+      'allergens': ['Gluten', 'Dairy'],
+      'recipe': 'Cook pasta, sauté vegetables, and mix together.'
     },
     {
       'title': 'Caesar Salad',
@@ -190,6 +235,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
         },
         {'title': 'Olives', 'image': 'assets/images/olives.jpg', 'price': 1.00},
       ],
+      'prepTime': '10',
+      'cookingSkillLevel': 'Beginner',
+      'healthGoal': 'Weight Loss',
+     'diseasesManaged': ['none'],
+      'allergens': ['Gluten', 'Dairy'],
+      'recipe': 'Toss lettuce with dressing and top with croutons.'
     },
     {
       'title': 'Smoothie Bowl',
@@ -211,6 +262,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
         },
         {'title': 'Honey', 'image': 'assets/images/honey.jpg', 'price': 1.00},
       ],
+      'prepTime': '5',
+      'cookingSkillLevel': 'Beginner',
+      'healthGoal': 'More Energy',
+     'diseasesManaged': ['none'],
+      'allergens': ['Dairy'],
+      'recipe': 'Blend fruits with yogurt and top with seeds and granola.'
     },
     {
       'title': 'Chicken Curry',
@@ -232,6 +289,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
           'price': 1.00
         },
       ],
+      'prepTime': '30',
+      'cookingSkillLevel': 'Advanced',
+      'healthGoal': 'Weight Gain',
+     'diseasesManaged': ['none'],
+      'allergens': ['Dairy'],
+      'recipe': 'Cook chicken with curry sauce and serve with rice.'
     },
     {
       'title': 'Avocado Toast',
@@ -253,6 +316,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
           'price': 0.75
         },
       ],
+      'prepTime': '5',
+      'cookingSkillLevel': 'Beginner',
+      'healthGoal': 'More Energy',
+     'diseasesManaged': ['none'],
+      'allergens': ['Gluten'],
+      'recipe': 'Smash avocado on toasted bread and top with seasonings.'
     },
     {
       'title': 'Stuffed Peppers',
@@ -274,6 +343,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
           'price': 2.00
         },
       ],
+      'prepTime': '20',
+      'cookingSkillLevel': 'Intermediate',
+      'healthGoal': 'Weight Loss',
+     'diseasesManaged': ['none'],
+      'allergens': ['none'],
+      'recipe': 'Stuff peppers with mixture and bake until tender.'
     },
     {
       'title': 'Shrimp Fried Rice',
@@ -299,6 +374,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
           'price': 1.50
         },
       ],
+      'prepTime': '15',
+      'cookingSkillLevel': 'Intermediate',
+      'healthGoal': 'Weight Gain',
+     'diseasesManaged': ['none'],
+      'allergens': ['Shellfish', 'Soy'],
+      'recipe': 'Stir-fry shrimp and vegetables, mix with rice.'
     },
     {
       'title': 'Chickpea Salad',
@@ -324,6 +405,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
           'price': 1.50
         },
       ],
+      'prepTime': '10',
+      'cookingSkillLevel': 'Beginner',
+      'healthGoal': 'Muscle Gain',
+     'diseasesManaged': ['none'],
+      'allergens': ['Legumes', 'Dairy'],
+      'recipe': 'Mix chickpeas with diced vegetables and dressing.'
     },
     {
       'title': 'Pumpkin Soup',
@@ -349,6 +436,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
           'price': 1.00
         },
       ],
+      'prepTime': '20',
+      'cookingSkillLevel': 'Intermediate',
+      'healthGoal': 'Weight Loss',
+     'diseasesManaged': ['none'],
+      'allergens': ['Dairy'],
+      'recipe': 'Blend cooked pumpkin with spices and cream.'
     },
     {
       'title': 'Eggplant Parmesan',
@@ -374,6 +467,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
           'price': 5.50
         },
       ],
+      'prepTime': '30',
+      'cookingSkillLevel': 'Advanced',
+      'healthGoal': 'Weight Gain',
+     'diseasesManaged': ['none'],
+      'allergens': ['Gluten', 'Dairy', 'Eggplant'],
+      'recipe': 'Layer eggplant with sauce and cheese, bake until golden.'
     },
     {
       'title': 'Couscous Bowl',
@@ -399,6 +498,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
           'price': 1.50
         },
       ],
+      'prepTime': '10',
+      'cookingSkillLevel': 'Beginner',
+      'healthGoal': 'More Energy',
+     'diseasesManaged': ['none'],
+      'allergens': ['Tree Nuts'],
+      'recipe': 'Prepare couscous and top with sautéed vegetables.'
     },
     {
       'title': 'Turkey Burger',
@@ -424,6 +529,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
           'price': 0.75
         },
       ],
+      'prepTime': '15',
+      'cookingSkillLevel': 'Intermediate',
+      'healthGoal': 'Weight Gain',
+     'diseasesManaged': ['none'],
+      'allergens': ['Gluten', 'Dairy'],
+      'recipe': 'Cook turkey patty, serve on bun with toppings.'
     },
     {
       'title': 'Greek Yogurt Parfait',
@@ -449,6 +560,12 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
           'price': 0.75
         },
       ],
+      'prepTime': '5',
+      'cookingSkillLevel': 'Beginner',
+      'healthGoal': 'More Energy',
+     'diseasesManaged': ['none'],
+      'allergens': ['Dairy', 'Nuts'],
+      'recipe': 'Layer yogurt with granola and berries.'
     },
     {
       'title': 'Lentil Soup',
@@ -474,8 +591,14 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
           'price': 0.50
         },
       ],
+      'prepTime': '15',
+      'cookingSkillLevel': 'Beginner',
+      'healthGoal': 'Weight Loss',
+     'diseasesManaged': ['none'],
+      'allergens': ['none'],
+      'recipe': 'Cook lentils with vegetables and spices until soft.'
     },
-  ];
+];
 
   late List<Map<String, dynamic>> _filteredMeals;
 
@@ -542,8 +665,8 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Recommended Meals'),
-        backgroundColor: Colors.teal[800],
+        title: Text('Meals'),
+        backgroundColor: Colors.teal[900],
         foregroundColor: Colors.white,
         actions: [
           IconButton(
@@ -552,7 +675,7 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => FavoritesScreen(),
+                  builder: (context) => cart.FavoritesScreen(),
                 ),
               );
             },
@@ -563,7 +686,7 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => ShoppingCartScreen(),
+                  builder: (context) => cart.ShoppingCartScreen(),
                 ),
               );
             },
@@ -609,7 +732,10 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
                       title: Text('Profile',
                           style: TextStyle(color: Colors.black)),
                       onTap: () {
-                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => ProfilePage()),
+                        );
                       },
                     ),
                     ListTile(
@@ -636,7 +762,7 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                              builder: (context) => ShoppingCartScreen()),
+                              builder: (context) => cart.ShoppingCartScreen()),
                         );
                       },
                     ),
@@ -709,7 +835,7 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
         ),
         child: SingleChildScrollView(
           child: Padding(
-            padding: EdgeInsets.all(16.0),
+            padding: EdgeInsets.all(4.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
@@ -740,9 +866,9 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
                   controller: _searchController,
                   decoration: InputDecoration(
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.8),
+                    fillColor: Colors.white.withOpacity(0.5),
                     labelText: 'Search Meals',
-                    labelStyle: TextStyle(color: Colors.black),
+                    labelStyle: TextStyle(color: Colors.teal[900]),
                     border: OutlineInputBorder(),
                     focusedBorder: OutlineInputBorder(
                       borderSide: BorderSide(color: Colors.teal),
@@ -762,8 +888,8 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
                   tilePadding: EdgeInsets.zero,
                   collapsedBackgroundColor: Colors.white.withOpacity(0.8),
                   backgroundColor: Colors.teal.withOpacity(0.01),
-                  title: Text('  Show Filters',
-                      style: TextStyle(color: Colors.teal[700])),
+                  title: Text('   Show Filters',
+                      style: TextStyle(color: Colors.teal[900])),
                   children: [
                     _buildFilterOptions(),
                   ],
@@ -784,9 +910,9 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
       shrinkWrap: true,
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
-        crossAxisSpacing: 16.0,
-        mainAxisSpacing: 16.0,
-        childAspectRatio: 0.8,
+        crossAxisSpacing: 6.0,
+        mainAxisSpacing: 6.0,
+        childAspectRatio: 0.9,
       ),
       itemCount: _filteredMeals.length,
       itemBuilder: (context, index) {
@@ -796,7 +922,7 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => MealDetailScreen(meal: meal),
+                builder: (context) => meal_detail.MealDetailScreen(meal: meal),
               ),
             );
           },
@@ -871,10 +997,21 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
   }
 
   Widget _buildMealCard(String title, String imagePath, double price) {
-    return Card(
-      elevation: 4,
-      color: Colors.orangeAccent,
-      shape: RoundedRectangleBorder(
+  return Card(
+    elevation: 2,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.teal[600]!, // Lighter teal
+            Colors.teal[800]!, // Medium teal
+          ],
+        ),
         borderRadius: BorderRadius.circular(12),
       ),
       child: ClipRRect(
@@ -898,32 +1035,23 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
                   Text(
                     title,
                     style: TextStyle(
-                      fontSize: 16.0,
+                      fontSize: 14.0,
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
                     ),
                   ),
                   Text(
                     '\$${price.toStringAsFixed(2)}',
-                    style: TextStyle(color: Colors.teal, fontSize: 14),
+                    style: TextStyle(color: Colors.white, fontSize: 14),
                   ),
-                  /*TextButton(
-                    onPressed: () {
-                      // Action to add item to cart
-                    },
-                    child: Text('+ Add to Cart', style: TextStyle(color: Colors.white)),
-                    style: TextButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                    ),
-                  ),*/
                 ],
               ),
             ),
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
 }
 
 void showCustomSnackBar(BuildContext context, String message) {
@@ -943,4 +1071,5 @@ void showCustomSnackBar(BuildContext context, String message) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(snackBar);
+}
 }
