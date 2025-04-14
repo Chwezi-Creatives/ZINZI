@@ -2,25 +2,31 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import 'package:zinzi2/verification.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:zinzi2/user_metrics.dart';
+import 'package:zinzi2/verification.dart';
 
-final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';
+final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 
-class SignUpPage extends StatefulWidget {
-  const SignUpPage({super.key});
+class UserSignUpPage extends StatefulWidget {
+  @override
+  const UserSignUpPage({super.key});
 
   @override
-  _SignUpPageState createState() => _SignUpPageState();
+  _UserSignUpPageState createState() => _UserSignUpPageState();
 }
 
-class _SignUpPageState extends State<SignUpPage>
-    with SingleTickerProviderStateMixin {
+class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  bool _isLoading = false; // Flag to control the loading state
+  final TextEditingController _imageUrlController = TextEditingController();
+
+  bool _isLoading = false; 
+  File? _profileImage; // Variable to hold the selected profile image
 
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
@@ -35,31 +41,37 @@ class _SignUpPageState extends State<SignUpPage>
   void initState() {
     super.initState();
 
+    // Initializing animations
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 2),
+      duration: const Duration(milliseconds: 800),
     );
 
-    // Mascot fades in first
     _fadeAnimation = CurvedAnimation(
       parent: _controller,
-      curve: Curves.easeIn,
+      curve: Curves.easeOut,
     );
 
-    // Slide animation for form content (text, input fields, and buttons)
     _slideAnimation = Tween<Offset>(
-            begin: const Offset(0, -1), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+      begin: const Offset(0, -0.5),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: Curves.easeOut,
+      ),
+    );
 
-    // Buttons fade in after text
     _buttonFadeAnimation = CurvedAnimation(
       parent: _controller,
-      curve: const Interval(0.6, 1.0, curve: Curves.easeIn),
+      curve: const Interval(0.6, 1.0, curve: Curves.easeOut),
     );
 
-    // Scale animation for the CTA button
     _buttonScaleAnimation = Tween<double>(begin: 0.4, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+      CurvedAnimation(
+        parent: _controller,
+        curve: Curves.easeOut,
+      ),
     );
 
     _controller.forward();
@@ -71,12 +83,12 @@ class _SignUpPageState extends State<SignUpPage>
     _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    _imageUrlController.dispose();
     super.dispose();
   }
 
-  // Function to check the password strength
   void _checkPasswordStrength(String password) {
-    if (password.length < 4) {
+    if (password.isEmpty || password.length < 4) {
       setState(() {
         _passwordStrengthMessage = 'Too short';
         _passwordStrengthColor = Colors.red;
@@ -106,11 +118,42 @@ class _SignUpPageState extends State<SignUpPage>
     }
   }
 
+  Future<void> pickImage() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+
+    if (pickedFile != null) {
+      setState(() {
+        _profileImage = File(pickedFile.path);
+      });
+
+      String imageUrl = await uploadImageToImgur(_profileImage!);
+      _imageUrlController.text = imageUrl; // Set the image URL in the controller
+    }
+  }
+
+  Future<String> uploadImageToImgur(File image) async {
+    final String uploadUrl = 'https://api.imgur.com/3/image';
+    final request = http.MultipartRequest('POST', Uri.parse(uploadUrl));
+    request.headers['Authorization'] = 'Client-ID [YOUR_IMGUR_CLIENT_ID]'; // Use a valid Imgur Client ID
+    request.files.add(await http.MultipartFile.fromPath('image', image.path));
+
+    final response = await request.send();
+    final responseData = await http.Response.fromStream(response);
+
+    if (response.statusCode == 200) {
+      final jsonResponse = json.decode(responseData.body);
+      return jsonResponse['data']['link']; // Returns the image URL
+    } else {
+      throw Exception('Failed to upload image to Imgur');
+    }
+  }
+
   Future<void> _signUp() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
-      _isLoading = true; // Show loading indicator
+      _isLoading = true; 
     });
 
     try {
@@ -121,6 +164,8 @@ class _SignUpPageState extends State<SignUpPage>
           'name': _nameController.text.trim(),
           'email': _emailController.text.trim(),
           'password': _passwordController.text.trim(),
+          'image': _imageUrlController.text.trim(),
+          'user_type': 'User', // Set the user type explicitly for this signup page
         }),
       );
 
@@ -133,10 +178,9 @@ class _SignUpPageState extends State<SignUpPage>
 
         Navigator.push(
           context,
-          _createSlideFadeTransition(const EmailVerificationPage()),
+          _createSlideFadeTransition(const UserMetricsPage()),
         );
       } else {
-        // Extract the error message from the response
         final errorResponse = json.decode(response.body);
         final errorMessage = errorResponse['message'] ?? 'Signup failed. Try again!';
         
@@ -150,7 +194,7 @@ class _SignUpPageState extends State<SignUpPage>
       ));
     } finally {
       setState(() {
-        _isLoading = false; // Hide loading indicator
+        _isLoading = false; 
       });
     }
   }
@@ -159,9 +203,9 @@ class _SignUpPageState extends State<SignUpPage>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          'Sign Up',
-          style: const TextStyle(color: Colors.black),
+        title: const Text(
+          'User Sign Up',
+          style: TextStyle(color: Colors.black),
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.black),
@@ -172,14 +216,12 @@ class _SignUpPageState extends State<SignUpPage>
       ),
       body: Stack(
         children: [
-          // Background image
           Positioned.fill(
             child: Image.asset(
               'assets/images/soft.jpg',
               fit: BoxFit.cover,
             ),
           ),
-          // Semi-transparent overlay
           Positioned.fill(
             child: Container(
               color: Colors.teal.withOpacity(0.2),
@@ -195,20 +237,26 @@ class _SignUpPageState extends State<SignUpPage>
                     crossAxisAlignment: CrossAxisAlignment.center,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Mascot fades in from top
                       SlideTransition(
                         position: _slideAnimation,
                         child: Column(
                           children: [
-                            Image.asset(
-                              'assets/images/Gru green.png',
-                              height: 170,
-                              width: 170,
+                            // Circular Profile Image Selection Section
+                            GestureDetector(
+                              onTap: pickImage,
+                              child: CircleAvatar(
+                                radius: 60, // Adjust the radius for size
+                                backgroundColor: Colors.grey[300],
+                                backgroundImage: _profileImage != null ? FileImage(_profileImage!) : null,
+                                child: _profileImage == null
+                                    ? const Icon(Icons.add_a_photo, size: 30)
+                                    : null,
+                              ),
                             ),
-                            const SizedBox(height: 01),
+                            const SizedBox(height: 20), // Spacing after image
                             Card(
                               elevation: 3,
-                              color: Colors.white.withOpacity(0.55),
+                              color: Colors.teal[50],
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
@@ -217,22 +265,22 @@ class _SignUpPageState extends State<SignUpPage>
                                 child: Column(
                                   children: [
                                     Text(
-                                      "Create an Account",
+                                      "Create your account",
                                       style: TextStyle(
                                         fontSize: 24,
                                         fontWeight: FontWeight.bold,
                                         color: Colors.teal.shade800,
-                                        letterSpacing: 1.5,
                                       ),
                                     ),
                                     const SizedBox(height: 8),
                                     Text(
-                                      "Join us to Personalize, track and Achieve your health goals and more!",
+                                      "Join us to personalize, track, and achieve your health goals and more!",
                                       style: TextStyle(
-                                        fontSize: 16,
-                                        color: Colors.black.withOpacity(0.9),
+                                        fontSize: 14,
+                                        color: Colors.teal[900],
                                       ),
-                                    )
+                                    ),
+                                    const SizedBox(height: 20),
                                   ],
                                 ),
                               ),
@@ -246,17 +294,13 @@ class _SignUpPageState extends State<SignUpPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // Name Field
                             _buildTextField(
                               controller: _nameController,
                               label: "Name",
                               icon: Icons.person,
-                              validator: (value) => value?.isEmpty ?? true
-                                  ? "Enter your name"
-                                  : null,
+                              validator: (value) => value?.isEmpty ?? true ? "Enter your name" : null,
                             ),
                             const SizedBox(height: 16),
-                            // Email Field
                             _buildTextField(
                               controller: _emailController,
                               label: "Email",
@@ -265,8 +309,7 @@ class _SignUpPageState extends State<SignUpPage>
                                 if (value == null || value.isEmpty) {
                                   return "Enter your email";
                                 }
-                                final emailRegex = RegExp(
-                                    r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$");
+                                final emailRegex = RegExp(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$");
                                 if (!emailRegex.hasMatch(value)) {
                                   return "Enter a valid email address";
                                 }
@@ -274,7 +317,6 @@ class _SignUpPageState extends State<SignUpPage>
                               },
                             ),
                             const SizedBox(height: 16),
-                            // Password Field
                             _buildTextField(
                               controller: _passwordController,
                               label: "Password",
@@ -287,38 +329,30 @@ class _SignUpPageState extends State<SignUpPage>
                                 }
                                 return null;
                               },
-                              onChanged: _checkPasswordStrength, // Check password strength
+                              onChanged: (value) {
+                                _checkPasswordStrength(value);
+                              },
                             ),
                             const SizedBox(height: 10),
-                            // Password Strength Indicator
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  _passwordStrengthMessage,
-                                  style: TextStyle(color: _passwordStrengthColor),
-                                ),
-                                const SizedBox(width: 3), // Spacing between text and Progress Indicator
-                                SizedBox(
-                                  width: 100, // Set a fixed width for LinearProgressIndicator
-                                  height: 8, // Height for the indicator
-                                  child: LinearProgressIndicator(
-                                    value: 
-                                      _passwordStrengthMessage == 'Strong'
-                                          ? 1.0
-                                          : _passwordStrengthMessage == 'Moderate' 
-                                              ? 0.7 
-                                              : _passwordStrengthMessage == 'Weak'
-                                                  ? 0.4 
-                                                  : 0.2,
-                                    backgroundColor: Colors.grey.shade300,
-                                    color: _passwordStrengthColor,
-                                  ),
-                                ),
-                              ],
-                            ),
+                            if (_passwordController.text.isNotEmpty) ...[
+                              Text(
+                                _passwordStrengthMessage,
+                                style: TextStyle(color: _passwordStrengthColor),
+                              ),
+                              SizedBox(height: 5),
+                              LinearProgressIndicator(
+                                value: _passwordStrengthMessage == 'Strong'
+                                    ? 1.0
+                                    : _passwordStrengthMessage == 'Moderate' 
+                                        ? 0.7 
+                                        : _passwordStrengthMessage == 'Weak'
+                                            ? 0.4 
+                                            : 0.2,
+                                backgroundColor: Colors.grey.shade300,
+                                color: _passwordStrengthColor,
+                              ),
+                            ],
                             const SizedBox(height: 40),
-                            // Signup Button with fade and scale animation
                             FadeTransition(
                               opacity: _buttonFadeAnimation,
                               child: ScaleTransition(
@@ -326,21 +360,17 @@ class _SignUpPageState extends State<SignUpPage>
                                 child: ElevatedButton(
                                   onPressed: _isLoading ? null : _signUp,
                                   style: ElevatedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 16),
+                                    padding: const EdgeInsets.symmetric(vertical: 16),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     backgroundColor: Colors.teal,
                                   ),
                                   child: _isLoading
-                                      ? const CircularProgressIndicator(
-                                          color: Colors.white)
+                                      ? const CircularProgressIndicator(color: Colors.white)
                                       : const Text(
                                           "Sign Up",
-                                          style: TextStyle(
-                                              fontSize: 16,
-                                              color: Colors.white),
+                                          style: TextStyle(fontSize: 16, color: Colors.white),
                                         ),
                                 ),
                               ),
@@ -365,11 +395,11 @@ class _SignUpPageState extends State<SignUpPage>
     required IconData icon,
     bool obscureText = false,
     required String? Function(String?) validator,
-    Function(String)? onChanged, // Add onChanged here for password strength
+    Function(String)? onChanged,
   }) {
     return TextFormField(
       controller: controller,
-      onChanged: onChanged,  // Add onChanged to capture password input
+      onChanged: onChanged,
       decoration: InputDecoration(
         labelText: label,
         labelStyle: TextStyle(color: Colors.teal.shade700),
@@ -387,17 +417,15 @@ class _SignUpPageState extends State<SignUpPage>
     );
   }
 
-  // Slide and fade transition for page navigation
   PageRouteBuilder _createSlideFadeTransition(Widget page) {
     return PageRouteBuilder(
       pageBuilder: (context, animation, secondaryAnimation) => page,
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
         const begin = Offset(1.0, 0.0);
         const end = Offset.zero;
-        const curve = Curves.easeInOut;
+        const curve = Curves.easeOut;
 
-        var tween =
-            Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+        var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
         var offsetAnimation = animation.drive(tween);
         var fadeAnimation = animation.drive(CurveTween(curve: curve));
 
@@ -405,6 +433,7 @@ class _SignUpPageState extends State<SignUpPage>
             position: offsetAnimation,
             child: FadeTransition(opacity: fadeAnimation, child: child));
       },
+      transitionDuration: const Duration(milliseconds: 500),
     );
   }
 }
