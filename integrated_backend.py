@@ -2103,7 +2103,7 @@ class Spices(BaseRepository):
 # --- Orders ---
 # (Orders class code seems relatively clean, kept as provided)
 class Orders(BaseRepository):
-    ALLOWED_ORDER_TYPES = {'supplement', 'herbal', 'gadget', 'spice', 'produce', 'meal'}
+    ALLOWED_ORDER_TYPES = { 'meal','supplement','gig', 'herbal', 'gadget', 'spice', 'produce'}
     ALLOWED_ORDER_STATUSES = {'cancelled', 'delivered', 'shipped', 'preparing', 'confirmed', 'pending', 'accepted', 'dispatched', 'picked up', 'delivering'}
     ALLOWED_PAYMENT_STATUSES = {'failed', 'refunded', 'paid', 'pending', 'completed'}
     ALLOWED_PAYMENT_MODES = {'cash', 'momo', 'mobile money', 'Airtel Card', 'paypal', 'stripe', 'debit card', 'credit card'}
