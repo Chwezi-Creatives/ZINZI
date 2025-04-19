@@ -1,5 +1,5 @@
 # Cspell:disable
-from vercel_adapter import VercelAdapter
+#from vercel_adapter import VercelAdapter
 import os
 import json
 import random
@@ -4557,8 +4557,8 @@ if __name__ == '__main__':
     stripe_secret_key = os.getenv('STRIPE_SECRET_KEY')
     if stripe_secret_key: configure_stripe(stripe_secret_key)
 
-    #app.run(debug=debug_mode, host=host, port=port)
-    handler = VercelAdapter(app)
+    app.run(debug=debug_mode, host=host, port=port)
+    #handler = VercelAdapter(app)
 
 
     ''' fix python 3 syntax errors in the following lines of the integrated_backend.py file : lines 84-88, 117-477, 545-642,  and finally line 1132-1148  without introducing further syntax errors for pylance to compleain. make sure no features are lost '''
