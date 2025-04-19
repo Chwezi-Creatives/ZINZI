@@ -1,13 +1,17 @@
 # Cspell:disable
-#from vercel_adapter import VercelAdapter
+
 import os
 import json
 import random
+import base64
+import time
+import uuid
+from typing import Dict, Any, Optional
 import string
 from datetime import datetime, timedelta, date
 from dotenv import load_dotenv
 import bcrypt
-import psycopg2  # Database driver
+import psycopg2 # Database driver
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
@@ -15,16 +19,16 @@ from google.oauth2.credentials import Credentials
 from google.auth.exceptions import RefreshError
 from email.mime.text import MIMEText
 import base64
-import paypalrestsdk
 import logging
+from typing import Dict, Any, Optional, List
+import paypalrestsdk
 import stripe
 import requests
 import time
 import uuid
-from typing import Dict, Any, Optional, List
 from flask import Flask, request, jsonify
-import logging
-# Assuming utils.py exists with this function, if not, define it or remove the import
+from flask_cors import CORS
+
 try:
     from utils import lowercase_keys
 except ImportError:
@@ -33,9 +37,7 @@ except ImportError:
         if isinstance(d, dict):
             return {k.lower(): v for k, v in d.items()}
         return d
-    # logger.warning("utils.lowercase_keys not found, using basic fallback.") # Defined below
 
-from flask_cors import CORS
 
 # --- Configuration Loading ---
 load_dotenv()  # Load environment variables first
@@ -130,27 +132,6 @@ def deserialize_list_from_json_string(json_string):
     except json.JSONDecodeError:
         logger.warning(f"Could not decode JSON: {json_string}. Fallback: comma split.")
         return [item.strip() for item in json_string.split(',') if item.strip()]
-
-import os
-import json
-import random
-import string
-from datetime import datetime, timedelta, date
-from dotenv import load_dotenv
-import bcrypt
-import psycopg2 # Database driver
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google.auth.exceptions import RefreshError
-from email.mime.text import MIMEText
-import base64
-import logging
-from typing import Dict, Any, Optional, List
-
-# Assuming logger, get_db_connection, hash_password, generate_random_code,
-# lowercase_keys, check_required_fields, deserialize_list are defined and imported correctly.
 
 # --- Base Class for Common DB Operations ---
 class BaseRepository:
@@ -2105,16 +2086,12 @@ class Spices(BaseRepository):
 
 import json
 from datetime import datetime, date
-import logging
 
-logger = logging.getLogger(__name__)
 
 # Assuming BaseRepository is defined elsewhere
 import json
 from datetime import datetime, date
-import logging
 
-logger = logging.getLogger(__name__)
 
 class Orders(BaseRepository):
     ALLOWED_ORDER_TYPES = {'meal', 'supplement', 'gig', 'herbal', 'gadget', 'spice', 'produce'}
@@ -2993,7 +2970,6 @@ class MealRecommendation2(BaseMealRecommender):
             logger.error(f"RecSys(V2) User {self.user_id}: Unexpected Error: {e}", exc_info=True)
             return {"error": "An unexpected error occurred during recommendation.", "success": False}
         
-import logging
 from datetime import datetime, date
 # Assuming BaseRepository and its _execute_query method are defined elsewhere
 # Assuming logger is configured globally
@@ -3064,18 +3040,6 @@ class GetAllMeals(BaseRepository):
             logger.error(f"Unexpected error fetching all meals: {e}", exc_info=True)
             return {"error": "An unexpected server error occurred.", "success": False}
         
-import os
-import json
-import base64
-import time
-import uuid
-import logging
-from typing import Dict, Any, Optional
-
-# Assuming necessary imports like requests, paypalrestsdk, stripe are present
-# Assuming logger is configured globally
-
-# --- Payment Methods (Corrected Syntax & Structure) ---
 
 def configure_paypal(mode: str, client_id: str, client_secret: str):
     """Configures the PayPal SDK."""
@@ -4545,7 +4509,7 @@ def momo_callback():
         # Avoid returning detailed errors in callback responses if possible
         return jsonify({"error": "Failed to process callback"}), 500 # No semicolon needed
 
-# --- Main Execution ---
+# --- Main Execution --- #wont be executed for producton purpses
 if __name__ == '__main__':
     host = os.getenv('FLASK_HOST', '0.0.0.0')
     port = int(os.getenv('FLASK_PORT', 5000))
@@ -4557,8 +4521,9 @@ if __name__ == '__main__':
     stripe_secret_key = os.getenv('STRIPE_SECRET_KEY')
     if stripe_secret_key: configure_stripe(stripe_secret_key)
 
-    app.run(debug=debug_mode, host=host, port=port)
-    #handler = VercelAdapter(app)
+    # app.run(debug=debug_mode, host=host, port=port) # Commented out for Gunicorn or waitress for production use
+    
+
 
 
     ''' fix python 3 syntax errors in the following lines of the integrated_backend.py file : lines 84-88, 117-477, 545-642,  and finally line 1132-1148  without introducing further syntax errors for pylance to compleain. make sure no features are lost '''
