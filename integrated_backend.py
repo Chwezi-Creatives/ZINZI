@@ -1,4 +1,5 @@
 # Cspell:disable
+from vercel_adapter import VercelAdapter
 import os
 import json
 import random
@@ -1084,7 +1085,7 @@ class Chefs(BaseRepository):
             logger.warning(f"Chef login failed: Invalid password for '{identifier}'.")
             return {'message': 'Invalid credentials.'}, 401
 
-    def delete_chef(self):
+    def delete_chef(self, chef_id):
         """Deletes a chef record. Use with caution!"""
         logger.warning(f"Attempting to delete chef ID: {chef_id}")
         sql = "DELETE FROM chefs WHERE chefid = %s"
@@ -2100,17 +2101,86 @@ class Spices(BaseRepository):
             return False
 
 
-# --- Orders ---
-# (Orders class code seems relatively clean, kept as provided)
+
+
+import json
+from datetime import datetime, date
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Assuming BaseRepository is defined elsewhere
+import json
+from datetime import datetime, date
+import logging
+
+logger = logging.getLogger(__name__)
+
 class Orders(BaseRepository):
-    ALLOWED_ORDER_TYPES = { 'meal','supplement','gig', 'herbal', 'gadget', 'spice', 'produce'}
-    ALLOWED_ORDER_STATUSES = {'cancelled', 'delivered', 'shipped', 'preparing', 'confirmed', 'pending', 'accepted', 'dispatched', 'picked up', 'delivering'}
+    ALLOWED_ORDER_TYPES = {'meal', 'supplement', 'gig', 'herbal', 'gadget', 'spice', 'produce'}
+    ALLOWED_ORDER_STATUSES = {'cancelled', 'assigned', 'delivered', 'shipped', 'preparing', 'confirmed', 'pending', 'accepted', 'dispatched', 'picked up', 'delivering'}
     ALLOWED_PAYMENT_STATUSES = {'failed', 'refunded', 'paid', 'pending', 'completed'}
     ALLOWED_PAYMENT_MODES = {'cash', 'momo', 'mobile money', 'Airtel Card', 'paypal', 'stripe', 'debit card', 'credit card'}
+
+    def _validate_product_id(self, product_id, order_type):
+        """Validates that the product_id exists in the appropriate table based on order_type."""
+        # if not product_id:
+        #     raise ValueError(f"product_id is required for {order_type} orders.")
+        
+        # order_type_l = order_type.lower().strip()
+        # if order_type_l == 'meal':
+        #     sql = "SELECT meal_id FROM meals WHERE meal_id = %s"
+        # elif order_type_l == 'supplement':
+        #     sql = "SELECT supplement_id FROM supplements WHERE supplement_id = %s"
+        # elif order_type_l == 'herbal':
+        #     sql = "SELECT herbal_id FROM herbals WHERE herbal_id = %s"
+        # elif order_type_l == 'gadget':
+        #     sql = "SELECT gadget_id FROM gadgets WHERE gadget_id = %s"
+        # elif order_type_l == 'spice':
+        #     sql = "SELECT spice_id FROM spices WHERE spice_id = %s"
+        # elif order_type_l == 'produce':
+        #     sql = "SELECT produce_id FROM produce WHERE produce_id = %s"
+        # elif order_type_l == 'gig':
+        #     # Skip validation for gigs since there's no separate gigs table
+        #     return
+        # else:
+        #     raise ValueError(f"Invalid order_type: '{order_type}'.")
+
+        # try:
+        #     product_id_int = int(product_id)
+        #     result = self._execute_query(sql, (product_id_int,), fetch_all=False)
+        # except (ValueError, TypeError):
+        #     result = self._execute_query(sql, (str(product_id),), fetch_all=False)
+        # if not result:
+        #     raise ValueError(f"Invalid product_id: '{product_id}' does not exist for order_type '{order_type}'.")
+        if not product_id:
+            raise ValueError(f"product_id is required for {order_type} orders.")
+        
+
+
     def create_order(self, user_id, order_type, order_status="pending", payment_status="pending", payment_mode="cash",
                      delivery_address=None, notes=None, total_price=0.0, amount_paid=0.0, quantity=1,
-                     product_id=None, chef_id=None, producer_id=None, transporter_id=None, transaction_id=None):
+                     product_id=None, chef_id=None, producer_id=None, transporter_id=None, transaction_id=None, 
+                     items=None):  # Accepting items parameter
+
         order_type_l = str(order_type).lower().strip()
+
+        # Validate gig_details for gig orders
+        gig_details_json = None
+        if order_type_l == 'gig':
+            if not items or not isinstance(items, list) or len(items) == 0:
+                raise ValueError("items parameter with gig_details is required for gig orders.")
+            gig_details = items[0].get('gig_details', {})
+            if not gig_details or not isinstance(gig_details, dict):
+                raise ValueError("Valid gig_details dictionary is required for gig orders.")
+            try:
+                gig_details_json = json.dumps(gig_details)  # Convert gig_details to JSON
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"Invalid gig_details format: {e}")
+        else:
+            # Validate product_id for non-gig orders
+            self._validate_product_id(product_id, order_type)
+
         order_status_l = str(order_status).lower().strip()
         payment_status_l = str(payment_status).lower().strip()
         payment_mode_l = str(payment_mode).lower().strip()
@@ -2131,7 +2201,7 @@ class Orders(BaseRepository):
                 raise ValueError(f"Invalid payment_mode: '{payment_mode}'. Allowed: {self.ALLOWED_PAYMENT_MODES}")
             if is_airtel_card:
                 payment_mode_l = 'Airtel Card'
-
+        
         delivery_address_s = delivery_address or "Not specified"
         notes_s = notes or "No special instructions"
 
@@ -2157,28 +2227,30 @@ class Orders(BaseRepository):
         except (ValueError, TypeError):
             raise ValueError("Invalid transporter_id format.")
 
-        sql = """INSERT INTO orders (user_id, order_type, product_id, chef_id, producer_id, transporter_id, order_date, delivery_address, order_status, total_price, notes, payment_status, payment_mode, amount_paid, transaction_id, quantity) VALUES (%s,%s,%s,%s,%s,%s,NOW(),%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING order_id"""
-        params = (user_id_i, order_type_l, prod_id_s, chef_id_i, producer_id_i, transporter_id_i, delivery_address_s, order_status_l, price_f, notes_s, payment_status_l, payment_mode_l, paid_f, transaction_id, qty_i)
+        sql = """INSERT INTO orders (user_id, order_type, product_id, chef_id, producer_id, transporter_id, order_date, delivery_address, order_status, total_price, notes, payment_status, payment_mode, amount_paid, transaction_id, quantity, gig_details) 
+                 VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) 
+                 RETURNING order_id"""
+
+        params = (user_id_i, order_type_l, prod_id_s, chef_id_i, producer_id_i, transporter_id_i,
+                  delivery_address_s, order_status_l, price_f, notes_s, payment_status_l, payment_mode_l,
+                  paid_f, transaction_id, qty_i, gig_details_json)
 
         try:
             order_id = self._execute_query(sql, params, commit=True, returning_id_column='order_id')
             if order_id:
                 logger.info(f"Order created: {order_id}")
-                # Return a simpler, more standard success response
                 return {"message": "Order created successfully", "order_id": order_id, "success": True}
             else:
                 raise ValueError("Order creation failed: Did not return order_id.")
-        except ValueError as ve: # Catch DB errors or validation errors
-            logger.error(f"Error creating order: {ve}", exc_info=False) # Less noise for expected errors
-            # Return structure matching endpoint expectations
+        except ValueError as ve:
+            logger.error(f"Error creating order: {ve}", exc_info=False)
             return {"message": str(ve), "order_id": None, "success": False}
-        except Exception as e: # Catch unexpected errors
+        except Exception as e:
             logger.error(f"Unexpected error creating order: {e}", exc_info=True)
             err_msg = "Server error occurred while creating the order."
             return {"message": err_msg, "order_id": None, "success": False}
 
     def read_orders(self, order_id=None, chef_id=None, producer_id=None, user_id=None, transporter_id=None):
-        # Use CTE for clarity and potential performance benefit
         sql = """
             WITH MealDetails AS (
                 SELECT
@@ -2188,33 +2260,77 @@ class Orders(BaseRepository):
                 FROM meals m
                 LEFT JOIN meal_ingredients mi ON m.meal_id = mi.meal_id
                 LEFT JOIN produce p ON mi.produce_id = p.produce_id
-                GROUP BY m.meal_id, m.meal_name -- Group by primary key and name
+                GROUP BY m.meal_id, m.meal_name
+            ),
+            SupplementDetails AS (
+                SELECT
+                    supplement_id,
+                    supplement_name AS product_name
+                FROM supplements
+            ),
+            HerbalDetails AS (
+                SELECT
+                    herbal_id,
+                    herbal_name AS product_name
+                FROM herbals
+            ),
+            GadgetDetails AS (
+                SELECT
+                    gadget_id,
+                    gadget_name AS product_name
+                FROM gadgets
+            ),
+            SpiceDetails AS (
+                SELECT
+                    spice_id,
+                    spice_name AS product_name
+                FROM spices
+            ),
+            ProduceDetails AS (
+                SELECT
+                    produce_id,
+                    produce_name AS product_name
+                FROM produce
             )
             SELECT
                 o.order_id, o.user_id, o.order_type, o.product_id, o.chef_id, o.producer_id, o.transporter_id,
                 o.order_date, o.delivery_address, o.order_status, o.total_price, o.notes,
                 o.payment_status, o.payment_mode, o.amount_paid, o.transaction_id, o.quantity,
-                md.meal_name,    -- From MealDetails CTE
-                md.ingredients,  -- From MealDetails CTE
-                p.name AS producer_name,
-                p.location AS producer_address,
-                c.name AS chef_name,
-                t.name AS transporter_name
+                md.meal_name,
+                md.ingredients,
+                producer.name AS producer_name,
+                producer.location AS producer_address,
+                chef.name AS chef_name,
+                transporter.name AS transporter_name,
+                o.gig_details,
+                COALESCE(
+                    CASE WHEN o.order_type = 'meal' THEN md.meal_name END,
+                    CASE WHEN o.order_type = 'supplement' THEN supd.product_name END,
+                    CASE WHEN o.order_type = 'herbal' THEN hd.product_name END,
+                    CASE WHEN o.order_type = 'gadget' THEN gd.product_name END,
+                    CASE WHEN o.order_type = 'spice' THEN sd.product_name END,
+                    CASE WHEN o.order_type = 'produce' THEN prod.product_name END,
+                    'Unknown'
+                ) AS product_name
             FROM orders o
-            LEFT JOIN MealDetails md ON o.product_id::varchar = md.meal_id::varchar AND o.order_type = 'meal' -- Ensure types match for join
-            LEFT JOIN producers p ON o.producer_id = p.producer_id
-            LEFT JOIN chefs c ON o.chef_id = c.chefid
-            LEFT JOIN transporters t ON o.transporter_id = t.transporter_id
+            LEFT JOIN MealDetails md ON o.product_id::varchar = md.meal_id::varchar AND o.order_type = 'meal'
+            LEFT JOIN SupplementDetails supd ON o.product_id::varchar = supd.supplement_id::varchar AND o.order_type = 'supplement'
+            LEFT JOIN HerbalDetails hd ON o.product_id::varchar = hd.herbal_id::varchar AND o.order_type = 'herbal'
+            LEFT JOIN GadgetDetails gd ON o.product_id::varchar = gd.gadget_id::varchar AND o.order_type = 'gadget'
+            LEFT JOIN SpiceDetails sd ON o.product_id::varchar = sd.spice_id::varchar AND o.order_type = 'spice'
+            LEFT JOIN ProduceDetails prod ON o.product_id::varchar = prod.produce_id::varchar AND o.order_type = 'produce'
+            LEFT JOIN producers producer ON o.producer_id = producer.producer_id
+            LEFT JOIN chefs chef ON o.chef_id = chef.chefid
+            LEFT JOIN transporters transporter ON o.transporter_id = transporter.transporter_id
             WHERE 1=1
         """
         params = []
 
-        def _safe_int(val, field_name="ID"): # Add field name for better error messages
-             if val is None: return None
-             try: return int(val)
-             except (ValueError, TypeError): raise ValueError(f"Invalid format for {field_name}: '{val}'. Expected an integer.")
+        def _safe_int(val, field_name="ID"):
+            if val is None: return None
+            try: return int(val)
+            except (ValueError, TypeError): raise ValueError(f"Invalid format for {field_name}: '{val}'. Expected an integer.")
 
-        # Append WHERE clauses and parameters safely
         try:
             if order_id is not None: sql += " AND o.order_id = %s"; params.append(_safe_int(order_id, "order_id"))
             if chef_id is not None: sql += " AND o.chef_id = %s"; params.append(_safe_int(chef_id, "chef_id"))
@@ -2222,41 +2338,46 @@ class Orders(BaseRepository):
             if user_id is not None: sql += " AND o.user_id = %s"; params.append(_safe_int(user_id, "user_id"))
             if transporter_id is not None: sql += " AND o.transporter_id = %s"; params.append(_safe_int(transporter_id, "transporter_id"))
         except ValueError as e:
-             logger.error(f"Error reading orders due to invalid ID format: {e}")
-             raise # Re-raise to be caught by the endpoint
+            logger.error(f"Error reading orders due to invalid ID format: {e}")
+            raise
 
-        sql += " ORDER BY o.order_date DESC" # Add ordering
+        sql += " ORDER BY o.order_date DESC"
 
         results = self._execute_query(sql, tuple(params), fetch_all=True)
-        if results is None: return [] # Return empty list if query fails
+        if results is None: return []
 
-        # Process datetime objects
+        # Process datetime objects and JSONB fields
         processed_results = []
         for order in results:
-            processed_order = dict(order) # Ensure mutable
+            processed_order = dict(order)
             for key, value in processed_order.items():
                 if isinstance(value, (datetime, date)):
                     processed_order[key] = value.isoformat()
+                if key == 'gig_details' and value:
+                    try:
+                        processed_order['gig_details'] = json.loads(value)
+                    except (json.JSONDecodeError, TypeError):
+                        logger.warning(f"Failed to parse gig_details for order_id {processed_order.get('order_id')}")
+                        processed_order['gig_details'] = None
             processed_results.append(processed_order)
 
         logger.info(f"Retrieved {len(processed_results)} orders matching criteria.")
         return processed_results
 
-    def update_order_status(self, order_id, new_status): # <<< ADDED STATUS UPDATE METHOD
+    def update_order_status(self, order_id, new_status):
         """Updates the status of a specific order."""
         new_status_l = str(new_status).lower()
         if new_status_l not in self.ALLOWED_ORDER_STATUSES:
             raise ValueError(f"Invalid target order status: {new_status}")
-        sql = "UPDATE orders SET order_status = %s, updated_at = NOW() WHERE order_id = %s" # Assume updated_at exists
+        sql = "UPDATE orders SET order_status = %s, updated_at = NOW() WHERE order_id = %s"
         try:
             self._execute_query(sql, (new_status_l, order_id), commit=True)
             logger.info(f"Updated order ID {order_id} status to {new_status_l}")
             return True
         except Exception as e:
             logger.error(f"Failed to update status for order ID {order_id}: {e}", exc_info=True)
-            return False # Return False on failure
+            return False
 
-    # --- Delete Order Method (Optional - Use with extreme caution) ---
     def delete_order(self, order_id):
         """Deletes an order record. Usually not recommended, prefer cancelling."""
         logger.warning(f"Attempting to delete order ID: {order_id}")
@@ -2268,8 +2389,7 @@ class Orders(BaseRepository):
         except Exception as e:
             logger.error(f"Failed to delete order ID {order_id}: {e}", exc_info=True)
             return False
-
-
+        
 # --- Calculation Logic Class ---
 class CalculationLogic:
     def calculate_bmi(self, weight, height):
@@ -3773,7 +3893,7 @@ def update_producer_status_endpoint(producer_id):
 def signup_transporter_endpoint():
     data = request.get_json();
     if not data: return jsonify({'error': 'Request body missing'}), 400
-    try: result = transporters_crud.create_transporter(data); return jsonify(result), 201
+    try: result = transporters_crud.create_transporter(data); print(result);return jsonify(result), 201
     except ValueError as ve: logger.warning(f'Transporter signup validation error: {ve}'); return jsonify({'error': str(ve)}), 400
     except Exception as e: logger.error(f'Error creating transporter: {e}', exc_info=True); return jsonify({'error': 'Internal server error during signup'}), 500
 
@@ -3785,6 +3905,7 @@ def login_transporter_endpoint():
     if not identifier or not password: return jsonify({'error': 'Identifier and password required'}), 400
     try:
         result, status_code = transporters_crud.login_transporter(identifier, password)
+        print(result)
         return jsonify(result), status_code
     except ValueError as ve: logger.error(f"Transporter login DB/Validation error: {ve}"); return jsonify({'error': 'Invalid credentials or account not found.'}), 401 if 'Invalid credentials' in str(ve) or 'not found' in str(ve) else (jsonify({'error': "Login failed due to server issue."}), 500)
     except Exception as e: logger.error(f"Transporter login internal error: {e}", exc_info=True); return jsonify({'error': "Internal login error."}), 500
@@ -4132,7 +4253,7 @@ def update_order_status_endpoint(order_id):
 @app.route('/rr/Aorders', methods=['POST'])
 def create_order_endpoint():
     data = request.get_json()
-    print(data)
+    logger.debug(f"Received payload: {data}")
     if not data:
         return jsonify({'error': 'Request body required'}), 400
 
@@ -4150,11 +4271,11 @@ def create_order_endpoint():
         transaction_id = data.get('transaction_id')
         quantity = data.get('quantity', 1)
         transporter_id = data.get('transporter_id')
+        items = data.get('items')  # Keep items for passing to create_order
 
         # Extract chef_id and producer_id from items[0] if present, else from top-level
         chef_id = None
         producer_id = None
-        items = data.get('items')
         if isinstance(items, list) and len(items) > 0:
             first_item = items[0]
             chef_id = first_item.get('chef_id')
@@ -4186,7 +4307,8 @@ def create_order_endpoint():
             amount_paid=amount_paid,
             transaction_id=transaction_id,
             quantity=quantity,
-            transporter_id=transporter_id
+            transporter_id=transporter_id,
+            items=items  # Pass items to create_order
         )
 
         # Return the result from the function
@@ -4202,12 +4324,11 @@ def create_order_endpoint():
         logger.error(f"Unexpected error creating order: {e}", exc_info=True)
         return jsonify({'error': 'Internal server error'}), 500
 
-
 # --- Payment Endpoints (Unchanged) ---
 # --- Payment Endpoints (Corrected Syntax) ---
-import uuid # Ensure uuid is imported if not already done globally
-from flask import jsonify, request # Ensure these are imported
-import logging # Ensure logger is imported and configured
+#import uuid # Ensure uuid is imported if not already done globally
+#from flask import jsonify, request # Ensure these are imported
+#import logging # Ensure logger is imported and configured
 
 # Assuming logger is configured globally, e.g.:
 # logging.basicConfig(level=logging.INFO)
@@ -4436,7 +4557,8 @@ if __name__ == '__main__':
     stripe_secret_key = os.getenv('STRIPE_SECRET_KEY')
     if stripe_secret_key: configure_stripe(stripe_secret_key)
 
-    app.run(debug=debug_mode, host=host, port=port)
+    #app.run(debug=debug_mode, host=host, port=port)
+    handler = VercelAdapter(app)
 
 
     ''' fix python 3 syntax errors in the following lines of the integrated_backend.py file : lines 84-88, 117-477, 545-642,  and finally line 1132-1148  without introducing further syntax errors for pylance to compleain. make sure no features are lost '''
