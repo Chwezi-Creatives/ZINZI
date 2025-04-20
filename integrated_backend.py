@@ -1840,13 +1840,73 @@ class Orders(BaseRepository):
     async def read_orders(self, conn: asyncpg.Connection, order_id=None, chef_id=None, producer_id=None, user_id=None, transporter_id=None):
         # SQL query remains the same structure
         sql = """
-            WITH MealDetails AS ( ... ), SupplementDetails AS ( ... ), HerbalDetails AS ( ... ),
-                 GadgetDetails AS ( ... ), SpiceDetails AS ( ... ), ProduceDetails AS ( ... )
+           WITH MealDetails AS (
+                SELECT
+                    m.meal_id,
+                    m.meal_name,
+                    COALESCE(STRING_AGG(DISTINCT p.produce_name, ', ' ORDER BY p.produce_name), '') AS ingredients
+                FROM meals m
+                LEFT JOIN meal_ingredients mi ON m.meal_id = mi.meal_id
+                LEFT JOIN produce p ON mi.produce_id = p.produce_id
+                GROUP BY m.meal_id, m.meal_name
+            ),
+            SupplementDetails AS (
+                SELECT
+                    supplement_id,
+                    supplement_name AS product_name
+                FROM supplements
+            ),
+            HerbalDetails AS (
+                SELECT
+                    herbal_id,
+                    herbal_name AS product_name
+                FROM herbals
+            ),
+            GadgetDetails AS (
+                SELECT
+                    gadget_id,
+                    gadget_name AS product_name
+                FROM gadgets
+            ),
+            SpiceDetails AS (
+                SELECT
+                    spice_id,
+                    spice_name AS product_name
+                FROM spices
+            ),
+            ProduceDetails AS (
+                SELECT
+                    produce_id,
+                    produce_name AS product_name
+                FROM produce
+            )
             SELECT
-                o.order_id, ..., prod.product_name
+                o.order_id, o.user_id, o.order_type, o.product_id, o.chef_id, o.producer_id, o.transporter_id,
+                o.order_date, o.delivery_address, o.order_status, o.total_price, o.notes,
+                o.payment_status, o.payment_mode, o.amount_paid, o.transaction_id, o.quantity,
+                md.meal_name,
+                md.ingredients,
+                producer.name AS producer_name,
+                producer.location AS producer_address,
+                chef.name AS chef_name,
+                transporter.name AS transporter_name,
+                o.gig_details,
+                COALESCE(
+                    CASE WHEN o.order_type = 'meal' THEN md.meal_name END,
+                    CASE WHEN o.order_type = 'supplement' THEN supd.product_name END,
+                    CASE WHEN o.order_type = 'herbal' THEN hd.product_name END,
+                    CASE WHEN o.order_type = 'gadget' THEN gd.product_name END,
+                    CASE WHEN o.order_type = 'spice' THEN sd.product_name END,
+                    CASE WHEN o.order_type = 'produce' THEN prod.product_name END,
+                    'Unknown'
+                ) AS product_name
             FROM orders o
             LEFT JOIN MealDetails md ON o.product_id::varchar = md.meal_id::varchar AND o.order_type = 'meal'
-            -- Other LEFT JOINs...
+            LEFT JOIN SupplementDetails supd ON o.product_id::varchar = supd.supplement_id::varchar AND o.order_type = 'supplement'
+            LEFT JOIN HerbalDetails hd ON o.product_id::varchar = hd.herbal_id::varchar AND o.order_type = 'herbal'
+            LEFT JOIN GadgetDetails gd ON o.product_id::varchar = gd.gadget_id::varchar AND o.order_type = 'gadget'
+            LEFT JOIN SpiceDetails sd ON o.product_id::varchar = sd.spice_id::varchar AND o.order_type = 'spice'
+            LEFT JOIN ProduceDetails prod ON o.product_id::varchar = prod.produce_id::varchar AND o.order_type = 'produce'
             LEFT JOIN producers producer ON o.producer_id = producer.producer_id
             LEFT JOIN chefs chef ON o.chef_id = chef.chefid
             LEFT JOIN transporters transporter ON o.transporter_id = transporter.transporter_id
