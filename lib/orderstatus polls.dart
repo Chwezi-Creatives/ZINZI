@@ -81,7 +81,7 @@ Color _getStatusColor(String? status) {
 }
 
 String _getStatusDisplay(String? status) {
-  return status?.replaceAll('_', ' ').split(' ').map((word) => word[0].toUpperCase() + word.substring(1)).join(' ') ?? 'N/A';
+  return status?.replaceAll('_', ' ').split(' ').map((word) => word.isNotEmpty ? word[0].toUpperCase() + word.substring(1) : '').join(' ').trim() ?? 'N/A'; // Default for null status
 }
 
 // --- Order Status Screen Widget ---
@@ -105,6 +105,9 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
   // State map to track orders by their IDs
   final Map<int, Map<String, dynamic>> _ordersMap = {};
   Timer? _pollingTimer;
+  // State map to track expansion per order ID
+  final Map<int, bool> _isExpandedMap = {};
+
 
   @override
   void initState() {
@@ -141,11 +144,11 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                 // Ensure order_id is parsed correctly
                 if (orderData.containsKey('order_id')) {
                   orderData['order_id'] = int.tryParse(orderData['order_id'].toString()) ?? orderData['order_id'];
-                  // Update if the status has changed
-                  if (_ordersMap[orderData['order_id']] == null || 
+                  // Update if the status has changed or if it's a new order
+                  if (_ordersMap[orderData['order_id']] == null ||
                       _ordersMap[orderData['order_id']]!['order_status'] != orderData['order_status']) {
                     _ordersMap[orderData['order_id']] = orderData;
-                    setState(() {}); // Trigger a rebuild for the updated status
+                    setState(() {}); // Trigger a rebuild for the updated status or new order
                   }
                 }
               }
@@ -205,7 +208,9 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                     final orderId = widget.orderIdList[index];
                     final order = _ordersMap[orderId];
                     if (order == null) return const SizedBox.shrink();
-                    return _buildOrderCard(context, order);
+                    // Use local map to track expansion state
+                    final isExpanded = _isExpandedMap[orderId] ?? false;
+                    return _buildOrderCard(context, order, isExpanded);
                   },
                 ),
               ),
@@ -214,10 +219,14 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
   }
 
   // --- UI Building Widgets ---
-  Widget _buildOrderCard(BuildContext context, Map<String, dynamic> order) {
+
+  Widget _buildOrderCard(BuildContext context, Map<String, dynamic> order, bool isExpanded) {
     final String status = order['order_status'] ?? 'Unknown';
     final Color statusColor = _getStatusColor(status);
     final String displayStatus = _getStatusDisplay(status);
+    final int orderId = order['order_id'] as int? ?? -1; // Safely get order_id as int
+    final String orderType = order['order_type'] ?? 'Unknown';
+
 
     return Card(
       margin: const EdgeInsets.symmetric(
@@ -225,27 +234,120 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
         vertical: _cardSpacing / 2,
       ),
       elevation: _cardElevation,
-      child: Padding(
-        padding: const EdgeInsets.all(_horizontalPadding),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(_cardCornerRadius),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () {
+          // Toggle expansion state locally
+          setState(() {
+            _isExpandedMap[orderId] = !isExpanded;
+          });
+        },
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            // Card Header
+            Padding(
+              padding: const EdgeInsets.all(_horizontalPadding),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Order #${orderId != -1 ? orderId : 'N/A'}', // Display N/A if ID is invalid
+                          style:
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: kColorTextPrimary,
+                                  ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Placed: ${_formatDate(order['order_date']?.toString())}', // Ensure date is string
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: kColorTextSecondary,
+                                  ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Chip(
+                    label: Text(
+                      displayStatus,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    backgroundColor: statusColor,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ],
+              ),
+            ),
+
+            // Animated Expansion Section
+            AnimatedCrossFade(
+              firstChild: Container(), // Empty container when collapsed
+              secondChild: _buildOrderDetails(context, order),
+              crossFadeState: isExpanded
+                  ? CrossFadeState.showSecond
+                  : CrossFadeState.showFirst,
+              duration: const Duration(milliseconds: 250), // Slightly faster animation
+              firstCurve: Curves.easeOut,
+              secondCurve: Curves.easeIn,
+              sizeCurve: Curves.easeInOut,
+            ),
+
+            // Footer (Total Price)
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: _horizontalPadding,
+                  vertical: _verticalPadding / 1.5), // Adjusted padding
+              color: Colors.grey.shade100,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Order #${order['order_id']}',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    'Total:',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.bold,
-                          color: kColorTextPrimary,
+                          color: kColorTextSecondary,
                         ),
                   ),
                   Text(
-                    displayStatus,
-                    style: TextStyle(color: statusColor),
+                    _formatCurrency(order['total_price']), // Use total_price
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: kColorPrimaryDark,
+                        ),
                   ),
                 ],
+              ),
+            ),
+            // Expansion Indicator (Subtle)
+            Container(
+              height: 25, // Reduced height
+              color: Colors.grey.shade100, // Match footer background
+              alignment: Alignment.center,
+              child: Icon(
+                isExpanded
+                    ? Icons.keyboard_arrow_up
+                    : Icons.keyboard_arrow_down,
+                color: kColorTextSecondary.withOpacity(0.6), // More subtle color
+                size: 20,
               ),
             ),
           ],
@@ -254,14 +356,223 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
     );
   }
 
+  Widget _buildOrderDetails(BuildContext context, Map<String, dynamic> order) {
+     // Safely extract items list
+    final List<dynamic> itemsList = order['items'] is List ? order['items'] : [];
+    final String orderType = order['order_type'] ?? 'Unknown';
+
+    return Padding(
+      padding: const EdgeInsets.only(
+          left: _horizontalPadding,
+          right: _horizontalPadding,
+          bottom: _verticalPadding),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Divider(height: 1, thickness: 0.5),
+          const SizedBox(height: 12),
+          // Display details based on order type
+          if (orderType == 'meal') ...[
+             _buildDetailRow(
+               context,
+               icon: Icons.person_outline,
+               label: order['chef_name'] != null ? 'Chef' : 'Producer',
+               value: order['chef_name'] ?? order['producer_name'] ?? 'N/A',
+             ),
+             _buildDetailRow(
+               context,
+               icon: Icons.location_on_outlined,
+               label: 'Delivery Address',
+               value: order['delivery_address'] ?? 'N/A',
+             ),
+             _buildDetailRow(
+               context,
+               icon: Icons.payment_outlined,
+               label: 'Payment Mode',
+               value: _getStatusDisplay(order['payment_mode']),
+             ),
+             _buildDetailRow(
+               context,
+               icon: Icons.credit_card_outlined,
+               label: 'Payment Status',
+               value: _getStatusDisplay(order['payment_status']),
+               valueColor: _getStatusColor(order['payment_status']),
+             ),
+             if (order['notes'] != null && order['notes'].toString().isNotEmpty)
+               _buildDetailRow(
+                 context,
+                 icon: Icons.notes_outlined,
+                 label: 'Notes',
+                 value: order['notes'].toString(),
+               ),
+             // Display Order Items (if available)
+             if (itemsList.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                   "Items:",
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                         color: kColorTextSecondary,
+                         fontWeight: FontWeight.w600,
+                       ),
+                ),
+                const SizedBox(height: 6),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: itemsList.map((item) {
+                     if (item is! Map<String, dynamic>) return const SizedBox.shrink(); // Skip invalid items
+                     final itemName = item['meal_name'] ?? 'Unknown Item';
+                     final quantity = item['quantity'] as int? ?? 1; // Default quantity to 1
+                     final price = (item['price'] as num?)?.toDouble() ?? 0.0; // Default price to 0.0
+
+                     String displayString = "- $itemName";
+                     if (quantity > 0) {
+                        displayString += " (x$quantity)";
+                     }
+                     if (price > 0) {
+                        displayString += " @ ${_formatCurrency(price)}";
+                     }
+
+                    return Padding(
+                      padding: const EdgeInsets.only(left: 20.0, top: 4.0), // Indent items
+                      child: Text(
+                         displayString,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                               color: kColorTextPrimary,
+                             ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+             ],
+          ] else if (orderType == 'gig') ...[
+             // Display Gig Details
+             _buildDetailRow(
+               context,
+               icon: Icons.work_outline,
+               label: 'Gig Type',
+               value: order['gig_details']?['gig_type'] ?? 'N/A',
+             ),
+             _buildDetailRow(
+               context,
+               icon: Icons.person_outline,
+               label: order['chef_name'] != null ? 'Chef' : 'Producer',
+               value: order['chef_name'] ?? order['producer_name'] ?? 'N/A',
+             ),
+             _buildDetailRow(
+               context,
+               icon: Icons.location_on_outlined,
+               label: 'Event Location',
+               value: order['gig_details']?['location'] ?? 'N/A',
+             ),
+             _buildDetailRow(
+               context,
+               icon: Icons.calendar_today_outlined,
+               label: 'Scheduled Date',
+               value: _formatDate(order['gig_details']?['scheduled_date']?.toString()),
+             ),
+             _buildDetailRow(
+               context,
+               icon: Icons.access_time_outlined,
+               label: 'Scheduled Time',
+               value: order['gig_details']?['time'] ?? 'N/A',
+             ),
+             _buildDetailRow(
+               context,
+               icon: Icons.people_outline,
+               label: 'Number of Guests',
+               value: order['gig_details']?['number_of_people'] ?? 'N/A',
+             ),
+             if (order['gig_details'] != null && order['gig_details']['detailed_description'] != null && order['gig_details']['detailed_description'].toString().isNotEmpty)
+               _buildDetailRow(
+                 context,
+                 icon: Icons.notes_outlined,
+                 label: 'Details',
+                 value: order['gig_details']['detailed_description'].toString(),
+               ),
+             _buildDetailRow(
+               context,
+               icon: Icons.payment_outlined,
+               label: 'Payment Mode',
+               value: _getStatusDisplay(order['payment_mode']),
+             ),
+             _buildDetailRow(
+               context,
+               icon: Icons.credit_card_outlined,
+               label: 'Payment Status',
+               value: _getStatusDisplay(order['payment_status']),
+               valueColor: _getStatusColor(order['payment_status']),
+             ),
+          ] else ...[
+             // Fallback for unknown order types
+             Text(
+                "Order Type: ${orderType.toUpperCase()}",
+                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: kColorTextPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+             ),
+             const SizedBox(height: 8),
+             Text(
+                "Details not available for this order type.",
+                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: kColorTextSecondary,
+                    ),
+             ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(BuildContext context,
+      {required IconData icon,
+      required String label,
+      required String value,
+      Color? valueColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: kColorPrimary),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: kColorTextSecondary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: valueColor ?? kColorTextPrimary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                  maxLines: 3, // Allow address/details to wrap
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+
   Widget _buildLoadingShimmer() {
     return Shimmer.fromColors(
       baseColor: kShimmerBaseColor,
       highlightColor: kShimmerHighlightColor,
       child: ListView.builder(
         padding: const EdgeInsets.symmetric(
-            horizontal: _horizontalPadding / 2,
-            vertical: _verticalPadding),
+            horizontal: _horizontalPadding / 2, vertical: _verticalPadding),
         itemCount: 5,
         itemBuilder: (context, index) {
           return Card(
