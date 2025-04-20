@@ -2670,6 +2670,7 @@ meal_fetcher = GetAllMeals() # Needs DB, instantiate per request or pass conn
 import functools # Import functools for caching
 
 @app.get('/rr')
+@alru_cache(maxsize=1) # Cache the result of this function
 async def welcome():
     """Welcome endpoint."""
     return {'message': 'Welcome to BONOBO.'}
