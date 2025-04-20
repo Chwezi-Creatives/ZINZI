@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+/*import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -187,7 +187,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
             context,
             PageRouteBuilder(
               pageBuilder: (context, animation, secondaryAnimation) =>
-                  DashboardPage(),
+                  dashboard(),
               transitionsBuilder:
                   (context, animation, secondaryAnimation, child) {
                 const begin = Offset(1.0, 0.0);
@@ -229,3 +229,4 @@ class _WebViewScreenState extends State<WebViewScreen> {
     );
   }
 }
+*/

@@ -24,42 +24,34 @@ class ProducerLoginPageModular extends StatelessWidget {
       buttonText: 'LOGIN AS PRODUCER',
       idKey: 'producer_id', // Specific to producer
       expectedUserType: 'producer', // Specific to producer
-      onLoginSuccess: (Map<String, dynamic> response) {
+      onLoginSuccess: (Map<String, dynamic> loginData) {
         // Print the entire response to the console for debugging purposes
-        print('Login response: $response');
+        print('Login response: $loginData');
 
-        // Ensure that 'data' key exists in the response
-        if (response.containsKey('data')) {
-          // Access the data object
-          var data = response['data'];
-
-          // Confirm that the expected fields are present
-          if (data is Map<String, dynamic> &&
-              data.containsKey('producer_id') &&
-              data.containsKey('user_type')) {
-            int producerId = data['producer_id']; // Ensure producer_id is an integer
-            String userType = data['user_type'];
+        // Extract data from the loginData map
+        final String userId = loginData['userId'];
+        final String userType = loginData['userType'];
+        final bool verified = loginData['verified'] ?? false; // Default to false if null
 
             // Save user ID and user type to shared preferences
-            saveUserDetails(producerId, userType).then((_) {
-              // Navigate to the Producer Dashboard after saving user details
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => ProducerDash22()), // Ensure this class is defined and imported
-              );
-            });
-          } else {
-            print('Data does not contain required keys: "producer_id" or "user_type".');
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Invalid response data. Please try again.')),
+            saveUserDetails(int.parse(userId), userType);
+            // Navigate to the Producer Dashboard after saving user details
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => ProducerDash22()), // Ensure this class is defined and imported
             );
-          }
-        } else {
-          print('Key "data" not found in response.');
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Invalid response format. Please try again.')),
-          );
-        }
+       //   } else {
+       //     print('Data does not contain required keys: "producer_id" or "user_type".');
+       //     ScaffoldMessenger.of(context).showSnackBar(
+       //       SnackBar(content: Text('Invalid response data. Please try again.')),
+       //     );
+       //   }
+       // } else {
+       //   print('Key "data" not found in response.');
+       //   ScaffoldMessenger.of(context).showSnackBar(
+       //     SnackBar(content: Text('Invalid response format. Please try again.')),
+       //   );
+       // }
 
         // Return a dummy widget since onLoginSuccess needs to return a Widget
         return Container(); // Return an empty widget

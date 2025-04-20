@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // For SystemUiOverlayStyle
-import 'dart:async'; // For Timer
+import 'package:flutter/services.dart';
 import 'package:zinzi2/signup_or_login.dart'; // Assuming this is your login/signup choice page
 import 'package:google_fonts/google_fonts.dart'; // For custom fonts
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,6 +7,7 @@ import 'package:zinzi2/onboard.dart';
 import 'package:zinzi2/chef_dash8888.dart';
 import 'package:zinzi2/produ_dash22.dart';
 import 'package:zinzi2/allmeals.dart';
+import 'package:zinzi2/meal_detail.dart';
 
 // --- Hardcoded Color Scheme (Shades of Teal and White/Off-White) ---
 const Color kColorPrimaryDark = Color(0xFF004D40); // Darkest Teal
@@ -110,12 +110,19 @@ class _SplashScreenState extends State<SplashScreen>
 
   // Decide where to go after splash based on login state
   Future<void> _preloadAndNavigate() async {
-    // Preload all meals cache (persistent)
+    // Preload caches for meals, chefs, and producers (persistent)
     try {
       await AllMealsScreen.loadMealsCacheFromPrefs();
-    } catch (_) {}
+      // Load chef/producer caches using the public static methods
+      await MealDetailScreen.loadChefsCacheFromUserCache();
+      await MealDetailScreen.loadProducersCacheFromUserCache();
+    } catch (e) {
+      print("Error preloading cache in splash screen: $e");
+      // Continue even if preloading fails
+    }
+
     // Wait for animation to finish (at least 1.5s)
-    await Future.delayed(const Duration(milliseconds: 1600));
+    await Future.delayed(const Duration(milliseconds: 3000));
 
     // Check login state
     final prefs = await SharedPreferences.getInstance();

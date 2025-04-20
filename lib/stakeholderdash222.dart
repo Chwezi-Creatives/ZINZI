@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart'; // For formatting numbers/currency
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 // --- Reusing Color Palette (from previous examples) ---
 const Color kColorPrimary = Color(0xFF00796B); // Teal Primary
@@ -16,6 +20,53 @@ const Color kColorSuccess = Color(0xFF2E7D32); // Darker Green for Success
 const Color kColorWarning = Color(0xFFFFA000); // Amber/Orange for Warning
 const Color kColorDivider = Color(0xFFE0E0E0);
 // --- End Color Palette ---
+
+// --- API Base URL (Ensure dotenv is loaded) ---
+final String apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url/api';
+
+// ===================================
+// === DATA MODELS (Placeholder) =====
+// ===================================
+// TODO: Define actual data models based on API response (e.g., StakeholderProfile, StakeholderOrder)
+
+// ===================================
+// === STAKEHOLDER API SERVICE =======
+// ===================================
+class StakeholderApiService {
+  static Future<String?> _getStakeholderId() async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      // Use the key set during login/signup
+      return prefs.getString('stakeholder_user_id');
+    } catch (e) {
+      print("Error accessing SharedPreferences for stakeholder ID: $e");
+      return null;
+    }
+  }
+
+  // TODO: Implement fetchStakeholderProfile()
+  // TODO: Implement fetchStakeholderMetrics()
+  // TODO: Implement fetchRecentOrders()
+
+  // Helper for handling API response structure (adapt as needed)
+  static dynamic _handleApiResponse(dynamic responseData) {
+     if (responseData is List) return responseData;
+     if (responseData is Map && responseData.containsKey('data')) return responseData['data'];
+     if (responseData is Map) return responseData; // Return map if no 'data' key
+     print("API Warning: Unhandled stakeholder response format. Got: ${responseData.runtimeType}");
+     return null;
+   }
+
+   // Helper for headers (adapt if auth token is needed)
+   static Map<String, String> _getHeaders() {
+     // String? authToken = await _getAuthToken(); // Implement if needed
+     return {
+       'Content-Type': 'application/json; charset=UTF-8',
+       'Accept': 'application/json',
+       // if (authToken != null) 'Authorization': 'Bearer $authToken',
+     };
+   }
+}
 
 class stakeholderdas2222 extends StatefulWidget {
   const stakeholderdas2222({super.key});
@@ -71,8 +122,64 @@ class _stakeholderdas2222State extends State<stakeholderdas2222> {
 
   // --- Helper for Number Formatting ---
   final currencyFormatter =
-      NumberFormat.currency(locale: 'en_US', symbol: '\$');
+      NumberFormat.currency(locale: 'en_US', symbol: 'UGX ');
   final numberFormatter = NumberFormat.decimalPattern('en_US');
+
+  // --- State Variables for API Data ---
+  bool _isLoading = true; // Start in loading state
+  String? _errorMessage;
+  // TODO: Add state variables for profile, metrics, orders (e.g., StakeholderProfile? _profile;)
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchDashboardData();
+  }
+
+  Future<void> _fetchDashboardData() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final stakeholderId = await StakeholderApiService._getStakeholderId();
+      if (stakeholderId == null || stakeholderId.isEmpty) {
+        throw Exception('Stakeholder ID not found. Please log in again.');
+      }
+      print("Fetching data for Stakeholder ID: $stakeholderId");
+
+      // TODO: Call API service methods here using the stakeholderId
+      // e.g., final profile = await StakeholderApiService.fetchStakeholderProfile(stakeholderId);
+      // e.g., final metrics = await StakeholderApiService.fetchStakeholderMetrics(stakeholderId);
+      // e.g., final orders = await StakeholderApiService.fetchRecentOrders(stakeholderId);
+
+      // TODO: Update state variables with fetched data
+      // setState(() {
+      //   _profile = profile;
+      //   _metrics = metrics; // Assuming a metrics object
+      //   recentOrders = orders; // Replace dummy data
+      // });
+
+      // Simulate API call delay for now
+      await Future.delayed(const Duration(seconds: 1));
+      print("Dummy data fetch complete.");
+
+
+    } catch (e) {
+      print("Error fetching dashboard data: $e");
+      setState(() {
+        _errorMessage = "Failed to load dashboard data: ${e.toString()}";
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -107,41 +214,82 @@ class _stakeholderdas2222State extends State<stakeholderdas2222> {
       ),
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: _handleRefresh,
+          onRefresh: _fetchDashboardData, // Use the data fetching function for refresh
           color: kColorPrimary,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(_horizontalPadding),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildWelcomeHeader(),
-                const SizedBox(height: _sectionSpacing),
-                _buildMetricsGrid(),
-                const SizedBox(height: _sectionSpacing),
-                _buildRecentOrdersCard(),
-                const SizedBox(height: _sectionSpacing),
-                _buildQuickActionsCard(),
-                const SizedBox(height: _verticalPadding), // Bottom padding
-              ],
-            ),
-          ),
+          child: _isLoading
+              ? _buildLoadingIndicator()
+              : _errorMessage != null
+                  ? _buildErrorView(_errorMessage!)
+                  : SingleChildScrollView(
+                      padding: const EdgeInsets.all(_horizontalPadding),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // TODO: Update widgets to use fetched data (_profile, _metrics, etc.)
+                          _buildWelcomeHeader(),
+                          const SizedBox(height: _sectionSpacing),
+                          _buildMetricsGrid(),
+                          const SizedBox(height: _sectionSpacing),
+                          _buildRecentOrdersCard(),
+                          const SizedBox(height: _sectionSpacing),
+                          _buildQuickActionsCard(),
+                          const SizedBox(height: _verticalPadding), // Bottom padding
+                        ],
+                      ),
+                    ),
         ),
       ),
     );
   }
 
-  // --- Pull-to-Refresh Handler ---
-  Future<void> _handleRefresh() async {
-    // Simulate fetching new data
-    await Future.delayed(const Duration(seconds: 1));
-    // In a real app, you'd fetch data here and call setState if needed
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Dashboard refreshed!', style: GoogleFonts.poppins()),
-      backgroundColor: kColorPrimaryLight,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      margin: const EdgeInsets.all(10),
-    ));
+  // --- Loading and Error Widgets ---
+  Widget _buildLoadingIndicator() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(color: kColorPrimary),
+          const SizedBox(height: 16),
+          Text('Loading Dashboard...', style: GoogleFonts.poppins(color: kColorTextSecondary)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorView(String message) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, color: kColorError, size: 50),
+            const SizedBox(height: 16),
+            Text(
+              'Error Loading Data',
+              style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600, color: kColorTextPrimary),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              style: GoogleFonts.poppins(color: kColorTextSecondary),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+              onPressed: _fetchDashboardData,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kColorPrimary,
+                foregroundColor: kColorSurface,
+              ),
+            )
+          ],
+        ),
+      ),
+    );
   }
 
   // --- Widget Builders ---

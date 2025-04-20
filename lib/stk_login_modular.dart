@@ -22,37 +22,39 @@ class StakeholderLoginPageModular extends StatelessWidget {
       buttonText: 'LOGIN AS STAKEHOLDER',
       idKey: 'stakeholder_id', // Specific to stakeholder
       expectedUserType: 'stakeholder', // Specific to stakeholder
-      onLoginSuccess: (Map<String, dynamic> response) {
+      onLoginSuccess: (Map<String, dynamic> loginData) { // Changed parameter name
         // Print the entire response to the console for debugging purposes
-        print('Login response: $response');
+        print('Login response: $loginData');
 
         // Ensure that 'data' key exists in the response
-        if (response.containsKey('data')) {
-          // Access the data object
-          var data = response['data'];
+        // Extract data from the loginData map
+        final String userId = loginData['userId'];
+        final String userType = loginData['userType'];
+        final bool verified = loginData['verified'] ?? false; // Default to false if null
 
           // Confirm that the expected fields are present
-          if (data is Map<String, dynamic> &&
-              data.containsKey('stakeholder_id') &&
-              data.containsKey('user_type')) {
-            String userId = data['stakeholder_id'].toString();
-            String userType = data['user_type'];
+       //   if (data is Map<String, dynamic> &&
+       //       data.containsKey('stakeholder_id') &&
+       //       data.containsKey('user_type')) {
+       //     String userId = data['stakeholder_id'].toString();
+       //     String userType = data['user_type'];
 
             // Save user ID and user type to shared preferences
-            saveUserDetails(userId, userType).then((_) {
-              // Navigate to the Stakeholder Dashboard after saving user details
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => stakeholderdas2222()),
-              );
-            });
-          } else {
-            print('Data does not contain required keys: "stakeholder_id" or "user_type".');
-          }
-        } else {
-          print('Key "data" not found in response.');
-        }
+            saveUserDetails(userId, userType);
 
+            // Navigate to the Stakeholder Dashboard after saving user details
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => stakeholderdas2222()),
+            );
+       //   } else {
+       //     print('Data does not contain required keys: "stakeholder_id" or "user_type".');
+       //   }
+       // } else {
+       //   print('Key "data" not found in response.');
+       // }
+
+        // Return a dummy widget since onLoginSuccess needs to return a Widget
         // Return a dummy widget since onLoginSuccess needs to return a Widget
         return Container(); // Return an empty widget
       },

@@ -16,7 +16,9 @@ import 'package:zinzi2/signup_or_Login.dart';
 import 'package:zinzi2/useranalytics.dart';
 import 'social.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:cached_network_image/cached_network_image.dart'; // For network images
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:zinzi2/user_cache.dart'; // Import UserCache
+import 'package:zinzi2/cache_config.dart'; // Import CacheConfig
 import 'package:shimmer/shimmer.dart'; // For loading effect
 import 'package:intl/intl.dart'; // For date formatting
 
@@ -56,7 +58,6 @@ class _ProfilePageState extends State<ProfilePage> {
   // --- Caching ---
   static Map<String, dynamic> _userDetailsCache = {};
   static DateTime? _userDetailsCacheTimestamp;
-  static const Duration _userCacheDuration = Duration(minutes: 10);
 
   int? _userId;
   String? _userType;
@@ -90,15 +91,21 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> _initializeProfile() async {
     await _loadUserIdAndType();
-    await _loadImageFromPrefs(); // Load local image path first
+    await _loadImageFromPrefs();
     if (_userId != null) {
-      // Use cache if available and fresh, otherwise fetch
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      final cachedData = await UserCache.getData('user_details_cache');
+      final cachedTimestampMillis =
+          prefs.getInt('user_details_cache_timestamp');
       final now = DateTime.now();
-      if (_userDetailsCache.isNotEmpty &&
-          _userDetailsCacheTimestamp != null &&
-          now.difference(_userDetailsCacheTimestamp!) < _userCacheDuration) {
+
+      if (cachedData != null &&
+          cachedTimestampMillis != null &&
+          now.difference(
+                  DateTime.fromMillisecondsSinceEpoch(cachedTimestampMillis)) <
+              CacheConfig.profileCacheDuration) {
         setState(() {
-          _userDetails = Map<String, dynamic>.from(_userDetailsCache);
+          _userDetails = Map<String, dynamic>.from(cachedData);
           _isLoadingUserDetails = false;
           _isLoading = false;
         });
@@ -215,9 +222,11 @@ class _ProfilePageState extends State<ProfilePage> {
             _isLoadingUserDetails = false; // Update loading state
             // Store the fetched image URL
             _profileImageUrl = _userDetails['profile_picture'];
-            });
-            _userDetailsCache = Map<String, dynamic>.from(_userDetails); // Update cache
-            _userDetailsCacheTimestamp = DateTime.now();
+          });
+          UserCache.saveData('user_details_cache', _userDetails);
+          SharedPreferences prefs = await SharedPreferences.getInstance();
+          await prefs.setInt('user_details_cache_timestamp',
+              DateTime.now().millisecondsSinceEpoch);
         } else {
           print("User details parsing failed or data empty: $responseData");
           _showErrorSnackBar('Could not parse user details.');
@@ -239,8 +248,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> _fetchMetrics() async {
     if (_userId == null) return;
-    final url =
-        '$apiBaseUrl/rr/metrics?user_id=$_userId'; // Assuming endpoint exists
+    final url = '$apiBaseUrl/rr/metrics/$_userId'; // Assuming endpoint exists
     print("Fetching Metrics from URL: $url");
     try {
       final response =
@@ -305,7 +313,7 @@ class _ProfilePageState extends State<ProfilePage> {
     if (_userId == null) return;
     // Adjust endpoint if necessary
     final url =
-        '$apiBaseUrl/rr/preferences?user_id=$_userId'; // Assuming endpoint maps to list_preferences
+        '$apiBaseUrl/rr/preferences/$_userId'; // Assuming endpoint maps to list_preferences
     // final url = '$apiBaseUrl/rr/fetch_user_preferences?user_id=$_userId'; // Original
     print("Fetching Preferences from URL: $url");
     try {

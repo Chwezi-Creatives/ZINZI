@@ -280,7 +280,7 @@ class _Recommend_Meals_ScreenState extends State<Recommend_Meals_Screen> {
                       ),
                     ),
                     Text(
-                      '\$${price.toStringAsFixed(2)}',
+                      'UGX ${price.toStringAsFixed(2)}',
                       style: TextStyle(color: Colors.white, fontSize: 14),
                     ),
                   ],

@@ -3,8 +3,6 @@ import 'package:http/http.dart' as http;
 import 'dart:convert'; // For jsonEncode and jsonDecode
 import 'package:zinzi2/allmeals.dart';
 import 'package:zinzi2/checkout.dart';
-import 'package:zinzi2/reco.dart';
-import 'package:zinzi2/repeat.dart';
 import 'cart.dart'; // Make sure the cart.dart file is correctly imported
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:cached_network_image/cached_network_image.dart'; // Import for cached network images
@@ -82,7 +80,8 @@ class _ChooseProducerNetworkState extends State<ChooseProducerNetwork> {
         ),
       ),
       body: isLoading
-          ? Center(child: CircularProgressIndicator()) // Show loader while fetching
+          ? Center(
+              child: CircularProgressIndicator()) // Show loader while fetching
           : Container(
               decoration: BoxDecoration(
                 image: DecorationImage(
@@ -97,22 +96,30 @@ class _ChooseProducerNetworkState extends State<ChooseProducerNetwork> {
               child: Padding(
                 padding: EdgeInsets.all(8.0),
                 child: (producers.isEmpty)
-                    ? Center(child: Text('No producers available', style: TextStyle(fontSize: 20)))
+                    ? Center(
+                        child: Text('No producers available',
+                            style: TextStyle(fontSize: 20)))
                     : ListView.builder(
                         itemCount: producers.length,
                         itemBuilder: (context, index) {
                           final producer = producers[index];
 
                           // Handle potential null values to avoid errors
-                          final producerName = producer['Name'] ?? 'No Name Available';
+                          final producerName =
+                              producer['Name'] ?? 'No Name Available';
                           final producerImage = producer['Image'] ?? '';
                           final producerLocation = producer['Location'] ?? 'NA';
-                          final producerType = producer['Producer_Type'] ?? 'Unknown';
-                          final producerRating = double.tryParse(producer['Rating'] ?? '0')?.toInt() ?? 0;
+                          final producerType =
+                              producer['Producer_Type'] ?? 'Unknown';
+                          final producerRating =
+                              double.tryParse(producer['Rating'] ?? '0')
+                                      ?.toInt() ??
+                                  0;
 
                           // Check if the image URL is valid (starts with http or https)
-                          final bool isValidImageUrl = producerImage.isNotEmpty &&
-                              producerImage.startsWith('http');
+                          final bool isValidImageUrl =
+                              producerImage.isNotEmpty &&
+                                  producerImage.startsWith('http');
 
                           return Card(
                             elevation: 0.0,
@@ -134,7 +141,8 @@ class _ChooseProducerNetworkState extends State<ChooseProducerNetwork> {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) => ProducerDetailScreen(producer: producer),
+                                    builder: (context) => ProducerDetailScreen(
+                                        producer: producer),
                                   ),
                                 );
                               },
@@ -144,7 +152,8 @@ class _ChooseProducerNetworkState extends State<ChooseProducerNetwork> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Hero(
-                                      tag: 'producer-image-${producer['Producer_Id']}',
+                                      tag:
+                                          'producer-image-${producer['Producer_Id']}',
                                       child: ClipOval(
                                         child: isValidImageUrl
                                             ? CachedNetworkImage(
@@ -154,11 +163,14 @@ class _ChooseProducerNetworkState extends State<ChooseProducerNetwork> {
                                                 fit: BoxFit.cover,
                                                 placeholder: (context, url) =>
                                                     Container(
-                                                      width: 50,
-                                                      height: 50,
-                                                      child: CircularProgressIndicator(),
-                                                    ),
-                                                errorWidget: (context, url, error) => Image.asset(
+                                                  width: 50,
+                                                  height: 50,
+                                                  child:
+                                                      CircularProgressIndicator(),
+                                                ),
+                                                errorWidget:
+                                                    (context, url, error) =>
+                                                        Image.asset(
                                                   'assets/images/producerHolder.png',
                                                   width: 50,
                                                   height: 50,
@@ -176,7 +188,8 @@ class _ChooseProducerNetworkState extends State<ChooseProducerNetwork> {
                                     const SizedBox(width: 12),
                                     Expanded(
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Row(
                                             children: [
@@ -192,16 +205,25 @@ class _ChooseProducerNetworkState extends State<ChooseProducerNetwork> {
                                               ),
                                               Expanded(
                                                 child: Row(
-                                                  mainAxisAlignment: MainAxisAlignment.start,
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment.start,
                                                   children: [
-                                                    Icon(Icons.location_on, color: Colors.teal[600], size: 16),
+                                                    Icon(Icons.location_on,
+                                                        color: Colors.teal[600],
+                                                        size: 16),
                                                     Expanded(
-                                                      child: SingleChildScrollView(
-                                                        scrollDirection: Axis.horizontal,
+                                                      child:
+                                                          SingleChildScrollView(
+                                                        scrollDirection:
+                                                            Axis.horizontal,
                                                         child: Text(
                                                           producerLocation,
-                                                          style: TextStyle(fontSize: 16, color: Colors.teal[900]),
-                                                          overflow: TextOverflow.visible,
+                                                          style: TextStyle(
+                                                              fontSize: 16,
+                                                              color: Colors
+                                                                  .teal[900]),
+                                                          overflow: TextOverflow
+                                                              .visible,
                                                         ),
                                                       ),
                                                     ),
@@ -215,20 +237,35 @@ class _ChooseProducerNetworkState extends State<ChooseProducerNetwork> {
                                               Expanded(
                                                 child: Row(
                                                   children: [
-                                                    for (int i = 0; i < producerRating; i++)
-                                                      Icon(Icons.star, color: Colors.teal[600], size: 16),
-                                                    for (int i = producerRating; i < 5; i++)
-                                                      Icon(Icons.star_border, color: Colors.teal[600], size: 16),
+                                                    for (int i = 0;
+                                                        i < producerRating;
+                                                        i++)
+                                                      Icon(Icons.star,
+                                                          color:
+                                                              Colors.teal[600],
+                                                          size: 16),
+                                                    for (int i = producerRating;
+                                                        i < 5;
+                                                        i++)
+                                                      Icon(Icons.star_border,
+                                                          color:
+                                                              Colors.teal[600],
+                                                          size: 16),
                                                   ],
                                                 ),
                                               ),
                                               Expanded(
                                                 child: Row(
                                                   children: [
-                                                    Icon(Icons.category, color: Colors.teal[600], size: 16),
+                                                    Icon(Icons.category,
+                                                        color: Colors.teal[600],
+                                                        size: 16),
                                                     Text(
                                                       ' $producerType',
-                                                      style: TextStyle(fontSize: 16, color: Colors.teal[900]),
+                                                      style: TextStyle(
+                                                          fontSize: 16,
+                                                          color:
+                                                              Colors.teal[900]),
                                                     ),
                                                   ],
                                                 ),
@@ -254,7 +291,8 @@ class _ChooseProducerNetworkState extends State<ChooseProducerNetwork> {
 class ProducerDetailScreen extends StatelessWidget {
   final Map<String, dynamic> producer;
 
-  const ProducerDetailScreen({Key? key, required this.producer}) : super(key: key);
+  const ProducerDetailScreen({Key? key, required this.producer})
+      : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -262,7 +300,8 @@ class ProducerDetailScreen extends StatelessWidget {
     final reviews = producer['Reviews'];
     final reviewsList = reviews is List
         ? reviews // If it's a list, use it directly
-        : reviews?.toString().split(', ') ?? []; // If it's a string, split it into a list
+        : reviews?.toString().split(', ') ??
+            []; // If it's a string, split it into a list
 
     // Check if the image URL is valid (starts with http or https)
     final bool isValidImageUrl = producer['Image'] != null &&
@@ -289,12 +328,12 @@ class ProducerDetailScreen extends StatelessWidget {
                     radius: 80,
                     backgroundImage: isValidImageUrl
                         ? NetworkImage(producer['Image'] ?? '')
-                        : AssetImage('assets/images/producerHolder.png') as ImageProvider,
+                        : AssetImage('assets/images/producerHolder.png')
+                            as ImageProvider,
                   ),
                 ),
               ),
               SizedBox(height: 20),
-
               Center(
                 child: Column(
                   children: [
@@ -310,9 +349,18 @@ class ProducerDetailScreen extends StatelessWidget {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        for (int i = 0; i < (double.tryParse(producer['Rating'] ?? '0')?.toInt() ?? 0); i++)
+                        for (int i = 0;
+                            i <
+                                (double.tryParse(producer['Rating'] ?? '0')
+                                        ?.toInt() ??
+                                    0);
+                            i++)
                           Icon(Icons.star, color: Colors.amber, size: 20),
-                        for (int i = (double.tryParse(producer['Rating'] ?? '0')?.toInt() ?? 0); i < 5; i++)
+                        for (int i = (double.tryParse(producer['Rating'] ?? '0')
+                                    ?.toInt() ??
+                                0);
+                            i < 5;
+                            i++)
                           Icon(Icons.star_border, color: Colors.grey, size: 20),
                       ],
                     ),
@@ -320,7 +368,6 @@ class ProducerDetailScreen extends StatelessWidget {
                 ),
               ),
               SizedBox(height: 20),
-
               _buildSectionHeader('Basic Information'),
               SizedBox(
                 height: 140,
@@ -330,15 +377,17 @@ class ProducerDetailScreen extends StatelessWidget {
                   crossAxisSpacing: 7,
                   childAspectRatio: 2.5,
                   children: [
-                    _buildDetailColumn('Type', producer['Producer_Type'] ?? 'N/A'),
-                    _buildDetailColumn('Location', producer['Location'] ?? 'N/A'),
+                    _buildDetailColumn(
+                        'Type', producer['Producer_Type'] ?? 'N/A'),
+                    _buildDetailColumn(
+                        'Location', producer['Location'] ?? 'N/A'),
                     _buildDetailColumn('Email', producer['Email'] ?? 'N/A'),
-                    _buildDetailColumn('Phone', producer['Phone_Number'] ?? 'N/A'),
+                    _buildDetailColumn(
+                        'Phone', producer['Phone_Number'] ?? 'N/A'),
                   ],
                 ),
               ),
               SizedBox(height: 20),
-
               _buildSectionHeader('About'),
               Padding(
                 padding: EdgeInsets.symmetric(horizontal: 8),
@@ -351,7 +400,6 @@ class ProducerDetailScreen extends StatelessWidget {
                 ),
               ),
               SizedBox(height: 20),
-
               _buildSectionHeader('Reviews'),
               if (reviewsList.isEmpty)
                 Padding(
@@ -366,27 +414,28 @@ class ProducerDetailScreen extends StatelessWidget {
                 ),
               if (reviewsList.isNotEmpty)
                 Column(
-                  children: reviewsList.map<Widget>((review) => Card(
-                        margin: EdgeInsets.symmetric(vertical: 5),
-                        child: Padding(
-                          padding: EdgeInsets.all(10),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                review ?? 'No review available',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: Colors.teal[900],
-                                ),
+                  children: reviewsList
+                      .map<Widget>((review) => Card(
+                            margin: EdgeInsets.symmetric(vertical: 5),
+                            child: Padding(
+                              padding: EdgeInsets.all(10),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    review ?? 'No review available',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.teal[900],
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                        ),
-                      )).toList(),
+                            ),
+                          ))
+                      .toList(),
                 ),
               SizedBox(height: 20),
-
               Center(
                 child: ElevatedButton.icon(
                   icon: Icon(Icons.people_alt),
@@ -406,11 +455,13 @@ class ProducerDetailScreen extends StatelessWidget {
                       (producer['Price'] ?? 0).toDouble(),
                       quantity: 1,
                       selectedproducer: producer,
-                      meal: {}, bestservedwith: [], // Include a valid meal object if applicable
+                      meal: {},
+                      bestservedwith: [], // Include a valid meal object if applicable
                     );
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text('${producer['Name'] ?? 'Unknown Producer'} Selected!'),
+                        content: Text(
+                            '${producer['Name'] ?? 'Unknown Producer'} Selected!'),
                         duration: Duration(seconds: 2),
                       ),
                     );
@@ -467,5 +518,5 @@ class ProducerDetailScreen extends StatelessWidget {
         ],
       ),
     );
-  }  
+  }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:zinzi2/checkout.dart'; // Import your checkout screen
+import 'package:zinzi2/widgets/app_drawer.dart'; // Import the AppDrawer
 
 // ***************************************************************
 // *          SINGLE SOURCE OF TRUTH FOR CART & FAVORITES        *
@@ -9,6 +10,7 @@ import 'package:zinzi2/checkout.dart'; // Import your checkout screen
 // Shopping Cart Management - Defined ONCE here
 class ShoppingCart {
   // Use static list - THIS IS THE SHARED STATE
+  // Items can be meals ('type': 'meal') or gigs ('type': 'gig')
   static List<Map<String, dynamic>> items = [];
 
   static void addItem(String title, double price, {
@@ -18,8 +20,11 @@ class ShoppingCart {
     // List<Map<String, dynamic>>? bestservedwith,
     Map<String, dynamic>? selectedchef,
     Map<String, dynamic>? selectedproducer,
-    required Map<String, dynamic> meal, required List<Map<String, String>> bestservedwith, // Contains image_link, description etc.
+    required Map<String, dynamic> meal,
+    required List<Map<String, String>> bestservedwith, // Contains image_link, description etc.
   }) {
+    // Ensure this item is marked as a meal
+    const itemType = 'meal';
     // Enforce mutual exclusivity: only one of selectedchef or selectedproducer should be passed
     final hasChef = selectedchef != null && selectedchef.isNotEmpty;
     final hasProducer = selectedproducer != null && selectedproducer.isNotEmpty;
@@ -30,7 +35,8 @@ class ShoppingCart {
     // }
 
     // Check if item ALREADY exists (regardless of chef/producer for quantity update)
-    final existingItemIndex = items.indexWhere((item) => item['title'] == title);
+    // Find existing *meal* item by title
+    final existingItemIndex = items.indexWhere((item) => item['type'] == 'meal' && item['title'] == title);
 
     if (existingItemIndex != -1) {
       // Item exists - Update it (e.g., change chef/producer or quantity)
@@ -41,6 +47,7 @@ class ShoppingCart {
       items[existingItemIndex]['selectedchef'] = hasChef ? selectedchef : null;
       items[existingItemIndex]['selectedproducer'] = hasProducer ? selectedproducer : null;
       items[existingItemIndex]['meal'] = meal; // Update meal data if needed
+      items[existingItemIndex]['bestservedwith'] = bestservedwith; // Update complementary items list
        print("Updated item in cart: $title"); // Debug log
     } else {
       // Item is new - Add it
@@ -48,10 +55,11 @@ class ShoppingCart {
         'title': title,
         'price': price,
         'quantity': quantity,
-        // 'bestservedwith': bestservedwith ?? [], // Not needed here
         'selectedchef': hasChef ? selectedchef : null,
         'selectedproducer': hasProducer ? selectedproducer : null,
         'meal': meal, // Store the entire meal object
+        'bestservedwith': bestservedwith, // Store complementary items list
+        'type': itemType, // Mark as meal
       });
        print("Added new item to cart: $title"); // Debug log
     }
@@ -69,9 +77,17 @@ class ShoppingCart {
       return 0.0;
     }
     return items.fold(0.0, (sum, item) {
-       final price = item['price'] is num ? item['price'] : 0.0;
-       final quantity = item['quantity'] is num ? item['quantity'] : 0;
-       return sum + (price * quantity);
+      if (item['type'] == 'meal') {
+        final price = item['price'] is num ? item['price'] : 0.0;
+        final quantity = item['quantity'] is num ? item['quantity'] : 0;
+        return sum + (price * quantity);
+      } else if (item['type'] == 'gig') {
+        // Assuming 'gigDetails' map exists and contains 'price'
+        final gigDetails = item['gigDetails'] as Map<String, dynamic>? ?? {};
+        final price = gigDetails['price'] is num ? gigDetails['price'] : 0.0;
+        return sum + price; // Gigs have a single price, no quantity multiplier here
+      }
+      return sum; // Should not happen if type is always set
     });
   }
 
@@ -80,25 +96,86 @@ class ShoppingCart {
     print("Cart Cleared"); // Debug log
   }
 
-  static void removeItemFromCart(String title) {
-    int initialLength = items.length;
-    items.removeWhere((item) => item['title'] == title);
-     if (items.length < initialLength) {
-       print("Removed item from cart: $title"); // Debug log
-     }
-      print("Current Cart: ${items.map((e) => e['title'])}"); // Debug log
+  // Use index for removal as titles aren't unique/present for all item types (gigs)
+  static void removeItemByIndex(int index) {
+    if (index >= 0 && index < items.length) {
+      final removedItem = items.removeAt(index);
+      final itemIdentifier = removedItem['type'] == 'meal'
+          ? removedItem['title'] ?? 'Unknown Meal'
+          : removedItem['gigDetails']?['gig_type'] ?? 'Unknown Gig';
+      print("Removed item from cart at index $index: $itemIdentifier"); // Debug log
+      print("Current Cart: ${items.map((e) => e['type'] == 'meal' ? e['title'] : e['gigDetails']?['gig_type'])}"); // Debug log
+    } else {
+       print("Attempted to remove item at invalid index: $index");
+    }
   }
 
-  static void updateQuantity(String title, int newQuantity) {
-    final existingItemIndex = items.indexWhere((item) => item['title'] == title);
+  // Update quantity only makes sense for meals
+  static void updateMealQuantity(String title, int newQuantity) {
+    // Find existing *meal* item by title
+    final existingItemIndex = items.indexWhere((item) => item['type'] == 'meal' && item['title'] == title);
     if (existingItemIndex != -1) {
       if (newQuantity > 0) {
         items[existingItemIndex]['quantity'] = newQuantity;
-         print("Updated quantity for $title to $newQuantity"); // Debug log
+        print("Updated quantity for meal '$title' to $newQuantity"); // Debug log
       } else {
         // Remove item if quantity is 0 or less
-        removeItemFromCart(title);
+        removeItemByIndex(existingItemIndex); // Use index removal
       }
+    }
+  }
+
+  // Method to add a Gig
+  static void addGig(Map<String, dynamic> gigDetails) {
+    // Basic Validation
+    final userId = gigDetails['user_id']; // Assuming fetched elsewhere and passed in
+    final chefId = gigDetails['chef_id'];
+    final producerId = gigDetails['producer_id'];
+    final price = gigDetails['price']; // Assuming calculated elsewhere and passed in
+
+    if (userId == null) {
+      print("Error adding gig: User ID is missing.");
+      // Optionally throw an exception or return an error status
+      return;
+    }
+    if ((chefId == null && producerId == null) || (chefId != null && producerId != null)) {
+       print("Error adding gig: Exactly one of chef_id or producer_id must be provided.");
+       // Optionally throw an exception or return an error status
+       return;
+    }
+     if (price == null || price is! num || price <= 0) {
+       print("Error adding gig: Valid price is missing.");
+       // Optionally throw an exception or return an error status
+       return;
+    }
+
+    // Check if a similar gig already exists? For now, allow multiple gigs.
+    // You might want logic here to prevent duplicate gig bookings if needed.
+
+    items.add({
+      'type': 'gig',
+      'gigDetails': gigDetails, // Store the entire gig map
+    });
+    print("Added new gig to cart: ${gigDetails['gig_type']}"); // Debug log
+    print("Current Cart: ${items.map((e) => e['type'] == 'meal' ? e['title'] : e['gigDetails']?['gig_type'])}"); // Debug log
+  }
+
+  // Method to remove a specific list of items (e.g., successfully ordered items)
+  // Uses object identity for comparison.
+  static void removeItems(List<Map<String, dynamic>> itemsToRemove) {
+    if (itemsToRemove.isEmpty) return;
+
+    int initialLength = items.length;
+    // Create a set of items to remove for efficient lookup
+    final Set<Map<String, dynamic>> removalSet = Set.identity()..addAll(itemsToRemove);
+
+    items.removeWhere((item) => removalSet.contains(item));
+
+    if (items.length < initialLength) {
+       print("Removed ${initialLength - items.length} item(s) from cart based on provided list."); // Debug log
+       print("Current Cart: ${items.map((e) => e['type'] == 'meal' ? e['title'] : e['gigDetails']?['gig_type'])}"); // Debug log
+    } else {
+       print("No items removed. Items to remove might not have been found in the cart.");
     }
   }
 }
@@ -202,6 +279,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
     print("Building Cart Screen with ${cartItems.length} items."); // Debug log
 
     return Scaffold(
+      drawer: const AppDrawer(), // Add the drawer here
       appBar: AppBar(
         title: Text('Shopping Cart (${cartItems.length})'), // Show count in title
         backgroundColor: Colors.teal[800],
@@ -244,9 +322,10 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
                     : ListView.separated(
                         padding: EdgeInsets.symmetric(vertical: 8, horizontal: 16), // Add padding here
                         itemCount: cartItems.length,
-                        separatorBuilder: (context, index) => Divider(height: 1, color: Colors.transparent), // Use transparent divider or SizedBox
+                        separatorBuilder: (context, index) => SizedBox(height: 8), // Use SizedBox for spacing
                         itemBuilder: (context, index) {
-                          return _buildCartItemCard(cartItems[index], context);
+                          // Pass index for removal purposes
+                          return _buildCartItemCard(cartItems[index], index, context);
                         },
                       ),
               ),
@@ -351,32 +430,82 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
     );
   }
 
-  Widget _buildCartItemCard(Map<String, dynamic> item, BuildContext context) {
+  // Add index parameter for removal
+  Widget _buildCartItemCard(Map<String, dynamic> item, int index, BuildContext context) {
      // Safely access data, provide defaults
-    final String title = item['title'] ?? 'Unknown Item';
-    final int quantity = (item['quantity'] as int?) ?? 0;
-    final double price = (item['price'] as double?) ?? 0.0;
-    final Map<String, dynamic>? chef = item['selectedchef'];
-    final Map<String, dynamic>? producer = item['selectedproducer'];
-     // Safely access nested meal data
-    final Map<String, dynamic> mealData = (item['meal'] is Map<String, dynamic>) ? item['meal'] : {};
-    final String imageUrl = _formatImageUrl(mealData['image_link']); // Use formatted URL from meal data
+    final String itemType = item['type'] ?? 'meal'; // Default to meal if type is missing
 
-    String sourceInfo = '';
-    if (chef != null) {
-      sourceInfo = 'Cooked by: ${chef['name'] ?? 'Unknown'}';
-    } else if (producer != null) {
-      // *** FIX: Access 'name', not 'Name' ***
-      sourceInfo = 'Fresh from: ${producer['name'] ?? 'Unknown'}';
+    if (itemType == 'meal') {
+      // --- Render Meal Item ---
+      final String title = item['title'] ?? 'Unknown Item';
+      final int quantity = (item['quantity'] as int?) ?? 0;
+      final double price = (item['price'] as double?) ?? 0.0;
+      final Map<String, dynamic>? chef = item['selectedchef'];
+      final Map<String, dynamic>? producer = item['selectedproducer'];
+      final Map<String, dynamic> mealData = (item['meal'] is Map<String, dynamic>) ? item['meal'] : {};
+      final String imageUrl = _formatImageUrl(mealData['image_link']);
+      final double itemTotal = price * quantity;
+
+      String sourceInfo = '';
+      if (chef != null) {
+        sourceInfo = 'Cooked by: ${chef['name'] ?? 'Unknown'}';
+      } else if (producer != null) {
+        sourceInfo = 'Fresh from: ${producer['name'] ?? 'Unknown'}';
+      } else {
+         sourceInfo = 'Complementary Item';
+      }
+
+      return _buildMealItemCardContent(context, index, title, quantity, price, itemTotal, imageUrl, sourceInfo, item);
+
+    } else if (itemType == 'gig') {
+      // --- Render Gig Item ---
+      final Map<String, dynamic> gigDetails = item['gigDetails'] as Map<String, dynamic>? ?? {};
+      final String gigType = gigDetails['gig_type'] ?? 'Unknown Gig';
+      final double gigPrice = (gigDetails['price'] as double?) ?? 0.0;
+      final String? chefId = gigDetails['chef_id']?.toString();
+      final String? producerId = gigDetails['producer_id']?.toString();
+      // You'll likely need to fetch chef/producer *name* based on the ID elsewhere
+      // For now, just display the ID or a placeholder
+      final String hiredParty = chefId != null ? 'Chef ID: $chefId' : (producerId != null ? 'Producer ID: $producerId' : 'Unknown Provider');
+      final String location = gigDetails['location'] ?? 'Not specified';
+      final String date = gigDetails['scheduled_date'] ?? 'Not set';
+      final String time = gigDetails['time'] ?? 'Not set';
+      // final int numPeople = (gigDetails['number_of_people'] as int?) ?? 0; // <<< INCORRECT CAST
+
+      // --- Correctly parse number_of_people string key ---
+      final String numPeopleKey = gigDetails['number_of_people']?.toString() ?? '';
+      int numPeople = 0; // Default to 0
+      if (numPeopleKey.isNotEmpty) {
+         // Try to extract the number part (e.g., "5" from "5_people", "20" from "20_plus_people")
+         final parts = numPeopleKey.split('_');
+         numPeople = int.tryParse(parts.first) ?? 0;
+      }
+      // --- End of parsing logic ---
+
+
+      return _buildGigItemCardContent(context, index, gigType, gigPrice, hiredParty, location, date, time, numPeople);
     } else {
-       sourceInfo = 'Complementary Item'; // Or leave blank for non-chef/producer items
+      // Fallback for unknown item type
+      return Card(child: ListTile(title: Text('Unknown Item Type')));
     }
+  }
 
-    // Calculate total price for this item line
-    final double itemTotal = price * quantity;
+
+  // Helper Widget for Meal Item Card Content
+  Widget _buildMealItemCardContent(
+      BuildContext context,
+      int index, // Pass index for removal
+      String title,
+      int quantity,
+      double price,
+      double itemTotal,
+      String imageUrl,
+      String sourceInfo,
+      Map<String, dynamic> item // Pass the original item for quantity controls
+      ) {
 
     return Dismissible(
-      key: Key(title + (chef?['chefid']?.toString() ?? producer?['producer_id']?.toString() ?? '')), // More unique key
+      key: Key('meal_$index'), // Use index for unique key
       direction: DismissDirection.endToStart, // Swipe left to delete
       background: Container(
         alignment: Alignment.centerRight,
@@ -384,7 +513,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
         decoration: BoxDecoration(color: Colors.red[100], borderRadius: BorderRadius.circular(12)),
         child: Icon(Icons.delete_outline, color: Colors.red[700], size: 28),
       ),
-      confirmDismiss: (direction) => _confirmItemRemoval(context, title),
+      confirmDismiss: (direction) => _confirmItemRemoval(context, index, title), // Pass index and title
       onDismissed: (direction) {
          // No need to call remove here, it's done in confirmDismiss callback
          // ShoppingCart.removeItemFromCart(title);
@@ -445,7 +574,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.teal[800]),
                   ),
                   SizedBox(height: 6),
-                  _buildQuantityControls(item),
+                  _buildQuantityControls(item), // Pass the meal item map
                 ],
               ),
             ],
@@ -455,9 +584,10 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
     );
   }
 
-  Widget _buildQuantityControls(Map<String, dynamic> item) {
-    final String title = item['title'] ?? '';
-    final int quantity = (item['quantity'] as int?) ?? 0;
+  // This widget is only for MEAL items
+  Widget _buildQuantityControls(Map<String, dynamic> mealItem) {
+    final String title = mealItem['title'] ?? '';
+    final int quantity = (mealItem['quantity'] as int?) ?? 0;
 
     return Container( // Wrap controls for better touch targets and visual grouping
        decoration: BoxDecoration(
@@ -470,8 +600,8 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
           IconButton(
             icon: Icon(Icons.remove, size: 18, color: Colors.red[700]), // Red minus
              // Disable if quantity is 1
-            onPressed: quantity > 1 ? () {
-                ShoppingCart.updateQuantity(title, quantity - 1);
+            onPressed: quantity > 1 ? () { // Use updateMealQuantity
+                ShoppingCart.updateMealQuantity(title, quantity - 1);
                 _refreshCart(); // Update UI
             } : null, // Disable button if quantity is 1 (or handle removal differently)
             padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4), // Adjust padding
@@ -487,8 +617,8 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
           ),
           IconButton(
             icon: Icon(Icons.add, size: 18, color: Colors.green[700]), // Green plus
-            onPressed: () {
-              ShoppingCart.updateQuantity(title, quantity + 1);
+            onPressed: () { // Use updateMealQuantity
+              ShoppingCart.updateMealQuantity(title, quantity + 1);
                _refreshCart(); // Update UI
             },
             padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4), // Adjust padding
@@ -500,13 +630,106 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
     );
   }
 
-  // Confirmation Dialog for removing a single item
-  Future<bool?> _confirmItemRemoval(BuildContext context, String title) async {
+  // Helper Widget for Gig Item Card Content
+  Widget _buildGigItemCardContent(
+      BuildContext context,
+      int index, // Pass index for removal
+      String gigType,
+      double gigPrice,
+      String hiredParty,
+      String location,
+      String date,
+      String time,
+      int numPeople
+      ) {
+    return Dismissible(
+      key: Key('gig_$index'), // Use index for unique key
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(color: Colors.red[100], borderRadius: BorderRadius.circular(12)),
+        child: Icon(Icons.delete_outline, color: Colors.red[700], size: 28),
+      ),
+      confirmDismiss: (direction) => _confirmItemRemoval(context, index, gigType), // Pass index and gigType as identifier
+      onDismissed: (direction) {
+        // Removal is handled in confirmDismiss
+      },
+      child: Card(
+        elevation: 1.5,
+        margin: EdgeInsets.symmetric(vertical: 6),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        color: Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 12.0),
+          child: Row(
+            children: [
+              // Icon for Gig
+              Icon(Icons.event_seat, size: 40, color: Colors.teal[600]), // Example icon
+              SizedBox(width: 12),
+              // Gig Details
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      gigType, // e.g., "Birthday Party Gig"
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.teal[900]),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      hiredParty, // e.g., "Chef: Gordon Ramsay" or "Producer ID: 123"
+                      style: TextStyle(color: Colors.grey[700], fontSize: 13),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                     SizedBox(height: 4),
+                     Text(
+                      'Location: $location',
+                      style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                       maxLines: 1,
+                       overflow: TextOverflow.ellipsis,
+                    ),
+                    SizedBox(height: 4),
+                     Text(
+                      'When: $date at $time',
+                      style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                       maxLines: 1,
+                       overflow: TextOverflow.ellipsis,
+                    ),
+                     if (numPeople > 0) ...[
+                       SizedBox(height: 4),
+                       Text(
+                         'Guests: $numPeople',
+                         style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                       ),
+                     ]
+                  ],
+                ),
+              ),
+              SizedBox(width: 8),
+              // Price for Gig
+              Text(
+                '\$${gigPrice.toStringAsFixed(2)}',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.teal[800]),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Confirmation Dialog for removing an item (meal or gig) by index
+  Future<bool?> _confirmItemRemoval(BuildContext context, int index, String itemIdentifier) async {
+    // itemIdentifier could be meal title or gig type
     return await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Remove Item?'),
-        content: Text('Are you sure you want to remove "$title" from your cart?'),
+        content: Text('Are you sure you want to remove "$itemIdentifier" from your cart?'),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         actions: [
           TextButton(
@@ -515,11 +738,11 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
           ),
           TextButton(
             onPressed: () {
-              ShoppingCart.removeItemFromCart(title); // Actually remove the item
+              ShoppingCart.removeItemByIndex(index); // Remove item by index
               Navigator.of(context).pop(true); // Return true (confirm dismiss)
               _refreshCart(); // Refresh the list AFTER dialog closes
-               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text('"$title" removed from cart.'),
+               ScaffoldMessenger.of(context).showSnackBar(SnackBar( // Use itemIdentifier in message
+                  content: Text('"$itemIdentifier" removed from cart.'),
                   duration: Duration(seconds: 2),
                   backgroundColor: Colors.red[600],
                ));

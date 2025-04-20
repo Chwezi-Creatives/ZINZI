@@ -1,0 +1,601 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // For SystemUiOverlayStyle
+import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:intl/intl.dart'; // For date and currency formatting
+import 'dart:async'; // For TimeoutException
+import 'package:shimmer/shimmer.dart'; // For loading shimmer
+
+// --- Environment & API ---
+final String apiBaseUrl = dotenv.env['API_BASE_URL'] ??
+    dotenv.env['API_BASE_URL-intranet'] ??
+    'https://your.default.api.url/fallback';
+
+// --- Theme Colors ---
+const Color kColorPrimaryDark = Color(0xFF004D40);
+const Color kColorPrimary = Color(0xFF00796B);
+const Color kColorPrimaryLight = Color(0xFFB2DFDB); // Adjusted for better contrast maybe
+const Color kColorAccent = Color(0xFFFFAB40); // Example Accent
+const Color kColorSurface = Colors.white;
+const Color kColorBackground = Color(0xFFF5F5F5); // Light grey background
+const Color kColorTextPrimary = Color(0xFF212121); // Darker text
+const Color kColorTextSecondary = Color(0xFF757575); // Greyer text
+const Color kColorError = Colors.redAccent;
+const Color kColorSuccess = Color(0xFF4CAF50);
+const Color kColorWarning = Color(0xFFFFA000); // For pending/processing
+const Color kColorCancelled = Color(0xFFF44336); // For cancelled
+const Color kColorInfo = Color(0xFF1976D2); // For other statuses
+
+// --- Shimmer Colors ---
+Color kShimmerBaseColor = Colors.grey.shade300;
+Color kShimmerHighlightColor = Colors.grey.shade100;
+
+// --- Dimensions ---
+const double _horizontalPadding = 16.0;
+const double _verticalPadding = 12.0; // Adjusted slightly
+const double _cardElevation = 1.0; // Slightly more pronounced
+const double _cardCornerRadius = 12.0;
+const double _cardSpacing = 12.0; // Spacing between cards
+
+// --- Helper Functions ---
+String _formatDate(String? dateString) {
+  if (dateString == null) return 'N/A';
+  try {
+    final dateTime = DateTime.parse(dateString);
+    // Example format: Jan 15, 2024 or customize as needed
+    return DateFormat.yMMMd().add_jm().format(dateTime);
+  } catch (e) {
+    return dateString; // Return original if parsing fails
+  }
+}
+
+String _formatCurrency(dynamic amount) {
+  if (amount == null) return 'N/A';
+  try {
+    final doubleValue = double.parse(amount.toString());
+    // Adjust currency symbol and locale as needed
+    return NumberFormat.currency(symbol: '\$', decimalDigits: 2).format(doubleValue);
+  } catch (e) {
+    return amount.toString(); // Return original if parsing fails
+  }
+}
+
+Color _getStatusColor(String? status) {
+  status = status?.toLowerCase();
+  switch (status) {
+    case 'delivered':
+    case 'completed':
+      return kColorSuccess;
+    case 'processing':
+    case 'shipped':
+    case 'pending':
+      return kColorWarning;
+    case 'cancelled':
+    case 'failed':
+      return kColorCancelled;
+    default:
+      return kColorInfo; // Default color for unknown statuses
+  }
+}
+
+String _getStatusDisplay(String? status) {
+  return status?.replaceAll('_', ' ').split(' ').map((word) => word[0].toUpperCase() + word.substring(1)).join(' ') ?? 'N/A';
+}
+
+
+// --- Order Status Screen Widget ---
+class OrderStatusScreen extends StatefulWidget {
+  final int userId;
+  final List<int> orderIdList;
+  final int orderId; // Assuming this might be used to highlight/scroll to a specific order?
+
+  const OrderStatusScreen({
+    super.key,
+    required this.userId,
+    required this.orderIdList,
+    required this.orderId, // Keep if needed, otherwise remove
+  });
+
+  @override
+  State<OrderStatusScreen> createState() => _OrderStatusScreenState();
+}
+
+class _OrderStatusScreenState extends State<OrderStatusScreen> {
+  late Future<List<Map<String, dynamic>>> _orderDetailsFuture;
+  // State map to track expansion per order ID
+  final Map<int, bool> _isExpandedMap = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchOrders();
+  }
+
+  void _fetchOrders() {
+    _orderDetailsFuture = _fetchOrderDetails();
+    // Initialize expansion state (all collapsed initially)
+    for (var id in widget.orderIdList) {
+      _isExpandedMap[id] = false;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchOrderDetails() async {
+    List<Map<String, dynamic>> orders = [];
+    // Consider making API calls concurrently if possible (e.g., using Future.wait)
+    // for better performance if the list is very long and the backend supports it.
+    // For simplicity, the sequential loop is kept.
+    try {
+      for (int orderId in widget.orderIdList) {
+        final uri = Uri.parse(
+            '$apiBaseUrl/rr/orders?user_id=${widget.userId}&order_id=$orderId');
+        final response = await http.get(uri).timeout(const Duration(seconds: 20)); // Increased timeout slightly
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          if (data is Map<String, dynamic> && data['data'] is List) {
+            final orderDataList = data['data'] as List;
+            for (var orderData in orderDataList) {
+              if (orderData is Map<String, dynamic>) {
+                 // Ensure order_id is parsed correctly
+                 if (orderData.containsKey('order_id')) {
+                    orderData['order_id'] = int.tryParse(orderData['order_id'].toString()) ?? orderData['order_id'];
+                 }
+                 orders.add(orderData);
+              }
+            }
+          } else {
+             // Handle cases where the expected structure isn't returned
+             print("Unexpected data format for order $orderId: $data");
+          }
+        } else {
+          // Handle non-200 responses for individual orders if needed
+          print("Failed to fetch order $orderId: Status ${response.statusCode}");
+          // Optionally throw an error or add a placeholder error object
+        }
+      }
+      // Sort orders perhaps by date (newest first)
+      orders.sort((a, b) {
+          DateTime? dateA = DateTime.tryParse(a['order_date'] ?? '');
+          DateTime? dateB = DateTime.tryParse(b['order_date'] ?? '');
+          if (dateA == null && dateB == null) return 0;
+          if (dateA == null) return 1; // Place orders with invalid dates at the end
+          if (dateB == null) return -1;
+          return dateB.compareTo(dateA); // Newest first
+      });
+
+      return orders;
+    } on TimeoutException catch (_) {
+      throw Exception('Request timed out. Please check your connection.');
+    } on http.ClientException catch (e) {
+      throw Exception('Network error: ${e.message}');
+    } catch (e) {
+      // Catch other potential errors (JSON parsing, etc.)
+      print("Error fetching order details: $e");
+      throw Exception('Failed to load order details. Please try again.');
+    }
+  }
+
+  void _retryFetch() {
+    setState(() {
+      // Clear previous error state and re-trigger the future
+      _fetchOrders();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Use Poppins as the default font for the entire app theme if desired,
+    // or apply it specifically like this.
+    final textTheme = Theme.of(context).textTheme.apply(
+      fontFamily: GoogleFonts.poppins().fontFamily,
+      bodyColor: kColorTextPrimary,
+      displayColor: kColorTextPrimary,
+    );
+
+    return Theme( // Apply theme data contextually if needed
+      data: Theme.of(context).copyWith(textTheme: textTheme),
+      child: Scaffold(
+        backgroundColor: kColorBackground,
+        appBar: AppBar(
+          title: Text(
+            'My Orders', // More user-friendly title
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: kColorSurface),
+          ),
+          backgroundColor: kColorPrimary,
+          foregroundColor: kColorSurface, // Sets icon/back button color
+          elevation: 2.0,
+          systemOverlayStyle: SystemUiOverlayStyle.light.copyWith( // Make status bar icons light
+            statusBarColor: Colors.transparent, // Or kColorPrimaryDark for solid color
+            statusBarIconBrightness: Brightness.light,
+          ),
+        ),
+        body: FutureBuilder<List<Map<String, dynamic>>>(
+          future: _orderDetailsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return _buildLoadingShimmer();
+            }
+
+            if (snapshot.hasError) {
+              return _buildErrorWidget(context, snapshot.error);
+            }
+
+            if (!snapshot.hasData || snapshot.data!.isEmpty) {
+              return _buildEmptyState(context);
+            }
+
+            // Data loaded successfully
+            final orders = snapshot.data!;
+            return RefreshIndicator( // Add pull-to-refresh
+              onRefresh: () async {
+                 _retryFetch();
+                 await _orderDetailsFuture; // Wait for fetch to complete
+              },
+              color: kColorPrimary,
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: _horizontalPadding / 2, // Slightly less horizontal padding for list
+                    vertical: _verticalPadding),
+                itemCount: orders.length,
+                itemBuilder: (context, index) {
+                  final order = orders[index];
+                  final orderId = order['order_id'] as int? ?? -1; // Fallback ID if null/invalid
+                  if (orderId == -1) {
+                      // Handle cases where order_id is missing or invalid gracefully
+                      return const SizedBox.shrink(); // Or show an error card
+                  }
+                  // Get expansion state, default to false if not found (shouldn't happen with init)
+                  final isExpanded = _isExpandedMap[orderId] ?? false;
+
+                  return _buildOrderCard(context, order, orderId, isExpanded);
+                },
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  // --- UI Building Widgets ---
+
+  Widget _buildOrderCard(BuildContext context, Map<String, dynamic> order, int orderId, bool isExpanded) {
+     final String status = order['order_status'] ?? 'Unknown';
+     final Color statusColor = _getStatusColor(status);
+     final String displayStatus = _getStatusDisplay(status);
+
+    return Card(
+      margin: const EdgeInsets.symmetric(
+        horizontal: _horizontalPadding / 2,
+        vertical: _cardSpacing / 2,
+      ),
+      elevation: _cardElevation,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(_cardCornerRadius),
+        // Optional: Add border color based on status
+        // side: BorderSide(color: statusColor.withOpacity(0.5), width: 1),
+      ),
+      clipBehavior: Clip.antiAlias, // Ensures content respects rounded corners
+      child: InkWell( // Make the whole card tappable for expansion
+        onTap: () {
+          setState(() {
+            _isExpandedMap[orderId] = !isExpanded;
+          });
+        },
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // --- Card Header (Always Visible) ---
+            Padding(
+              padding: const EdgeInsets.all(_horizontalPadding),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Order #${order['order_id']}',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: kColorTextPrimary,
+                              ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Placed: ${_formatDate(order['order_date'])}',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: kColorTextSecondary,
+                              ),
+                           overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Chip(
+                    label: Text(
+                       displayStatus,
+                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                         color: Colors.white, // White text on colored chip
+                         fontWeight: FontWeight.bold,
+                       ),
+                    ),
+                    backgroundColor: statusColor,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    visualDensity: VisualDensity.compact, // Makes chip smaller
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ],
+              ),
+            ),
+
+            // --- Animated Expansion Section ---
+            AnimatedCrossFade(
+              firstChild: Container(), // Empty container when collapsed
+              secondChild: _buildOrderDetails(context, order), // Details when expanded
+              crossFadeState: isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+              duration: const Duration(milliseconds: 300), // Animation duration
+              firstCurve: Curves.easeOut,
+              secondCurve: Curves.easeIn,
+              sizeCurve: Curves.easeInOut,
+            ),
+
+             // --- Footer (Optional - e.g., Total Amount) ---
+             Container(
+                padding: const EdgeInsets.symmetric(horizontal: _horizontalPadding, vertical: _verticalPadding / 2),
+                color: Colors.grey.shade100, // Subtle background for footer
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Total:',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                         fontWeight: FontWeight.bold,
+                         color: kColorTextSecondary,
+                      ),
+                    ),
+                    Text(
+                      _formatCurrency(order['amount_paid']),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: kColorPrimaryDark, // Use a prominent color for amount
+                      ),
+                    ),
+                  ],
+                ),
+             ),
+             // --- Expansion Indicator (Subtle) ---
+             Container(
+                height: 25, // Height for the indicator area
+                alignment: Alignment.center,
+                child: Icon(
+                  isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                  color: kColorTextSecondary.withOpacity(0.7),
+                  size: 20,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOrderDetails(BuildContext context, Map<String, dynamic> order) {
+    return Padding(
+      padding: const EdgeInsets.only(left: _horizontalPadding, right: _horizontalPadding, bottom: _verticalPadding),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Divider(height: 1),
+          const SizedBox(height: 12),
+          _buildDetailRow(
+            context,
+            icon: Icons.location_on_outlined,
+            label: 'Delivery Address',
+            value: order['delivery_address'] ?? 'N/A',
+          ),
+          _buildDetailRow(
+            context,
+            icon: Icons.payment_outlined,
+            label: 'Payment Mode',
+            value: order['payment_mode'] ?? 'N/A',
+          ),
+          _buildDetailRow(
+            context,
+            icon: Icons.credit_card_outlined,
+            label: 'Payment Status',
+            value: _getStatusDisplay(order['payment_status']), // Format payment status
+            valueColor: _getStatusColor(order['payment_status']), // Color code payment status
+          ),
+          // Add more details as needed
+          // Example:
+          // _buildDetailRow(
+          //   context,
+          //   icon: Icons.receipt_long_outlined,
+          //   label: 'Transaction ID',
+          //   value: order['transaction_id'] ?? 'N/A',
+          // ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(BuildContext context, {required IconData icon, required String label, required String value, Color? valueColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0), // Spacing between rows
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: kColorPrimary),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                   Text(
+                     label,
+                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                       color: kColorTextSecondary,
+                       fontWeight: FontWeight.w600, // Slightly bolder label
+                     ),
+                   ),
+                  const SizedBox(height: 2),
+                   Text(
+                     value,
+                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                       color: valueColor ?? kColorTextPrimary, // Use provided color or default
+                       fontWeight: FontWeight.w500,
+                     ),
+                   ),
+                ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+
+  Widget _buildLoadingShimmer() {
+    return Shimmer.fromColors(
+      baseColor: kShimmerBaseColor,
+      highlightColor: kShimmerHighlightColor,
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(
+            horizontal: _horizontalPadding / 2,
+            vertical: _verticalPadding),
+        itemCount: 5, // Show several shimmer placeholders
+        itemBuilder: (context, index) {
+          return Card(
+             margin: const EdgeInsets.symmetric(
+               horizontal: _horizontalPadding / 2,
+               vertical: _cardSpacing / 2,
+             ),
+            elevation: _cardElevation,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(_cardCornerRadius),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(_horizontalPadding),
+              child: Column(
+                 crossAxisAlignment: CrossAxisAlignment.start,
+                 children: [
+                    // Shimmer Header
+                    Row(
+                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                       children: [
+                          Column(
+                             crossAxisAlignment: CrossAxisAlignment.start,
+                             children: [
+                                Container(width: 120, height: 16, color: Colors.white),
+                                const SizedBox(height: 6),
+                                Container(width: 150, height: 12, color: Colors.white),
+                             ],
+                          ),
+                           Container(
+                             width: 70,
+                             height: 24,
+                             // color: Colors.white, // REMOVE THIS LINE
+                             decoration: BoxDecoration(
+                                color: Colors.white, // Keep color inside decoration
+                                borderRadius: BorderRadius.circular(12)
+                             ),
+                          ), // Chip placeholder
+                       ],
+                    ),
+                    const SizedBox(height: 16),
+                    // Shimmer Footer placeholder
+                    Container(
+                      height: 30,
+                      color: Colors.white.withOpacity(0.5), // Lighter footer placeholder
+                    )
+                 ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildErrorWidget(BuildContext context, Object? error) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(_horizontalPadding * 2),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, color: kColorError, size: 60),
+            const SizedBox(height: _verticalPadding),
+            Text(
+              'Failed to Load Orders',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: kColorTextPrimary),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              // Display a user-friendly message based on the error type if possible
+              error is Exception ? error.toString().replaceFirst("Exception: ", "") : 'An unexpected error occurred.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: kColorTextSecondary),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: _verticalPadding * 2),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.refresh),
+              label: const Text('Try Again'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kColorPrimary,
+                foregroundColor: kColorSurface,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(30), // Rounded button
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              ),
+              onPressed: _retryFetch,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context) {
+     return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(_horizontalPadding * 2),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon(Icons.receipt_long_outlined, color: kColorTextSecondary, size: 60),
+            const SizedBox(height: _verticalPadding),
+            Text(
+              'No Orders Found',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: kColorTextPrimary),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'You haven\'t placed any orders yet.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: kColorTextSecondary),
+              textAlign: TextAlign.center,
+            ),
+             // Optional: Add a button to browse products/go home
+            // const SizedBox(height: _verticalPadding * 2),
+            // ElevatedButton(
+            //   child: const Text('Start Shopping'),
+            //   onPressed: () { /* Navigate somewhere */ },
+            // )
+          ],
+        ),
+      ),
+    );
+  }
+
+}

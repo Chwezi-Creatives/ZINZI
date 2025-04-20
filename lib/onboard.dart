@@ -3,7 +3,6 @@ import 'package:zinzi2/allmeals.dart';
 import 'package:zinzi2/chef.dart';
 import 'package:zinzi2/chef_net.dart';
 import 'package:zinzi2/producer_network_testing.dart';
-import 'chef_form_netwroked.dart';
 import 'package:zinzi2/nutri+.dart';
 import 'package:zinzi2/sensei_view.dart';
 import 'Sensei_chat_in_house.dart';

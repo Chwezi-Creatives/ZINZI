@@ -1,8 +1,10 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'];
 
@@ -10,8 +12,8 @@ class LoginPageModular extends StatefulWidget {
   final String apiUrl;
   final String pageTitle;
   final String buttonText;
-  final String idKey; // Key for the unique ID in the API response
-  final String expectedUserType; // Expected user type for this role
+  final String idKey;
+  final String expectedUserType;
   final Widget Function(Map<String, dynamic> response) onLoginSuccess;
 
   const LoginPageModular({
@@ -33,7 +35,7 @@ class _LoginPageModularState extends State<LoginPageModular>
   final _formKey = GlobalKey<FormState>();
   String _identifier = '';
   String _password = '';
-  bool _isLoading = false; // Flag to control loading indicator
+  bool _isLoading = false;
 
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
@@ -42,26 +44,23 @@ class _LoginPageModularState extends State<LoginPageModular>
   @override
   void initState() {
     super.initState();
-
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 800), // Reduced duration for faster animations
+      duration: const Duration(milliseconds: 800),
     );
 
     _fadeAnimation = CurvedAnimation(
       parent: _controller,
-      curve: Curves.easeOut, // Smoother curve
+      curve: Curves.easeOut,
     );
 
     _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, -0.5), // Start slightly above the center
+      begin: const Offset(0, -0.5),
       end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Curves.easeOut, // Smoother curve
-      ),
-    );
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOut,
+    ));
 
     _controller.forward();
   }
@@ -73,12 +72,9 @@ class _LoginPageModularState extends State<LoginPageModular>
   }
 
   Future<void> _login() async {
-    setState(() {
-      _isLoading = true; // Show loading indicator when login starts
-    });
+    setState(() => _isLoading = true);
 
     try {
-      print('Attempting login with identifier: $_identifier'); // Debugging output
       final response = await http.post(
         Uri.parse('$apibaseurl/${widget.apiUrl}'),
         headers: {'Content-Type': 'application/json'},
@@ -88,192 +84,121 @@ class _LoginPageModularState extends State<LoginPageModular>
         }),
       );
 
-      print('Response status: ${response.statusCode}'); // Log response status code
-      print('Response body: ${response.body}'); // Log the response body
-
       if (response.statusCode == 200) {
-        var data = json.decode(response.body);
-        print('Decoded response data: $data'); // Log decoded response data
+        var responseData = json.decode(response.body);
+        if (responseData is Map<String, dynamic> && responseData.containsKey('data')) {
+          final data = responseData['data'] as Map<String, dynamic>;
+          final String userId = data[widget.idKey].toString(); // Extract user ID and convert to String
+          final String userType = widget.expectedUserType; // Use expected user type
+          final bool verified = data['verified'] as bool? ?? false; // Extract verified status, default to false if null
 
-        // Check for valid data structure in the response
-        if (data.containsKey('data') && data['data'] is Map<String, dynamic>) {
-          var userData = data['data'];
-
-          // Check if the response contains the expected ID key and user type (case-insensitive)
-          if (userData.containsKey(widget.idKey) &&
-              userData['user_type'].toLowerCase() == widget.expectedUserType.toLowerCase()) {
-            int userId = userData[widget.idKey];
-            String userType = userData['user_type'];
-
-            print('User ID: $userId'); // Log user ID
-            print('User Type: $userType'); // Log user type
-
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.setInt('user_id', userId); // Store user ID
-            await prefs.setString('user_type', userType); // Store user type
-
-            // Navigate to the appropriate page with the response data
-            Navigator.pushReplacement(
-              context,
-              PageRouteBuilder(
-                pageBuilder: (context, animation, secondaryAnimation) =>
-                    widget.onLoginSuccess(data), // Pass the complete response
-                transitionsBuilder:
-                    (context, animation, secondaryAnimation, child) {
-                  const curve = Curves.easeOut; // Smoother curve
-                  final tween = Tween<Offset>(
-                    begin: const Offset(1.0, 0.0), // Start from the right
-                    end: Offset.zero,
-                  ).chain(CurveTween(curve: curve));
-
-                  final opacityTween = Tween<double>(begin: 0.0, end: 1.0)
-                      .chain(CurveTween(curve: curve));
-
-                  return FadeTransition(
-                    opacity: animation.drive(opacityTween),
-                    child: SlideTransition(
-                      position: animation.drive(tween),
-                      child: child,
-                    ),
-                  );
-                },
-                transitionDuration: const Duration(milliseconds: 500), // Faster transition
-              ),
-            );
-          } else {
-            print('No valid user data found in response: $data'); // Debug statement for invalid data
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('No valid user data found in response.')),
-            );
-          }
+          // Pass extracted data to the success callback
+          widget.onLoginSuccess({
+            'userId': userId,
+            'userType': userType,
+            'verified': verified,
+          });
         } else {
-          print('Invalid data structure in response: $data'); // Debug statement for invalid data
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Invalid data structure in response.')),
-          );
+          _showError('Invalid data structure in response.');
         }
       } else {
-        print('Login failed with status code: ${response.statusCode}'); // Log the error status code
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Login failed. Invalid credentials.')),
-        );
+        _showError('Login failed. Invalid credentials.');
       }
-    } catch (error) {
-      print('Login error: $error'); // Log any errors that occurred during the request
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('An error occurred. Please try again later.')),
-      );
+    } catch (e) {
+      _showError('An error occurred. Please try again later.');
     } finally {
-      setState(() {
-        _isLoading = false; // Hide loading indicator after login attempt
-      });
+      setState(() => _isLoading = false);
     }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: SlideTransition(
-          position: _slideAnimation,
-          child: Text(
-            widget.pageTitle,
-            style: const TextStyle(color: Colors.white, fontSize: 24),
-          ),
-        ),
-        foregroundColor: Colors.white,
-        backgroundColor: Colors.teal,
-        elevation: 5,
-      ),
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: Image.asset(
-              'assets/images/soft.jpg',
-              fit: BoxFit.cover,
+    return Stack(
+      children: [
+        Scaffold(
+          appBar: AppBar(
+            title: SlideTransition(
+              position: _slideAnimation,
+              child: Text(widget.pageTitle,
+                  style: GoogleFonts.poppins(
+                      color: Colors.white, fontSize: 24)),
             ),
+            foregroundColor: Colors.white,
+            backgroundColor: Colors.teal.shade700,
+            elevation: 1,
           ),
-          Positioned.fill(
-            child: Container(
-              color: Colors.teal.withOpacity(0.2),
+          body: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color.fromARGB(255, 203, 243, 248),Color(0xFFe0f7fa)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
             ),
-          ),
-          Center(
-            child: SingleChildScrollView(
-              child: FadeTransition(
-                opacity: _fadeAnimation,
-                child: Padding(
-                  padding: const EdgeInsets.all(24.0),
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24.0),
+                child: FadeTransition(
+                  opacity: _fadeAnimation,
                   child: Column(
                     children: [
                       SlideTransition(
                         position: _slideAnimation,
                         child: Column(
                           children: [
-                            SizedBox(
-                              height: 170,
-                              width: 170,
-                              child: Image.asset('assets/images/Gru green.png'),
+                            Image.asset(
+                              'assets/images/acc.png',
+                              height: 130,
+                              width: 130,
                             ),
-                            const SizedBox(height: 1),
-                            Container(
-                              padding: const EdgeInsets.all(16.0),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.7),
-                                borderRadius: BorderRadius.circular(10),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.2),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 2),
+                            const SizedBox(height: 20),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(20),
+                              child: BackdropFilter(
+                                filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                                child: Container(
+                                  padding: const EdgeInsets.all(20),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
+                                        color: Colors.white.withOpacity(0.2)),
                                   ),
-                                ],
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    'WELCOME BACK,',
-                                    style: TextStyle(
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.teal.shade800,
-                                      letterSpacing: 1.5,
-                                    ),
+                                  child: Column(
+                                    children: [
+                                      Text('WELCOME BACK,',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 24,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.teal.shade900,
+                                            letterSpacing: 1.2,
+                                          )),
+                                      const SizedBox(height: 6),
+                                      Text('Let\'s continue your health journey!',
+                                          style: GoogleFonts.poppins(
+                                              color: Colors.teal.shade800,
+                                              fontSize: 16)),
+                                    ],
                                   ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    'Let\'s continue your health journey!',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: Colors.teal.shade800,
-                                    ),
-                                  ),
-                                ],
+                                ),
                               ),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 70),
+                      const SizedBox(height: 60),
                       Form(
                         key: _formKey,
                         child: Column(
                           children: [
                             TextFormField(
-                              decoration: InputDecoration(
-                                labelText: 'Email or Username',
-                                labelStyle: TextStyle(color: Colors.teal),
-                                filled: true,
-                                fillColor: Colors.white.withOpacity(0.6),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide.none,
-                                ),
-                                prefixIcon:
-                                    Icon(Icons.person, color: Colors.teal),
-                              ),
+                              decoration: _inputDecoration(
+                                  label: 'Email or Username',
+                                  icon: Icons.person),
                               onChanged: (value) => _identifier = value,
                               validator: (value) => value!.isEmpty
                                   ? 'Please enter your email or username'
@@ -281,51 +206,65 @@ class _LoginPageModularState extends State<LoginPageModular>
                             ),
                             const SizedBox(height: 16),
                             TextFormField(
-                              decoration: InputDecoration(
-                                labelText: 'Password',
-                                labelStyle: TextStyle(color: Colors.teal),
-                                filled: true,
-                                fillColor: Colors.white.withOpacity(0.6),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide.none,
-                                ),
-                                prefixIcon:
-                                    Icon(Icons.lock, color: Colors.teal),
-                              ),
                               obscureText: true,
+                              decoration: _inputDecoration(
+                                  label: 'Password', icon: Icons.lock),
                               onChanged: (value) => _password = value,
                               validator: (value) => value!.isEmpty
                                   ? 'Please enter your password'
                                   : null,
                             ),
-                            const SizedBox(height: 50),
-                            ElevatedButton(
-                              onPressed: _isLoading
-                                  ? null
-                                  : () {
-                                      if (_formKey.currentState!.validate()) {
-                                        _login();
-                                      }
-                                    },
-                              style: ElevatedButton.styleFrom(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 16),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                backgroundColor: Colors.teal,
-                                elevation: 3,
-                                minimumSize: const Size(double.infinity, 60),
+                            const SizedBox(height: 8),
+                            Opacity(
+                              opacity: 0.001,
+                              child: TextButton(
+                                onPressed: () {
+                                  // hidden but functional
+                                  debugPrint('Forgot password tapped');
+                                },
+                                child: const Text('Forgot password?'),
                               ),
-                              child: _isLoading
-                                  ? const CircularProgressIndicator(
-                                      color: Colors.white)
-                                  : Text(
-                                      widget.buttonText,
-                                      style: const TextStyle(
-                                          fontSize: 16, color: Colors.white),
-                                    ),
+                            ),
+                            const SizedBox(height: 40),
+                            AnimatedContainer(
+                              duration: const Duration(seconds: 2),
+                              curve: Curves.easeInOut,
+                              decoration: BoxDecoration(
+                                boxShadow: _isLoading
+                                    ? []
+                                    : [
+                                        BoxShadow(
+                                          color: Colors.tealAccent
+                                              .withOpacity(0.6),
+                                          blurRadius: 15,
+                                          spreadRadius: 1,
+                                          offset: const Offset(0, 3),
+                                        )
+                                      ],
+                              ),
+                              child: ElevatedButton(
+                                onPressed: _isLoading
+                                    ? null
+                                    : () {
+                                        if (_formKey.currentState!.validate()) {
+                                          _login();
+                                        }
+                                      },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.teal,
+                                  minimumSize: const Size(double.infinity, 60),
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 16),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                child: Text(widget.buttonText,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 16,
+                                      color: Colors.white,
+                                    )),
+                              ),
                             ),
                           ],
                         ),
@@ -336,8 +275,29 @@ class _LoginPageModularState extends State<LoginPageModular>
               ),
             ),
           ),
-        ],
+        ),
+        if (_isLoading)
+          Container(
+            color: Colors.black.withOpacity(0.4),
+            child: const Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            ),
+          )
+      ],
+    );
+  }
+
+  InputDecoration _inputDecoration({required String label, required IconData icon}) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: GoogleFonts.poppins(color: Colors.teal),
+      filled: true,
+      fillColor: Colors.white.withOpacity(0.6),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide.none,
       ),
+      prefixIcon: Icon(icon, color: Colors.teal),
     );
   }
 }

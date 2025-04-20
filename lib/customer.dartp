@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:zinzi2/reco.dart';
-import 'package:zinzi2/repeat.dart'; // Ensure this is the correct path
+import 'package:zinzi2/reco.dartp';
+import 'package:zinzi2/repeat.dartp'; // Ensure this is the correct path
 
 class CustomerTypeSelectionPage extends StatelessWidget {
   const CustomerTypeSelectionPage({Key? key}) : super(key: key);

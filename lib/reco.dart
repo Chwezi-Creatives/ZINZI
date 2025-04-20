@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+/*import 'package:flutter/material.dart';
 import 'package:zinzi2/checkout.dart';
 import 'package:zinzi2/cart.dart' as cart;
 import 'package:zinzi2/meal_detail.dart' as meal_detail;
@@ -7,7 +7,7 @@ import 'package:zinzi2/profile.dart';
 import 'package:zinzi2/useranalytics.dart';
 import 'dart:math';
 import 'package:zinzi2/blogview.dart';
-import 'package:zinzi2/mealdetail2.dart';
+import 'package:zinzi2/mealdetail2.dartp';
 
 class RecommendedMealsScreen extends StatefulWidget {
   @override
@@ -1041,7 +1041,7 @@ class _RecommendedMealsScreenState extends State<RecommendedMealsScreen> {
                     ),
                   ),
                   Text(
-                    '\$${price.toStringAsFixed(2)}',
+                    'UGX ${price.toStringAsFixed(2)}',
                     style: TextStyle(color: Colors.white, fontSize: 14),
                   ),
                 ],
@@ -1073,3 +1073,4 @@ void showCustomSnackBar(BuildContext context, String message) {
     ..showSnackBar(snackBar);
 }
 }
+*/

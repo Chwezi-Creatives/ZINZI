@@ -1,0 +1,828 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // For SystemUiOverlayStyle
+import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:intl/intl.dart'; // For date formatting
+import 'dart:async'; // For TimeoutException
+// import 'package:shimmer/shimmer.dart'; // Shimmer not currently used
+import 'package:zinzi2/widgets/app_drawer.dart'; // Import the AppDrawer
+
+// Assuming API_BASE_URL-intranet is set in your .env file
+final String apiBaseUrl = dotenv.env['API_BASE_URL'] ?? dotenv.env['API_BASE_URL-intranet'] ??
+    'https://your.default.api.url/fallback'; // Provide a sensible fallback
+
+// --- Color Palette (Hardcoded Teal/White Shades) ---
+const Color kColorPrimaryDark = Color(0xFF004D40); // Darkest Teal
+const Color kColorPrimary = Color(0xFF00796B); // Medium Teal
+const Color kColorPrimaryLight = Color(0xFF4DB6AC); // Lighter Teal
+const Color kColorPrimaryLighter = Color(0xFFB2DFDB); // Very Light Teal
+const Color kColorPrimaryLightest = Color(0xFFE0F2F1); // Lightest Teal
+const Color kColorBackground = Color(0xFFF8F8F8); // Off-White Background
+const Color kColorSurface = Colors.white; // White for cards
+const Color kColorTextPrimary = kColorPrimaryDark; // Dark teal for primary text
+const Color kColorTextSecondary = Color(0xFF546E7A); // Blue Grey for secondary text
+const Color kColorTextOnPrimary = Colors.white; // White text on teal backgrounds
+const Color kColorDivider = Color(0xFFE0E0E0); // Light grey divider
+const Color kColorError = Colors.redAccent; // Error color
+const Color kColorSuccess = Color(0xFF2E7D32); // Darker Green for Success
+const Color kColorWarning = Colors.orangeAccent; // Warning color
+// final Color kShimmerBaseColor = Colors.grey.shade300; // Not used
+// final Color kShimmerHighlightColor = Colors.grey.shade100; // Not used
+// --- End Color Palette ---
+
+class OrderStatusScreen extends StatefulWidget {
+  // Accept a list of order IDs (might be redundant now but kept for compatibility)
+  final List<int> orderIds;
+  final int userId;
+
+  const OrderStatusScreen({
+    super.key,
+    required this.orderIds,
+    required this.userId,
+  });
+
+  @override
+  State<OrderStatusScreen> createState() => _OrderStatusScreenState();
+}
+
+class _OrderStatusScreenState extends State<OrderStatusScreen> {
+  // Future now returns a list of order details maps
+  late Future<List<Map<String, dynamic>>> _orderDetailsFuture;
+
+  // --- UI Styling Constants ---
+  static const double _horizontalPadding = 16.0;
+  static const double _verticalPadding = 16.0;
+  static const double _sectionSpacing = 24.0;
+  static const double _cardElevation = 2.0; // Slightly more elevation
+  static const double _cardCornerRadius = 12.0;
+
+  @override
+  void initState() {
+    super.initState();
+    print("DEBUG: OrderStatusScreen initState - Fetching for User: ${widget.userId}");
+    // Ensure API URL is loaded
+    print("DEBUG: Using API Base URL: $apiBaseUrl");
+    _orderDetailsFuture = _fetchOrderDetails();
+  }
+
+  // --- Fetch Logic ---
+  // Fetch all orders for the user
+  Future<List<Map<String, dynamic>>> _fetchOrderDetails() async {
+    // Construct the URI to fetch all orders for the user
+    final uri = Uri.parse('$apiBaseUrl/rr/orders?user_id=${widget.userId}');
+    debugPrint('Fetching all orders for User ID ${widget.userId} from: $uri');
+
+    try {
+      // --- Standard HTTP Client (Use for Production) ---
+      final response = await http.get(uri).timeout(const Duration(seconds: 20)); // Increased timeout slightly
+      // --- End Standard HTTP Client ---
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        print('RAW API Response for User ID ${widget.userId}: ${response.body}');
+
+        // Expecting the API to return a list of order objects directly
+        // or a map containing a list under a key like 'data' or 'orders'.
+        List<dynamic> orderList = [];
+
+        if (data is List) {
+          orderList = data;
+          print("DEBUG: Parsed order data directly from List response.");
+        } else if (data is Map<String, dynamic>) {
+           // Common patterns: check for 'data', 'orders', or similar keys
+           if (data.containsKey('data') && data['data'] is List) {
+             orderList = data['data'];
+             print("DEBUG: Parsed order data from Map response (data['data']).");
+           } else if (data.containsKey('orders') && data['orders'] is List) {
+             orderList = data['orders'];
+             print("DEBUG: Parsed order data from Map response (data['orders']).");
+           } else {
+              // Maybe the map itself is a single order? Less likely for a list endpoint.
+              // Or maybe the structure is unexpected.
+              print("DEBUG: Unexpected Map structure received from list endpoint: $data");
+              // If only one order was placed, the API *might* incorrectly return a single object map?
+              // Let's try adding it directly if it looks like an order.
+              if (data.containsKey('order_id')) { // Heuristic check
+                 print("DEBUG: Attempting to treat Map response as a single order list.");
+                 orderList = [data];
+              } else {
+                 throw Exception('API response is a map, but does not contain a recognized list key (e.g., "data", "orders") or order details.');
+              }
+           }
+        } else {
+           print("DEBUG: Unexpected API response type: ${data.runtimeType}");
+           throw Exception('Unexpected API response format. Expected List or Map containing a list.');
+        }
+
+        // Filter out any non-map items and ensure they are Map<String, dynamic>
+        final List<Map<String, dynamic>> fetchedOrders = orderList
+            .whereType<Map<String, dynamic>>() // Filter out non-maps
+            .toList();
+
+        print("DEBUG: Successfully fetched and parsed ${fetchedOrders.length} orders for User ID ${widget.userId}.");
+
+        return fetchedOrders;
+
+      } else {
+        final errorMsg = 'Failed to fetch orders for User ID ${widget.userId} (Code: ${response.statusCode})';
+        debugPrint('$errorMsg - Body: ${response.body}');
+        // Throw an exception to be caught by the FutureBuilder
+        throw Exception('$errorMsg. Please try again.');
+      }
+    } on TimeoutException {
+      final errorMsg = 'Timeout fetching orders for User ID ${widget.userId}.';
+      debugPrint(errorMsg);
+      throw Exception('$errorMsg Please check your connection and try again.');
+    } catch (e, stackTrace) {
+      final errorMsg = 'Error fetching orders for User ID ${widget.userId}: $e';
+      debugPrint(errorMsg);
+      debugPrint("Stack trace: $stackTrace");
+      // Rethrow the exception (or a more user-friendly one)
+      throw Exception('Could not load order details. $e');
+    }
+  }
+  // --- End Fetch Logic ---
+
+  @override
+  Widget build(BuildContext context) {
+    // Note: textTheme is fetched inside the builder where needed
+
+    return Scaffold(
+      drawer: const AppDrawer(), // Add the drawer here
+      backgroundColor: kColorBackground,
+      appBar: AppBar(
+        backgroundColor: kColorSurface,
+        elevation: 1,
+        shadowColor: kColorPrimary.withOpacity(0.2),
+        foregroundColor: kColorTextPrimary,
+        centerTitle: true,
+        title: Text(
+          'Order Confirmation',
+          style: GoogleFonts.poppins(
+            fontWeight: FontWeight.w600,
+            color: kColorTextPrimary,
+            fontSize: 18,
+          ),
+        ),
+        leading: IconButton(
+           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+           onPressed: () => Navigator.of(context).pop(),
+        ),
+         systemOverlayStyle: SystemUiOverlayStyle(
+             statusBarColor: Colors.transparent,
+             statusBarIconBrightness: Brightness.dark,
+             statusBarBrightness: Brightness.light,
+         ),
+      ),
+      body: FutureBuilder<List<Map<String, dynamic>>>(
+        future: _orderDetailsFuture,
+        builder: (context, AsyncSnapshot<List<Map<String, dynamic>>> snapshot) {
+          final textTheme = Theme.of(context).textTheme;
+          print("DEBUG: FutureBuilder builder entered. ConnectionState: ${snapshot.connectionState}");
+
+          // Handle Loading State
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            print("DEBUG: FutureBuilder waiting.");
+            return const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(kColorPrimary),
+              ),
+            );
+          }
+
+          // Handle Error State
+          if (snapshot.hasError) {
+             print("DEBUG: FutureBuilder snapshot has error: ${snapshot.error}");
+             print("DEBUG: Error StackTrace: ${snapshot.stackTrace}");
+             final error = snapshot.error ?? 'Order data is unavailable.';
+             return _buildErrorWidget(context, error, textTheme);
+          }
+
+          // Handle No Data State (After successful fetch but empty result)
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+             print("DEBUG: FutureBuilder snapshot has no data or is empty (after fetch completed).");
+             return _buildErrorWidget(context, "No order details found for the provided IDs.", textTheme);
+          }
+
+          // Handle Success State (Data is available)
+          final orders = snapshot.data!;
+          print("DEBUG: FutureBuilder snapshot has data. Number of orders: ${orders.length}");
+
+          return SafeArea(
+            top: false,
+            bottom: true,
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: _horizontalPadding,
+                  vertical: _verticalPadding,
+              ),
+              itemCount: orders.length + 1, // +1 for the header
+              itemBuilder: (context, index) {
+                print("DEBUG: ListView.builder itemBuilder called for index: $index");
+
+                if (index == 0) {
+                  print("DEBUG: Building header (index 0)");
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: _sectionSpacing),
+                    child: _buildSuccessHeader(context, textTheme, orderCount: orders.length),
+                  );
+                }
+
+                final orderIndex = index - 1;
+                 if (orderIndex < 0 || orderIndex >= orders.length) {
+                   print("DEBUG: Invalid orderIndex $orderIndex derived from index $index. Skipping.");
+                   return const SizedBox.shrink();
+                 }
+
+                print("DEBUG: Building order card for orderIndex: $orderIndex (Order ID: ${orders[orderIndex]['order_id']})");
+                final order = orders[orderIndex];
+
+                return Padding(
+                  padding: EdgeInsets.only(bottom: orderIndex < orders.length - 1 ? _sectionSpacing : 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildOrderSummaryCard(context, order, textTheme),
+                      const SizedBox(height: _sectionSpacing / 2),
+                      _buildItemCardSection(context, order, textTheme),
+                    ],
+                  ),
+                );
+              }, // End of itemBuilder
+            ), // End ListView.builder
+          ); // End SafeArea
+        }, // End of builder
+      ), // End FutureBuilder
+       bottomNavigationBar: Padding(
+         padding: EdgeInsets.only(
+            left: _horizontalPadding,
+            right: _horizontalPadding,
+            bottom: _verticalPadding + MediaQuery.of(context).padding.bottom,
+            top: _verticalPadding / 2
+         ),
+         child: _buildDoneButton(context, Theme.of(context).textTheme),
+       ),
+    ); // End Scaffold
+  }
+
+  // --- Helper Methods (Must be inside _OrderStatusScreenState) ---
+
+  // --- Error Widget ---
+  Widget _buildErrorWidget(BuildContext context, Object? error, TextTheme textTheme) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(_horizontalPadding * 1.5),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon( Icons.error_outline_rounded, color: kColorError, size: 50, ),
+            const SizedBox(height: 16),
+            Text( 'Oops! Something Went Wrong', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600, color: kColorTextPrimary), textAlign: TextAlign.center, ),
+            const SizedBox(height: 8),
+            Text(
+              (error is Exception ? error.toString().replaceFirst('Exception: ', '') : error?.toString()) ?? 'Could not load order details. Please try again.',
+              style: GoogleFonts.poppins(color: kColorTextSecondary, fontSize: 14),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Retry'),
+              onPressed: () {
+                  print("DEBUG: Retry button pressed.");
+                  setState(() { _orderDetailsFuture = _fetchOrderDetails(); });
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kColorPrimary,
+                foregroundColor: kColorTextOnPrimary,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- Enhanced Success Header ---
+  Widget _buildSuccessHeader(BuildContext context, TextTheme textTheme, {int orderCount = 1}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: _verticalPadding, horizontal: _horizontalPadding),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+           colors: [ kColorPrimaryLightest.withOpacity(0.6), kColorPrimaryLighter.withOpacity(0.3) ],
+           begin: Alignment.topLeft, end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(_cardCornerRadius),
+        border: Border.all(color: kColorSuccess.withOpacity(0.3))
+      ),
+      child: Column(
+        children: [
+          Icon( Icons.check_circle_outline_rounded, color: kColorSuccess, size: 45, ),
+          const SizedBox(height: 10),
+          Text(
+            orderCount > 1 ? '$orderCount Orders Placed Successfully!' : 'Order Placed Successfully!',
+            style: GoogleFonts.poppins( fontSize: 20, fontWeight: FontWeight.w600, color: kColorSuccess, ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Thank you! Your order details are below.',
+            style: GoogleFonts.poppins(fontSize: 14, color: kColorSuccess.withOpacity(0.9)),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- Enhanced Order Summary Card ---
+  Widget _buildOrderSummaryCard( BuildContext context, Map<String, dynamic> order, TextTheme textTheme) {
+    final String orderDateStr = order['order_date']?.toString() ?? '';
+    String formattedDate = 'N/A';
+    if (orderDateStr.isNotEmpty) {
+        try {
+            final dateTime = DateTime.parse(orderDateStr).toLocal();
+            formattedDate = DateFormat('MMM d, yyyy hh:mm a').format(dateTime);
+        } catch (e) {
+            print("DEBUG: Error parsing order_date '$orderDateStr': $e");
+            formattedDate = orderDateStr;
+        }
+    }
+
+    final String orderId = order['order_id']?.toString() ?? 'N/A';
+    final String orderStatus = order['order_status']?.toString() ?? 'N/A';
+    final String deliveryAddress = order['delivery_address']?.toString() ?? 'N/A';
+    final String orderType = order['order_type']?.toString() ?? 'N/A';
+    final String paymentMode = order['payment_mode']?.toString() ?? 'N/A';
+    final String paymentStatus = order['payment_status']?.toString() ?? 'UNKNOWN';
+    final double totalPrice = _parseDouble(order['total_price']) ?? 0.0;
+
+    return Card(
+      elevation: _cardElevation,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_cardCornerRadius)),
+      color: kColorSurface,
+      shadowColor: kColorPrimary.withOpacity(0.1),
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(_verticalPadding),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+                'Order Summary',
+                style: GoogleFonts.poppins(fontSize: 17, color: kColorPrimary, fontWeight: FontWeight.w600)
+            ),
+            const Divider(height: 20, thickness: 0.8, color: kColorDivider),
+            _buildDetailTile(context, textTheme, icon: Icons.tag_rounded, label: 'Order ID', value: '#$orderId', isBoldValue: true),
+            _buildDetailTile(context, textTheme, icon: Icons.calendar_today_rounded, label: 'Placed On', value: formattedDate),
+            _buildDetailTile(context, textTheme, icon: Icons.info_outline_rounded, label: 'Order Status', valueWidget: _buildStatusChip( context, textTheme, orderStatus, isPaymentStatus: false)),
+            _buildDetailTile(context, textTheme, icon: Icons.location_on_outlined, label: 'Deliver To', value: deliveryAddress),
+            _buildDetailTile(context, textTheme, icon: Icons.receipt_long_outlined, label: 'Order Type', value: orderType.capitalizeFirst()),
+            _buildDetailTile(context, textTheme, icon: Icons.credit_card, label: 'Payment Mode', value: paymentMode.capitalizeFirst()),
+            _buildDetailTile(context, textTheme, icon: Icons.payment, label: 'Payment Status', valueWidget: _buildStatusChip( context, textTheme, paymentStatus, isPaymentStatus: true)),
+            const Divider(height: 20, thickness: 0.8, color: kColorDivider),
+            _buildDetailTile(context, textTheme, icon: Icons.monetization_on_outlined, label: 'Order Total', value: '\$${totalPrice.toStringAsFixed(2)}', isBoldValue: true, valueColor: kColorPrimaryDark),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- Refined Detail Tile ---
+  Widget _buildDetailTile( BuildContext context, TextTheme textTheme, { required IconData icon, required String label, String? value, Widget? valueWidget, Color? valueColor, bool isBoldValue = false, }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: kColorPrimary.withOpacity(0.9)),
+          const SizedBox(width: 12),
+          Text(label, style: GoogleFonts.poppins(color: kColorTextSecondary, fontSize: 14)),
+          const Spacer(),
+          Flexible(
+            child: valueWidget ?? // Use valueWidget if provided
+                   (value != null // Otherwise, check if value string exists
+                      ? Text( // If value exists, display it
+                          value,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 3,
+                          textAlign: TextAlign.end,
+                          style: GoogleFonts.poppins(
+                              color: valueColor ?? kColorTextPrimary,
+                              fontSize: 14,
+                              fontWeight: isBoldValue ? FontWeight.w600 : FontWeight.normal,
+                          ),
+                        )
+                      : Text( // If value is null, display 'N/A'
+                          'N/A',
+                          textAlign: TextAlign.end,
+                          style: GoogleFonts.poppins(color: kColorTextSecondary, fontSize: 14)
+                        )
+                   ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- Refined Status Chip ---
+  Widget _buildStatusChip( BuildContext context, TextTheme textTheme, String? status, {bool isPaymentStatus = false}) {
+    final statusText = (status?.isNotEmpty ?? false) ? status!.toUpperCase() : (isPaymentStatus ? 'UNKNOWN' : 'N/A');
+    final Color chipColor = isPaymentStatus ? _getPaymentStatusColor(context, status) : _getOrderStatusColor(context, status);
+    final Color textColor = chipColor;
+    final Color backgroundColor = chipColor.withOpacity(0.12);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: (status?.isNotEmpty ?? false) && status != 'N/A' && status != 'UNKNOWN'
+            ? () => _showStatusExplanationDialog(context, status, isPaymentStatus, textTheme)
+            : null,
+        borderRadius: BorderRadius.circular(16),
+        splashColor: chipColor.withOpacity(0.3),
+        highlightColor: chipColor.withOpacity(0.2),
+        child: Chip(
+          avatar: CircleAvatar(
+              backgroundColor: chipColor,
+              radius: 5,
+          ),
+          label: Text(
+            statusText,
+            style: GoogleFonts.poppins(
+                color: textColor,
+                fontWeight: FontWeight.w600,
+                fontSize: 11,
+                letterSpacing: 0.3
+            ),
+          ),
+          backgroundColor: backgroundColor,
+          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 3.0),
+          visualDensity: VisualDensity.compact,
+          side: BorderSide(color: chipColor.withOpacity(0.3)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        ),
+      ),
+    );
+  }
+
+  // --- Status Colors ---
+  Color _getOrderStatusColor(BuildContext context, String? status) {
+    switch (status?.toLowerCase()) {
+      case 'completed':
+      case 'delivered':
+        return kColorSuccess;
+      case 'processing':
+      case 'preparing':
+      case 'shipped':
+      case 'delivering':
+        return Colors.blue.shade600;
+      case 'pending':
+        return kColorWarning;
+      case 'cancelled':
+      case 'rejected':
+      case 'failed':
+        return kColorError;
+      default:
+        return Colors.grey.shade500;
+    }
+  }
+  Color _getPaymentStatusColor(BuildContext context, String? status) {
+    switch (status?.toLowerCase()) {
+      case 'paid':
+      case 'completed':
+        return kColorSuccess;
+      case 'pending':
+        return kColorWarning;
+      case 'failed':
+        return kColorError;
+      case 'unpaid':
+         return Colors.orange.shade700;
+      default:
+        return Colors.grey.shade500;
+    }
+  }
+
+  // --- Logic to decide which item card to build ---
+  Widget _buildItemCardSection(BuildContext context, Map<String, dynamic> order, TextTheme textTheme) {
+      final String orderType = order['order_type']?.toString() ?? '';
+      final String? mealName = order['meal_name']?.toString();
+      final List<dynamic>? items = order['items'] as List<dynamic>?;
+
+      print("DEBUG: Building item card section. OrderType: '$orderType', MealName: '$mealName'");
+
+      if (orderType.toLowerCase() == 'gig') {
+           print("DEBUG: Building GigItemCard.");
+          return _buildGigItemCard(context, order, textTheme);
+      }
+      else if (orderType.toLowerCase() == 'meal' || (mealName != null && mealName.isNotEmpty)) {
+          print("DEBUG: Building OrderItemCard (Meal).");
+          return _buildOrderItemCard(context, order, textTheme);
+      }
+      else if (items != null && items.isNotEmpty) {
+           print("DEBUG: Order type unknown/other, but 'items' list found. Building generic item card based on items[0].");
+           final firstItem = items[0] as Map<String, dynamic>? ?? {};
+           if(firstItem.containsKey('meal_name') && firstItem['meal_name'] != null) {
+               return _buildOrderItemCard(context, order, textTheme);
+           } else if (firstItem.containsKey('gig_type') && firstItem['gig_type'] != null) {
+               return _buildGigItemCard(context, order, textTheme);
+           } else {
+              print("DEBUG: Items list present, but first item has no recognized keys (meal_name, gig_type). Building placeholder.");
+              return _buildPlaceholderItemCard(context, textTheme, "Details for this item type are not available.");
+           }
+      }
+      else {
+          print("DEBUG: No recognizable order type or item details found. Building placeholder.");
+          return _buildPlaceholderItemCard(context, textTheme, "Specific item details not available for this order.");
+      }
+  }
+
+  // --- Meal Item Card ---
+  Widget _buildOrderItemCard( BuildContext context, Map<String, dynamic> order, TextTheme textTheme) {
+     final Map<String, dynamic> itemDetails = (order['items'] is List && (order['items'] as List).isNotEmpty)
+        ? (order['items'] as List)[0] as Map<String, dynamic>? ?? {}
+        : {};
+
+    final String mealName = order['meal_name']?.toString() ?? itemDetails['meal_name']?.toString() ?? 'Meal Item';
+    final String ingredients = order['ingredients']?.toString() ?? itemDetails['ingredients']?.toString() ?? '';
+    final String producerName = order['producer_name']?.toString() ?? itemDetails['producer_name']?.toString() ?? '';
+    final String chefName = order['chef_name']?.toString() ?? itemDetails['chef_name']?.toString() ?? '';
+    final String quantityStr = order['quantity']?.toString() ?? itemDetails['quantity']?.toString() ?? '1';
+    final String displayPrice = '\$${(_parseDouble(order['total_price']) ?? 0.0).toStringAsFixed(2)}';
+
+    return Card(
+      elevation: _cardElevation,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_cardCornerRadius)),
+      color: kColorSurface,
+      shadowColor: kColorPrimary.withOpacity(0.1),
+      clipBehavior: Clip.antiAlias,
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(_verticalPadding),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+             Text('Item Details', style: GoogleFonts.poppins(fontSize: 16, color: kColorPrimary, fontWeight: FontWeight.w600)),
+             const Divider(height: 16, thickness: 0.8, color: kColorDivider),
+             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 70, height: 70,
+                  decoration: BoxDecoration( color: kColorPrimaryLightest, borderRadius: BorderRadius.circular(8.0), ),
+                  child: Icon(Icons.fastfood_outlined, color: kColorPrimaryLight, size: 35),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(mealName, style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: kColorTextPrimary)),
+                      if (ingredients.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text('Includes: $ingredients', style: GoogleFonts.poppins(fontSize: 12, color: kColorTextSecondary), maxLines: 2, overflow: TextOverflow.ellipsis),
+                      ],
+                      const SizedBox(height: 8),
+                       if (chefName.isNotEmpty)
+                        _buildInfoChip(context, textTheme, Icons.kitchen_rounded, 'Chef: $chefName')
+                      else if (producerName.isNotEmpty)
+                        _buildInfoChip( context, textTheme, Icons.storefront_outlined, 'Producer: $producerName')
+                      else
+                         _buildInfoChip(context, textTheme, Icons.help_outline, 'Provider N/A'),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Qty: $quantityStr • Order Total: $displayPrice',
+                         style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500, color: kColorTextPrimary)
+                       ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- NEW: Widget to display Gig details ---
+  Widget _buildGigItemCard(BuildContext context, Map<String, dynamic> order, TextTheme textTheme) {
+      final Map<String, dynamic> gigDetails = (order['items'] is List && (order['items'] as List).isNotEmpty)
+        ? (order['items'] as List)[0] as Map<String, dynamic>? ?? {}
+        : {};
+
+     final String gigType = gigDetails['gig_type']?.toString() ?? order['order_type']?.toString()?.capitalizeFirst() ?? 'Gig';
+     final String location = order['delivery_address']?.toString() ?? gigDetails['location']?.toString() ?? 'N/A';
+     final String date = gigDetails['scheduled_date']?.toString() ?? 'N/A';
+     final String time = gigDetails['time']?.toString() ?? 'N/A';
+
+     final String numPeopleKey = gigDetails['number_of_people']?.toString() ?? '';
+     String numPeopleDisplay = 'N/A';
+      if (numPeopleKey.isNotEmpty) {
+         try {
+           final parts = numPeopleKey.split('_');
+           numPeopleDisplay = parts.first + (numPeopleKey.contains('plus') ? '+' : '');
+         } catch (e) {
+            print("DEBUG: Error parsing numPeopleKey '$numPeopleKey': $e");
+            numPeopleDisplay = numPeopleKey;
+         }
+      }
+
+     final String description = order['notes']?.toString() ?? gigDetails['detailed_description']?.toString() ?? '';
+     final String? chefId = order['chef_id']?.toString() ?? gigDetails['chef_id']?.toString();
+     final String? producerId = order['producer_id']?.toString() ?? gigDetails['producer_id']?.toString();
+      final String hiredParty = chefId != null ? 'Chef ID: $chefId' : (producerId != null ? 'Producer ID: $producerId' : 'Provider N/A');
+
+     return Card(
+        elevation: _cardElevation,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_cardCornerRadius)),
+        color: kColorSurface,
+        shadowColor: kColorPrimary.withOpacity(0.1),
+        clipBehavior: Clip.antiAlias,
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(_verticalPadding),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+               Text('Gig Details', style: GoogleFonts.poppins(fontSize: 16, color: kColorPrimary, fontWeight: FontWeight.w600)),
+               const Divider(height: 16, thickness: 0.8, color: kColorDivider),
+               _buildInfoChip(context, textTheme, Icons.event_seat_outlined, 'Type: $gigType'),
+               const SizedBox(height: 8),
+               _buildInfoChip(context, textTheme, Icons.person_outline, 'Provider: $hiredParty'),
+               const SizedBox(height: 8),
+               _buildInfoChip(context, textTheme, Icons.location_on_outlined, 'Location: $location', maxLines: 3),
+               const SizedBox(height: 8),
+               _buildInfoChip(context, textTheme, Icons.calendar_today_outlined, 'Date: $date'),
+               const SizedBox(height: 8),
+               _buildInfoChip(context, textTheme, Icons.access_time_outlined, 'Time: $time'),
+               const SizedBox(height: 8),
+               _buildInfoChip(context, textTheme, Icons.people_outline, 'Guests: $numPeopleDisplay'),
+               if (description.isNotEmpty && description != 'No special instructions') ...[
+                  const SizedBox(height: 12),
+                   const Divider(height: 1, thickness: 0.5),
+                   const SizedBox(height: 10),
+                  Text('Notes:', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: kColorTextSecondary)),
+                  const SizedBox(height: 4),
+                  Text(description, style: GoogleFonts.poppins(fontSize: 13, color: kColorTextPrimary)),
+               ]
+            ],
+          ),
+        ),
+     );
+  }
+
+ // --- Placeholder Item Card ---
+  Widget _buildPlaceholderItemCard(BuildContext context, TextTheme textTheme, String message) {
+    return Card(
+      elevation: _cardElevation / 2,
+      shape: RoundedRectangleBorder( borderRadius: BorderRadius.circular(_cardCornerRadius)),
+      color: kColorBackground,
+      shadowColor: Colors.black.withOpacity(0.05),
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(_verticalPadding),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.info_outline_rounded, color: kColorTextSecondary.withOpacity(0.7), size: 18),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                message,
+                style: GoogleFonts.poppins(color: kColorTextSecondary, fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- Generic Info Chip for Item/Gig Cards ---
+   Widget _buildInfoChip(BuildContext context, TextTheme textTheme, IconData icon, String text, {int maxLines = 1}) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 18, color: kColorPrimary),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: GoogleFonts.poppins(fontSize: 13, color: kColorTextPrimary),
+            maxLines: maxLines,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // --- Enhanced Done Button ---
+  Widget _buildDoneButton(BuildContext context, TextTheme textTheme) {
+    return Center(
+      child: ElevatedButton(
+        onPressed: () {
+           print("DEBUG: Done button pressed.");
+          if (Navigator.canPop(context)) {
+             Navigator.pop(context);
+          } else {
+             print("WARN: Cannot pop OrderStatusScreen.");
+          }
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: kColorPrimaryDark,
+          foregroundColor: kColorTextOnPrimary,
+          padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 14),
+          textStyle: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+          elevation: 3,
+        ),
+        child: const Text('Done'),
+      ),
+    );
+  }
+
+  // --- _parseDouble Utility ---
+  double? _parseDouble(dynamic value) {
+     if (value == null) return null;
+     if (value is double) return value;
+     if (value is int) return value.toDouble();
+     if (value is String) {
+       final cleanedValue = value.replaceAll(RegExp(r'[$,]'), '');
+       return double.tryParse(cleanedValue);
+     }
+     print("WARN: Could not parse '$value' as double.");
+     return null;
+  }
+
+  // --- Status Explanation Dialog ---
+  void _showStatusExplanationDialog(BuildContext context, String? status, bool isPaymentStatus, TextTheme textTheme) {
+     String title = '';
+     String explanation = '';
+     final statusLower = status?.toLowerCase() ?? 'unknown';
+
+      const Map<String, String> paymentStatusExplanations = {
+        'pending': 'Your payment is being processed or awaiting confirmation (e.g., from MoMo). This usually takes a few moments.',
+        'paid': 'Your payment has been successfully received.',
+        'completed': 'Your payment has been successfully received.',
+        'failed': 'Your payment could not be completed. Please check your payment details or try a different method. Contact support if issues persist.',
+        'unpaid': 'Payment for this order has not been made yet. Please complete the payment if required.',
+        'unknown': 'The payment status is currently unknown or not specified.'
+      };
+      const Map<String, String> orderStatusExplanations = {
+          'pending': 'Your order has been received and is awaiting confirmation and processing by the kitchen or producer.',
+          'processing': 'Your order is currently being prepared or processed.',
+          'preparing': 'Your order is being prepared by the chef or sourced by the producer.',
+          'completed': 'Your order preparation is complete and it\'s ready for the next step (delivery or pickup).',
+          'shipped': 'Your order has been shipped and is on its way.',
+          'delivering': 'Your order is currently out for delivery with the transporter.',
+          'delivered': 'Your order has been successfully delivered. Enjoy!',
+          'cancelled': 'This order has been cancelled.',
+          'rejected': 'This order could not be fulfilled and has been rejected.',
+          'failed': 'There was an issue processing this order. Please contact support if this persists.',
+          'unknown': 'The order status is currently unknown or not specified.'
+      };
+
+     if (isPaymentStatus) {
+         title = 'Payment Status: ${statusLower.capitalizeFirst()}';
+         explanation = paymentStatusExplanations[statusLower] ?? paymentStatusExplanations['unknown']!;
+     } else {
+         title = 'Order Status: ${statusLower.capitalizeFirst()}';
+         explanation = orderStatusExplanations[statusLower] ?? orderStatusExplanations['unknown']!;
+     }
+
+      showDialog(
+          context: context,
+          builder: (BuildContext dialogContext) {
+              return AlertDialog(
+                  shape: RoundedRectangleBorder( borderRadius: BorderRadius.circular(_cardCornerRadius)),
+                  backgroundColor: kColorSurface,
+                  title: Text(title, style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold, color: kColorPrimaryDark)),
+                  content: Text(explanation, style: GoogleFonts.poppins(fontSize: 14, color: kColorTextPrimary)),
+                  actions: <Widget>[
+                      TextButton(
+                          child: Text('OK', style: GoogleFonts.poppins(color: kColorPrimary, fontWeight: FontWeight.bold)),
+                          onPressed: () { Navigator.of(dialogContext).pop(); },
+                      ),
+                  ],
+              );
+          },
+      );
+  }
+  // --- End Status Explanation Function ---
+
+} // End of _OrderStatusScreenState
+
+// Helper extension for capitalizing strings
+extension StringExtension on String {
+    String capitalizeFirst() {
+      if (isEmpty) return "";
+      return "${this[0].toUpperCase()}${substring(1).toLowerCase()}";
+    }
+}

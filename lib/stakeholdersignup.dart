@@ -13,6 +13,7 @@ import 'dart:io';
 // Placeholder for verification page if the above is wrong:
 import 'package:flutter/cupertino.dart';
 import 'package:zinzi2/stakeholderdash222.dart'; // Using Cupertino for placeholder
+import 'package:shared_preferences/shared_preferences.dart';
 
 // --- Placeholder Verification Page ---
 class EmailVerificationPage extends StatelessWidget {
@@ -264,11 +265,22 @@ class _StakeholderSignUpPageState extends State<StakeholderSignUpPage> {
       if (!mounted) return; // Check if widget is still mounted after await
 
       if (response.statusCode == 201 || response.statusCode == 200) { // Allow 200 OK as well
-        _showSnackbar("Sign up successful! Please verify your email.", success: true);
-        // Navigate to verification page
-        Navigator.pushReplacement( // Use pushReplacement if you don't want user coming back here
-            context,
-            MaterialPageRoute(builder: (context) => stakeholderdas2222()));
+        final responseData = json.decode(response.body);
+        final stakeholderId = responseData['stakeholder_id']; // Adjust key if needed
+
+        if (stakeholderId != null) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('stakeholder_user_id', stakeholderId.toString());
+          print("Stakeholder ID saved: $stakeholderId"); // Optional: for debugging
+          _showSnackbar("Sign up successful!", success: true);
+          // Navigate to dashboard page
+          Navigator.pushReplacement( // Use pushReplacement if you don't want user coming back here
+              context,
+              MaterialPageRoute(builder: (context) => stakeholderdas2222()));
+        } else {
+          _showSnackbar("Signup successful, but failed to retrieve user ID.");
+          // Optionally navigate to login or show an error specific to missing ID
+        }
       } else {
         // Try to parse error message from API
         String errorMessage = 'Signup failed. Please try again.';

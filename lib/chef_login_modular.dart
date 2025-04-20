@@ -21,37 +21,29 @@ class ChefLoginPageModular extends StatelessWidget {
       buttonText: 'LOGIN AS CHEF',
       idKey: 'chef_id', // Specific to chef
       expectedUserType: 'chef', // Specific to chef
-      onLoginSuccess: (Map<String, dynamic> response) {
+      onLoginSuccess: (Map<String, dynamic> loginData) {
         // Print the entire response to the console for debugging purposes
-        print('Login response: $response');
+        print('Login response: $loginData');
 
-        // Ensure that 'data' key exists in the response
-        if (response.containsKey('data')) {
-          // Access the data object
-          var data = response['data'];
-
-          // Confirm that the expected fields are present
-          if (data is Map<String, dynamic> &&
-              data.containsKey('chef_id') &&
-              data.containsKey('user_type')) {
-            String userId = data['chef_id'].toString();
-            String userType = data['user_type'];
+        // Extract data from the loginData map
+        final String userId = loginData['userId'];
+        final String userType = loginData['userType'];
+        final bool verified = loginData['verified'] ?? false; // Default to false if null
 
             // Save user ID and user type to shared preferences
-            saveUserDetails(userId, userType).then((_) {
-              // Navigate to the Chef Dashboard after saving user details
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => ChefDash88new()),
-              );
-            });
-          } else {
-            print(
-                'Data does not contain required keys: "chef_id" or "user_type".');
-          }
-        } else {
-          print('Key "data" not found in response.');
-        }
+            saveUserDetails(userId, userType);
+            // Navigate to the Chef Dashboard after saving user details
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => ChefDash88new()),
+            );
+       //   } else {
+       //     print(
+       //         'Data does not contain required keys: "chef_id" or "user_type".');
+       //   }
+       // } else {
+       //   print('Key "data" not found in response.');
+       // }
 
         // Return a dummy widget since onLoginSuccess needs to return a Widget
         return Container(); // Return an empty widget

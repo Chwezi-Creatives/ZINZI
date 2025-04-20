@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -68,15 +67,37 @@ class _TransporterLoginPageState extends State<TransporterLoginPage> {
 
          if (response.statusCode == 200 || response.statusCode == 201) {
            final responseData = json.decode(response.body);
-           final transporterId = responseData['transporter_id'] ?? responseData['id'];
-           if (transporterId != null) {
+           final data = responseData['data'] as Map<String, dynamic>?;
+
+           if (data != null && data.containsKey('transporter_id')) {
+             final String transporterId = data['transporter_id'].toString();
+             final String userType = 'transporter'; // Hardcoded for this page
+             final bool verified = data['verified'] as bool? ?? false;
+
+             // Save to SharedPreferences
              SharedPreferences prefs = await SharedPreferences.getInstance();
-             await prefs.setString('transporter_id', transporterId.toString());
+             await prefs.setString('transporter_id', transporterId);
+             await prefs.setString('transporter_user_type', userType);
+             await prefs.setBool('transporter_verified', verified); // Save verified status
+
+             await Future.delayed(const Duration(milliseconds: 100)); // Small delay
+
+             // Navigate ONLY if ID is valid and widget is still mounted
+             if (mounted) {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => TransporterDashboardScreen(transporterId: transporterId), // Pass the non-null ID
+                  ),
+                );
+             }
+           } else {
+              // Handle case where ID is missing in response
+              if (mounted) {
+                 _showErrorSnackBar('Login successful, but failed to retrieve Transporter ID.');
+              }
            }
-           Navigator.pushReplacement(
-             context,
-             MaterialPageRoute(builder: (context) => const TransporterDashboardScreen()),
-           );
+           // Removed navigation from outside the null check (lines 94-95 were leftovers and are now removed)
          } else {
            String errorMessage = 'Login failed.';
            try {
@@ -93,121 +114,7 @@ class _TransporterLoginPageState extends State<TransporterLoginPage> {
          }
        }
        // --- End Actual API Call ---
-
-
-      /*
-      // --- *** ACTUAL API CALL (Commented Out) *** ---
-      try {
-        // **VERIFY ENDPOINT**: e.g., /transporters/login or /auth/rider/login
-        final Uri uri = Uri.parse('$apibaseurl/transporters/login'); // ADJUST ENDPOINT
-
-        final response = await http.post(
-          uri,
-          headers: {'Content-Type': 'application/json; charset=UTF-8'},
-          body: json.encode({
-            'identifier': _identifierController.text.trim(),
-  // --- Helper for validating email or username ---
-  bool _isValidEmail(String input) {
-    final emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
-    return emailRegex.hasMatch(input);
-  }
-            'password': _passwordController.text
-          }),
-        );
-
-        if (!mounted) return; // Check after await
-        setState(() => _isLoading = false);
-
-        if (response.statusCode == 200) {
-          final responseData = json.decode(response.body);
-          final String? token = responseData['token'];
-          final dynamic transporterIdRaw = responseData['transporter_id']; // Or 'id', 'rider_id'
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  children: [
-                    TextFormField(
-                      controller: _identifierController,
-                      keyboardType: TextInputType.text,
-                      decoration: InputDecoration(
-                        labelText: "Email or Username",
-                        hintText: "Enter your email or username",
-                        prefixIcon: const Icon(Icons.person_outline, color: primaryTeal),
-                        filled: true,
-                        fillColor: textFieldFillColor,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(color: lightTeal, width: 1.0),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(color: lightTeal, width: 1.0),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(color: primaryTeal, width: 1.5),
-                        ),
-                        errorBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(color: errorColor, width: 1.0),
-                        ),
-                        focusedErrorBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(color: errorColor, width: 1.5),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 14.0, horizontal: 16.0),
-                        errorStyle: const TextStyle(color: errorColor, fontSize: 11),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return "Enter your email or username";
-                        }
-                        // Accept either a valid email or a non-empty username
-                        if (!_isValidEmail(value) && value.length < 3) {
-                          return "Enter a valid email or username";
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    // ... (rest of the form fields, e.g., password)
-                  ],
-                ),
-              ),
-            ),
-
-          if (token != null && transporterIdRaw != null) {
-             SharedPreferences prefs = await SharedPreferences.getInstance();
-             await prefs.setString('transporter_token', token); // **KEY NAME**
-             await prefs.setString('transporter_user_id', transporterIdRaw.toString()); // **KEY NAME**
-             print("Login successful. Stored ID: $transporterIdRaw");
-
-             Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => const TransporterDashboardScreen()),
-             );
-          } else {
-             _showErrorSnackBar('Login failed: Missing token or ID in response.');
-          }
-        } else {
-          String errorMessage = 'Login failed.';
-          try {
-            final responseData = json.decode(response.body);
-            errorMessage = responseData['message'] ?? responseData['error'] ?? 'Invalid credentials (Code: ${response.statusCode})';
-          } catch (_) {}
-          _showErrorSnackBar(errorMessage);
-        }
-      } catch (e) {
-        print("Login Exception: $e");
-        if (mounted) {
-           setState(() => _isLoading = false);
-           _showErrorSnackBar('An error occurred during login: $e');
-        }
-      }
-      // --- *** END ACTUAL API CALL *** ---
-      */
+       
     } else {
        _showSnackBar('Please enter email and password.', isError: true);
     }
@@ -281,5 +188,4 @@ class _TransporterLoginPageState extends State<TransporterLoginPage> {
    Widget _buildTextFormField({ required TextEditingController controller, required String labelText, required String hintText, required IconData icon, TextInputType keyboardType = TextInputType.text, bool obscureText = false, String? Function(String?)? validator, Widget? suffixIcon, }) { return TextFormField( controller: controller, keyboardType: keyboardType, obscureText: obscureText, style: const TextStyle(color: darkTeal), decoration: InputDecoration( labelText: labelText, hintText: hintText, labelStyle: const TextStyle(color: primaryTeal, fontWeight: FontWeight.w500), hintStyle: const TextStyle(color: subtleTextColor), prefixIcon: Icon(icon, color: primaryTeal, size: 20), suffixIcon: suffixIcon, filled: true, fillColor: textFieldFillColor, border: OutlineInputBorder( borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: lightTeal, width: 1.0), ), enabledBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: lightTeal, width: 1.0), ), focusedBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: primaryTeal, width: 1.5), ), errorBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: errorColor, width: 1.0), ), focusedErrorBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: errorColor, width: 1.5), ), contentPadding: const EdgeInsets.symmetric(vertical: 14.0, horizontal: 16.0), errorStyle: const TextStyle(color: errorColor, fontSize: 11) ), validator: validator, ); }
    Widget _buildLoginButton() { return SizedBox( width: double.infinity, child: ElevatedButton( onPressed: _isLoading ? null : _submitLogin, style: ElevatedButton.styleFrom( backgroundColor: accentTeal, foregroundColor: whiteColor, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), elevation: 2, disabledBackgroundColor: disabledColor.withOpacity(0.5), disabledForegroundColor: whiteColor.withOpacity(0.7), ), child: _isLoading ? const SizedBox( height: 20, width: 20, child: CircularProgressIndicator( strokeWidth: 2.5, valueColor: AlwaysStoppedAnimation<Color>(whiteColor), ), ) : const Text( "Log In", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)), ), ); }
    Widget _buildSignUpLink() { return Row( mainAxisAlignment: MainAxisAlignment.center, children: [ const Text("Don't have an account?", style: TextStyle(color: subtleTextColor)), TextButton( onPressed: () { Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const TransporterSignUpPage())); }, style: TextButton.styleFrom( padding: const EdgeInsets.symmetric(horizontal: 6), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap, ), child: const Text("Sign Up", style: TextStyle(color: primaryTeal, fontWeight: FontWeight.bold)), ), ], ); }
-
 }

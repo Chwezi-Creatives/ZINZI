@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import the dotenv package
 import 'splash.dart'; // Assuming your splash screen is in the 'splash.dart' file
 import 'http_overrides.dart';
+import 'widgets/app_drawer.dart'; // Add this import
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,6 +19,10 @@ void main() async {
   final cert = certBytes.buffer.asUint8List();
   HttpOverrides.global = MyHttpOverrides(cert);
   print("HTTP Overrides set");
+
+  // Initialize drawer data
+  await AppDrawer.initializeUserData();
+  print("Drawer data initialized");
 
   runApp(MyApp());
   print("App started");

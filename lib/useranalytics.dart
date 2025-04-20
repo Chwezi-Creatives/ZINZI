@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:visibility_detector/visibility_detector.dart';
+import 'package:zinzi2/widgets/app_drawer.dart'; // Import the AppDrawer
 
 // --- Constants ---
 const Duration kAnimationDuration = Duration(milliseconds: 1200);
@@ -217,11 +218,12 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard> with Ti
     final appBarTitleStyle = GoogleFonts.poppins(color: kColorTextOnPrimary, fontSize: 20, fontWeight: FontWeight.w600);
 
     return Scaffold(
+      drawer: const AppDrawer(), // Add the drawer here
       appBar: AppBar(
-        title: Text('Analytics Dashboard', style: appBarTitleStyle), 
+        title: Text('Analytics Dashboard', style: appBarTitleStyle),
         centerTitle: true,
-        backgroundColor: kColorPrimaryDark, 
-        foregroundColor: kColorTextOnPrimary, 
+        backgroundColor: kColorPrimaryDark,
+        foregroundColor: kColorTextOnPrimary,
         elevation: 1.0,
       ),
       body: Container(

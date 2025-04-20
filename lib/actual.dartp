@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:zinzi2/checkout.dart';
 import 'package:zinzi2/cart.dart' as cart;
 import 'package:zinzi2/meal_detail.dart';
-import 'package:zinzi2/mealdetail2.dart';
+import 'package:zinzi2/mealdetail2.dartp';
 import 'package:zinzi2/mealdetail3.dart';
 import 'package:zinzi2/useranalytics.dart'; // Ensure the necessary imports
 import 'dart:math';
 import 'package:zinzi2/blogview.dart';
+import 'package:zinzi2/app_drawer.dart';
 
 class ActualRecommendedMealsScreen extends StatefulWidget {
   final List<String>
@@ -658,133 +659,7 @@ class _ActualRecommendedMealsScreenState
         backgroundColor: Colors.teal[800],
         foregroundColor: Colors.white,
       ),
-      drawer: Drawer(
-        child: Container(
-          color: Colors.teal[100],
-          child: Column(
-            children: [
-              DrawerHeader(
-                decoration: BoxDecoration(color: Colors.teal[600]),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      'Menu',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      'Choose an option below:',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: ListView(
-                  padding: EdgeInsets.zero,
-                  shrinkWrap: true,
-                  children: [
-                    ListTile(
-                      leading: Icon(Icons.person, color: Colors.teal[800]),
-                      title: Text('Profile',
-                          style: TextStyle(color: Colors.black)),
-                      onTap: () {
-                        Navigator.pop(context);
-                      },
-                    ),
-                    ListTile(
-                      leading: Icon(Icons.analytics, color: Colors.teal[800]),
-                      title: Text('Analytics Dashboard',
-                          style: TextStyle(color: Colors.black)),
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (context) => UserAnalyticsDashboard()),
-                        );
-                      },
-                    ),
-                    Divider(),
-                    ListTile(
-                      leading:
-                          Icon(Icons.shopping_cart, color: Colors.teal[800]),
-                      title: Text('Shopping Cart',
-                          style: TextStyle(color: Colors.black)),
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (context) => cart.ShoppingCartScreen()),
-                        );
-                      },
-                    ),
-                    Divider(),
-                    ListTile(
-                      leading: Icon(Icons.article, color: Colors.teal[800]),
-                      title:
-                          Text('Blog', style: TextStyle(color: Colors.black)),
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => BlogScreen(
-                                url: 'https://artchwezi.blogspot.com/'),
-                          ),
-                        );
-
-                        ListTile(
-                          leading: Icon(Icons.health_and_safety,
-                              color: Colors.teal[800]),
-                          title: Text('Wellness Communities',
-                              style: TextStyle(color: Colors.black)),
-                          onTap: () {
-                            Navigator.pop(context);
-                            // Navigate to Wellness Communities screen
-                          },
-                        );
-                        ListTile(
-                          leading: Icon(Icons.help, color: Colors.teal[800]),
-                          title: Text('Help',
-                              style: TextStyle(color: Colors.black)),
-                          onTap: () {
-                            Navigator.pop(context);
-                            // Navigate to Help screen
-                          },
-                        );
-                      },
-                    ),
-                    Container(
-                      color: Colors.teal[100],
-                      height: 60,
-                      child: Align(
-                        alignment: Alignment.bottomCenter,
-                        child: Text(
-                          '',
-                          style: TextStyle(
-                            color: Colors.teal[800],
-                            fontSize: 16,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+      drawer: const AppDrawer(),
       body: Container(
         width: double.infinity,
         height: double.infinity,

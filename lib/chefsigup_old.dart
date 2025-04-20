@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'dart:async'; // Import for TimeoutException
+import 'dart:async'; // Import for Timer and TimeoutException
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io'; // For File
@@ -16,8 +16,11 @@ const Color lighterTeal = Color(0xFFE0F2F1); // Teal 50
 const Color darkTeal = Color(0xFF004D40); // Teal 900
 const Color accentTeal = Color(0xFF009688); // Teal 500
 const Color whiteColor = Colors.white;
-const Color lightBackgroundColor = Color(0xFFF5F5F5); // Very light grey/white
-const Color textFieldFillColor = Color(0x8AFFFFFF); // Semi-transparent white
+// const Color lightBackgroundColor = Color(0xFFF5F5F5); // No longer primary background
+const Color textFieldFillColor = Color(
+    0x8AFFFFFF); // Semi-transparent white (Will show slightly greyish on white bg)
+// Consider changing textFieldFillColor if it blends too much with white bg:
+// const Color textFieldFillColor = Color(0xFFFAFAFA); // Very light grey alternative
 const Color subtleTextColor = Color(0xFF757575); // Grey 600
 const Color errorColor = Color(0xFFD32F2F); // Red 700 for errors
 const Color disabledColor = Colors.grey; // For disabled elements
@@ -58,6 +61,10 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
 
   final ImagePicker _picker = ImagePicker(); // Instance of Image Picker
 
+  // For location fetching animation
+  Timer? _locationHintTimer;
+  int _locationHintDots = 0;
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -66,6 +73,7 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
     _confirmPasswordController.dispose();
     _phoneNumberController.dispose();
     _locationDisplayController.dispose();
+    _locationHintTimer?.cancel(); // Cancel timer on dispose
     super.dispose();
   }
 
@@ -142,11 +150,8 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
     if (_profileImageFile == null) return;
     if (imgurClientId == null || imgurClientId!.isEmpty) {
       _showSnackBar("Image upload configuration missing.", isError: true);
-      // Allow signup without image if upload isn't configured? Or enforce it?
-      // For now, we just warn and don't set _isUploadingImage.
-      // If image is REQUIRED, you might want to prevent signup here.
       print("Warning: Imgur Client ID not configured in .env");
-      return; // Or handle differently if image is mandatory
+      return;
     }
 
     setState(() => _isUploadingImage = true);
@@ -164,10 +169,8 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
         ),
       );
 
-      // Add timeout to the request
-      final streamedResponse = await request
-          .send()
-          .timeout(const Duration(seconds: 30)); // 30 second timeout for upload
+      final streamedResponse =
+          await request.send().timeout(const Duration(seconds: 30));
       final response = await http.Response.fromStream(streamedResponse);
 
       if (response.statusCode == 200) {
@@ -177,7 +180,7 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
             responseData['data']['link'] != null) {
           setState(() {
             _uploadedImageUrl = responseData['data']['link'];
-            _isUploadingImage = false;
+            // Keep _isUploadingImage = false until after state is set
           });
           _showSnackBar("Profile image uploaded successfully!", isError: false);
         } else {
@@ -189,12 +192,44 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
       }
     } on TimeoutException catch (_) {
       print("Imgur upload timeout");
-      setState(() => _isUploadingImage = false);
       _showSnackBar("Image upload timed out. Please try again.", isError: true);
     } catch (e) {
       print("Imgur upload error: $e");
-      setState(() => _isUploadingImage = false);
       _showSnackBar("Failed to upload image. Please try again.", isError: true);
+    } finally {
+      // Ensure loading state is turned off even if setting URL fails
+      if (mounted) {
+        setState(() => _isUploadingImage = false);
+      }
+    }
+  }
+
+  // --- Start Location Hint Animation ---
+  void _startLocationHintAnimation() {
+    _locationHintTimer?.cancel(); // Cancel existing timer
+    _locationHintDots = 0; // Reset dots
+    _locationHintTimer =
+        Timer.periodic(const Duration(milliseconds: 400), (timer) {
+      if (!mounted || !_isFetchingLocation) {
+        timer.cancel();
+        if (mounted && !_isFetchingLocation) {
+          // Ensure dots are reset if fetching stops before next tick
+          setState(() => _locationHintDots = 0);
+        }
+        return;
+      }
+      setState(() {
+        _locationHintDots =
+            (_locationHintDots + 1) % 4; // Cycle 0, 1, 2, 3 -> 0
+      });
+    });
+  }
+
+  // --- Stop Location Hint Animation ---
+  void _stopLocationHintAnimation() {
+    _locationHintTimer?.cancel();
+    if (mounted) {
+      setState(() => _locationHintDots = 0); // Reset dots visually
     }
   }
 
@@ -202,11 +237,14 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
   Future<void> _getCurrentLocation() async {
     if (_isFetchingLocation) return; // Prevent multiple requests
 
-    setState(() => _isFetchingLocation = true);
-    // Clear previous values while fetching// --- Location Fetching --- (Continuing from previous part)
-    _locationDisplayController.clear();
-    _locationCoordinates = '';
-    _humanReadableAddress = '';
+    setState(() {
+      _isFetchingLocation = true;
+      // Clear previous values while fetching
+      _locationDisplayController.clear();
+      _locationCoordinates = '';
+      _humanReadableAddress = '';
+    });
+    _startLocationHintAnimation(); // Start animation
 
     LocationPermission permission;
     bool serviceEnabled;
@@ -216,6 +254,7 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
       if (!serviceEnabled) {
         _showSnackBar('Location services are disabled. Please enable them.',
             isError: true);
+        _stopLocationHintAnimation();
         setState(() => _isFetchingLocation = false);
         return;
       }
@@ -225,6 +264,7 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
           _showSnackBar('Location permission denied.', isError: true);
+          _stopLocationHintAnimation();
           setState(() => _isFetchingLocation = false);
           return;
         }
@@ -234,12 +274,11 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
         _showSnackBar(
             'Location permission permanently denied. Please enable in settings.',
             isError: true);
+        _stopLocationHintAnimation();
         setState(() => _isFetchingLocation = false);
-        // Optionally, offer to open app settings here
         return;
       }
 
-      // Fetch position
       Position position = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high,
           timeLimit: const Duration(seconds: 15) // Add a timeout
@@ -247,14 +286,13 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
 
       _locationCoordinates = "${position.latitude}, ${position.longitude}";
 
-      // Reverse Geocode (using a free service - consider rate limits/alternatives)
+      // Reverse Geocode
       try {
-        // Using geocode.maps.co as in the original example
         final String geocodeUrl =
             'https://geocode.maps.co/reverse?lat=${position.latitude}&lon=${position.longitude}';
         final response = await http
             .get(Uri.parse(geocodeUrl))
-            .timeout(const Duration(seconds: 10)); // Geocoding timeout
+            .timeout(const Duration(seconds: 10));
 
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
@@ -272,8 +310,8 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
             isError: true);
       }
 
+      _stopLocationHintAnimation(); // Stop animation before setting final text
       setState(() {
-        // Display address or fallback to coordinates if address fetch failed
         _locationDisplayController.text = _humanReadableAddress.isNotEmpty &&
                 _humanReadableAddress != 'Could not fetch address'
             ? _humanReadableAddress
@@ -284,21 +322,24 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
     } on TimeoutException catch (_) {
       _showSnackBar('Getting location timed out. Please try again.',
           isError: true);
-      setState(() => _isFetchingLocation = false);
+      _stopLocationHintAnimation();
+      setState(() {
+        _isFetchingLocation = false;
+        _locationDisplayController.text = 'Failed to get location';
+      });
     } catch (e) {
       print("Location error: $e");
       _showSnackBar('Error getting location. Please try again.', isError: true);
+      _stopLocationHintAnimation();
       setState(() {
         _isFetchingLocation = false;
-        _locationDisplayController.text =
-            'Failed to get location'; // Indicate failure in field
+        _locationDisplayController.text = 'Failed to get location';
       });
     }
   }
 
   // --- Form Submission (Chef Sign Up) ---
   Future<void> _signUp() async {
-    // Dismiss keyboard
     FocusScope.of(context).unfocus();
 
     if (!_formKey.currentState!.validate()) {
@@ -312,34 +353,26 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
       return;
     }
 
-    // Check if location was acquired
     if (_locationCoordinates.isEmpty) {
-      _showSnackBar('Please acquire your location using the button.',
-          isError: true);
+      _showSnackBar('Please acquire your location.', isError: true);
       return;
     }
 
-    // Check if image is still uploading (if an image was selected)
     if (_profileImageFile != null && _isUploadingImage) {
       _showSnackBar('Profile image is still uploading. Please wait.',
           isError: true);
       return;
     }
-    // Optional: Check if upload failed and image is required
+    // Optional: Check if upload failed and image is required (uncomment if needed)
     // if (_profileImageFile != null && _uploadedImageUrl == null && !_isUploadingImage) {
-    //    _showSnackBar('Profile image upload failed. Please try uploading again.', isError: true);
-    //    // Optionally trigger retry: await _uploadToImgur(); if(_uploadedImageUrl == null) return;
+    //    _showSnackBar('Profile image upload failed. Please try uploading again or remove the image.', isError: true);
     //    return;
     // }
 
-    setState(() {
-      _isLoading = true; // Show loading indicator on button
-    });
+    setState(() => _isLoading = true);
 
     try {
-      final Uri signupUri =
-          Uri.parse('$apibaseurl/rr/achef'); // Chef signup endpoint
-
+      final Uri signupUri = Uri.parse('$apibaseurl/rr/achef');
       final response = await http
           .post(
             signupUri,
@@ -347,25 +380,19 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
             body: json.encode({
               'Name': _nameController.text.trim(),
               'Email': _emailController.text.trim().toLowerCase(),
-              'Hashed_Password': _passwordController
-                  .text, // Send plain text, backend should hash
+              'Hashed_Password': _passwordController.text, // Backend hashes
               'Phone_Number': _phoneNumberController.text.trim(),
-              // Combine human-readable address and coordinates
               'Location': _humanReadableAddress.isNotEmpty &&
                       _humanReadableAddress != 'Could not fetch address'
                   ? "$_humanReadableAddress ($_locationCoordinates)"
-                  : _locationCoordinates, // Fallback to just coordinates
-              'Image': _uploadedImageUrl ??
-                  '', // Send Imgur URL or empty string if none/failed
+                  : _locationCoordinates,
+              'Image': _uploadedImageUrl ?? '',
             }),
           )
-          .timeout(const Duration(seconds: 20)); // Network request timeout
+          .timeout(const Duration(seconds: 20));
 
       if (response.statusCode == 201) {
-        // Chef creation successful
-        // --- SUCCESS ---
         final responseBody = json.decode(response.body);
-        // Ensure the keys match your backend response
         final userId = responseBody['id']?.toString();
         final userType = responseBody['type']?.toString();
 
@@ -373,13 +400,10 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
           await saveUserDetails(userId, userType);
           _showSnackBar('Sign up successful! Redirecting to verification.',
               isError: false);
-          // Navigate to verification page
           Navigator.pushReplacement(
-            // Use pushReplacement so user can't go back to signup
             context,
             MaterialPageRoute(
-                builder: (context) =>
-                    const EmailVerificationPage()), // Ensure VerificationPage exists
+                builder: (context) => const EmailVerificationPage()),
           );
         } else {
           print(
@@ -389,14 +413,12 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
               isError: true);
         }
       } else {
-        // --- FAILURE ---
         String errorMessage = 'Sign up failed. Please try again.';
         try {
           final responseData = json.decode(response.body);
           errorMessage =
               responseData['message'] ?? responseData['error'] ?? errorMessage;
         } catch (_) {
-          // Handle cases where response body is not valid JSON or empty
           errorMessage =
               'Sign up failed (Code: ${response.statusCode}). Please try again.';
           print(
@@ -414,21 +436,16 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
           'An unexpected error occurred during sign up. Please try again later.',
           isError: true);
     } finally {
-      // Ensure loading indicator is always turned off
       if (mounted) {
-        // Check if the widget is still in the tree
-        setState(() {
-          _isLoading = false;
-        });
+        setState(() => _isLoading = false);
       }
     }
   }
 
   // --- Helper for SnackBar ---
   void _showSnackBar(String message, {bool isError = false}) {
-    if (!mounted) return; // Don't show snackbar if widget is disposed
-    ScaffoldMessenger.of(context)
-        .removeCurrentSnackBar(); // Remove previous snackbar
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message, style: TextStyle(color: whiteColor)),
@@ -436,8 +453,7 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         margin: const EdgeInsets.all(15),
-        duration:
-            Duration(seconds: isError ? 4 : 3), // Longer duration for errors
+        duration: Duration(seconds: isError ? 4 : 3),
       ),
     );
   }
@@ -445,12 +461,14 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: lightBackgroundColor,
+      // --- CHANGE 1: Set background to white ---
+      backgroundColor: whiteColor,
+      // --- End Change 1 ---
       appBar: AppBar(
         title: const Text('Become A Chef',
             style: TextStyle(color: whiteColor, fontWeight: FontWeight.w600)),
         backgroundColor: primaryTeal,
-        elevation: 1.0,
+        elevation: 1.0, // Subtle shadow against white background
         iconTheme: const IconThemeData(color: whiteColor),
       ),
       body: SafeArea(
@@ -461,11 +479,9 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
             child: ListView(
               children: [
                 const SizedBox(height: 10),
-                // --- Profile Image Picker ---
                 _buildProfileImagePicker(),
                 const SizedBox(height: 30),
 
-                // --- Chef Name ---
                 _buildTextFormField(
                   controller: _nameController,
                   labelText: "Chef Name",
@@ -477,7 +493,6 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
                 ),
                 const SizedBox(height: 16),
 
-                // --- Email ---
                 _buildTextFormField(
                   controller: _emailController,
                   labelText: "Email Address",
@@ -495,7 +510,6 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
                 ),
                 const SizedBox(height: 16),
 
-                // --- Password ---
                 _buildTextFormField(
                   controller: _passwordController,
                   labelText: "Password",
@@ -512,7 +526,6 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
                 ),
                 const SizedBox(height: 16),
 
-                // --- Confirm Password ---
                 _buildTextFormField(
                   controller: _confirmPasswordController,
                   labelText: "Confirm Password",
@@ -520,18 +533,15 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
                   icon: Icons.lock_outline,
                   obscureText: true,
                   validator: (value) {
-                    if (value == null || value.isEmpty) {
+                    if (value == null || value.isEmpty)
                       return "Confirm password";
-                    }
-                    if (value != _passwordController.text) {
+                    if (value != _passwordController.text)
                       return "Passwords do not match";
-                    }
                     return null;
                   },
                 ),
                 const SizedBox(height: 16),
 
-                // --- Phone Number ---
                 _buildTextFormField(
                   controller: _phoneNumberController,
                   labelText: "Phone Number",
@@ -539,9 +549,8 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
                   icon: Icons.phone_outlined,
                   keyboardType: TextInputType.phone,
                   validator: (value) {
-                    if (value == null || value.isEmpty) {
+                    if (value == null || value.isEmpty)
                       return "Enter phone number";
-                    }
                     // Basic phone number validation (optional)
                     // if (!RegExp(r'^\+?[0-9]{10,}$').hasMatch(value)) {
                     //   return "Enter a valid phone number";
@@ -551,20 +560,21 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
                 ),
                 const SizedBox(height: 16),
 
-                // --- Location Field (Read-only + Button) ---
+                // --- CHANGE 2: Wrap Location Field with GestureDetector ---
                 GestureDetector(
-                  // AbsorbPointer prevents taps on the text field itself,
-                  // but the GestureDetector captures taps on the whole area.
-                  onTap: _isFetchingLocation ? null : _getCurrentLocation,
+                  onTap: _isFetchingLocation
+                      ? null
+                      : _getCurrentLocation, // Trigger location fetch on tap
                   child: AbsorbPointer(
+                    // Prevents TextFormField from getting tap focus
                     child: _buildLocationField(),
                   ),
                 ),
+                // --- End Change 2 ---
                 const SizedBox(height: 30),
 
-                // --- Sign Up Button ---
                 _buildSignUpButton(),
-                const SizedBox(height: 20), // Space at the bottom
+                const SizedBox(height: 20),
               ],
             ),
           ),
@@ -573,7 +583,6 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
     );
   }
 
-  // --- Reusable TextFormField Builder (Copied from Producer) ---
   Widget _buildTextFormField({
     required TextEditingController controller,
     required String labelText,
@@ -585,12 +594,13 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
     bool readOnly = false,
     Widget? suffixIcon,
   }) {
+    // Re-using the existing well-styled text field builder
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
       obscureText: obscureText,
       readOnly: readOnly,
-      style: const TextStyle(color: darkTeal), // Input text color
+      style: const TextStyle(color: darkTeal),
       decoration: InputDecoration(
           labelText: labelText,
           hintText: hintText,
@@ -600,57 +610,58 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
           prefixIcon: Icon(icon, color: primaryTeal, size: 20),
           suffixIcon: suffixIcon,
           filled: true,
-          fillColor: textFieldFillColor, // Semi-transparent white fill
-          // Border styles
+          fillColor:
+              textFieldFillColor, // Semi-transparent white fill might need adjustment on pure white BG
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(
-                color: lightTeal, width: 1.0), // Default border
+            borderSide: const BorderSide(color: lightTeal, width: 1.0),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(
-                color: lightTeal, width: 1.0), // Border when enabled
+            borderSide: const BorderSide(color: lightTeal, width: 1.0),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(
-                color: primaryTeal, width: 1.5), // Border when focused
+            borderSide: const BorderSide(color: primaryTeal, width: 1.5),
           ),
           errorBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(
-                color: errorColor, width: 1.0), // Border on error
+            borderSide: const BorderSide(color: errorColor, width: 1.0),
           ),
           focusedErrorBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(
-                color: errorColor, width: 1.5), // Border on error + focused
+            borderSide: const BorderSide(color: errorColor, width: 1.5),
           ),
-          contentPadding: const EdgeInsets.symmetric(
-              vertical: 14.0, horizontal: 16.0), // Inner padding
-          errorStyle: const TextStyle(
-              color: errorColor, fontSize: 11)), // Error text style
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 14.0, horizontal: 16.0),
+          errorStyle: const TextStyle(color: errorColor, fontSize: 11)),
       validator: validator,
     );
   }
 
-  // --- Location Field Specific Builder (Adapted from Producer) ---
+  // --- Location Field Specific Builder ---
   Widget _buildLocationField() {
+    // --- CHANGE 3: Added animation logic ---
+    String currentHintText = _isFetchingLocation
+        ? "Acquiring location${'.' * _locationHintDots}" // Animated dots
+        : "Tap here or icon to get location"; // Updated hint
+    // --- End Change 3 ---
+
     return AnimatedOpacity(
-      opacity: _isFetchingLocation ? 0.6 : 1.0, // Fade slightly when fetching
+      opacity:
+          _isFetchingLocation ? 0.7 : 1.0, // Slightly more fade when fetching
       duration: const Duration(milliseconds: 300),
       child: TextFormField(
         controller: _locationDisplayController,
-        readOnly: true, // Make it read-only
+        readOnly: true,
         style: const TextStyle(color: darkTeal, fontSize: 14),
         decoration: InputDecoration(
             labelText: "Your Location",
             labelStyle: const TextStyle(
                 color: primaryTeal, fontWeight: FontWeight.w500),
-            hintText: _isFetchingLocation
-                ? "Acquiring location..."
-                : "Tap icon to get current location",
+            // --- CHANGE 3.1: Use dynamic hint text ---
+            hintText: currentHintText,
+            // --- End Change 3.1 ---
             hintStyle: const TextStyle(
                 color: subtleTextColor,
                 fontStyle: FontStyle.italic,
@@ -669,68 +680,61 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(
-                  color: primaryTeal, width: 1.5), // Keep focus style
+              borderSide: const BorderSide(color: primaryTeal, width: 1.5),
             ),
             errorBorder: OutlineInputBorder(
-              // Add error border style
               borderRadius: BorderRadius.circular(10),
               borderSide: const BorderSide(color: errorColor, width: 1.0),
             ),
             focusedErrorBorder: OutlineInputBorder(
-              // Add focused error border style
               borderRadius: BorderRadius.circular(10),
               borderSide: const BorderSide(color: errorColor, width: 1.5),
             ),
-            contentPadding: const EdgeInsets.fromLTRB(
-                16.0, 14.0, 0.0, 14.0), // Adjust padding for icon
+            contentPadding: const EdgeInsets.fromLTRB(16.0, 14.0, 0.0, 14.0),
             suffixIcon: Padding(
-              padding: const EdgeInsets.only(
-                  right: 8.0), // Padding for the suffix icon
+              padding: const EdgeInsets.only(right: 8.0),
               child: IconButton(
                 icon: _isFetchingLocation
                     ? const SizedBox(
-                        // Show progress indicator inside button space
                         width: 20,
                         height: 20,
                         child: CircularProgressIndicator(
                             strokeWidth: 2.0, color: primaryTeal))
-                    : const Icon(Icons.my_location_rounded,
-                        color: accentTeal), // Location icon
+                    : const Icon(Icons.my_location_rounded, color: accentTeal),
                 tooltip: 'Get Current Location',
-                // Disable button while fetching
+                // Button inside is now redundant for tap activation, but good for visual cue & accessibility
                 onPressed: _isFetchingLocation ? null : _getCurrentLocation,
               ),
             ),
-            errorStyle: const TextStyle(
-                color: errorColor, fontSize: 11) // Error text style
-            ),
-        // Validator checks if coordinates are present (set after successful fetching)
+            errorStyle: const TextStyle(color: errorColor, fontSize: 11)),
         validator: (_) {
-          // Use underscore as value is not needed
-          if (_locationCoordinates.isEmpty && !_isFetchingLocation) {
-            // Only show error if not currently fetching
+          // Only show validation error if the field is empty *and* we are not currently fetching
+          if (_locationCoordinates.isEmpty &&
+              !_isFetchingLocation &&
+              _locationDisplayController.text.isEmpty) {
             return 'Please acquire your location';
           }
-          return null;
+          // Allow "Failed to get location" text without triggering validation error
+          if (_locationDisplayController.text == 'Failed to get location') {
+            return 'Location fetch failed, please try again'; // More specific error
+          }
+          return null; // No error if coordinates exist, fetching, or failed text is shown
         },
       ),
     );
   }
 
-  // --- Profile Image Picker Widget (Copied from Producer) ---
   Widget _buildProfileImagePicker() {
+    // Re-using the existing image picker widget
     return Center(
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // The main circle avatar
           Container(
             decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                border: Border.all(color: lightTeal, width: 2), // Teal border
+                border: Border.all(color: lightTeal, width: 2),
                 boxShadow: [
-                  // Subtle shadow for depth
                   BoxShadow(
                     color: Colors.grey.withOpacity(0.3),
                     spreadRadius: 1,
@@ -739,54 +743,46 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
                   ),
                 ]),
             child: CircleAvatar(
-              radius: 60, // Size of the avatar
-              backgroundColor: lighterTeal, // Light teal background
-              // Display the selected image file if available
+              radius: 60,
+              backgroundColor: lighterTeal,
               backgroundImage: _profileImageFile != null
                   ? FileImage(_profileImageFile!)
                   : null,
-              // Show person icon if no image and not uploading
               child: _profileImageFile == null && !_isUploadingImage
                   ? const Icon(Icons.person_add_alt_1,
-                      size: 50, color: primaryTeal) // Changed icon slightly
-                  : null, // Otherwise, show nothing (backgroundImage will be used)
+                      size: 50, color: primaryTeal)
+                  : null,
             ),
           ),
-          // Loading indicator overlay (shows during upload)
           if (_isUploadingImage)
             Positioned.fill(
               child: Container(
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.5), // Dark overlay
+                  color: Colors.black.withOpacity(0.5),
                   shape: BoxShape.circle,
                 ),
                 child: const Center(
                   child: CircularProgressIndicator(
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                        whiteColor), // White spinner
+                    valueColor: AlwaysStoppedAnimation<Color>(whiteColor),
                     strokeWidth: 3,
                   ),
                 ),
               ),
             ),
-          // Edit/Upload button overlay (pencil icon)
           Positioned(
             bottom: 0,
             right: 0,
             child: Material(
-              color: primaryTeal, // Teal background for the button
+              color: primaryTeal,
               shape: const CircleBorder(),
-              elevation: 3.0, // Button shadow
+              elevation: 3.0,
               child: InkWell(
-                onTap: _isUploadingImage
-                    ? null
-                    : _showImageSourceActionSheet, // Disable tap during upload
+                onTap: _isUploadingImage ? null : _showImageSourceActionSheet,
                 customBorder: const CircleBorder(),
-                splashColor: lightTeal.withOpacity(0.5), // Splash effect on tap
+                splashColor: lightTeal.withOpacity(0.5),
                 child: const Padding(
-                  padding: EdgeInsets.all(8.0), // Padding inside the button
-                  child: Icon(Icons.edit,
-                      color: whiteColor, size: 20), // Edit icon
+                  padding: EdgeInsets.all(8.0),
+                  child: Icon(Icons.edit, color: whiteColor, size: 20),
                 ),
               ),
             ),
@@ -796,29 +792,25 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
     );
   }
 
-  // --- Sign Up Button Builder (Adapted from Producer) ---
   Widget _buildSignUpButton() {
-    // Determine if the button should be disabled
+    // Re-using the existing sign-up button
     final bool isDisabled =
         _isLoading || _isUploadingImage || _isFetchingLocation;
-
     return SizedBox(
-      width: double.infinity, // Make button full width
+      width: double.infinity,
       child: ElevatedButton(
-        // Disable onPressed if any loading operation is in progress
         onPressed: isDisabled ? null : _signUp,
         style: ElevatedButton.styleFrom(
-          backgroundColor: accentTeal, // Button background color
-          foregroundColor: whiteColor, // Text/Icon color
-          padding: const EdgeInsets.symmetric(vertical: 14), // Button padding
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10)), // Rounded corners
-          elevation: isDisabled ? 0 : 2, // Remove shadow when disabled
-          // Style for the disabled state
+          backgroundColor: accentTeal,
+          foregroundColor: whiteColor,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          elevation: isDisabled ? 0 : 2,
           disabledBackgroundColor: disabledColor.withOpacity(0.6),
           disabledForegroundColor: whiteColor.withOpacity(0.8),
         ),
-        child: _isLoading // Show spinner if general signup is loading
+        child: _isLoading
             ? const SizedBox(
                 height: 20,
                 width: 20,
@@ -827,7 +819,6 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
                   valueColor: AlwaysStoppedAnimation<Color>(whiteColor),
                 ),
               )
-            // Otherwise, show the text
             : const Text("Create Chef Account",
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       ),

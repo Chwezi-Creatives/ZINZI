@@ -114,7 +114,8 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isListening = false;
   final List<String> _ttsQueue = [];
   bool _isSpeaking = false;
-  final String webhookUrl = 'https://chwezi.app.n8n.cloud/webhook/fc1e9b92-2a76-4496-90a1-f590c3fcbc53';
+  final String webhookUrl =
+      'https://chwezi.app.n8n.cloud/webhook/fc1e9b92-2a76-4496-90a1-f590c3fcbc53';
 
   @override
   void initState() {
@@ -269,15 +270,17 @@ class _ChatScreenState extends State<ChatScreen> {
       _messages.add(userMessage);
     });
 
-    _playSound('sounds/send1.mp3'); 
+    _playSound('sounds/send1.mp3');
     _scrollToBottom();
 
     try {
-      final response = await http.post(
-        Uri.parse(webhookUrl),
-        headers: {'Content-Type': 'application/json; charset=UTF-8'},
-        body: jsonEncode({'message': message}),
-      ).timeout(const Duration(seconds: 20));
+      final response = await http
+          .post(
+            Uri.parse(webhookUrl),
+            headers: {'Content-Type': 'application/json; charset=UTF-8'},
+            body: jsonEncode({'message': message}),
+          )
+          .timeout(const Duration(seconds: 20));
 
       String botResponseText;
       if (response.statusCode == 200) {
@@ -285,7 +288,10 @@ class _ChatScreenState extends State<ChatScreen> {
           final responseBody = utf8.decode(response.bodyBytes);
           if (responseBody.isNotEmpty) {
             final data = jsonDecode(responseBody);
-            if (data != null && data is Map && data.containsKey('output') && data['output'] is String) {
+            if (data != null &&
+                data is Map &&
+                data.containsKey('output') &&
+                data['output'] is String) {
               botResponseText = data['output'];
             } else {
               botResponseText = 'Received unclear data from server.';
@@ -300,7 +306,8 @@ class _ChatScreenState extends State<ChatScreen> {
           print("Received Body: ${response.body}");
         }
       } else {
-        botResponseText = 'Oops! Server error. Status: ${response.statusCode}. Body: ${response.body}';
+        botResponseText =
+            'Oops! Server error. Status: ${response.statusCode}. Body: ${response.body}';
         print("Server Error: ${response.statusCode}, Body: ${response.body}");
       }
       _addBotMessage(botResponseText);
@@ -411,7 +418,8 @@ class _ChatScreenState extends State<ChatScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('SENSEI', style: TextStyle(fontWeight: FontWeight.bold)),
+          title: const Text('SENSEI',
+              style: TextStyle(fontWeight: FontWeight.bold)),
           centerTitle: true,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
@@ -458,7 +466,8 @@ class _ChatScreenState extends State<ChatScreen> {
                     const CircleAvatar(
                       radius: 12,
                       backgroundColor: Colors.teal,
-                      child: Icon(Icons.smart_toy, color: Colors.white, size: 16),
+                      child:
+                          Icon(Icons.smart_toy, color: Colors.white, size: 16),
                     ),
                     const SizedBox(width: 12),
                     Text(
@@ -490,9 +499,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildInputField() {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    final inputFieldBgColor = Theme.of(context).cardTheme.color ?? 
-        (isDarkMode ? _NutritionChatAppState.inputFieldColorDark : _NutritionChatAppState.inputFieldColorLight);
-    final inputTextColor = Theme.of(context).textTheme.bodyMedium?.color ?? 
+    final inputFieldBgColor = Theme.of(context).cardTheme.color ??
+        (isDarkMode
+            ? _NutritionChatAppState.inputFieldColorDark
+            : _NutritionChatAppState.inputFieldColorLight);
+    final inputTextColor = Theme.of(context).textTheme.bodyMedium?.color ??
         (isDarkMode ? Colors.white : Colors.black87);
     final hintColor = Theme.of(context).hintColor;
     final iconColor = _NutritionChatAppState.sendButtonColor;
@@ -513,14 +524,14 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            IconButton(
+            /*IconButton(
               icon: Icon(
                 _isListening ? Icons.mic_off : Icons.mic,
                 color: iconColor,
               ),
               onPressed: _toggleListening,
               tooltip: _isListening ? 'Stop listening' : 'Start listening',
-            ),
+            ),*/
             Expanded(
               child: TextField(
                 controller: _controller,
@@ -634,10 +645,11 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
         ? _NutritionChatAppState.botBubbleColorDark
         : _NutritionChatAppState.botBubbleColorLight;
 
-    final bubbleColor = widget.message.isUser ? userBubbleColor : botBubbleColor;
+    final bubbleColor =
+        widget.message.isUser ? userBubbleColor : botBubbleColor;
     final textColor = widget.message.isUser
         ? Colors.white
-        : Theme.of(context).textTheme.bodyMedium?.color ?? 
+        : Theme.of(context).textTheme.bodyMedium?.color ??
             (isDarkMode ? Colors.white : Colors.black87);
 
     final botAvatar = CircleAvatar(
@@ -651,7 +663,7 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
       child: const Icon(Icons.person, color: Colors.white, size: 18),
     );
 
-    final MainAxisAlignment rowMainAxisAlignment = 
+    final MainAxisAlignment rowMainAxisAlignment =
         widget.message.isUser ? MainAxisAlignment.end : MainAxisAlignment.start;
 
     return SlideTransition(

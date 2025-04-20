@@ -1,8 +1,8 @@
-import 'package:flutter/material.dart';
+/*import 'package:flutter/material.dart';
 import 'package:zinzi2/allmeals.dart';
 import 'package:zinzi2/checkout.dart';
-import 'package:zinzi2/reco.dart';
-import 'package:zinzi2/repeat.dart';
+import 'package:zinzi2/reco.dartp';
+import 'package:zinzi2/repeat.dartp';
 import 'cart.dart';
 
 class ChooseChef extends StatelessWidget {
@@ -507,3 +507,4 @@ class ChefDetailScreen extends StatelessWidget {
     );
   }
 }
+*/

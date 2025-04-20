@@ -17,6 +17,8 @@ import 'package:shimmer/shimmer.dart';
 import 'package:google_fonts/google_fonts.dart'; // Import Google Fonts
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi2/app_drawer.dart';
+import 'package:zinzi2/user_cache.dart'; // Import UserCache
+import 'package:zinzi2/cache_config.dart'; // Import CacheConfig
 
 // --- Re-add Color Constants (or import from a shared file) ---
 const Color kColorPrimaryDark = Color(0xFF004D40);
@@ -46,45 +48,49 @@ class AllMealsScreen extends StatefulWidget {
   const AllMealsScreen({super.key}); // Use super parameters
 
   // Public static cache loader for splash screen
-  static Future<void> loadMealsCacheFromPrefs() => _AllMealsScreenState.loadMealsCacheFromPrefs();
+  static Future<void> loadMealsCacheFromPrefs() =>
+      _AllMealsScreenState.loadMealsCacheFromPrefs();
 
   @override
   _AllMealsScreenState createState() => _AllMealsScreenState();
 }
 
-
 class _AllMealsScreenState extends State<AllMealsScreen> {
   // --- Caching ---
+  List<Map<String, dynamic>> _meals = [];
   static List<Map<String, dynamic>> _mealsCache = [];
   static DateTime? _mealsCacheTimestamp;
-  static const Duration _cacheDuration = Duration(days: 1);
 
   static const String _mealsCacheKey = 'all_meals_cache';
   static const String _mealsCacheTimestampKey = 'all_meals_cache_timestamp';
 
   // Load cache from SharedPreferences (persistent storage)
   static Future<void> loadMealsCacheFromPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
-    final mealsJson = prefs.getString(_mealsCacheKey);
-    final timestampStr = prefs.getString(_mealsCacheTimestampKey);
-    if (mealsJson != null && timestampStr != null) {
+    final cachedData = await UserCache.getData(_mealsCacheKey);
+    final timestampData = await UserCache.getData(_mealsCacheTimestampKey);
+
+    if (cachedData != null && timestampData != null) {
       try {
-        final List<dynamic> decoded = json.decode(mealsJson);
-        _mealsCache = List<Map<String, dynamic>>.from(decoded);
-        _mealsCacheTimestamp = DateTime.parse(timestampStr);
+        _mealsCache = List<Map<String, dynamic>>.from(cachedData);
+        _mealsCacheTimestamp = DateTime.parse(timestampData);
       } catch (_) {
         _mealsCache = [];
         _mealsCacheTimestamp = null;
       }
+    } else {
+       _mealsCache = [];
+       _mealsCacheTimestamp = null;
     }
   }
 
   // Save cache to SharedPreferences
-  static Future<void> saveMealsCacheToPrefs(List<Map<String, dynamic>> meals) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_mealsCacheKey, json.encode(meals));
-    await prefs.setString(_mealsCacheTimestampKey, DateTime.now().toIso8601String());
+  static Future<void> saveMealsCacheToPrefs(
+      List<Map<String, dynamic>> meals) async {
+    await UserCache.saveData(_mealsCacheKey, meals);
+    await UserCache.saveData(
+        _mealsCacheTimestampKey, DateTime.now().toIso8601String());
   }
+
   final TextEditingController _searchController = TextEditingController();
   Timer? _debounce;
   // Use ValueNotifier for reactive state management of meals list
@@ -105,53 +111,77 @@ class _AllMealsScreenState extends State<AllMealsScreen> {
   void initState() {
     super.initState();
     // Load persistent cache first (async)
+    // Load persistent cache first (async)
     _initialFetchFuture = (() async {
-      await loadMealsCacheFromPrefs();
-      final now = DateTime.now();
-      if (_mealsCache.isNotEmpty &&
-          _mealsCacheTimestamp != null &&
-          now.difference(_mealsCacheTimestamp!) < _cacheDuration) {
-        _allMeals = List<Map<String, dynamic>>.from(_mealsCache);
+      await AllMealsScreen.loadMealsCacheFromPrefs();
+
+      // Always display cached data immediately if available
+      if (_AllMealsScreenState._mealsCache.isNotEmpty) {
+        _allMeals =
+            List<Map<String, dynamic>>.from(_AllMealsScreenState._mealsCache);
         _buildMealLookupMap();
         _filterMeals('');
-        setState(() {
-          _isLoadingMeals = false;
-        });
+        if (mounted) {
+          setState(() {
+            _isLoadingMeals = false; // Assume not loading initially if cache is present
+          });
+        }
       } else {
-        await _fetchMealsAndPreprocess();
+         // If no cache, show loading shimmer initially
+         if (mounted) {
+            setState(() {
+              _isLoadingMeals = true;
+            });
+         }
       }
+
+      // Always fetch new data in the background
+      // We don't await this fetch here so the UI can show cached data immediately
+      _fetchMealsAndPreprocess();
+
       _searchController.addListener(_onSearchChanged);
       _fetchUserDetails();
     })();
   }
 
   Future<void> _fetchMealsAndPreprocess() async {
-    setState(() {
-      _isLoadingMeals = true;
-      _fetchError = ''; // Reset error on new fetch
-    });
+    // Do not set _isLoadingMeals to true here.
+    // The loading state is managed by initState based on cache availability.
+    _fetchError = ''; // Reset error on new fetch
     try {
       final meals = await _fetchMeals();
       if (mounted) {
         // Check if widget is still mounted
         _allMeals = meals;
-        _mealsCache = List<Map<String, dynamic>>.from(meals); // Update cache
-        _mealsCacheTimestamp = DateTime.now();
-        await saveMealsCacheToPrefs(_mealsCache); // Persist cache
+        _AllMealsScreenState._mealsCache =
+            List<Map<String, dynamic>>.from(meals); // Update cache
+        _AllMealsScreenState._mealsCacheTimestamp = DateTime.now();
+        // Persist cache using UserCache
+        await UserCache.saveData(_mealsCacheKey, _AllMealsScreenState._mealsCache);
+        await UserCache.saveData(_mealsCacheTimestampKey, _AllMealsScreenState._mealsCacheTimestamp!.toIso8601String());
+
         _buildMealLookupMap();
-        _filterMeals(''); // Initialize filter with all meals
-        setState(() {
-          _isLoadingMeals = false;
-        });
+        _filterMeals(''); // Initialize filter with all meals and trigger UI update
+
+        // If we were showing a loading indicator (because there was no cache), hide it now.
+        if (_isLoadingMeals) {
+           setState(() {
+             _isLoadingMeals = false;
+           });
+        }
       }
     } catch (e) {
       if (mounted) {
-        setState(() {
-          _isLoadingMeals = false;
-          _fetchError = "Failed to load meals. Please try again.";
-          _filteredMealsNotifier.value = []; // Clear meals on error
-        });
-        print('Error in _fetchMealsAndPreprocess: $e');
+        print('Error fetching new meals in background: $e');
+        // If there was no cached data, show the error state.
+        if (_allMeals.isEmpty) {
+           setState(() {
+             _isLoadingMeals = false;
+             _fetchError = "Failed to load meals. Please try again.";
+             _filteredMealsNotifier.value = []; // Clear meals on error
+           });
+        }
+        // If cached data is present, just log the error and keep showing cached data.
       }
     }
   }
@@ -159,9 +189,9 @@ class _AllMealsScreenState extends State<AllMealsScreen> {
   void _buildMealLookupMap() {
     _mealMapByName = Map.fromEntries(
       _allMeals
-          .where(
-              (m) => m['Meal_name'] != null) // Use PascalCase key
-          .map((m) => MapEntry(m['Meal_name'].toString().toLowerCase(), m)), // Use PascalCase key
+          .where((m) => m['Meal_name'] != null) // Use PascalCase key
+          .map((m) => MapEntry(m['Meal_name'].toString().toLowerCase(),
+              m)), // Use PascalCase key
     );
   }
 
@@ -184,8 +214,10 @@ class _AllMealsScreenState extends State<AllMealsScreen> {
               if (mapItem.containsKey('Price') && mapItem['Price'] is num) {
                 // Keep price as num (int or double)
               } else {
-                 // Handle potential string price or missing price - default to 0.0
-                 mapItem['Price'] = double.tryParse(mapItem['Price']?.toString() ?? '0.0') ?? 0.0;
+                // Handle potential string price or missing price - default to 0.0
+                mapItem['Price'] =
+                    double.tryParse(mapItem['Price']?.toString() ?? '0.0') ??
+                        0.0;
               }
               return mapItem;
             }));
@@ -324,6 +356,10 @@ class _AllMealsScreenState extends State<AllMealsScreen> {
             color: kColorTextOnPrimary), // Explicit drawer icon color
         actions: [
           IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _fetchMealsAndPreprocess,
+          ),
+          IconButton(
             tooltip: "Shopping Cart",
             icon: const Icon(Icons.shopping_cart_outlined), // Outlined icon
             onPressed: () {
@@ -336,11 +372,10 @@ class _AllMealsScreenState extends State<AllMealsScreen> {
           ),
         ],
       ),
+      // Replace with the standardized AppDrawer
       drawer: AppDrawer(
-        userName: _isLoadingUserDetails ? null : (_userDetails['name'] ?? 'User Name'),
-        userEmail: _isLoadingUserDetails ? null : (_userDetails['email'] ?? ''),
-        profilePicUrl: _isLoadingUserDetails ? null : _userDetails['profile_picture'],
-        isLoadingUserDetails: _isLoadingUserDetails,
+        userType: 'customer', // Default to customer type for meal browsing
+        userIdKey: 'user_id', // Standard key for user ID in SharedPreferences
       ),
       body: RefreshIndicator(
         // Add pull-to-refresh
@@ -543,10 +578,12 @@ class _AllMealsScreenState extends State<AllMealsScreen> {
           onTap: () => _navigateToMealDetail(meal), // Use helper for navigation
           child: Hero(
             tag: 'meal-$mealId',
-            flightShuttleBuilder: (flightContext, animation, flightDirection, fromHeroContext, toHeroContext) {
+            flightShuttleBuilder: (flightContext, animation, flightDirection,
+                fromHeroContext, toHeroContext) {
               // Use a scale+fade transition for extra polish
               return ScaleTransition(
-                scale: animation.drive(Tween<double>(begin: 0.95, end: 1.0).chain(CurveTween(curve: Curves.easeInOut))),
+                scale: animation.drive(Tween<double>(begin: 0.95, end: 1.0)
+                    .chain(CurveTween(curve: Curves.easeInOut))),
                 child: FadeTransition(
                   opacity: animation,
                   child: toHeroContext.widget,
@@ -708,8 +745,8 @@ class _AllMealsScreenState extends State<AllMealsScreen> {
       // Use PascalCase key for image link lookup
       if (complementaryMeal != null &&
           complementaryMeal['Image_link'] != null) {
-      imageUrl = _processImagePath(
-          complementaryMeal['Image_link'], dishName); // Use PascalCase key
+        imageUrl = _processImagePath(
+            complementaryMeal['Image_link'], dishName); // Use PascalCase key
       } else {
         // Log if complementary meal or its image link wasn't found
         print(
@@ -726,11 +763,13 @@ class _AllMealsScreenState extends State<AllMealsScreen> {
     final Map<String, String> mealNameToImageLink = {
       for (final m in _allMeals)
         if ((m['Meal_name'] ?? '').toString().trim().isNotEmpty)
-          m['Meal_name'].toString().toLowerCase(): m['Image_link'] ?? 'assets/images/cover.png'
+          m['Meal_name'].toString().toLowerCase():
+              m['Image_link'] ?? 'assets/images/cover.png'
     };
 
     // For each complementary dish, get its image link from the map, else use placeholder
-    final List<String> complementary_image_links = complementaryDishNames.map((dishName) {
+    final List<String> complementary_image_links =
+        complementaryDishNames.map((dishName) {
       final key = dishName.toLowerCase();
       return mealNameToImageLink[key] ?? 'assets/images/cover.png';
     }).toList();
@@ -742,165 +781,6 @@ class _AllMealsScreenState extends State<AllMealsScreen> {
       context,
       MaterialPageRoute(
         builder: (context) => meal_detail.MealDetailScreen(meal: mealToSend),
-      ),
-    );
-  }
-
-  // Refined Drawer Widget
-  Widget _buildDrawer(BuildContext context) {
-    // Get text theme for consistency
-    final textTheme = Theme.of(context).textTheme;
-
-    String userName = _isLoadingUserDetails
-        ? "Loading..."
-        : (_userDetails['name'] ?? 'User Name');
-    String userEmail =
-        _isLoadingUserDetails ? "" : (_userDetails['email'] ?? '');
-    String? profilePicUrl =
-        _isLoadingUserDetails ? null : _userDetails['profile_picture'];
-
-    ImageProvider<Object> avatarImage =
-        const AssetImage('assets/images/proffr.png'); // Default
-    if (!_isLoadingUserDetails &&
-        profilePicUrl != null &&
-        profilePicUrl.isNotEmpty &&
-        profilePicUrl.startsWith('http')) {
-      avatarImage =
-          CachedNetworkImageProvider(profilePicUrl); // Use cached provider
-    }
-
-    // Helper for list tiles
-    Widget _buildDrawerTile(IconData icon, String title, VoidCallback onTap,
-        {Color? color}) {
-      return ListTile(
-        leading: Icon(icon,
-            color: color ?? kColorPrimary), // Use primary color by default
-        title: Text(title,
-            style: textTheme.bodyLarge
-                ?.copyWith(color: color ?? kColorTextPrimary)),
-        onTap: onTap,
-        dense: true, // Make tiles slightly more compact
-      );
-    }
-
-    return Drawer(
-      child: Container(
-        color: kColorSurface, // Use surface color for drawer background
-        child: Column(
-          children: [
-            // Use UserAccountsDrawerHeader for a standard, nice layout
-            UserAccountsDrawerHeader(
-              accountName: Text(
-                userName,
-                style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18,
-                    color: kColorTextOnPrimary),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              accountEmail: userEmail.isNotEmpty
-                  ? Text(
-                      userEmail,
-                      style: GoogleFonts.poppins(
-                          fontSize: 13,
-                          color: kColorTextOnPrimary.withOpacity(0.8)),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    )
-                  : null, // Only show email if available
-              currentAccountPicture: CircleAvatar(
-                radius: 35, // Adjust radius
-                backgroundColor: kColorSurface.withOpacity(0.8),
-                backgroundImage: avatarImage,
-                onBackgroundImageError: (_, __) {
-                  print("Error loading profile picture.");
-                },
-                // Show initials or icon as fallback?
-                child: _isLoadingUserDetails && profilePicUrl == null
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2.0,
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(kColorPrimary)))
-                    : null,
-              ),
-              decoration: const BoxDecoration(
-                color: kColorPrimaryDark, // Dark teal header
-              ),
-              margin: EdgeInsets.zero, // Remove default margin
-            ),
-            // Use ListView for the rest of the items
-            Expanded(
-              child: ListView(
-                padding: EdgeInsets.zero, // Remove default padding
-                children: [
-                  _buildDrawerTile(Icons.person_outline, 'Profile', () {
-                    Navigator.pop(context);
-                    Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (context) => const ProfilePage()));
-                  }),
-                  _buildDrawerTile(
-                      Icons.analytics_outlined, 'Analytics Dashboard', () {
-                    Navigator.pop(context);
-                    Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (context) =>
-                                const UserAnalyticsDashboard()));
-                  }),
-                  const Divider(
-                      height: 1, color: kColorDivider), // Subtle divider
-                  _buildDrawerTile(
-                      Icons.shopping_cart_outlined, 'Shopping Cart', () {
-                    Navigator.pop(context);
-                    Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (context) => cart.ShoppingCartScreen()));
-                  }),
-                  _buildDrawerTile(Icons.article_outlined, 'Blog', () {
-                    Navigator.pop(context);
-                    Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (context) => const BlogScreen(
-                                url: 'https://artchwezi.blogspot.com/')));
-                  }),
-                  _buildDrawerTile(
-                      Icons.health_and_safety_outlined, 'Wellness Communities',
-                      () {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('Wellness Communities Coming Soon!')));
-                  }),
-                  _buildDrawerTile(Icons.help_outline, 'Help', () {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('Help Section Coming Soon!')));
-                  }),
-                  const Divider(height: 1, color: kColorDivider),
-                  _buildDrawerTile(Icons.logout, 'Logout', () async {
-                    Navigator.pop(context); // Close drawer first
-                    final prefs = await SharedPreferences.getInstance();
-                    await prefs.clear();
-                    Navigator.pushAndRemoveUntil(
-                      context,
-                      MaterialPageRoute(
-                          builder: (context) =>
-                              SignUpOrLoginPage()), // Redirect to login page
-                      (Route<dynamic> route) => false,
-                    );
-                  }, color: Colors.red.shade700), // Specific color for logout
-                ],
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

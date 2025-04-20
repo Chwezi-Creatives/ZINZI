@@ -2,11 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import 'package:zinzi2/dashboard_page.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:zinzi2/profile.dart';
+import 'package:flutter/services.dart'; // Import for SystemChrome
 
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
+
+// Define colors matching other pages
+const Color lightTeal = Color(0xFFB2DFDB);
+const Color lighterTeal = Color(0xFFE0F2F1);
+const Color primaryTeal = Color(0xFF00796B);
+const Color darkTeal = Color(0xFF004D40);
+const Color subtleTextColor = Color(0xFF616161);
+const Color errorColor = Color(0xFFD32F2F);
+
 
 class UserPreferencesPage extends StatefulWidget {
   const UserPreferencesPage({super.key});
@@ -18,7 +27,7 @@ class UserPreferencesPage extends StatefulWidget {
 class _UserPreferencesPageState extends State<UserPreferencesPage>
     with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
-  String _Goals = '';
+  String _goals = ''; // Renamed for clarity
   String _dietType = '';
   String _foodRestrictions = '';
   int? _userId;
@@ -28,7 +37,7 @@ class _UserPreferencesPageState extends State<UserPreferencesPage>
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
 
-  final List<String> _GoalsOptions = [
+  final List<String> _goalsOptions = [ // Renamed for clarity
     'Weight Loss',
     'Muscle Gain',
     'Maintain Weight'
@@ -51,30 +60,51 @@ class _UserPreferencesPageState extends State<UserPreferencesPage>
   void initState() {
     super.initState();
     _controller =
-        AnimationController(vsync: this, duration: const Duration(seconds: 2));
+        AnimationController(vsync: this, duration: const Duration(seconds: 1)); // Adjusted duration
     _fadeAnimation = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
     _slideAnimation = Tween<Offset>(
-            begin: const Offset(0, -1), end: const Offset(0, 0))
-        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+            begin: const Offset(0, -0.5), end: Offset.zero) // Slide from top
+        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
 
     _controller.forward();
     _loadUserId();
   }
 
+   @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+
   Future<void> _loadUserId() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _userId = prefs.getInt('user_id');
-    });
+    // Ensure setState is called only if the widget is still mounted
+    if (mounted) {
+      setState(() {
+        _userId = prefs.getInt('user_id');
+      });
+       if (_userId == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('User ID not found. Please log in again.'),
+          backgroundColor: errorColor,
+        ));
+      }
+    }
   }
 
   Future<void> _submitPreferences() async {
+    if (!_formKey.currentState!.validate()) return; // Validate form first
+
     if (_userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('User ID is missing. Cannot submit preferences.'),
+         backgroundColor: errorColor,
       ));
       return;
     }
+
+    setState(() => _isLoading = true); // Start loading
 
     try {
       final response = await http.post(
@@ -82,179 +112,251 @@ class _UserPreferencesPageState extends State<UserPreferencesPage>
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'user_id': _userId,
-          'goals': _Goals,
+          'goals': _goals, // Use updated variable name
           'diet_type': _dietType,
           'food_restrictions': _foodRestrictions,
         }),
       );
 
       if (response.statusCode == 201) {
-        Navigator.push(
+         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+           content: Text('Preferences saved successfully!'),
+           backgroundColor: primaryTeal,
+         ));
+        // Navigate to Profile Page after successful submission
+        Navigator.pushReplacement( // Use pushReplacement to avoid going back here
           context,
           PageRouteBuilder(
             pageBuilder: (context, animation, secondaryAnimation) =>
                 const ProfilePage(),
             transitionsBuilder:
                 (context, animation, secondaryAnimation, child) {
-              const slideBegin = Offset(1.0, 0.0); // Slide in from the right
-              const slideEnd = Offset.zero;
-              const fadeBegin = 0.0;
-              const fadeEnd = 1.0;
-
-              var slideTween = Tween(begin: slideBegin, end: slideEnd)
-                  .chain(CurveTween(curve: Curves.easeInOut));
-              var fadeTween = Tween(begin: fadeBegin, end: fadeEnd)
-                  .chain(CurveTween(curve: Curves.easeIn));
-
-              var slideAnimation = animation.drive(slideTween);
-              var fadeAnimation = animation.drive(fadeTween);
+              const begin = Offset(1.0, 0.0);
+              const end = Offset.zero;
+              final tween = Tween(begin: begin, end: end).chain(CurveTween(curve: Curves.easeInOut));
+              final fadeTween = Tween<double>(begin: 0.0, end: 1.0).chain(CurveTween(curve: Curves.easeIn));
 
               return FadeTransition(
-                opacity: fadeAnimation,
-                child: SlideTransition(
-                  position: slideAnimation,
-                  child: child,
-                ),
+                opacity: animation.drive(fadeTween),
+                child: SlideTransition(position: animation.drive(tween), child: child),
               );
             },
+             transitionDuration: const Duration(milliseconds: 400), // Adjust duration
           ),
         );
       } else {
+         final errorData = json.decode(response.body);
+         final errorMessage = errorData['message'] ?? 'Failed to submit preferences data.';
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Failed to submit preferences data. Please try again.'),
+          content: Text('$errorMessage Please try again.'),
+           backgroundColor: errorColor,
         ));
       }
     } catch (e) {
+       print("Preferences Submit Error: $e");
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Error: $e'),
+        content: Text('An error occurred: $e'),
+         backgroundColor: errorColor,
       ));
+    } finally {
+       if (mounted) {
+         setState(() => _isLoading = false); // Stop loading
+       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // Set status bar style
+    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark.copyWith(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.dark,
+    ));
+
     return Scaffold(
+      // Transparent AppBar
       appBar: AppBar(
         title: SlideTransition(
           position: _slideAnimation,
           child: const Text(
             'Diet Preferences',
-            style: TextStyle(color: Colors.black),
+            style: TextStyle(color: darkTeal), // Use consistent color
           ),
         ),
+         leading: IconButton( // Add back button
+          icon: const Icon(Icons.arrow_back, color: darkTeal),
+          onPressed: () => Navigator.pop(context),
+        ),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
       ),
-      body: Stack(
-        children: [
-          Positioned.fill(
-              child: Image.asset('assets/images/soft.jpg', fit: BoxFit.cover)),
-          Positioned.fill(
-              child: Container(color: Colors.teal.withOpacity(0.2))),
-          Center(
+      extendBodyBehindAppBar: true,
+      // Gradient Background Container
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [lighterTeal, lightTeal],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        // SafeArea and Content
+        child: SafeArea(
+          child: Center(
             child: SingleChildScrollView(
+               padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
               child: FadeTransition(
                 opacity: _fadeAnimation,
-                child: Padding(
-                  padding: const EdgeInsets.all(24.0),
+                child: Form( // Keep Form
+                  key: _formKey,
                   child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
+                      // Keep image animation
                       SlideTransition(
                           position: _slideAnimation,
                           child: SizedBox(
-                              height: 170,
-                              width: 170,
+                              height: 150, // Adjust size if needed
+                              width: 150,
                               child: Image.asset(
-                                  'assets/images/sensei white.png'))),
+                                  'assets/images/heart.svg'))), // Consider image visibility
+                       const SizedBox(height: 15),
+                       Text(
+                         "Tell us about your diet",
+                         textAlign: TextAlign.center,
+                         style: TextStyle(
+                           fontSize: 18,
+                           color: darkTeal.withOpacity(0.9),
+                           fontWeight: FontWeight.w600,
+                         ),
+                       ),
                       const SizedBox(height: 30),
-                      Form(
-                        key: _formKey,
-                        child: Column(
-                          children: [
-                            _buildDropdownField(
-                              'Goals',
-                              _GoalsOptions,
-                              (value) {
-                                setState(() => _Goals = value!);
-                              },
-                              _Goals,
-                            ),
-                            const SizedBox(height: 16),
-                            _buildDropdownField(
-                              'Diet Type',
-                              _dietTypeOptions,
-                              (value) {
-                                setState(() => _dietType = value!);
-                              },
-                              _dietType,
-                            ),
-                            const SizedBox(height: 16),
-                            _buildDropdownField(
-                              'Food Restrictions',
-                              _foodRestrictionsOptions,
-                              (value) {
-                                setState(() => _foodRestrictions = value!);
-                              },
-                              _foodRestrictions,
-                            ),
-                            const SizedBox(height: 50),
-                            ScaleTransition(
-                              scale: CurvedAnimation(
-                                  parent: _controller, curve: Curves.easeOut),
-                              child: ElevatedButton(
-                                onPressed: _isLoading
-                                    ? null
-                                    : () {
-                                        if (_formKey.currentState!.validate()) {
-                                          _submitPreferences();
-                                        }
-                                      },
-                                style: ElevatedButton.styleFrom(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 16),
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12)),
-                                  backgroundColor: Colors.teal.shade500,
-                                  elevation: 5,
-                                  minimumSize: const Size(double.infinity, 60),
-                                ),
-                                child: _isLoading
-                                    ? const CircularProgressIndicator(
-                                        color: Colors.white)
-                                    : const Text('Submit Preferences',
-                                        style: TextStyle(
-                                            fontSize: 18, color: Colors.white)),
+                      // Form Fields Column
+                      Column(
+                        children: [
+                          _buildDropdownField(
+                            'Goals',
+                            _goalsOptions, // Use updated name
+                            (value) {
+                              if (value != null) setState(() => _goals = value); // Use updated name
+                            },
+                            _goals, // Use updated name
+                          ),
+                          const SizedBox(height: 16),
+                          _buildDropdownField(
+                            'Diet Type',
+                            _dietTypeOptions,
+                            (value) {
+                              if (value != null) setState(() => _dietType = value);
+                            },
+                            _dietType,
+                          ),
+                          const SizedBox(height: 16),
+                          _buildDropdownField(
+                            'Food Restrictions',
+                            _foodRestrictionsOptions,
+                            (value) {
+                              if (value != null) setState(() => _foodRestrictions = value);
+                            },
+                            _foodRestrictions,
+                          ),
+                          const SizedBox(height: 50),
+                          // Update Button style
+                          ScaleTransition(
+                            scale: CurvedAnimation(
+                                parent: _controller, curve: Curves.easeOutBack), // Add bounce
+                            child: ElevatedButton(
+                              onPressed: _isLoading
+                                  ? null
+                                  : () {
+                                      if (_formKey.currentState!.validate()) {
+                                        _submitPreferences();
+                                      }
+                                    },
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(15)), // Match other screens
+                                backgroundColor: primaryTeal, // Consistent color
+                                foregroundColor: Colors.white,
+                                minimumSize: const Size(double.infinity, 52), // Consistent height
+                                textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                               ),
+                              child: _isLoading
+                                  ? const SizedBox(
+                                      height: 20, width: 20,
+                                      child: CircularProgressIndicator(
+                                          color: Colors.white, strokeWidth: 2.0))
+                                  : const Text('Submit Preferences'),
                             ),
-                          ],
-                        ),
-                      ),
+                          ),
+                        ],
+                      ), // End Form Fields Column
                     ],
                   ),
-                ),
-              ),
-            ),
-          ),
-        ],
+                ), // Close Form
+              ), // Close FadeTransition
+            ), // Close SingleChildScrollView
+          ), // Close Center
+        ), // Close SafeArea
+      ), // Close Container
+    ); // Close Scaffold
+  }
+
+  // Helper for InputDecoration (consistent style)
+  InputDecoration _buildInputDecoration(String label, {IconData? prefixIcon}) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: primaryTeal),
+      hintText: 'Select $label', // Add hint text
+      hintStyle: TextStyle(color: subtleTextColor.withOpacity(0.5)),
+      prefixIcon: prefixIcon != null ? Icon(prefixIcon, color: primaryTeal, size: 20) : null,
+      border: UnderlineInputBorder(
+        borderSide: BorderSide(color: subtleTextColor.withOpacity(0.5)),
       ),
+      enabledBorder: UnderlineInputBorder(
+        borderSide: BorderSide(color: subtleTextColor.withOpacity(0.5)),
+      ),
+      focusedBorder: const UnderlineInputBorder(
+        borderSide: BorderSide(color: primaryTeal, width: 2.0),
+      ),
+      errorBorder: const UnderlineInputBorder(
+        borderSide: BorderSide(color: errorColor, width: 1.0),
+      ),
+      focusedErrorBorder: const UnderlineInputBorder(
+        borderSide: BorderSide(color: errorColor, width: 2.0),
+      ),
+      filled: false,
+      contentPadding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 0),
     );
   }
 
+
+  // Updated Dropdown helper using the new InputDecoration helper
   Widget _buildDropdownField(String label, List<String> items,
-      Function(String?) onChanged, String value) {
+      Function(String?) onChanged, String currentValue) {
+    // Determine the value to display: null if empty, otherwise the current value
+    String? displayValue = currentValue.isEmpty ? null : currentValue;
+    // Ensure the displayValue exists in the items list, otherwise set to null
+    if (displayValue != null && !items.contains(displayValue)) {
+      displayValue = null;
+    }
+
     return DropdownButtonFormField<String>(
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: TextStyle(color: Colors.teal.shade800),
-        filled: true,
-        fillColor: Colors.white.withOpacity(0.6),
-        border: InputBorder.none,
-      ),
-      value: value.isEmpty ? null : value,
+      decoration: _buildInputDecoration(label), // Use helper
+      value: displayValue, // Use the potentially null displayValue
       onChanged: onChanged,
       items: items
-          .map((item) => DropdownMenuItem(value: item, child: Text(item)))
+          .map((item) => DropdownMenuItem(value: item, child: Text(item, style: const TextStyle(color: darkTeal))))
           .toList(),
       validator: (value) =>
-          value == null || value.isEmpty ? 'Please select a $label' : null,
+          value == null || value.isEmpty ? 'Please select $label' : null,
+      style: const TextStyle(color: darkTeal), // Style dropdown itself
+      iconEnabledColor: primaryTeal, // Style icon
+      dropdownColor: lighterTeal, // Style dropdown background
+      isExpanded: true, // Ensure dropdown takes full width
     );
   }
 }

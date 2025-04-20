@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zinzi2/app_drawer.dart'; // Import the AppDrawer widget
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
@@ -56,7 +57,7 @@ class Order {
 
     return Order(
       orderId: parseInt(json['order_id']),
-      mealName: json['meal_name'] as String,
+      mealName: json['meal_name'] as String? ?? 'Unknown Meal', // Handle potential null
       orderDate: DateTime.parse(json['order_date'] as String),
       totalPrice: parseDouble(json['total_price']),
       quantity: parseInt(json['quantity']),
@@ -324,7 +325,7 @@ class ProducerApiService {
     }
 
     final Uri uri =
-        Uri.parse('$apibaseurl/rr/rproducers?producer_id=$producerId');
+        Uri.parse('$apibaseurl/rr/rproducers/$producerId');
     print("Fetching producer profile from: $uri");
 
     try {
@@ -1665,6 +1666,11 @@ class _ProducerDash22State extends State<ProducerDash22> {
     }
 
     return Scaffold(
+      // Add the standard drawer
+      drawer: const AppDrawer(
+        userType: 'Producer',
+        userIdKey: 'producer_id',
+      ),
       backgroundColor: whiteColor, // Solid white background
       appBar: AppBar(
         backgroundColor: primaryTeal,
@@ -3003,7 +3009,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
-              NumberFormat.currency(symbol: '\$', decimalDigits: 2).format(order.totalPrice), // Format price as currency
+              NumberFormat.currency(symbol: 'UGX ', decimalDigits: 2).format(order.totalPrice), // Format price as currency
               style: const TextStyle(fontWeight: FontWeight.bold, color: darkTeal, fontSize: 13),
             ),
             const SizedBox(height: 2),
@@ -3022,7 +3028,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Display various order details using a helper
-                _buildOrderDetailItem('Customer', order.producerName ?? 'Unknown'), // Assuming producerName holds customer name here
+                _buildOrderDetailItem('Producer', order.producerName ?? 'Unknown'), // Assuming producerName holds customer name here
                 _buildOrderDetailItem('Status', order.orderStatus, color: statusColor), // Show status with color
                 _buildOrderDetailItem('Payment', order.paymentStatus ?? 'Unknown'),
                 if (order.notes != null && order.notes!.isNotEmpty)

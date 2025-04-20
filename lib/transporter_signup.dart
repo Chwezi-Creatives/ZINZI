@@ -195,11 +195,15 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
           if (transporterId != null) {
             final prefs = await SharedPreferences.getInstance();
             await prefs.setString('transporter_id', transporterId.toString());
+            await Future.delayed(const Duration(milliseconds: 100)); // Small delay
           }
-          _showSnackBar('Signup successful! Please log in.', isError: false);
+          if (!mounted) return; // Check mount status again after delay
+          _showSnackBar('Signup successful!', isError: false); // Changed message slightly
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (context) => const TransporterDashboardScreen()),
+            MaterialPageRoute(
+              builder: (context) => TransporterDashboardScreen(transporterId: transporterId.toString()), // Pass ID
+            ),
           );
         } else {
           String errorMessage = 'Signup failed.';

@@ -177,7 +177,7 @@ class _LoginPageState extends State<LoginPage>
                             SizedBox(
                               height: 170,
                               width: 170,
-                              child: Image.asset('assets/images/Gru green.png'),
+                              child: Image.asset('assets/images/acc.png'),
                             ),
                             const SizedBox(height: 1),
                             // Welcome text
