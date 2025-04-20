@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, date
 from typing import Dict, Any, Optional, List, Tuple, Union # Added Union, Tuple
 #import mealrecommendation2 currently not implemented
 from dotenv import load_dotenv
+from async_lru import alru_cache # Import alru_cache for async caching
 import bcrypt
 # import psycopg2 # Removed synchronous driver
 import asyncpg # Added asynchronous driver
@@ -2666,8 +2667,11 @@ meal_fetcher = GetAllMeals() # Needs DB, instantiate per request or pass conn
 
 # --- FastAPI Endpoints ---
 
+import functools # Import functools for caching
+
 @app.get('/rr')
-async def welcome(): # Make endpoint async
+async def welcome():
+    """Welcome endpoint."""
     return {'message': 'Welcome to BONOBO.'}
 
 # === USER Endpoints (FastAPI) ===
@@ -3073,6 +3077,7 @@ async def delete_herbal_endpoint(herbal_id: int, conn: asyncpg.Connection = Depe
 # === MEAL Endpoints (FastAPI - Corrected List/Get) ===
 
 @app.get('/rr/meals')
+@alru_cache(maxsize=1) # Use async-aware cache 
 async def list_all_meals_endpoint(conn: asyncpg.Connection = Depends(get_db)):
     """Retrieves a list of all meals."""
     # list_meals should return a list (potentially empty)
