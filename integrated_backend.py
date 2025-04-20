@@ -59,17 +59,13 @@ db_pool: Optional[asyncpg.Pool] = None
 async def lifespan(app: FastAPI):
     """Manage the database connection pool lifecycle."""
     global db_pool
-    db_host = os.getenv("DB_POOLER_HOST")
-    db_port = os.getenv("DB_POOLER_PORT", "6543")
+    db_host = os.getenv("DB_HOST")
+    db_port = os.getenv("DB_PORT", "5432")
     db_name = os.getenv("DB_NAME", "postgres")
-    db_user_base = os.getenv("DB_USER")
+    db_user = os.getenv("DB_USER")
     db_password = os.getenv("DB_PASSWORD")
-    supabase_project_id = os.getenv("SUPABASE_PROJECT_ID")
-    db_user = db_user_base
-    if db_user_base and supabase_project_id and '.' not in db_user_base:
-        db_user = f"{db_user_base}.{supabase_project_id}"
-    missing_vars = [var for var, val in locals().items() if var.startswith('db_') and not val and var != 'db_user_base']
-    if not db_user: missing_vars.append("DB_USER (or base + SUPABASE_PROJECT_ID)")
+    missing_vars = [var for var, val in locals().items() if var.startswith('db_') and not val]
+    if not db_user: missing_vars.append("DB_USER")
     if missing_vars:
         error_msg = f"Database POOLED connection details missing: {', '.join(missing_vars)}."
         logger.critical(error_msg)
@@ -79,7 +75,7 @@ async def lifespan(app: FastAPI):
         return # Exit early
 
     db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?ssl=require"
-    logger.info(f"Attempting to connect to database pool: {db_host}:{db_port}/{db_name}")
+    logger.info(f"Attempting to connect to database: {db_host}:{db_port}/{db_name}")
 
     try:
         db_pool = await asyncpg.create_pool(
