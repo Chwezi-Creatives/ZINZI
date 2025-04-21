@@ -13,6 +13,8 @@ import 'dart:io'; // <<< IMPORT for File handling
 import 'package:multi_select_flutter/multi_select_flutter.dart'; // <<< IMPORT for MultiSelectDialogField
 import 'dart:async'; // For Timer
 import 'package:geolocator/geolocator.dart'; // For location fetching
+import 'package:zinzi2/user_cache.dart'; // <<< IMPORT UserCache
+import 'package:zinzi2/cache_config.dart'; // <<< IMPORT CacheConfig
 // http and dart:convert are already imported
 
 // --- Consistent Color Palette (from chefsignup222.dart) ---
@@ -872,6 +874,71 @@ class ApiService {
     print("Add Meals to Stock Triggered (Coming Soon)");
     return false; // Indicate failure/block
   }
+  // --- Static Fetch Chefs (for preloading) ---
+  static Future<List<dynamic>?> fetchChefsStatic() async {
+    final url = '$apibaseurl/rr/rchefs';
+    try {
+      final response = await http.get(Uri.parse(url), headers: {
+        'Accept': 'application/json',
+      }).timeout(const Duration(seconds: 25));
+
+      if (response.statusCode == 200) {
+        final dynamic rawData = json.decode(response.body);
+        final dynamic chefsList = _handleApiResponse(rawData); // Use existing static helper
+
+        if (chefsList is List) {
+           // Optionally map to a simpler structure if needed, but returning raw list is fine for caching
+           // For now, just return the list as is from the handler
+           return chefsList;
+        } else {
+          print('Static fetchChefs: Unexpected response format after handling: ${chefsList?.runtimeType}');
+          return null; // Indicate failure to get a list
+        }
+      } else {
+        print('Static fetchChefs: Failed to load chefs. Status code: ${response.statusCode}.');
+        return null; // Indicate failure
+      }
+    } on TimeoutException {
+      print('Static fetchChefs: Request timed out.');
+      return null; // Indicate failure
+    } catch (e) {
+      print('Static fetchChefs: Error fetching chefs: $e');
+      return null; // Indicate failure
+    }
+  }
+
+  // --- Static Fetch Producers (for preloading) ---
+  static Future<List<dynamic>?> fetchProducersStatic() async {
+    final url = '$apibaseurl/rr/rproducers';
+    try {
+      final response = await http.get(Uri.parse(url), headers: {
+        'Accept': 'application/json',
+      }).timeout(const Duration(seconds: 25));
+
+      if (response.statusCode == 200) {
+        final dynamic rawData = json.decode(response.body);
+        final dynamic producerList = _handleApiResponse(rawData); // Use existing static helper
+
+        if (producerList is List) {
+           // Optionally map to a simpler structure if needed, but returning raw list is fine for caching
+           // For now, just return the list as is from the handler
+           return producerList;
+        } else {
+          print('Static fetchProducers: Unexpected response format after handling: ${producerList?.runtimeType}');
+          return null; // Indicate failure to get a list
+        }
+      } else {
+        print('Static fetchProducers: Failed to load producers. Status code: ${response.statusCode}.');
+        return null; // Indicate failure
+      }
+    } on TimeoutException {
+      print('Static fetchProducers: Request timed out.');
+      return null; // Indicate failure
+    } catch (e) {
+      print('Static fetchProducers: Error fetching producers: $e');
+      return null; // Indicate failure
+    }
+  }
 }
 
 // +++ REUSABLE IMAGE WIDGET +++
@@ -1230,7 +1297,7 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen>
       // Add the standard drawer
       drawer: const AppDrawer(
         userType: 'Chef',
-        userIdKey: 'chef_id',
+        userIdKey: 'chef_user_id',
       ),
       appBar: AppBar(
         title: const Text('Chef Dashboard'),
@@ -1268,8 +1335,64 @@ class ProfileTab extends StatefulWidget {
 
 class _ProfileTabState extends State<ProfileTab>
     with AutomaticKeepAliveClientMixin {
-  Future<ChefProfile>? _profileFuture;
+  // --- Caching ---
+  static ChefProfile? _profileCache;
+  static DateTime? _profileCacheTimestamp;
+  static const String _profileCacheKey = 'chef_profile_cache';
+  static const String _profileCacheTimestampKey = 'chef_profile_cache_timestamp';
+
+  // Load cache from UserCache
+  static Future<void> _loadProfileCacheFromPrefs() async {
+    final cachedData = await UserCache.getData(_profileCacheKey);
+    final timestampData = await UserCache.getData(_profileCacheTimestampKey);
+
+    if (cachedData is Map<String, dynamic> && timestampData is String) {
+      try {
+        _profileCache = ChefProfile.fromMockJson(cachedData); // Assuming fromMockJson works
+        _profileCacheTimestamp = DateTime.parse(timestampData);
+      } catch (e) {
+        print("Error parsing cached profile: $e");
+        _profileCache = null;
+        _profileCacheTimestamp = null;
+        // Clear potentially corrupted cache
+        await UserCache.removeData(_profileCacheKey);
+        await UserCache.removeData(_profileCacheTimestampKey);
+      }
+    } else {
+       _profileCache = null;
+       _profileCacheTimestamp = null;
+    }
+  }
+
+  // Save cache to UserCache
+  static Future<void> _saveProfileCacheToPrefs(ChefProfile profile) async {
+    // Convert profile to a suitable Map for JSON encoding if needed
+    // Assuming ChefProfile has a toJson method or can be directly encoded
+    // For now, let's assume we need a toJson method in ChefProfile
+    // If ChefProfile.fromMockJson works, we might need a toJson() that produces compatible JSON
+    // Let's assume toJsonForUpdate() is close enough for caching purposes,
+    // but ideally, a full toJson() would be better.
+    // For simplicity, we'll cache the result of toJsonForUpdate() plus the ID.
+    Map<String, dynamic> cacheableProfile = profile.toJsonForUpdate();
+    cacheableProfile['chefid'] = profile.chefid; // Ensure ID is included
+    cacheableProfile['image'] = profile.image; // Ensure image URL is included
+    // Add any other non-editable fields needed for display if not in toJsonForUpdate()
+    cacheableProfile['chef_type'] = profile.chefType;
+    cacheableProfile['is_active'] = profile.isActive;
+
+
+    await UserCache.saveData(_profileCacheKey, cacheableProfile);
+    await UserCache.saveData(
+        _profileCacheTimestampKey, DateTime.now().toIso8601String());
+    _profileCache = profile; // Update in-memory cache
+    _profileCacheTimestamp = DateTime.now();
+  }
+  // --- End Caching ---
+
+  Future<ChefProfile?>? _profileFuture; // Can be null if loaded from cache
   ChefProfile? _currentProfile;
+  bool _isLoadingProfile = true; // Track loading state
+  String _fetchError = ''; // Store fetch error
   bool _isLoadingStatus = false; // For online/offline toggle
   bool _isEditing = false; // To toggle edit mode
   bool _isSaving = false; // To show saving indicator
@@ -1342,7 +1465,8 @@ class _ProfileTabState extends State<ProfileTab>
     // Load profile only once when dependencies change (typically once)
     if (!_didLoadProfile) {
       _didLoadProfile = true;
-      _loadProfile();
+      // Start the combined cache load and background fetch process
+      _initializeProfileData();
     }
   }
 
@@ -1360,44 +1484,122 @@ class _ProfileTabState extends State<ProfileTab>
     super.dispose();
   }
 
-  void _loadProfile() {
-    // Reset edit state when reloading
+  // Combined cache load and background fetch
+  Future<void> _initializeProfileData() async {
+    if (mounted) {
+      setState(() {
+        _isLoadingProfile = true; // Start loading
+        _fetchError = '';
+        _isEditing = false; // Ensure not in edit mode on load
+        _isSaving = false;
+      });
+    }
+
+    // 1. Load from cache
+    await _loadProfileCacheFromPrefs();
+
+    // 2. Display cached data immediately if available
+    if (_profileCache != null && mounted) {
+      // Check cache validity (optional, but good practice)
+      final now = DateTime.now();
+      final bool cacheIsValid = _profileCacheTimestamp != null &&
+          now.difference(_profileCacheTimestamp!) < CacheConfig.profileCacheDuration; // Use correct duration
+
+      if (cacheIsValid) {
+         print("ProfileTab: Displaying valid cached profile.");
+         setState(() {
+           _currentProfile = _profileCache;
+           _updateControllersFromProfile(_currentProfile!);
+           _isLoadingProfile = false; // Stop loading indicator
+           _profileFuture = Future.value(_currentProfile); // Set future for FutureBuilder
+         });
+      } else {
+         print("ProfileTab: Cached profile expired, will fetch fresh data.");
+         // Keep showing stale cache while fetching, but ensure loading is true
+         setState(() {
+            _currentProfile = _profileCache; // Show stale data
+            _updateControllersFromProfile(_currentProfile!);
+            _isLoadingProfile = true; // Indicate background loading
+            _profileFuture = null; // Reset future, will be set by fetch
+         });
+      }
+    } else if (mounted) {
+       print("ProfileTab: No cached profile found, fetching...");
+       // No cache, ensure loading is true
+       setState(() {
+         _isLoadingProfile = true;
+         _profileFuture = null; // Reset future
+       });
+    }
+
+    // 3. Fetch fresh data in the background (regardless of cache state)
+    await _fetchProfileAndUpdate();
+  }
+
+
+  // Separate function to fetch and update state/cache
+  Future<void> _fetchProfileAndUpdate() async {
+    final apiService = ApiService();
+    try {
+      final profile = await apiService.fetchChefProfile();
+      if (mounted) {
+        print("ProfileTab: Fetched fresh profile data.");
+        await _saveProfileCacheToPrefs(profile); // Save fresh data to cache
+        setState(() {
+          _currentProfile = profile;
+          _updateControllersFromProfile(profile);
+          _isLoadingProfile = false; // Done loading
+          _fetchError = ''; // Clear any previous error
+          _profileFuture = Future.value(profile); // Update future for FutureBuilder
+        });
+      }
+    } catch (error, stackTrace) {
+      print("Error fetching fresh profile: $error\n$stackTrace");
+      if (mounted) {
+        // Only show error if there's no cached data to display
+        if (_currentProfile == null) {
+          setState(() {
+            _fetchError = 'Failed to load profile: $error';
+            _isLoadingProfile = false; // Stop loading
+            _profileFuture = Future.error(error); // Set future to error state
+          });
+          _showErrorSnackbar('Error loading profile: $error');
+        } else {
+           // Keep showing cached data, log error silently or show subtle indicator
+           print("ProfileTab: Failed to fetch fresh profile, showing cached version. Error: $error");
+           // Optionally show a less intrusive snackbar
+           // _showInfoSnackbar("Couldn't update profile, showing last known data.");
+           // Ensure loading indicator stops if it was showing for background fetch
+           setState(() {
+              _isLoadingProfile = false;
+              // Keep _profileFuture pointing to the cached data if it was set
+              if (_profileFuture == null) {
+                 _profileFuture = Future.value(_currentProfile);
+              }
+           });
+        }
+      }
+    }
+  }
+
+  // Renamed original _loadProfile to _refreshProfile for clarity (used by refresh button)
+  void _refreshProfile() {
+     // Reset edit state when reloading
     if (mounted) {
        setState(() {
          _isEditing = false;
          _isSaving = false;
          _currentProfile?.localImageFile = null; // Clear local image selection
+         _isLoadingProfile = true; // Show loading indicator during manual refresh
+         _fetchError = '';
        });
        // Clear previous snackbars if any
        ScaffoldMessenger.of(context).removeCurrentSnackBar();
     }
-
-    final apiService = ApiService();
-    _profileFuture = apiService.fetchChefProfile();
-
-    // Update the state to show a loading indicator while fetching
-    // This replaces the existing future, triggering the FutureBuilder
-    setState(() {});
-
-    _profileFuture!.then((profile) {
-      if (mounted) {
-        setState(() {
-          _currentProfile = profile;
-          _updateControllersFromProfile(profile); // Populate controllers with fetched data
-        });
-      }
-    }).catchError((error, stackTrace) {
-      print("Error in _loadProfile: $error\n$stackTrace");
-      if (mounted) {
-        _showErrorSnackbar('Error loading profile: $error');
-        // Update the state to reflect the error in FutureBuilder
-        setState(() {
-           _currentProfile = null; // Clear any potentially stale profile data
-           _profileFuture = Future.error(error); // Set future to error state
-        });
-      }
-    });
+    // Fetch fresh data and update
+    _fetchProfileAndUpdate();
   }
+
 
   // Helper function to safely parse comma-separated string into a list,
   // filtering against allowed values.
@@ -1472,6 +1674,7 @@ class _ProfileTabState extends State<ProfileTab>
      // Location is handled by its controller, which gets updated by _getCurrentLocation
       // localImageFile is already set by the picker if an image was changed
   }
+
   // --- Location Handling (Copied & adapted from chefsignup222.dart) ---
 
   void _startLocationHintAnimation() {
@@ -1794,51 +1997,55 @@ class _ProfileTabState extends State<ProfileTab>
     // Ensure AutomaticKeepAliveClientMixin is honored
     super.build(context);
 
-    return FutureBuilder<ChefProfile>(
+    return FutureBuilder<ChefProfile?>( // Changed type to nullable ChefProfile
       future: _profileFuture, // The future driving the builder
       builder: (context, snapshot) {
         // ---- Loading State ----
         // Show shimmer only on initial load (when _currentProfile is still null)
-        if (snapshot.connectionState == ConnectionState.waiting && _currentProfile == null) {
+        if (_isLoadingProfile && _currentProfile == null) { // Use _isLoadingProfile state
           return _buildProfileShimmer();
         }
         // ---- Error State ----
-        // Show error state if future failed and we don't have a previously loaded profile
-        else if (snapshot.hasError && _currentProfile == null) {
-          return _buildErrorState(snapshot.error ?? 'Unknown error loading profile.');
+        // Show error state if fetch failed and we don't have a previously loaded profile
+        else if (_fetchError.isNotEmpty && _currentProfile == null) { // Use _fetchError state
+          return _buildErrorState(_fetchError); // Pass the stored error message
         }
         // ---- Empty State (Future completed but no data) ----
+        // This case might be less likely with cache-first, but keep for robustness
         else if (snapshot.connectionState == ConnectionState.done && !snapshot.hasData && _currentProfile == null) {
            return _buildErrorState('Profile data not found.'); // Treat no data as an error state
         }
         // ---- Success/Loaded State ----
         else {
           // Use _currentProfile if available (avoids flicker during refresh/save)
-          // Otherwise, use snapshot.data (on initial successful load)
-          final profile = _currentProfile ?? snapshot.data;
+          // This will be populated by _initializeProfileData or _fetchProfileAndUpdate
+          final profile = _currentProfile;
 
           // Fallback if somehow profile is still null after checks (shouldn't happen often)
           if (profile == null) {
+             // This case should ideally be caught by the error state above, but as a safeguard:
              return _buildErrorState('Failed to load profile data.');
           }
 
           // --- Handle potential background updates ---
-          // If the snapshot brings new data (e.g., after a refresh) AND we are *not*
-          // currently editing, update the _currentProfile and controllers.
-          // This prevents background refreshes from overwriting user edits.
+          // The _fetchProfileAndUpdate method already handles updating _currentProfile
+          // and controllers when new data arrives, so this block can be simplified
+          // or potentially removed if _fetchProfileAndUpdate's logic is sufficient.
+          // Let's remove this block as _fetchProfileAndUpdate already updates the state.
+          /*
           if (!_isEditing && snapshot.hasData && _currentProfile?.chefid != snapshot.data!.chefid) {
-             // Use addPostFrameCallback to update state after the build cycle completes
              WidgetsBinding.instance.addPostFrameCallback((_) {
                 if(mounted) {
-                  setState(() => _currentProfile = snapshot.data!); // Update local profile
-                  _updateControllersFromProfile(_currentProfile!); // Update form fields
+                  setState(() => _currentProfile = snapshot.data!);
+                  _updateControllersFromProfile(_currentProfile!);
                 }
              });
           }
+          */
 
           // Build the main profile UI
           return RefreshIndicator(
-            onRefresh: () async => _loadProfile(), // Trigger reload on pull-to-refresh
+            onRefresh: () async => _refreshProfile(), // Trigger reload on pull-to-refresh
             color: Theme.of(context).colorScheme.primary,
             child: Form( // Wrap the scrollable content in a Form for validation
                key: _formKey,
@@ -1854,6 +2061,10 @@ class _ProfileTabState extends State<ProfileTab>
                    const SizedBox(height: 20),
                     // Show Save/Cancel buttons only when editing
                    if (_isEditing) _buildEditActions(context),
+                   // Show loading indicator if a background fetch is in progress AND we are not editing
+                   // (Avoids showing indicator while user is actively typing/interacting)
+                   if (_isLoadingProfile && !_isEditing)
+                      const LinearProgressIndicator(),
                    const SizedBox(height: 70), // Extra space at the bottom
                  ],
                ),
@@ -1908,7 +2119,7 @@ class _ProfileTabState extends State<ProfileTab>
            const SizedBox(height: 8),
            Text( error.toString(), style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]), textAlign: TextAlign.center, maxLines: 3, overflow: TextOverflow.ellipsis, ),
            const SizedBox(height: 24),
-           ElevatedButton.icon( icon: const Icon(Icons.refresh_rounded, size: 20), label: const Text('Retry'), onPressed: _loadProfile, ) // Retry button calls _loadProfile
+           ElevatedButton.icon( icon: const Icon(Icons.refresh_rounded, size: 20), label: const Text('Retry'), onPressed: _refreshProfile, ) // Retry button calls _refreshProfile
          ],
        ),
      ));
@@ -4450,9 +4661,9 @@ class _ProductsTabState extends State<ProductsTab>
               const SizedBox(width: 8),
               // Action Buttons Column (Edit, Select, Delete)
               Column( mainAxisAlignment: MainAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                  // Edit Button
-                  _buildActionButton( context, icon: Icons.edit_outlined, tooltip: 'Edit Meal (Coming Soon)', color: colorScheme.secondary, onPressed: onEdit, ), // Calls _handleEditProduct
-                  const SizedBox(height: 8),
+                  // Edit Button (Commented Out)
+                  // _buildActionButton( context, icon: Icons.edit_outlined, tooltip: 'Edit Meal (Coming Soon)', color: colorScheme.secondary, onPressed: onEdit, ), // Calls _handleEditProduct
+                  // const SizedBox(height: 8), // Commented out spacing
                   // Select/Deselect Button (Visually disabled, triggers Coming Soon)
                   _buildActionButton( context,
                     // Use unchecked icon always as selection is disabled
@@ -4465,8 +4676,8 @@ class _ProductsTabState extends State<ProductsTab>
                     onPressed: onSelectToggle, // Calls _handleToggleSelection
                   ),
                    const SizedBox(height: 8),
-                   // Delete Button
-                   _buildActionButton( context, icon: Icons.delete_outline_rounded, tooltip: 'Delete Meal (Coming Soon)', color: colorScheme.error.withOpacity(0.7), onPressed: onDelete, ), // Calls _handleDeleteProduct
+                   // Delete Button (Commented Out)
+                   // _buildActionButton( context, icon: Icons.delete_outline_rounded, tooltip: 'Delete Meal (Coming Soon)', color: colorScheme.error.withOpacity(0.7), onPressed: onDelete, ), // Calls _handleDeleteProduct
                 ],
               )
             ],

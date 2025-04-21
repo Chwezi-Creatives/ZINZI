@@ -8,6 +8,8 @@ import 'package:zinzi2/chef_dash8888.dart';
 import 'package:zinzi2/produ_dash22.dart';
 import 'package:zinzi2/allmeals.dart';
 import 'package:zinzi2/meal_detail.dart';
+import 'package:zinzi2/cache_config.dart'; // Import CacheConfig
+import 'package:zinzi2/user_cache.dart'; // Import UserCache
 
 // --- Hardcoded Color Scheme (Shades of Teal and White/Off-White) ---
 const Color kColorPrimaryDark = Color(0xFF004D40); // Darkest Teal
@@ -25,7 +27,6 @@ const Color kColorTextSecondary =
 // --- End Color Scheme ---
 
 class SplashScreen extends StatefulWidget {
-  // Use const constructor
   const SplashScreen({super.key});
 
   @override
@@ -35,9 +36,9 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  late Animation<double> _fadeAnimation; // Changed to Fade Animation
-  late Animation<Offset>
-      _slideAnimation; // Added Slide Animation for Text/Button
+  late Animation<double> _fadeAnimation;
+  late Animation<Offset> _slideAnimation;
+  bool _isPreloading = false;
 
   @override
   void initState() {
@@ -46,27 +47,24 @@ class _SplashScreenState extends State<SplashScreen>
     // Initialize the animation controller
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(
-          milliseconds: 1500), // Longer duration for fade + slide
+      duration: const Duration(milliseconds: 1500),
     );
 
     // Define the fade animation for the background/logo
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _controller,
-        // Fade in during the first half of the animation
         curve: const Interval(0.0, 0.6, curve: Curves.easeIn),
       ),
     );
 
     // Define the slide animation for text and button (from bottom up)
     _slideAnimation = Tween<Offset>(
-      begin: const Offset(0.0, 0.5), // Start slightly below center
-      end: Offset.zero, // End at the center
+      begin: const Offset(0.0, 0.5),
+      end: Offset.zero,
     ).animate(
       CurvedAnimation(
         parent: _controller,
-        // Slide in during the second half, after fade starts
         curve: const Interval(0.4, 1.0, curve: Curves.easeOutCubic),
       ),
     );
@@ -74,15 +72,13 @@ class _SplashScreenState extends State<SplashScreen>
     // Start the animation
     _controller.forward();
 
-    // Preload all meals cache and auto-navigate after loading
+    // Start preloading and navigation logic
     _preloadAndNavigate();
   }
 
-  // (Removed duplicate _preloadAndNavigate)
-
   @override
   void dispose() {
-    _controller.dispose(); // Dispose the controller
+    _controller.dispose();
     super.dispose();
   }
 
@@ -108,21 +104,89 @@ class _SplashScreenState extends State<SplashScreen>
     );
   }
 
-  // Decide where to go after splash based on login state
+  // Decide where to go after splash based on login state and preloading
   Future<void> _preloadAndNavigate() async {
-    // Preload caches for meals, chefs, and producers (persistent)
-    try {
-      await AllMealsScreen.loadMealsCacheFromPrefs();
-      // Load chef/producer caches using the public static methods
-      await MealDetailScreen.loadChefsCacheFromUserCache();
-      await MealDetailScreen.loadProducersCacheFromUserCache();
-    } catch (e) {
-      print("Error preloading cache in splash screen: $e");
-      // Continue even if preloading fails
+    if (mounted) {
+      setState(() {
+        _isPreloading = true;
+      });
     }
 
-    // Wait for animation to finish (at least 1.5s)
-    await Future.delayed(const Duration(milliseconds: 3000));
+    // Start the animation delay and the data preloading concurrently
+    final animationDelay = Future.delayed(const Duration(milliseconds: 3000));
+    final preloadTasks = <Future>[];
+    preloadTasks.add(AllMealsScreen.loadMealsCacheFromPrefs());
+    preloadTasks.add(MealDetailScreen.loadChefsCacheFromUserCache());
+    preloadTasks.add(MealDetailScreen.loadProducersCacheFromUserCache());
+
+    // Add fetching and saving logic if cache is invalid
+    final now = DateTime.now();
+
+    // Check and fetch/save Chefs if cache is invalid
+    final dynamic chefsTimestampData = await UserCache.getData('chefs_list_cache_timestamp');
+    DateTime? chefsCacheTimestamp;
+    if (chefsTimestampData is String) {
+      try {
+        chefsCacheTimestamp = DateTime.parse(chefsTimestampData);
+      } catch (_) {}
+    }
+    final bool chefsCacheValid = chefsCacheTimestamp != null &&
+        now.difference(chefsCacheTimestamp) < CacheConfig.chefProducerDetailCacheDuration;
+
+    if (!chefsCacheValid) {
+      print("Splash: Chef cache invalid, fetching...");
+      preloadTasks.add(ApiService.fetchChefsStatic().then((fetchedChefs) async {
+        if (fetchedChefs != null) {
+          await MealDetailScreen.saveChefsCacheToUserCache(fetchedChefs);
+          print("Splash: Fetched and saved new chef cache.");
+        } else {
+          print("Splash: Failed to fetch new chef cache.");
+        }
+      }).catchError((e) {
+        print("Splash: Error fetching chefs: $e");
+      }));
+    } else {
+      print("Splash: Chef cache is valid.");
+    }
+
+    // Check and fetch/save Producers if cache is invalid
+    final dynamic producersTimestampData = await UserCache.getData('producers_list_cache_timestamp');
+    DateTime? producersCacheTimestamp;
+    if (producersTimestampData is String) {
+      try {
+        producersCacheTimestamp = DateTime.parse(producersTimestampData);
+      } catch (_) {}
+    }
+    final bool producersCacheValid = producersCacheTimestamp != null &&
+        now.difference(producersCacheTimestamp) < CacheConfig.chefProducerDetailCacheDuration;
+
+    if (!producersCacheValid) {
+      print("Splash: Producer cache invalid, fetching...");
+      preloadTasks.add(ApiService.fetchProducersStatic().then((fetchedProducers) async {
+        if (fetchedProducers != null) {
+          await MealDetailScreen.saveProducersCacheToUserCache(fetchedProducers);
+          print("Splash: Fetched and saved new producer cache.");
+        } else {
+          print("Splash: Failed to fetch new producer cache.");
+        }
+      }).catchError((e) {
+        print("Splash: Error fetching producers: $e");
+      }));
+    } else {
+      print("Splash: Producer cache is valid.");
+    }
+
+    // Wait for both the animation delay and all preload tasks to complete
+    await Future.wait([animationDelay, ...preloadTasks]);
+
+    if (mounted) {
+      setState(() {
+        _isPreloading = false;
+      });
+    }
+
+    // Add a small delay to allow UI to update
+    await Future.delayed(const Duration(milliseconds: 200));
 
     // Check login state
     final prefs = await SharedPreferences.getInstance();
@@ -130,14 +194,15 @@ class _SplashScreenState extends State<SplashScreen>
     final chefId = prefs.getString('chef_user_id');
     final producerId = prefs.getString('producer_id');
 
+    await Future.delayed(const Duration(milliseconds: 300));
+
     Widget nextScreen;
     if (userId != null) {
-      // User is logged in as a regular user
-      nextScreen = LandingPage(); // Use LandingPage as the user dashboard/home
+      nextScreen = LandingPage(); // Assumed to be defined elsewhere
     } else if (chefId != null) {
-      nextScreen = ChefDash88new(); // Replace with your chef dashboard
+      nextScreen = ChefDash88new(); // Assumed to be defined elsewhere
     } else if (producerId != null) {
-      nextScreen = ProducerDash22(); // Replace with your producer dashboard
+      nextScreen = ProducerDash22();
     } else {
       nextScreen = SignUpOrLoginPage();
     }
@@ -149,37 +214,29 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
-    // Set status bar style for better appearance
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark.copyWith(
-      // Or .light depending on your background
-      statusBarColor: Colors.transparent, // Make status bar transparent
-      statusBarIconBrightness:
-          Brightness.dark, // Use dark icons on light background
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.dark,
     ));
 
     return Scaffold(
-      backgroundColor: kColorBackground, // Updated teal background
+      backgroundColor: kColorBackground,
       body: Stack(
-        fit: StackFit.expand, // Make stack fill the screen
+        fit: StackFit.expand,
         children: [
-          // Optional: Subtle background pattern or texture instead of image
-
-          // Animated Content
           FadeTransition(
-            opacity: _fadeAnimation, // Apply fade to logo
+            opacity: _fadeAnimation,
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center, // Center vertically
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo
-                const Spacer(flex: 2), // Push logo up slightly
+                const Spacer(flex: 2),
                 Container(
-                  height: 146, // Slightly larger logo
+                  height: 146,
                   width: 146,
-                  padding: const EdgeInsets.all(8), // Padding around logo
+                  padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color:
-                        Colors.transparent, // White background for logo circle
+                    color: Colors.transparent,
                     boxShadow: [
                       BoxShadow(
                         color: kColorPrimary.withOpacity(0.15),
@@ -189,36 +246,30 @@ class _SplashScreenState extends State<SplashScreen>
                     ],
                   ),
                   child: ClipOval(
-                    // Clip the image itself
                     child: Image.asset(
                       'assets/images/Logo (1).png',
-                      fit: BoxFit.contain, // Contain to avoid distortion
+                      fit: BoxFit.contain,
                     ),
                   ),
                 ),
-                const Spacer(flex: 1), // Space between logo and text
-
-                // Animated Text and Button (Slide + Fade)
+                const Spacer(flex: 1),
                 SlideTransition(
                   position: _slideAnimation,
                   child: FadeTransition(
                     opacity: _controller.drive(CurveTween(
-                        curve: const Interval(
-                            0.5, 1.0))), // Fade text/button in later
+                        curve: const Interval(0.5, 1.0))),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 30.0),
                       child: Column(
-                        mainAxisSize:
-                            MainAxisSize.min, // Take minimum vertical space
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
                             "ZINZI",
                             style: GoogleFonts.poppins(
-                              // Use Google Fonts
-                              fontSize: 52, // Slightly reduced size
+                              fontSize: 52,
                               fontWeight: FontWeight.w800,
-                              color: kColorPrimaryDark, // Dark Teal
-                              letterSpacing: 3.0, // Adjust spacing
+                              color: kColorPrimaryDark,
+                              letterSpacing: 3.0,
                             ),
                           ),
                           const SizedBox(height: 15),
@@ -227,39 +278,35 @@ class _SplashScreenState extends State<SplashScreen>
                             textAlign: TextAlign.center,
                             style: GoogleFonts.poppins(
                               fontSize: 17,
-                              fontWeight: FontWeight.w500, // Medium weight
-                              color: kColorPrimaryDark, // Secondary text color
-                              letterSpacing: 0.5, // Reduced spacing
+                              fontWeight: FontWeight.w500,
+                              color: kColorPrimaryDark,
+                              letterSpacing: 0.5,
                             ),
                           ),
-                          const SizedBox(
-                              height: 50), // More space before button
-                          // "Get Started" button
+                          const SizedBox(height: 50),
                           ElevatedButton(
-                            onPressed: () {
-                              _navigateWithSlideTransition(
-                                  context, SignUpOrLoginPage());
-                            },
+                            onPressed: _isPreloading
+                                ? null
+                                : () {
+                                    _navigateWithSlideTransition(
+                                        context, SignUpOrLoginPage());
+                                  },
                             style: ElevatedButton.styleFrom(
-                              backgroundColor:
-                                  kColorPrimary, // Medium Teal button
-                              foregroundColor:
-                                  kColorTextOnPrimary, // White text
+                              backgroundColor: kColorPrimary,
+                              foregroundColor: kColorTextOnPrimary,
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 50,
-                                  vertical: 16), // Adjusted padding
+                                  horizontal: 50, vertical: 16),
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(
-                                    30), // Keep pill shape
+                                borderRadius: BorderRadius.circular(30),
                               ),
-                              elevation: 3, // Subtle elevation
+                              elevation: 3,
                               shadowColor: kColorPrimary.withOpacity(0.3),
                             ),
                             child: Text(
                               "Get Started",
                               style: GoogleFonts.poppins(
                                 fontSize: 17,
-                                fontWeight: FontWeight.w600, // Semi-bold
+                                fontWeight: FontWeight.w600,
                                 letterSpacing: 0.8,
                               ),
                             ),
@@ -269,10 +316,20 @@ class _SplashScreenState extends State<SplashScreen>
                     ),
                   ),
                 ),
-                const Spacer(flex: 2), // Space at the bottom
+                const Spacer(flex: 2),
               ],
             ),
           ),
+          if (_isPreloading)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: LinearProgressIndicator(
+                color: kColorPrimary,
+                backgroundColor: kColorPrimary.withOpacity(0.2),
+              ),
+            ),
         ],
       ),
     );

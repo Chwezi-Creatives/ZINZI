@@ -5,6 +5,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi2/transporter_dash.dart';
 import 'package:zinzi2/transporter_signup.dart';
+import 'transoorter_dash_new.dart'; // being tested for now
 
 // --- Hardcoded Colors (Copied) ---
 const Color primaryTeal = Color(0xFF00796B);
@@ -87,7 +88,7 @@ class _TransporterLoginPageState extends State<TransporterLoginPage> {
                 Navigator.pushReplacement(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => TransporterDashboardScreen(transporterId: transporterId), // Pass the non-null ID
+                    builder: (context) => TransporterDashNew(transporterId: transporterId)//TransporterDashboardScreen(transporterId: transporterId), // Pass the non-null ID ths page ha sbeen  //commented out temporraliry to test a new page 
                   ),
                 );
              }

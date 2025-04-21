@@ -13,6 +13,8 @@ import 'package:image_picker/image_picker.dart'; // For profile editing
 import 'package:geolocator/geolocator.dart';
 import 'package:zinzi2/Transporter_login.dart';
 import 'package:zinzi2/signup_or_Login.dart'; // Assuming this is your login page path
+import 'package:zinzi2/user_cache.dart'; // <<< IMPORT UserCache
+import 'package:zinzi2/cache_config.dart'; // <<< IMPORT CacheConfig
 
 // --- Hardcoded Colors ---
 const Color primaryTeal = Color(0xFF00796B);
@@ -503,11 +505,43 @@ class TransporterApiService {
       if (e is Exception) rethrow;
       throw Exception('Failed to load orders: $e');
     }
+
+  }
+  // Fetch orders by status
+  static Future<List<Order>> fetchOrdersByStatus(String status) async {
+    if (status.isEmpty) {
+      throw Exception('Status provided is empty.');
+    }
+    final Uri uri = Uri.parse('$apibaseurl/rr/orders?order_status=$status');
+    print("Fetching orders with status '$status' from: $uri");
+    try {
+      final response = await http.get(uri, headers: _getWriteHeaders(requiresAuth: true)); // Assuming auth needed
+      if (response.statusCode == 200) {
+        final dynamic rawData = json.decode(response.body);
+        final dynamic ordersList = _handleApiResponse(rawData);
+        if (ordersList is List) {
+          return ordersList
+              .whereType<Map<String, dynamic>>() // Ensure items are maps
+              .map((item) => Order.fromJson(item))
+              .toList();
+        } else {
+          print("Orders by status API response format unexpected: Expected List, got ${ordersList?.runtimeType}");
+          return []; // Return empty list on format error
+        }
+      } else {
+        print("Error fetching orders by status: ${response.statusCode} ${response.body}");
+        throw Exception('Failed to load orders by status (Code: ${response.statusCode})');
+      }
+    } catch (e) {
+      print("Exception fetching orders by status: $e");
+      if (e is Exception) rethrow;
+      throw Exception('Failed to load orders by status: $e');
+    }
   }
 
   // Update order status (called by transporter)
   static Future<bool> updateOrderStatusByTransporter(int orderId, String newStatus) async {
-    final Uri uri = Uri.parse('$apibaseurl/rr/orders/$orderId/transporter-status');
+    final Uri uri = Uri.parse('$apibaseurl/rr/orders/$orderId/status');
     print("Updating order $orderId status by transporter to $newStatus via $uri");
     try {
       final response = await http.patch(
@@ -972,9 +1006,77 @@ class TransporterProfileTab extends StatefulWidget {
 }
 
 class _TransporterProfileTabState extends State<TransporterProfileTab> with AutomaticKeepAliveClientMixin {
+  // --- Caching for Transporter Profile ---
+  static TransporterProfile? _profileCache;
+  static DateTime? _profileCacheTimestamp;
+  static const String _profileCacheKey = 'transporter_profile_cache';
+  static const String _profileCacheTimestampKey = 'transporter_profile_cache_timestamp';
+
+  // Load cache from UserCache
+  static Future<void> _loadProfileCacheFromPrefs() async {
+    final cachedData = await UserCache.getData(_profileCacheKey);
+    final timestampData = await UserCache.getData(_profileCacheTimestampKey);
+
+    if (cachedData is Map<String, dynamic> && timestampData is String) {
+      try {
+        _profileCache = TransporterProfile.fromJson(cachedData); // Assuming fromJson works for cached data
+        _profileCacheTimestamp = DateTime.parse(timestampData);
+      } catch (e) {
+        print("Error parsing cached transporter profile: $e");
+        _profileCache = null;
+        _profileCacheTimestamp = null;
+        // Clear potentially corrupted cache
+        await UserCache.removeData(_profileCacheKey);
+        await UserCache.removeData(_profileCacheTimestampKey);
+      }
+    } else {
+       _profileCache = null;
+       _profileCacheTimestamp = null;
+    }
+  }
+
+  // Save cache to UserCache
+  static Future<void> _saveProfileCacheToPrefs(TransporterProfile profile) async {
+    // Convert profile to a suitable Map for JSON encoding if needed
+    // Assuming TransporterProfile has a toJson method or can be directly encoded
+    // For simplicity, we'll cache the result of toJson() if available, or just the map from fromJson
+    // Let's assume TransporterProfile.toJson() exists or we can use the map from fromJson
+    // For now, we'll just save the map we got from the API fetch.
+    // A dedicated toJson() method in TransporterProfile would be ideal.
+    // If TransporterProfile.fromJson works, we might need a toJson() that produces compatible JSON
+    // Let's assume we can use the original JSON map if we stored it, or create a new one.
+    // For simplicity, let's assume we can convert the profile back to a map.
+    // If TransporterProfile.toJson() exists, use it. Otherwise, manually create a map.
+    // Assuming TransporterProfile has a toJson() method:
+    // Map<String, dynamic> cacheableProfile = profile.toJson(); // Assuming toJson exists
+
+    // If no toJson(), manually create a map (less ideal, might miss fields)
+    Map<String, dynamic> cacheableProfile = {
+      'transporter_id': profile.transporterId,
+      'name': profile.name,
+      'email': profile.email,
+      'phone_number': profile.phoneNumber,
+      'profile_image_url': profile.profileImageUrl,
+      'vehicle_type': profile.vehicleType,
+      'license_plate': profile.licensePlate,
+      'is_active': profile.isActive,
+      'rating': profile.rating,
+      'location': profile.location,
+      'registration_date': profile.registrationDate?.toIso8601String(),
+    };
+
+
+    await UserCache.saveData(_profileCacheKey, cacheableProfile);
+    await UserCache.saveData(
+        _profileCacheTimestampKey, DateTime.now().toIso8601String());
+    _profileCache = profile; // Update in-memory cache
+    _profileCacheTimestamp = DateTime.now();
+  }
+  // --- End Caching ---
+
   TransporterProfile? _currentProfile;
-  bool _isLoading = true;
-  String _error = '';
+  bool _isLoadingProfile = true; // Specific loading for profile
+  String _profileFetchError = ''; // Specific error for profile
   bool _isLoadingStatus = false; // For online/offline toggle
   bool _isEditing = false;
   bool _isUploadingEditImage = false; // Specific state for image uploading
@@ -1002,7 +1104,7 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
     _vehicleTypeController = TextEditingController();
     _licensePlateController = TextEditingController();
     _locationController = TextEditingController();
-    _loadProfile(); // Load data when tab is initialized
+    _initializeProfileData(); // Load data when tab is initialized (cache-first)
   }
 
   @override
@@ -1062,36 +1164,97 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
     }
   }
 
-  // --- Load Profile Data via API ---
-  Future<void> _loadProfile() async {
-    if (!mounted) return;
-    // Do not use ScaffoldMessenger here!
-    _cancelEditMode(); // Ensure edit mode is off on load/reload
-    setState(() {
-      _isLoading = true;
-      _error = '';
-    });
+  // Combined cache load and background fetch for Transporter Profile
+  Future<void> _initializeProfileData() async {
+     if (mounted) {
+       setState(() {
+         _isLoadingProfile = true; // Start profile loading
+         _profileFetchError = '';
+         _cancelEditMode(); // Ensure edit mode is off on load/reload
+       });
+     }
 
+     // 1. Load from cache
+     await _loadProfileCacheFromPrefs();
+
+     // 2. Display cached data immediately if available
+     if (_profileCache != null && mounted) {
+       final now = DateTime.now();
+       final bool cacheIsValid = _profileCacheTimestamp != null &&
+           now.difference(_profileCacheTimestamp!) < CacheConfig.profileCacheDuration; // Use correct duration
+
+       if (cacheIsValid) {
+          print("TransporterProfileTab: Displaying valid cached profile.");
+          setState(() {
+            _currentProfile = _profileCache;
+            _isLoadingProfile = false; // Stop profile loading indicator
+          });
+       } else {
+          print("TransporterProfileTab: Cached profile expired, will fetch fresh data.");
+          // Keep showing stale cache while fetching, but indicate background loading
+          setState(() {
+             _currentProfile = _profileCache; // Show stale data
+             _isLoadingProfile = true; // Indicate background loading
+          });
+       }
+     } else if (mounted) {
+        print("TransporterProfileTab: No cached profile found, fetching...");
+        // No cache, ensure loading is true
+        setState(() {
+          _isLoadingProfile = true;
+        });
+     }
+
+     // 3. Fetch fresh data in the background (regardless of cache state)
+     await _fetchTransporterProfileAndUpdate();
+  }
+
+  // Separate function to fetch Transporter Profile and update state/cache
+  Future<void> _fetchTransporterProfileAndUpdate() async {
     try {
-      // Pass ID to fetch profile
-      // Access ID via widget.transporterId
       final profile = await TransporterApiService.fetchTransporterProfile(widget.transporterId);
       if (mounted) {
+        print("TransporterProfileTab: Fetched fresh transporter profile data.");
+        await _saveProfileCacheToPrefs(profile); // Save fresh data to cache
         setState(() {
           _currentProfile = profile;
-          _isLoading = false;
+          _isLoadingProfile = false; // Done loading
+          _profileFetchError = ''; // Clear any previous error
         });
       }
-    } catch (e) {
-      print("Error loading transporter profile: $e");
+    } catch (error, stackTrace) {
+      print("Error fetching fresh transporter profile: $error\n$stackTrace");
       if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _error = 'Failed to load profile: $e';
-        });
+        // Only show error if there's no cached data to display
+        if (_currentProfile == null) {
+          setState(() {
+            _profileFetchError = 'Failed to load profile: $error';
+            _isLoadingProfile = false; // Stop loading
+          });
+          _showErrorSnackbar('Error loading profile: $error'); // Use existing snackbar
+        } else {
+           // Keep showing cached data, log error silently or show subtle indicator
+           print("TransporterProfileTab: Failed to fetch fresh profile, showing cached version. Error: $error");
+           setState(() {
+              _isLoadingProfile = false; // Ensure loading indicator stops
+           });
+        }
       }
     }
   }
+
+  // Renamed original _loadProfile to _refreshProfile for clarity (used by refresh indicator)
+  Future<void> _refreshProfile() async {
+     if (!mounted) return;
+     setState(() {
+       _isLoadingProfile = true; // Show loading indicator during manual refresh
+       _profileFetchError = '';
+       _cancelEditMode(); // Ensure edit mode is off on reload
+     });
+     // Fetch fresh data and update
+     await _fetchTransporterProfileAndUpdate();
+  }
+
 
   // --- Image Handling for Edit ---
   Future<void> _pickEditImage(ImageSource source) async {
@@ -1259,8 +1422,8 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
         setState(() => _isLoadingStatus = false);
         if (success) {
           _showSuccessSnackbar('Profile updated successfully!');
-          _loadProfile();
-        } // Reload to see changes
+          _refreshProfile(); // Reload to see changes
+        }
         else {
           _showErrorSnackbar('Failed to save profile changes.');
         }
@@ -1373,28 +1536,25 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
+    // Use _isLoadingProfile and _profileFetchError for state management
+    if (_isLoadingProfile && _currentProfile == null) {
       return _buildProfileShimmer();
     }
-    if (_error.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _error.isNotEmpty) {
-          ScaffoldMessenger.of(context).removeCurrentSnackBar();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(_error), backgroundColor: errorColor),
-          );
-        }
-      });
-      return _buildErrorState(_error);
+    if (_profileFetchError.isNotEmpty && _currentProfile == null) {
+      // Show error state only if there's no cached data to display
+      return _buildErrorState(_profileFetchError);
     }
+    // If _currentProfile is null here, it means there was no cache and fetch failed
     if (_currentProfile == null) {
-      return _buildEmptyState(
-          "Profile Not Found", "Could not load your profile details.");
+       // This case should ideally be caught by the error state above, but as a safeguard:
+       return _buildEmptyState(
+           "Profile Not Found", "Could not load your profile details.");
     }
 
-    final profile = _currentProfile!;
+
+    final profile = _currentProfile!; // Use the potentially cached or fresh profile
     return RefreshIndicator(
-      onRefresh: _loadProfile,
+      onRefresh: _refreshProfile, // Use the new refresh method
       color: primaryTeal,
       child: Form(
         key: _profileFormKey,
@@ -1408,6 +1568,9 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
             const SizedBox(height: 20),
             _buildAccountStatusSection(profile),
             const SizedBox(height: 80),
+            // Show loading indicator if a background fetch is in progress AND we are not editing
+            if (_isLoadingProfile && !_isEditing)
+               const LinearProgressIndicator(),
           ],
         ),
       ),
@@ -1513,7 +1676,7 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
           ElevatedButton.icon(
             icon: const Icon(Icons.refresh_rounded, size: 20),
             label: const Text('Retry'),
-            onPressed: _loadProfile,
+            onPressed: _refreshProfile, // Call the refresh method
           )
         ],
       ),

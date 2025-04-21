@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'signup_or_Login.dart'; // Correct filename
 import 'signup_or_Login.dart' show SignUpOrLoginPage; // Import the specific class
 
+import 'splash.dart';
+
 class AppDrawer extends StatelessWidget {
   final String userType; // e.g., 'Chef', 'Transporter', 'Producer'
   final String userIdKey; // The SharedPreferences key for the user ID (e.g., 'chef_id')
@@ -25,19 +27,13 @@ class AppDrawer extends StatelessWidget {
       print('User ID key "$userIdKey" removed from SharedPreferences.');
 
       // Clear all routes and navigate to the initial route (which should lead to splash)
+      // Clear all routes and navigate to the initial route (which should lead to splash)
+      // Assuming the initial route is set up correctly in main.dart to go to the splash screen.
+      // Navigate directly to the SplashScreen and remove all previous routes
       navigator.pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => const SizedBox.shrink()), // Navigate to a blank screen temporarily
+        MaterialPageRoute(builder: (context) => const SplashScreen()),
         (Route<dynamic> route) => false, // Remove all routes
       );
-      // This is a common pattern to clear the stack before potentially restarting
-      // A full app restart might require platform-specific code or packages,
-      // but navigating to the initial route after clearing the stack
-      // often achieves the desired effect of going through the splash screen.
-      // If the app's main function sets up the initial route to be the splash screen,
-      // this will effectively restart the flow from there.
-      // If the initial route is not the splash screen, further changes in main.dart might be needed.
-      // Assuming the initial route is set up correctly in main.dart:
-      navigator.pushNamedAndRemoveUntil('/', (Route<dynamic> route) => false); // Navigate to the initial route
     } catch (e) {
       print("Error during logout: $e");
       // Show an error message if logout fails

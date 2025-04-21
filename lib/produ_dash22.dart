@@ -11,6 +11,8 @@ import 'package:shimmer/shimmer.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:zinzi2/user_cache.dart'; // <<< IMPORT UserCache
+import 'package:zinzi2/cache_config.dart'; // <<< IMPORT CacheConfig
 
 // Inline Order class based on API data
 class Order {
@@ -678,11 +680,84 @@ class ProducerDash22 extends StatefulWidget {
 }
 
 class _ProducerDash22State extends State<ProducerDash22> {
+  // --- Caching for Producer Profile ---
+  static ProducerProfile? _profileCache;
+  static DateTime? _profileCacheTimestamp;
+  static const String _profileCacheKey = 'producer_profile_cache';
+  static const String _profileCacheTimestampKey = 'producer_profile_cache_timestamp';
+
+  // Load cache from UserCache
+  static Future<void> _loadProfileCacheFromPrefs() async {
+    final cachedData = await UserCache.getData(_profileCacheKey);
+    final timestampData = await UserCache.getData(_profileCacheTimestampKey);
+
+    if (cachedData is Map<String, dynamic> && timestampData is String) {
+      try {
+        _profileCache = ProducerProfile.fromJson(cachedData); // Assuming fromJson works for cached data
+        _profileCacheTimestamp = DateTime.parse(timestampData);
+      } catch (e) {
+        print("Error parsing cached producer profile: $e");
+        _profileCache = null;
+        _profileCacheTimestamp = null;
+        // Clear potentially corrupted cache
+        await UserCache.removeData(_profileCacheKey);
+        await UserCache.removeData(_profileCacheTimestampKey);
+      }
+    } else {
+       _profileCache = null;
+       _profileCacheTimestamp = null;
+    }
+  }
+
+  // Save cache to UserCache
+  static Future<void> _saveProfileCacheToPrefs(ProducerProfile profile) async {
+    // Convert profile to a suitable Map for JSON encoding if needed
+    // Assuming ProducerProfile has a toJson method or can be directly encoded
+    // For simplicity, we'll cache the result of toJson() if available, or just the map from fromJson
+    // Let's assume ProducerProfile.toJson() exists or we can use the map from fromJson
+    // For now, we'll just save the map we got from the API fetch.
+    // A dedicated toJson() method in ProducerProfile would be ideal.
+    // For now, let's assume we can convert it back to a map.
+    // If ProducerProfile.fromJson works, we might need a toJson() that produces compatible JSON
+    // Let's assume we can use the original JSON map if we stored it, or create a new one.
+    // For simplicity, let's assume we can convert the profile back to a map.
+    // If ProducerProfile.toJson() exists, use it. Otherwise, manually create a map.
+    // Assuming ProducerProfile has a toJson() method:
+    // Map<String, dynamic> cacheableProfile = profile.toJson(); // Assuming toJson exists
+
+    // If no toJson(), manually create a map (less ideal, might miss fields)
+    Map<String, dynamic> cacheableProfile = {
+      'producer_id': profile.producerId,
+      'name': profile.name,
+      'email': profile.email,
+      'phone_number': profile.phoneNumber,
+      'location': profile.location,
+      'image': profile.image,
+      'is_active': profile.isActive,
+      'registration_date': profile.registrationDate.toIso8601String(),
+      'last_login': profile.lastLogin?.toIso8601String(),
+      'producer_type': profile.producerType,
+      'rating': profile.rating,
+      'reviews': profile.reviews,
+      'stock': profile.stock, // Include stock in cache
+    };
+
+
+    await UserCache.saveData(_profileCacheKey, cacheableProfile);
+    await UserCache.saveData(
+        _profileCacheTimestampKey, DateTime.now().toIso8601String());
+    _profileCache = profile; // Update in-memory cache
+    _profileCacheTimestamp = DateTime.now();
+  }
+  // --- End Caching ---
+
   int _currentIndex = 0;
   ProducerProfile? _profile;
   List<Order> _orders = [];
   List<Product> _produce = []; // List of ALL available produce
-  bool _isLoading = true;
+  bool _isLoading = true; // General loading indicator
+  bool _isLoadingProfile = true; // Specific loading for profile
+  String _profileFetchError = ''; // Specific error for profile
 
   // Track selected produce for stock
   Set<String> _selectedProduceIds = {};
@@ -965,31 +1040,112 @@ class _ProducerDash22State extends State<ProducerDash22> {
     _produceSourceController = null;
   }
 
+  // Combined cache load and background fetch for Producer Profile
+  Future<void> _initializeProducerProfile() async {
+     if (mounted) {
+       setState(() {
+         _isLoadingProfile = true; // Start profile loading
+         _profileFetchError = '';
+       });
+     }
+
+     // 1. Load from cache
+     await _loadProfileCacheFromPrefs();
+
+     // 2. Display cached data immediately if available
+     if (_profileCache != null && mounted) {
+       final now = DateTime.now();
+       final bool cacheIsValid = _profileCacheTimestamp != null &&
+           now.difference(_profileCacheTimestamp!) < CacheConfig.profileCacheDuration; // Use correct duration
+
+       if (cacheIsValid) {
+          print("ProducerDash: Displaying valid cached profile.");
+          setState(() {
+            _profile = _profileCache;
+            _isLoadingProfile = false; // Stop profile loading indicator
+          });
+       } else {
+          print("ProducerDash: Cached profile expired, will fetch fresh data.");
+          // Keep showing stale cache while fetching, but indicate background loading
+          setState(() {
+             _profile = _profileCache; // Show stale data
+             _isLoadingProfile = true; // Indicate background loading
+          });
+       }
+     } else if (mounted) {
+        print("ProducerDash: No cached profile found, fetching...");
+        // No cache, ensure loading is true
+        setState(() {
+          _isLoadingProfile = true;
+        });
+     }
+
+     // 3. Fetch fresh data in the background (regardless of cache state)
+     await _fetchProducerProfileAndUpdate();
+  }
+
+  // Separate function to fetch Producer Profile and update state/cache
+  Future<void> _fetchProducerProfileAndUpdate() async {
+    try {
+      final profile = await ProducerApiService.fetchProducerProfile();
+      if (mounted) {
+        print("ProducerDash: Fetched fresh producer profile data.");
+        await _saveProfileCacheToPrefs(profile); // Save fresh data to cache
+        setState(() {
+          _profile = profile;
+          _isLoadingProfile = false; // Done loading
+          _profileFetchError = ''; // Clear any previous error
+        });
+      }
+    } catch (error, stackTrace) {
+      print("Error fetching fresh producer profile: $error\n$stackTrace");
+      if (mounted) {
+        // Only show error if there's no cached data to display
+        if (_profile == null) {
+          setState(() {
+            _profileFetchError = 'Failed to load profile: $error';
+            _isLoadingProfile = false; // Stop loading
+          });
+          _showErrorSnackBar('Error loading profile: $error'); // Use existing snackbar
+        } else {
+           // Keep showing cached data, log error silently or show subtle indicator
+           print("ProducerDash: Failed to fetch fresh profile, showing cached version. Error: $error");
+           setState(() {
+              _isLoadingProfile = false; // Ensure loading indicator stops
+           });
+        }
+      }
+    }
+  }
+
+
+  // Modified _fetchAllData to only fetch orders and produce, and trigger profile fetch
   Future<void> _fetchAllData() async {
     if (!mounted) return;
-    // Ensure isLoading is true only when starting the fetch
+    // Ensure isLoading is true only when starting the fetch for orders/produce
+    // Profile loading is managed by _isLoadingProfile
     if (!_isLoading) {
        setState(() => _isLoading = true);
     }
-    _error = '';
+    _error = ''; // General error for orders/produce
     _cancelAllEdits(); // Cancel any ongoing edits before refresh
 
+    // Trigger profile initialization/fetch (cache-first)
+    _initializeProducerProfile(); // Don't await this
+
     try {
-      // Fetch all data concurrently
+      // Fetch orders and produce concurrently
       final results = await Future.wait([
-        ProducerApiService.fetchProducerProfile(),
         ProducerApiService.fetchProducerOrders(),
         ProducerApiService.fetchProducerProduce(), // Fetch the global list of produce
       ], eagerError: true); // Stop on first error
 
       // Process results if mounted
       if (mounted) {
-        final fetchedProfile = results[0] as ProducerProfile;
-        final fetchedOrders = results[1] as List<Order>;
-        final fetchedProduce = results[2] as List<Product>;
+        final fetchedOrders = results[0] as List<Order>;
+        final fetchedProduce = results[1] as List<Product>;
 
         setState(() {
-          _profile = fetchedProfile;
           _orders = fetchedOrders;
           _produce = fetchedProduce; // Store the master list of produce
 
@@ -1649,8 +1805,9 @@ class _ProducerDash22State extends State<ProducerDash22> {
   @override
   Widget build(BuildContext context) {
     // Determine AppBar Avatar Image
+    // Use _profile and _isLoadingProfile for profile image
     ImageProvider? appBarAvatarImage;
-    if (_isLoading || _profile == null) {
+    if (_isLoadingProfile || _profile == null) {
       appBarAvatarImage = const AssetImage(placeholderImagePath); // Placeholder while loading
     } else if (_profile!.image != null && _profile!.image!.isNotEmpty) {
       try {
@@ -1683,7 +1840,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
         centerTitle: false, // Align title left (common practice)
         actions: [
           // Profile Avatar in AppBar
-          if (!_isLoading && _profile != null) // Show only when loaded
+          if (!_isLoadingProfile && _profile != null) // Show only when profile is loaded
              Padding(
                padding: const EdgeInsets.only(right: 10.0),
                child: CircleAvatar(
@@ -1736,7 +1893,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
             colorFilter: ColorFilter.mode(Color(0xE6FFFFFF), BlendMode.dstATop), // Lighten image
           ),
         ),
-        child: _buildBodyContent(), // Main content بناءً on state
+        child: _buildBodyContent(), // Main content based on state
       ),
       // Bottom Navigation Bar
       bottomNavigationBar: BottomNavigationBar(
@@ -1823,10 +1980,11 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
     switch (_currentIndex) {
       case 0: // Profile Tab
+        // Show FAB only when profile is loaded and not loading
         return FloatingActionButton.small(
-          onPressed: (_profile == null || _isLoading) ? null : _handleEditProfile,
+          onPressed: (_profile == null || _isLoadingProfile) ? null : _handleEditProfile,
           tooltip: 'Edit Profile',
-          backgroundColor: (_profile == null || _isLoading) ? Colors.grey : primaryTeal,
+          backgroundColor: (_profile == null || _isLoadingProfile) ? Colors.grey : primaryTeal,
           foregroundColor: textOnTeal,
           child: const Icon(Icons.edit_outlined, size: 20),
           heroTag: 'fab_profile_edit', // Unique tag
@@ -2696,23 +2854,23 @@ class _ProducerDash22State extends State<ProducerDash22> {
            : Row( // Action buttons for existing items
               mainAxisSize: MainAxisSize.min,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.edit_outlined, size: 20),
-                  color: actionButtonForeground, // Use defined color
-                  tooltip: 'Edit Item Details',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(), // Compact button
-                   onPressed: () => _handleEditProduce(product), // Open edit form
-                ),
-                const SizedBox(width: 4), // Space between buttons
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, size: 20),
-                  color: destructiveButtonForeground, // Use defined color
-                  tooltip: 'Delete Item',
-                  padding: EdgeInsets.zero,
-                   constraints: const BoxConstraints(), // Compact button
-                  onPressed: () => _handleDeleteProduce(product), // Show delete confirmation
-                ),
+                // IconButton( // Commented out edit button
+                //   icon: const Icon(Icons.edit_outlined, size: 20),
+                //   color: actionButtonForeground, // Use defined color
+                //   tooltip: 'Edit Item Details',
+                //   padding: EdgeInsets.zero,
+                //   constraints: const BoxConstraints(), // Compact button
+                //    onPressed: () => _handleEditProduce(product), // Open edit form
+                // ),
+                // const SizedBox(width: 4), // Space between buttons
+                // IconButton( // Commented out delete button
+                //   icon: const Icon(Icons.delete_outline, size: 20),
+                //   color: destructiveButtonForeground, // Use defined color
+                //   tooltip: 'Delete Item',
+                //   padding: EdgeInsets.zero,
+                //    constraints: const BoxConstraints(), // Compact button
+                //   onPressed: () => _handleDeleteProduce(product), // Show delete confirmation
+                // ),
               ],
             ),
          // Allow tapping the whole tile to edit as well
