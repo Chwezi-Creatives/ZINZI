@@ -245,6 +245,7 @@ class Order {
   final int? transporterId;
   final DateTime orderDate;
   final String deliveryAddress; // Keep as string, use getStringSafe
+  final String? pickupLocation; // <<< NEW: Add pickup_location field
   final String orderStatus;
   final double totalPrice;
   final String? notes; // Use getStringSafe
@@ -304,8 +305,13 @@ class Order {
     return rawAddress;
   }
 
-  // Placeholder for pickup address - adapt based on actual data source
+  // Use the new pickupLocation field for pickup address
   String get pickupAddress {
+    // Prioritize the new pickupLocation field if available
+    if (pickupLocation != null && pickupLocation!.isNotEmpty) {
+      return pickupLocation!;
+    }
+    // Fallback to existing logic if pickupLocation is not available
     if (orderType.toLowerCase() == 'meal' && chefName != null) {
       // Assume chef address isn't directly in order, placeholder
       return "Chef $chefName's Location"; // Simpler placeholder
@@ -346,6 +352,7 @@ class Order {
     this.transporterId,
     required this.orderDate,
     required this.deliveryAddress,
+    this.pickupLocation, // <<< NEW: Add pickupLocation to constructor
     required this.orderStatus,
     required this.totalPrice,
     this.notes,
@@ -365,32 +372,50 @@ class Order {
   });
 
   factory Order.fromJson(Map<String, dynamic> json) {
+    DateTime parseDate(String dateString) {
+      try {
+        return DateTime.parse(dateString).toLocal();
+      } catch (e) {
+        print("Warning: Could not parse order date '$dateString': $e");
+        return DateTime.now(); // Fallback to current time
+      }
+    }
+
+    // Helper to safely get a string value
+    String? getStringSafe(dynamic value) => value?.toString();
+
     return Order(
-      orderId: parseIntSafe(json['order_id']),
-      userId: parseIntNullable(json['user_id']),
-      orderType: getStringSafe(json['order_type']) ?? 'unknown',
-      productId: getStringSafe(json['product_id']),
-      chefId: parseIntNullable(json['chef_id']),
-      producerId: parseIntNullable(json['producer_id']),
-      transporterId: parseIntNullable(json['transporter_id']),
-      orderDate:
-          parseRequiredDateSafe(json['order_date']), // Use required parser
-      // *** FIX: Use getStringSafe for potentially complex address field ***
-      deliveryAddress:
-          getStringSafe(json['delivery_address']) ?? 'Address not provided',
-      orderStatus: getStringSafe(json['order_status']) ?? 'unknown',
-      totalPrice: parseDoubleSafe(json['total_price']),
+      orderId: json['order_id'] as int? ?? 0,
+      userId: json['user_id'] as int?,
+      orderType: json['order_type'] as String? ?? 'unknown',
+      productId: json['product_id'] as String?,
+      chefId: json['chef_id'] as int?,
+      producerId: json['producer_id'] as int?,
+      transporterId: json['transporter_id'] as int?,
+      orderDate: parseDate(
+          json['order_date'] as String? ?? DateTime.now().toIso8601String()),
+      deliveryAddress: getStringSafe(json['delivery_address']) ??
+          'Address not provided', // Use safe getter
+      pickupLocation: getStringSafe(
+          json['pickup_location']), // <<< NEW: Parse pickup_location
+      orderStatus: json['order_status'] as String? ?? 'unknown',
+      // Handle potential String price from API before parsing
+      totalPrice: (json['total_price'] is String
+                  ? double.tryParse(json['total_price'])
+                  : json['total_price'] as num?)
+              ?.toDouble() ??
+          0.0,
       notes: getStringSafe(json['notes']), // Use safe getter
-      paymentStatus: getStringSafe(json['payment_status']) ?? 'unknown',
-      paymentMode: getStringSafe(json['payment_mode']),
-      amountPaid: parseDoubleNullable(json['amount_paid']),
-      transactionId: getStringSafe(json['transaction_id']),
-      quantity: parseIntSafe(json['quantity'], defaultValue: 1),
+      paymentStatus: json['payment_status'] as String? ?? 'unknown',
+      paymentMode: json['payment_mode'] as String?,
+      amountPaid: (json['amount_paid'] as num?)?.toDouble(),
+      transactionId: json['transaction_id'] as String?,
+      quantity: json['quantity'] as int? ?? 1,
       mealName: getStringSafe(json['meal_name']),
       ingredients: getStringSafe(json['ingredients']),
       producerName: getStringSafe(json['producer_name']),
-      // *** FIX: Use getStringSafe for potentially complex address field ***
-      producerAddress: getStringSafe(json['producer_address']),
+      producerAddress:
+          getStringSafe(json['producer_address']), // Use safe getter
       chefName: getStringSafe(json['chef_name']),
       transporterName: getStringSafe(json['transporter_name']),
       gigDetails: getStringSafe(json['gig_details']),
@@ -908,7 +933,7 @@ class TransporterApiService {
   // Accept an available order
   static Future<bool> acceptOrder(int orderId, String transporterId) async {
     final Uri uri = Uri.parse(
-        '$apibaseurl/rr/orders/$orderId/accept'); // Assuming dedicated /accept endpoint
+        '$apibaseurl/rr/orders/$orderId/status'); // Assuming dedicated /accept endpoint
     // OR use the general update endpoint if that's how accept works:
     // final Uri uri = Uri.parse('$apibaseurl/rr/orders/$orderId');
     print("Accepting order $orderId for transporter $transporterId via $uri");

@@ -1,0 +1,488 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:intl/intl.dart';
+import 'package:lottie/lottie.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+
+// --- Environment & API ---
+final String apiBaseUrl = dotenv.env['API_BASE_URL'] ??
+    dotenv.env['API_BASE_URL-intranet'] ??
+    'https://your.default.api.url/fallback';
+
+// --- Theme Colors ---
+const Color kColorPrimary = Color(0xFF2A2D3E);
+const Color kColorAccent = Color(0xFF4CAF50);
+const Color kColorBackground = Color(0xFFF5F5F5);
+const Color kColorCard = Colors.white;
+const Color kColorTextPrimary = Color(0xFF333333);
+const Color kColorTextSecondary = Color(0xFF666666);
+const Color kColorStatusActive = Color(0xFF4CAF50);
+const Color kColorStatusInactive = Color(0xFFCCCCCC);
+const Color kColorDivider = Color(0xFFEEEEEE);
+
+class OrderStatusScreen extends StatefulWidget {
+  final int userId;
+  final List<int> orderIdList;
+  final int orderId;
+
+  const OrderStatusScreen({
+    super.key,
+    required this.userId,
+    required this.orderIdList,
+    required this.orderId,
+  });
+
+  @override
+  State<OrderStatusScreen> createState() => _OrderStatusScreenState();
+}
+
+class _OrderStatusScreenState extends State<OrderStatusScreen> {
+  final Map<int, Map<String, dynamic>> _ordersMap = {};
+  Timer? _pollingTimer;
+  int? _selectedOrderId;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchOrders();
+    _startPolling();
+  }
+
+  void _startPolling() {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      _fetchOrders();
+    });
+  }
+
+  void _fetchOrders() async {
+    for (var orderId in widget.orderIdList) {
+      final uri = Uri.parse('$apiBaseUrl/rr/orders?user_id=${widget.userId}&order_id=$orderId');
+      
+      try {
+        final response = await http.get(uri).timeout(const Duration(seconds: 20));
+        
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          if (data is Map<String, dynamic> && data['data'] is List) {
+            final orderDataList = data['data'] as List;
+            for (var orderData in orderDataList) {
+              if (orderData is Map<String, dynamic> && orderData.containsKey('order_id')) {
+                orderData['order_id'] = int.tryParse(orderData['order_id'].toString()) ?? orderData['order_id'];
+                
+                if (_ordersMap[orderData['order_id']] == null ||
+                    _ordersMap[orderData['order_id']]!['order_status'] != orderData['order_status']) {
+                  _ordersMap[orderData['order_id']] = orderData;
+                  if (_selectedOrderId == null) {
+                    _selectedOrderId = orderData['order_id'];
+                  }
+                  setState(() {});
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        print("Error fetching details for order $orderId: $e");
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: kColorBackground,
+      appBar: AppBar(
+        title: Text('ORDER TRACKING', 
+          style: GoogleFonts.poppins(
+            fontWeight: FontWeight.bold,
+            color: kColorTextPrimary,
+            fontSize: 18,
+          ),
+        ),
+        centerTitle: true,
+        backgroundColor: kColorPrimary,
+        elevation: 0,
+        systemOverlayStyle: SystemUiOverlayStyle.light.copyWith(
+          statusBarColor: kColorPrimary,
+        ),
+      ),
+      body: _ordersMap.isEmpty
+          ? _buildLoadingState()
+          : SingleChildScrollView(
+              child: Column(
+                children: [
+                  _buildOrderSelector(),
+                  _buildOrderStatusCard(),
+                  _buildShippingInfoCard(),
+                  _buildTrackingHistoryCard(),
+                ],
+              ),
+            ),
+    );
+  }
+
+  Widget _buildOrderSelector() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      color: kColorCard,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text('ORDER',
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.bold,
+              color: kColorTextPrimary,
+            ),
+          ),
+          DropdownButton<int>(
+            value: _selectedOrderId,
+            items: _ordersMap.keys.map((orderId) {
+              return DropdownMenuItem<int>(
+                value: orderId,
+                child: Text('Order #$orderId',
+                  style: GoogleFonts.poppins(),
+                ),
+              );
+            }).toList(),
+            onChanged: (value) {
+              setState(() {
+                _selectedOrderId = value;
+              });
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOrderStatusCard() {
+    final order = _selectedOrderId != null ? _ordersMap[_selectedOrderId] : null;
+    if (order == null) return Container();
+
+    final status = order['order_status']?.toString() ?? 'Unknown';
+    final formattedDate = _formatDate(order['order_date']?.toString());
+    final estimatedDate = _estimateDispatchDate(order['order_date']?.toString());
+
+    return Container(
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: kColorCard,
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Order Status: ${_formatStatus(status)}',
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+              color: kColorTextPrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text('Estimated Dispatch Date: $estimatedDate',
+            style: GoogleFonts.poppins(
+              color: kColorTextSecondary,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _buildStatusTimeline(status),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusTimeline(String status) {
+    final statuses = ['Order-Placed', 'Dispatched', 'Delivered'];
+    final currentStatusIndex = _getStatusIndex(status);
+    final orderDate = _selectedOrderId != null 
+        ? _ordersMap[_selectedOrderId]!['order_date']?.toString() 
+        : null;
+    final dates = _generateStatusDates(orderDate);
+
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: List.generate(statuses.length, (index) {
+            return Column(
+              children: [
+                Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: index <= currentStatusIndex 
+                        ? kColorStatusActive 
+                        : kColorStatusInactive,
+                  ),
+                  child: index <= currentStatusIndex
+                      ? const Icon(Icons.check, size: 16, color: Colors.white)
+                      : null,
+                ),
+                const SizedBox(height: 4),
+                Text(statuses[index],
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            );
+          }),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: List.generate(dates.length, (index) {
+            return Text(dates[index],
+              style: GoogleFonts.poppins(
+                fontSize: 12,
+                color: kColorTextSecondary,
+              ),
+            );
+          }),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildShippingInfoCard() {
+    final order = _selectedOrderId != null ? _ordersMap[_selectedOrderId] : null;
+    if (order == null) return Container();
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: kColorCard,
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('SHIPPING INFORMATION',
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.bold,
+              color: kColorTextPrimary,
+            ),
+          ),
+          const Divider(color: kColorDivider),
+          const SizedBox(height: 8),
+          _buildInfoRow('Ship To', 'Greek Morgan'),
+          _buildInfoRow('Contact', order['contact_number']?.toString() ?? 'N/A'),
+          _buildInfoRow('Shipping Method', 'Microsoft Standard Shipping'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTrackingHistoryCard() {
+    return Container(
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: kColorCard,
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('TRACKING HISTORY',
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.bold,
+              color: kColorTextPrimary,
+            ),
+          ),
+          const Divider(color: kColorDivider),
+          const SizedBox(height: 8),
+          _buildTrackingEvent('Order placed', '2 Feb.'),
+          _buildTrackingEvent('Order processed', '2 Feb.'),
+          _buildTrackingEvent('Shipped', '3 Feb.', isLast: true),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(label,
+              style: GoogleFonts.poppins(
+                color: kColorTextSecondary,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(value,
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTrackingEvent(String event, String date, {bool isLast = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Column(
+            children: [
+              Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: kColorStatusActive,
+                ),
+              ),
+              if (!isLast)
+                Container(
+                  width: 2,
+                  height: 40,
+                  color: kColorStatusActive,
+                ),
+            ],
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(event,
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                Text(date,
+                  style: GoogleFonts.poppins(
+                    color: kColorTextSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoadingState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(color: kColorPrimary),
+          const SizedBox(height: 16),
+          Text('Loading order details...',
+            style: GoogleFonts.poppins(
+              color: kColorTextPrimary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Helper methods
+  String _formatDate(String? dateString) {
+    if (dateString == null) return 'N/A';
+    try {
+      final dateTime = DateTime.parse(dateString);
+      return DateFormat('d MMM y').format(dateTime);
+    } catch (e) {
+      return dateString;
+    }
+  }
+
+  String _estimateDispatchDate(String? orderDate) {
+    if (orderDate == null) return 'N/A';
+    try {
+      final dateTime = DateTime.parse(orderDate).add(const Duration(days: 1));
+      return DateFormat('d MMM').format(dateTime);
+    } catch (e) {
+      return 'N/A';
+    }
+  }
+
+  String _formatStatus(String status) {
+    return status.replaceAll('_', ' ').split(' ').map((word) => 
+      word.isNotEmpty ? word[0].toUpperCase() + word.substring(1).toLowerCase() : ''
+    ).join(' ').trim();
+  }
+
+  List<String> _generateStatusDates(String? orderDate) {
+    if (orderDate == null) return ['N/A', 'N/A', 'N/A'];
+    try {
+      final dateTime = DateTime.parse(orderDate);
+      return [
+        DateFormat('d MMM').format(dateTime),
+        DateFormat('d MMM').format(dateTime.add(const Duration(days: 1))),
+        DateFormat('d MMM').format(dateTime.add(const Duration(days: 2))),
+      ];
+    } catch (e) {
+      return ['N/A', 'N/A', 'N/A'];
+    }
+  }
+
+  int _getStatusIndex(String status) {
+    switch (status.toLowerCase()) {
+      case 'placed':
+      case 'order_placed':
+        return 0;
+      case 'dispatched':
+      case 'shipped':
+        return 1;
+      case 'delivered':
+      case 'completed':
+        return 2;
+      default:
+        return 0;
+    }
+  }
+}

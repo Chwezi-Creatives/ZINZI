@@ -1,0 +1,4559 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // For TextInputFormatter
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'dart:io'; // Required for File and image picking
+import 'dart:async'; // Required for StreamSubscription
+import 'dart:ui' as ui; // Required for EdgeInsets in CameraBoundsOptions
+import 'package:async/async.dart'; // Required for CancelableOperation
+import 'package:flutter/gestures.dart'; // Required for EagerGestureRecognizer
+
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // For environment variables
+import 'package:image_picker/image_picker.dart' as image_picker; // Aliased image_picker
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // Import SharedPreferences for caching and prefs
+import 'package:cached_network_image/cached_network_image.dart'; // Image caching
+import 'package:shimmer/shimmer.dart'; // Shimmer effect
+import 'package:geolocator/geolocator.dart' as geolocator; // Aliased geolocator
+// ignore: depend_on_referenced_packages
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' as mapbox; // Alias mapbox itself
+
+
+// --- Assumed Imports (Ensure these files exist) ---
+// Make sure these paths are correct for your project structure
+import 'package:zinzi2/Transporter_login.dart'; // For logout navigation
+import 'package:zinzi2/user_cache.dart'; // <<< IMPORT UserCache
+import 'package:zinzi2/cache_config.dart'; // <<< IMPORT CacheConfig
+// import 'package:zinzi2/app_drawer.dart'; // If you reuse the drawer from old code
+
+// --- Environment Variables ---
+// Ensure loaded in main.dart: await dotenv.load(fileName: ".env");
+final String apibaseurl =
+    dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url/api';
+final String? imgurClientId = dotenv.env['IMGUR_CLIENT_ID'];
+final String? mapboxAccessToken =
+    dotenv.env['MAPBOX_ACCESS_TOKEN']; // <<< Mapbox Token
+
+// Path for placeholder image (ensure this exists)
+const String placeholderImagePath = 'assets/images/placeholder_avatar.png';
+
+// --- Color Palette (New Dashboard Style) ---
+const Color _primaryTeal = Colors.teal;
+// const Color _accentTeal = Colors.tealAccent; // Unused, commented out
+const Color _lightTeal = Color(0xFFB2DFDB);
+const Color _darkTeal = Color(0xFF00695C);
+const Color _white = Colors.white;
+const Color _grey = Colors.grey;
+const Color _lightGrey = Color(0xFFF5F5F5);
+const Color _green = Colors.green;
+const Color _red = Colors.red;
+const Color _orange = Colors.orange; // Added for warning/progress
+const Color _errorColor = Color(0xFFD32F2F); // Use a consistent error color
+const Color _subtleTextColor = Color(0xFF757575);
+
+// ================================================
+// === DATA MODELS (with robust parsing) =========
+// ================================================
+
+// --- Reusable JSON parsing helpers ---
+String? getStringSafe(dynamic value) => value?.toString();
+int parseIntSafe(dynamic value, {int defaultValue = 0}) {
+  if (value == null) return defaultValue;
+  if (value is int) return value;
+  if (value is String) return int.tryParse(value) ?? defaultValue;
+  if (value is double) return value.toInt();
+  return defaultValue;
+}
+
+int? parseIntNullable(dynamic value) {
+  if (value == null) return null;
+  if (value is int) return value;
+  if (value is String) return int.tryParse(value);
+  if (value is double) return value.toInt();
+  return null;
+}
+
+double? parseDoubleNullable(dynamic value) {
+  if (value == null) return null;
+  if (value is double) return value;
+  if (value is int) return value.toDouble();
+  if (value is String) return double.tryParse(value);
+  return null;
+}
+
+double parseDoubleSafe(dynamic value, {double defaultValue = 0.0}) =>
+    parseDoubleNullable(value) ?? defaultValue;
+bool parseBoolSafe(dynamic value) => value is bool
+    ? value
+    : (value == 'true' || value == 1 || value == 'True' || value == '1');
+DateTime? parseDateSafe(dynamic value) {
+  if (value == null) return null;
+  try {
+    return DateTime.tryParse(value.toString())?.toLocal();
+  } catch (_) {
+    try {
+      return DateFormat("E, dd MMM yyyy HH:mm:ss 'GMT'", 'en_US')
+          .parseUtc(value.toString())
+          .toLocal();
+    } catch (e) {
+      print("Could not parse date: $value - Error: $e");
+      return null;
+    }
+  }
+}
+
+DateTime parseRequiredDateSafe(dynamic value) =>
+    parseDateSafe(value) ?? DateTime.now();
+bool isValidUrl(String? url) {
+  if (url == null || url.isEmpty) return false;
+  try {
+    final uri = Uri.parse(url);
+    return uri.isScheme('HTTP') || uri.isScheme('HTTPS');
+  } catch (_) {
+    return false;
+  }
+}
+// --- End Helpers ---
+
+class TransporterProfile {
+  final int transporterId;
+  final String name;
+  final String email;
+  final String? phoneNumber;
+  final String? profileImageUrl;
+  final String? vehicleType;
+  final String? licensePlate;
+  final bool isActive;
+  final double? rating;
+  final String? location;
+  final DateTime? registrationDate;
+  final DateTime? lastLogin;
+  final String userType;
+  final bool isEmailVerified;
+  final String? address;
+  final String? vehicleMake;
+  final String? vehicleModel;
+  final String? vehicleYear;
+  final String? vehicleColor;
+
+  TransporterProfile({
+    required this.transporterId,
+    required this.name,
+    required this.email,
+    this.phoneNumber,
+    this.profileImageUrl,
+    this.vehicleType,
+    this.licensePlate,
+    required this.isActive,
+    this.rating,
+    this.location,
+    this.registrationDate,
+    this.lastLogin,
+    required this.userType,
+    required this.isEmailVerified,
+    this.address,
+    this.vehicleMake,
+    this.vehicleModel,
+    this.vehicleYear,
+    this.vehicleColor,
+  });
+
+  factory TransporterProfile.fromJson(Map<String, dynamic> json) {
+    return TransporterProfile(
+      transporterId: parseIntSafe(
+          json['transporter_id'] ?? json['rider_id'] ?? json['id']),
+      name: getStringSafe(json['name']) ?? 'N/A',
+      email: getStringSafe(json['email']) ?? 'N/A',
+      phoneNumber: getStringSafe(json['phone_number']),
+      profileImageUrl:
+          isValidUrl(getStringSafe(json['image'] ?? json['profile_image_url']))
+              ? getStringSafe(json['image'] ?? json['profile_image_url'])
+              : null,
+      vehicleType: getStringSafe(json['vehicle_type']),
+      licensePlate: getStringSafe(json['license_plate']),
+      isActive:
+          parseBoolSafe(json['is_active'] ?? json['online_status'] ?? false),
+      rating: parseDoubleNullable(json['rating']),
+      location: getStringSafe(json['location']),
+      registrationDate:
+          parseDateSafe(json['registration_date'] ?? json['created_at']),
+      lastLogin: parseDateSafe(json['last_login']),
+      userType: getStringSafe(json['user_type']) ?? 'Transporter',
+      isEmailVerified: parseBoolSafe(json['is_email_verified'] ?? false),
+      address: getStringSafe(json['address']),
+      vehicleMake: getStringSafe(json['vehicle_make']),
+      vehicleModel: getStringSafe(json['vehicle_model']),
+      vehicleYear: getStringSafe(json['vehicle_year']),
+      vehicleColor: getStringSafe(json['vehicle_color']),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'transporter_id': transporterId,
+        'name': name,
+        'email': email,
+        'phone_number': phoneNumber,
+        'profile_image_url': profileImageUrl,
+        'vehicle_type': vehicleType,
+        'license_plate': licensePlate,
+        'is_active': isActive,
+        'rating': rating,
+        'location': location,
+        'registration_date': registrationDate?.toIso8601String(),
+        'last_login': lastLogin?.toIso8601String(),
+        'user_type': userType,
+        'is_email_verified': isEmailVerified,
+        'address': address,
+        'vehicle_make': vehicleMake,
+        'vehicle_model': vehicleModel,
+        'vehicle_year': vehicleYear,
+        'vehicle_color': vehicleColor,
+      };
+
+  // copyWith method
+  TransporterProfile copyWith({
+    int? transporterId,
+    String? name,
+    String? email,
+    ValueGetter<String?>? phoneNumber,
+    ValueGetter<String?>? profileImageUrl,
+    ValueGetter<String?>? vehicleType,
+    ValueGetter<String?>? licensePlate,
+    bool? isActive,
+    ValueGetter<double?>? rating,
+    ValueGetter<String?>? location,
+    ValueGetter<String?>? address,
+    ValueGetter<DateTime?>? registrationDate,
+    ValueGetter<DateTime?>? lastLogin,
+    String? userType,
+    bool? isEmailVerified,
+    ValueGetter<String?>? vehicleMake,
+    ValueGetter<String?>? vehicleModel,
+    ValueGetter<String?>? vehicleYear,
+    ValueGetter<String?>? vehicleColor,
+  }) {
+    return TransporterProfile(
+      transporterId: transporterId ?? this.transporterId,
+      name: name ?? this.name,
+      email: email ?? this.email,
+      phoneNumber: phoneNumber != null ? phoneNumber() : this.phoneNumber,
+      profileImageUrl:
+          profileImageUrl != null ? profileImageUrl() : this.profileImageUrl,
+      vehicleType: vehicleType != null ? vehicleType() : this.vehicleType,
+      licensePlate: licensePlate != null ? licensePlate() : this.licensePlate,
+      isActive: isActive ?? this.isActive,
+      rating: rating != null ? rating() : this.rating,
+      location: location != null ? location() : this.location,
+      address: address != null ? address() : this.address,
+      registrationDate:
+          registrationDate != null ? registrationDate() : this.registrationDate,
+      lastLogin: lastLogin != null ? lastLogin() : this.lastLogin,
+      userType: userType ?? this.userType,
+      isEmailVerified: isEmailVerified ?? this.isEmailVerified,
+      vehicleMake: vehicleMake != null ? vehicleMake() : this.vehicleMake,
+      vehicleModel: vehicleModel != null ? vehicleModel() : this.vehicleModel,
+      vehicleYear: vehicleYear != null ? vehicleYear() : this.vehicleYear,
+      vehicleColor: vehicleColor != null ? vehicleColor() : this.vehicleColor,
+    );
+  }
+}
+
+class Order {
+  final int orderId;
+  final int? userId;
+  final String orderType;
+  final String? productId;
+  final int? chefId;
+  final int? producerId;
+  final int? transporterId;
+  final DateTime orderDate;
+  final String deliveryAddress; // Assume format like "lat,lon,description" or just address
+  final String? pickupLocation; // Assume format like "lat,lon,description" or just address
+  final String orderStatus;
+  final double totalPrice;
+  final String? notes;
+  final String paymentStatus;
+  final String? paymentMode;
+  final double? amountPaid;
+  final String? transactionId;
+  final int quantity;
+  final String? mealName;
+  final String? ingredients;
+  final String? producerName;
+  final String? producerAddress;
+  final String? chefName;
+  final String? transporterName;
+  final String? gigDetails;
+  final String? productName;
+
+  // Static constants for status strings (including new ones)
+  static const STATUS_PENDING = 'pending'; // Available
+  static const STATUS_ASSIGNED = 'assigned'; // System assigned (maybe)
+  static const STATUS_RIDER_ACCEPTED = 'rider_accepted'; // Rider accepted
+  static const STATUS_PICKED_UP = 'picked_up';
+  static const STATUS_ON_THE_WAY = 'on_the_way'; // Rider started delivery
+  static const STATUS_DELIVERED = 'delivered'; // Reached destination (pre-verification)
+  static const STATUS_COMPLETED = 'completed'; // Final state after verification
+  static const STATUS_CANCELLED = 'cancelled';
+  static const STATUS_RIDER_REJECTED = 'rider_rejected'; // Rider rejected
+  static const STATUS_DELIVERING = 'delivering'; // Kept for backward compatibility if needed
+
+  Order({
+    required this.orderId,
+    this.userId,
+    required this.orderType,
+    this.productId,
+    this.chefId,
+    this.producerId,
+    this.transporterId,
+    required this.orderDate,
+    required this.deliveryAddress,
+    this.pickupLocation,
+    required this.orderStatus,
+    required this.totalPrice,
+    this.notes,
+    required this.paymentStatus,
+    this.paymentMode,
+    this.amountPaid,
+    this.transactionId,
+    required this.quantity,
+    this.mealName,
+    this.ingredients,
+    this.producerName,
+    this.producerAddress,
+    this.chefName,
+    this.transporterName,
+    this.gigDetails,
+    this.productName,
+  });
+
+  factory Order.fromJson(Map<String, dynamic> json) {
+    return Order(
+      orderId: parseIntSafe(json['order_id']),
+      userId: parseIntNullable(json['user_id']),
+      orderType: getStringSafe(json['order_type']) ?? 'unknown',
+      productId: getStringSafe(json['product_id']),
+      chefId: parseIntNullable(json['chef_id']),
+      producerId: parseIntNullable(json['producer_id']),
+      transporterId: parseIntNullable(json['transporter_id']),
+      orderDate: parseRequiredDateSafe(json['order_date']),
+      deliveryAddress:
+          getStringSafe(json['delivery_address']) ?? 'Address not provided',
+      pickupLocation: getStringSafe(json['pickup_location']),
+      // Ensure status is lowercase for easier comparison
+      orderStatus:
+          getStringSafe(json['order_status'])?.toLowerCase() ?? 'unknown',
+      totalPrice: parseDoubleSafe(json['total_price']),
+      notes: getStringSafe(json['notes']),
+      paymentStatus: getStringSafe(json['payment_status']) ?? 'unknown',
+      paymentMode: getStringSafe(json['payment_mode']),
+      amountPaid: parseDoubleNullable(json['amount_paid']),
+      transactionId: getStringSafe(json['transaction_id']),
+      quantity: parseIntSafe(json['quantity'], defaultValue: 1),
+      mealName: getStringSafe(json['meal_name']),
+      ingredients: getStringSafe(json['ingredients']),
+      producerName: getStringSafe(json['producer_name']),
+      producerAddress: getStringSafe(json['producer_address']),
+      chefName: getStringSafe(json['chef_name']),
+      transporterName: getStringSafe(json['transporter_name']),
+      gigDetails: getStringSafe(json['gig_details']),
+      productName: getStringSafe(json['product_name']),
+    );
+  }
+
+  // --- Coordinate Parsing Helpers ---
+  // <<< UPDATED to return mapbox.Point? >>>
+  mapbox.Point? get deliveryCoordinates {
+    return _parseCoordinates(deliveryAddress);
+  }
+
+  mapbox.Point? get pickupCoordinates {
+    return _parseCoordinates(pickupLocation ?? producerAddress); // Use fallback
+  }
+
+  mapbox.Point? _parseCoordinates(String? addressString) {
+    if (addressString == null || addressString.isEmpty) return null;
+    try {
+      // Try format "lat,lon" or "lat, lon, description"
+      List<String> parts = addressString.split(',');
+      if (parts.length >= 2) {
+        double? lat = double.tryParse(parts[0].trim());
+        double? lon = double.tryParse(parts[1].trim());
+        if (lat != null && lon != null) {
+          print("Parsed coordinates: Lat=$lat, Lon=$lon");
+          // Create a Point object expected by mapbox_maps_flutter
+          // NOTE: mapbox_maps_flutter uses (longitude, latitude) for Position
+          return mapbox.Point(coordinates: mapbox.Position(lon, lat));
+        }
+      }
+      // If coordinate parsing fails, return null (or attempt geocoding later)
+      print("Could not parse coordinates from: $addressString");
+      return null;
+    } catch (e) {
+      print("Error parsing coordinates: $e");
+      return null;
+    }
+  }
+  // --- End Coordinate Parsing ---
+
+  String get simplifiedDeliveryAddress {
+    String rawAddress = deliveryAddress;
+    try {
+      if (rawAddress.startsWith('{') && rawAddress.endsWith('}')) {
+        Map<String, dynamic> addrMap = jsonDecode(rawAddress);
+        return addrMap['desc'] ?? addrMap['display_name'] ?? rawAddress;
+      }
+      List<String> parts = rawAddress.split(',');
+      if (parts.length >= 3 &&
+          double.tryParse(parts[0].trim()) != null &&
+          double.tryParse(parts[1].trim()) != null) {
+        String desc = parts
+            .sublist(2)
+            .map((s) => s.trim())
+            .where((s) => s.isNotEmpty)
+            .join(', ');
+         return desc.isNotEmpty ? desc : rawAddress; // Return desc if available, else full
+      }
+    } catch (e) {
+      print("Error parsing simplified address: $e");
+    }
+    return rawAddress; // Return raw address if parsing fails or format is different
+  }
+
+  String get pickupAddress {
+    if (pickupLocation != null && pickupLocation!.isNotEmpty) {
+      // Try to get descriptive part if coords are present
+      try {
+        List<String> parts = pickupLocation!.split(',');
+        if (parts.length >= 3 &&
+            double.tryParse(parts[0].trim()) != null &&
+            double.tryParse(parts[1].trim()) != null) {
+          String desc = parts
+              .sublist(2)
+              .map((s) => s.trim())
+              .where((s) => s.isNotEmpty)
+              .join(', ');
+          return desc.isNotEmpty ? desc : pickupLocation!; // Return desc if available
+        }
+      } catch (_) {}
+      return pickupLocation!; // Return full string if no description part
+    }
+    // Fallback
+    if (orderType.toLowerCase() == 'meal' && chefName != null) {
+       return "Chef $chefName's Location";
+     }
+    if (orderType.toLowerCase() == 'produce' &&
+        producerAddress != null &&
+        producerAddress!.isNotEmpty) {
+        return producerAddress!;
+      }
+    return 'Pickup Location Not Specified';
+  }
+
+  String get estimatedTime => orderType == 'meal' ? '25 min' : '35 min';
+  String get estimatedDistance => orderType == 'meal' ? '3.2 km' : '4.5 km';
+  double get earnings => orderType == 'meal' ? 8.50 : 10.75;
+  List<String> get orderItems {
+    if (orderType.toLowerCase() == 'meal' && mealName != null) {
+       return ['$mealName x$quantity'];
+     }
+    if (productName != null) return ['$productName x$quantity'];
+    return ['Item details unavailable'];
+  }
+
+  Map<String, dynamic> toJson() => {
+        'order_id': orderId, 'user_id': userId, 'order_type': orderType,
+        'product_id': productId,
+        'chef_id': chefId, 'producer_id': producerId,
+        'transporter_id': transporterId,
+        'order_date': orderDate.toIso8601String(),
+        'delivery_address': deliveryAddress,
+        'pickup_location': pickupLocation, // Include in JSON
+        'order_status': orderStatus, 'total_price': totalPrice, 'notes': notes,
+        'payment_status': paymentStatus, 'payment_mode': paymentMode,
+        'amount_paid': amountPaid,
+        'transaction_id': transactionId, 'quantity': quantity,
+        'meal_name': mealName,
+        'ingredients': ingredients, 'producer_name': producerName,
+        'producer_address': producerAddress,
+        'chef_name': chefName, 'transporter_name': transporterName,
+        'gig_details': gigDetails,
+        'product_name': productName,
+      };
+
+  Order copyWith({
+    int? orderId,
+    int? userId,
+    String? orderType,
+    ValueGetter<String?>? productId,
+    ValueGetter<int?>? chefId,
+    ValueGetter<int?>? producerId,
+    ValueGetter<int?>? transporterId,
+    DateTime? orderDate,
+    String? deliveryAddress,
+    ValueGetter<String?>? pickupLocation,
+    String? orderStatus,
+    double? totalPrice,
+    ValueGetter<String?>? notes,
+    String? paymentStatus,
+    ValueGetter<String?>? paymentMode,
+    ValueGetter<double?>? amountPaid,
+    ValueGetter<String?>? transactionId,
+    int? quantity,
+    ValueGetter<String?>? mealName,
+    ValueGetter<String?>? ingredients,
+    ValueGetter<String?>? producerName,
+    ValueGetter<String?>? producerAddress,
+    ValueGetter<String?>? chefName,
+    ValueGetter<String?>? transporterName,
+    ValueGetter<String?>? gigDetails,
+    ValueGetter<String?>? productName,
+  }) {
+    return Order(
+      orderId: orderId ?? this.orderId, userId: userId ?? this.userId,
+      orderType: orderType ?? this.orderType,
+      productId: productId != null ? productId() : this.productId,
+      chefId: chefId != null ? chefId() : this.chefId,
+      producerId: producerId != null ? producerId() : this.producerId,
+      transporterId:
+          transporterId != null ? transporterId() : this.transporterId,
+      orderDate: orderDate ?? this.orderDate,
+      deliveryAddress: deliveryAddress ?? this.deliveryAddress,
+      pickupLocation: pickupLocation != null
+          ? pickupLocation()
+          : this.pickupLocation, // Copy pickupLocation
+      orderStatus: orderStatus ?? this.orderStatus,
+      totalPrice: totalPrice ?? this.totalPrice,
+      notes: notes != null ? notes() : this.notes,
+      paymentStatus: paymentStatus ?? this.paymentStatus,
+      paymentMode: paymentMode != null ? paymentMode() : this.paymentMode,
+      amountPaid: amountPaid != null ? amountPaid() : this.amountPaid,
+      transactionId:
+          transactionId != null ? transactionId() : this.transactionId,
+      quantity: quantity ?? this.quantity,
+      mealName: mealName != null ? mealName() : this.mealName,
+      ingredients: ingredients != null ? ingredients() : this.ingredients,
+      producerName: producerName != null ? producerName() : this.producerName,
+      producerAddress:
+          producerAddress != null ? producerAddress() : this.producerAddress,
+      chefName: chefName != null ? chefName() : this.chefName,
+      transporterName:
+          transporterName != null ? transporterName() : this.transporterName,
+      gigDetails: gigDetails != null ? gigDetails() : this.gigDetails,
+      productName: productName != null ? productName() : this.productName,
+    );
+  }
+}
+
+class Payment {
+  final int id;
+  final int transporterId;
+  final int orderId;
+  final String orderType;
+  final double amount;
+  final String disbursementTransactionStatus;
+  final String orderTransactionStatus;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  Payment(
+      {required this.id,
+      required this.transporterId,
+      required this.orderId,
+      required this.orderType,
+      required this.amount,
+      required this.disbursementTransactionStatus,
+      required this.orderTransactionStatus,
+      required this.createdAt,
+      required this.updatedAt});
+  factory Payment.fromJson(Map<String, dynamic> json) => Payment(
+        id: parseIntSafe(json['id']),
+        transporterId: parseIntSafe(json['transporter_id']),
+        orderId: parseIntSafe(json['order_id']),
+        orderType: getStringSafe(json['order_type']) ?? 'unknown',
+        amount: parseDoubleSafe(json['amount']),
+        disbursementTransactionStatus:
+            getStringSafe(json['disbursement_transaction_status']) ?? 'Unknown',
+        orderTransactionStatus:
+            getStringSafe(json['order_transaction_status']) ?? 'Unknown',
+        createdAt: parseRequiredDateSafe(json['created_at']),
+        updatedAt: parseRequiredDateSafe(json['updated_at']),
+      );
+}
+
+// ================================================
+// === API SERVICE (With New Methods) ============
+// ================================================
+class TransporterApiService {
+  static dynamic _handleStaticApiResponse(dynamic responseData,
+      {String endpointContext = 'unknown'}) {
+    print(
+        "Handling API response for $endpointContext: Type=${responseData.runtimeType}");
+    if (responseData is List) return responseData;
+    if (responseData is Map<String, dynamic>) {
+      const List<String> dataKeys = [
+        'data',
+        'orders',
+        'payments',
+        'profile',
+        'items',
+        'message'
+      ]; // Added 'message' for verification
+      for (String key in dataKeys) {
+        if (responseData.containsKey(key) && responseData[key] is List) {
+          print("Found data list under key '$key'");
+          return responseData[key];
+        }
+        if (responseData.containsKey(key) &&
+            responseData[key] is Map<String, dynamic>) {
+          print("Found data object under key '$key'");
+          return responseData[key];
+        }
+        // Handle simple message response for verification
+        if (responseData.containsKey(key) && responseData[key] is String) {
+          print("Found string message under key '$key'");
+          return responseData;
+        } // Return whole map if message found
+      }
+      print(
+          "API Warning: Response is a Map but no known list/object key found. Returning the Map itself for $endpointContext.");
+      return responseData;
+    }
+    print(
+        "API Error: Unhandled response format for $endpointContext. Got: ${responseData.runtimeType}");
+    throw Exception(
+        'Unexpected API response type for $endpointContext: ${responseData.runtimeType}');
+  }
+
+  static Map<String, String> _getWriteHeaders({bool requiresAuth = true}) {
+    Map<String, String> headers = {
+      'Content-Type': 'application/json; charset=UTF-8',
+      'Accept': 'application/json',
+    };
+    // Add Auth header if needed based on requiresAuth and token retrieval logic
+    // String? token = await getToken(); // Replace with your token logic
+    // if (requiresAuth && token != null) {
+    //   headers['Authorization'] = 'Bearer $token';
+    // }
+    return headers;
+  }
+
+  static Future<TransporterProfile> fetchTransporterProfile(
+      String transporterId) async {
+    if (transporterId.isEmpty) {
+       throw Exception('Transporter ID provided is empty.');
+     }
+    final Uri uri = Uri.parse('$apibaseurl/rr/transporters/$transporterId');
+    print("Fetching transporter profile from: $uri");
+    try {
+      final response =
+          await http.get(uri, headers: _getWriteHeaders(requiresAuth: true));
+      if (response.statusCode == 200) {
+        final dynamic rawData = json.decode(response.body);
+        final dynamic handledData = _handleStaticApiResponse(rawData,
+            endpointContext: 'fetchTransporterProfile');
+        if (handledData is Map<String, dynamic>) {
+          return TransporterProfile.fromJson(handledData);
+        } else if (handledData is List &&
+            handledData.isNotEmpty &&
+            handledData[0] is Map<String, dynamic>) {
+          print("Warning: Profile API returned a List, using the first item.");
+          return TransporterProfile.fromJson(handledData[0]);
+        } else {
+          print(
+              "Error: Handled data is not Map or List<Map>: ${handledData?.runtimeType}");
+          throw Exception(
+              'Failed to parse profile: Expected a Map or List<Map> but received ${handledData?.runtimeType}');
+        }
+      } else {
+        print(
+            "Error fetching transporter profile: ${response.statusCode} ${response.body}");
+        throw Exception(
+            'Failed to load transporter profile (Code: ${response.statusCode}) - ${response.reasonPhrase}');
+      }
+    } catch (e) {
+      print("Exception fetching transporter profile: $e");
+      throw Exception('Failed to load transporter profile: ${e.toString()}');
+    }
+  }
+
+  static Future<List<Order>> fetchAllTransporterOrders(
+      String transporterId) async {
+    if (transporterId.isEmpty) {
+       throw Exception('Transporter ID provided is empty.');
+     }
+    final Uri uri =
+        Uri.parse('$apibaseurl/rr/orders?transporter_id=$transporterId');
+    print("Fetching all orders for transporter $transporterId from: $uri");
+    try {
+      final response =
+          await http.get(uri, headers: _getWriteHeaders(requiresAuth: true));
+      if (response.statusCode == 200) {
+        final dynamic rawData = json.decode(response.body);
+        final dynamic ordersList = _handleStaticApiResponse(rawData,
+            endpointContext: 'fetchAllTransporterOrders');
+        if (ordersList is List) {
+          return ordersList
+              .whereType<Map<String, dynamic>>()
+              .map((item) => Order.fromJson(item))
+              .toList();
+        } else {
+          print(
+              "All orders API response format unexpected: Expected List, got ${ordersList?.runtimeType}");
+          return [];
+        }
+      } else {
+        print(
+            "Error fetching all orders: ${response.statusCode} ${response.body}");
+        throw Exception(
+            'Failed to load orders (Code: ${response.statusCode}) - ${response.reasonPhrase}');
+      }
+    } catch (e) {
+      print("Exception fetching all orders: $e");
+      throw Exception('Failed to load orders: ${e.toString()}');
+    }
+  }
+
+  static Future<List<Payment>> fetchTransporterPayments(
+      String transporterId) async {
+    if (transporterId.isEmpty) {
+       throw Exception('Transporter ID provided is empty.');
+     }
+    final Uri uri = Uri.parse(
+        '$apibaseurl/rr/disbursements/transporter?transporter_id=$transporterId');
+    print("Fetching payments for transporter $transporterId from: $uri");
+    try {
+      final response =
+          await http.get(uri, headers: _getWriteHeaders(requiresAuth: true));
+      if (response.statusCode == 200) {
+        final dynamic rawData = json.decode(response.body);
+        final dynamic paymentsList = _handleStaticApiResponse(rawData,
+            endpointContext: 'fetchTransporterPayments');
+        if (paymentsList is List) {
+          return paymentsList
+              .whereType<Map<String, dynamic>>()
+              .map((item) => Payment.fromJson(item))
+              .toList();
+        } else {
+          print(
+              "Payments API response format unexpected: Expected List, got ${paymentsList?.runtimeType}");
+          return [];
+        }
+      } else {
+        print(
+            "Error fetching payments: ${response.statusCode} ${response.body}");
+        throw Exception(
+            'Failed to load payments (Code: ${response.statusCode}) - ${response.reasonPhrase}');
+      }
+    } catch (e) {
+      print("Exception fetching payments: $e");
+      throw Exception('Failed to load payments: ${e.toString()}');
+    }
+  }
+
+  // UPDATE: Centralized status update method
+  static Future<bool> _updateOrderStatus(
+      int orderId, String newStatus, String transporterId,
+      {String? endpointPath}) async {
+    final Uri uri =
+        Uri.parse('$apibaseurl/rr/orders/$orderId/${endpointPath ?? 'status'}');
+    print(
+        "Updating order $orderId status to $newStatus (Transporter: $transporterId) via $uri");
+
+    Map<String, dynamic> body = {
+      'order_status': newStatus,
+      // Only include transporter_id if endpoint requires it explicitly (like accept/reject might)
+      if (newStatus == Order.STATUS_RIDER_ACCEPTED || newStatus == Order.STATUS_RIDER_REJECTED)
+         'transporter_id': int.tryParse(transporterId),
+    };
+    // Clean nulls from body if API doesn't like them
+    body.removeWhere((key, value) => value == null);
+
+    try {
+      final response = await http.patch(
+        uri,
+        headers: _getWriteHeaders(requiresAuth: true),
+        body: jsonEncode(body),
+      );
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        print("Order $orderId status updated to $newStatus successfully.");
+        return true;
+      } else {
+        print(
+            "Error updating order status: ${response.statusCode} ${response.body}");
+        String errorMessage = 'Failed to update status to $newStatus.';
+        try {
+          final errorBody = json.decode(response.body);
+          errorMessage =
+              errorBody['message'] ?? errorBody['error'] ?? errorMessage;
+        } catch (_) {}
+        throw Exception(
+            'Failed to update order status (Code: ${response.statusCode}) - $errorMessage');
+      }
+    } catch (e) {
+      print("Exception updating order status to $newStatus: $e");
+      throw Exception('Failed to update order status: ${e.toString()}');
+    }
+  }
+
+  // NEW: Accept an available order
+  static Future<bool> acceptOrder(int orderId, String transporterId) async {
+    // Calls the central update method with specific status
+    // Assuming the endpoint for accept requires transporter_id
+    return await _updateOrderStatus(
+        orderId, Order.STATUS_RIDER_ACCEPTED, transporterId, endpointPath: 'status'); // Assuming endpoint is /status
+  }
+
+  // NEW: Reject an available order
+  static Future<bool> rejectOrder(int orderId, String transporterId) async {
+    // Calls the central update method with specific status
+    // Assuming the endpoint for reject requires transporter_id
+    return await _updateOrderStatus(
+        orderId, Order.STATUS_RIDER_REJECTED, transporterId, endpointPath: 'status'); // Assuming endpoint is /status
+  }
+
+  // UPDATE: General status update (e.g., picked_up, on_the_way)
+  static Future<bool> updateOrderStatusByTransporter(
+      int orderId, String newStatus, String transporterId) async {
+    // This specific method might not need transporterId in the body,
+    // using the _updateOrderStatus helper handles this implicitly if needed
+    return await _updateOrderStatus(orderId, newStatus, transporterId, endpointPath: 'status');
+  }
+
+  // NEW: Verify Delivery Code and Complete Order
+  // Returns true on success, throws Exception on failure
+  static Future<bool> verifyDeliveryCode(
+      int orderId, String verificationCode) async {
+    final Uri uri = Uri.parse('$apibaseurl/rr/rc'); // Rider Complete endpoint
+    print("Verifying code for order $orderId via $uri");
+
+    try {
+      final response = await http.post(
+        // Assuming POST for this action
+        uri,
+        headers: _getWriteHeaders(requiresAuth: true),
+        body: jsonEncode({
+          'order_id': orderId,
+          'verification_code': verificationCode,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final dynamic responseData = json.decode(response.body);
+        // Check for specific success message
+        final String message =
+            getStringSafe(responseData['message'] ?? responseData['msg'])
+                    ?.toLowerCase() ??
+                '';
+        if (message.contains("delivery completed") ||
+            message.contains("success")) {
+          print(
+              "Verification successful for order $orderId. Response: ${response.body}");
+          return true;
+        } else {
+          // Got 200 OK but message indicates failure (e.g., wrong code)
+          print(
+              "Verification failed for order $orderId (API Message): $message");
+          throw Exception(
+              getStringSafe(responseData['message'] ?? responseData['error']) ??
+                  'Verification failed');
+        }
+      } else {
+        // Handle non-200 status codes (e.g., 400 Bad Request for wrong code)
+        print("Error verifying code: ${response.statusCode} ${response.body}");
+        String errorMessage = 'Verification failed.';
+        try {
+          final errorBody = json.decode(response.body);
+          errorMessage =
+              errorBody['message'] ?? errorBody['error'] ?? errorMessage;
+        } catch (_) {}
+        // Customize error for wrong code if API provides specific status/message
+        if (response.statusCode == 400 ||
+            errorMessage.toLowerCase().contains("wrong code")) {
+          throw Exception('Wrong verification code.');
+        }
+        throw Exception(
+            'Verification failed (Code: ${response.statusCode}) - $errorMessage');
+      }
+    } catch (e) {
+      print("Exception verifying code: $e");
+      // Rethrow specific exceptions or wrap
+      if (e is Exception) {
+        throw e;
+      }
+      throw Exception('Failed to verify code: ${e.toString()}');
+    }
+  }
+
+  static Future<bool> updateTransporterActiveStatus(
+      String transporterId, bool isActive) async {
+    if (transporterId.isEmpty) {
+       throw Exception('Transporter ID provided is empty.');
+     }
+    final Uri uri = Uri.parse('$apibaseurl/rr/transporters/$transporterId');
+    print(
+        "Updating transporter $transporterId active status to $isActive via $uri (PATCH)");
+    try {
+      final response = await http.patch(
+        uri,
+        headers: _getWriteHeaders(requiresAuth: true),
+        body: jsonEncode({'is_active': isActive}),
+      );
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        print("Transporter active status updated successfully.");
+        return true;
+      } else {
+        print(
+            "Error updating transporter active status: ${response.statusCode} ${response.body}");
+        throw Exception(
+            'Failed to update active status (Code: ${response.statusCode}) - ${response.reasonPhrase}');
+      }
+    } catch (e) {
+      print("Exception updating transporter active status: $e");
+      throw Exception('Failed to update active status: ${e.toString()}');
+    }
+  }
+
+  static Future<bool> updateTransporterProfile(
+      String transporterId, Map<String, dynamic> updateData) async {
+    if (transporterId.isEmpty) {
+       throw Exception('Transporter ID provided is empty.');
+     }
+    final Uri uri = Uri.parse('$apibaseurl/rr/transporters/$transporterId');
+    // Keep nulls for specific fields if needed by API, otherwise remove
+    // updateData.removeWhere((key, value) => value == null); // Original logic
+    if (updateData.isEmpty) {
+      print("Update profile called with no data to update.");
+      return true;
+    }
+    print(
+        "Updating transporter profile $transporterId with data: ${jsonEncode(updateData)}");
+    try {
+      final response = await http.patch(
+        uri,
+        headers: _getWriteHeaders(requiresAuth: true),
+        body: jsonEncode(updateData),
+      );
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        print("Transporter profile updated successfully.");
+        return true;
+      } else {
+        print(
+            "Error updating transporter profile: ${response.statusCode} ${response.body}");
+        String errorMessage = 'Failed to update profile.';
+        try {
+          final errorBody = json.decode(response.body);
+          errorMessage =
+              errorBody['message'] ?? errorBody['error'] ?? errorMessage;
+        } catch (_) {}
+        throw Exception(
+            'Failed to update profile (Code: ${response.statusCode}) - $errorMessage');
+      }
+    } catch (e) {
+      print("Exception updating transporter profile: $e");
+      throw Exception('Failed to update profile: ${e.toString()}');
+    }
+  }
+
+  static Future<String?> uploadImageToImgur(File imageFile) async {
+    if (imgurClientId == null || imgurClientId!.isEmpty) {
+      print("Imgur Client ID missing in .env");
+      throw Exception("Image upload configuration missing.");
+    }
+    final Uri imgurUri = Uri.parse('https://api.imgur.com/3/image');
+    print("Uploading image to Imgur...");
+    try {
+      var request = http.MultipartRequest('POST', imgurUri);
+      request.headers['Authorization'] = 'Client-ID $imgurClientId';
+      request.files
+          .add(await http.MultipartFile.fromPath('image', imageFile.path));
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        if (responseData['success'] == true &&
+            responseData['data']?['link'] != null) {
+          print("Imgur upload successful: ${responseData['data']['link']}");
+          return responseData['data']['link'];
+        } else {
+          String errorMsg = responseData['data']?['error']?.toString() ??
+              'Invalid response structure';
+          print("Imgur upload failed: $errorMsg");
+          throw Exception('Imgur upload failed: $errorMsg');
+        }
+      } else {
+        print("Imgur upload failed: ${response.statusCode} ${response.body}");
+        throw Exception(
+            'Imgur upload failed with status code ${response.statusCode}');
+      }
+    } catch (e) {
+      print("Imgur upload error: $e");
+      throw Exception("Failed to upload image: ${e.toString()}");
+    }
+  }
+
+  static Future<List<Order>> fetchAvailableOrders() async {
+    final Uri uri = Uri.parse('$apibaseurl/rr/orders?order_status=pending');
+    print("Fetching available orders from: $uri");
+    try {
+      final response =
+          await http.get(uri, headers: _getWriteHeaders(requiresAuth: true));
+      if (response.statusCode == 200) {
+        final dynamic rawData = json.decode(response.body);
+        final dynamic ordersList = _handleStaticApiResponse(rawData,
+            endpointContext: 'fetchAvailableOrders');
+        if (ordersList is List) {
+          return ordersList
+              .whereType<Map<String, dynamic>>()
+              .map((item) => Order.fromJson(item))
+              .toList();
+        } else {
+          print(
+              "Available orders API response format unexpected: Expected List, got ${ordersList?.runtimeType}");
+          return [];
+        }
+      } else {
+        print(
+            "Error fetching available orders: ${response.statusCode} ${response.body}");
+        throw Exception(
+            'Failed to load available orders (Code: ${response.statusCode}) - ${response.reasonPhrase}');
+      }
+    } catch (e) {
+      print("Exception fetching available orders: $e");
+      throw Exception('Failed to load available orders: ${e.toString()}');
+    }
+  }
+
+  // <<< Fetch route using Mapbox Directions API >>>
+  static Future<Map<String, dynamic>?> fetchRoute(mapbox.Point origin, mapbox.Point destination) async { // Use mapbox.Point
+    if (mapboxAccessToken == null || mapboxAccessToken!.isEmpty) {
+      print("Mapbox Access Token is missing for Directions API.");
+      return null;
+    }
+    // IMPORTANT: mapbox_maps_flutter uses (longitude, latitude) order
+    final String originCoords = "${origin.coordinates.lng},${origin.coordinates.lat}";
+    final String destCoords = "${destination.coordinates.lng},${destination.coordinates.lat}";
+    final profile = 'driving-traffic'; // Or 'driving', 'walking', 'cycling'
+    final url =
+        'https://api.mapbox.com/directions/v5/mapbox/$profile/$originCoords;$destCoords?alternatives=false&geometries=geojson&language=en&overview=full&steps=false&access_token=${mapboxAccessToken!}';
+
+    print("Fetching route from Mapbox Directions: $url");
+
+    try {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['routes'] != null && data['routes'].isNotEmpty) {
+          print("Route fetched successfully.");
+          return data['routes'][0]; // Return the first route object (contains geometry, duration, distance)
+        } else {
+          print("No routes found in Mapbox Directions response: ${response.body}");
+          return null;
+        }
+      } else {
+        print("Error fetching route: ${response.statusCode} ${response.body}");
+        return null;
+      }
+    } catch (e) {
+      print("Exception fetching route: $e");
+      return null;
+    }
+  }
+
+} // End of TransporterApiService
+
+// ================================================
+// === MAIN DASHBOARD WIDGET =====================
+// ================================================
+
+class TransporterDashNew extends StatefulWidget {
+  final String transporterId;
+  const TransporterDashNew({Key? key, required this.transporterId})
+      : super(key: key);
+  @override
+  _TransporterDashNewState createState() => _TransporterDashNewState();
+}
+
+class _TransporterDashNewState extends State<TransporterDashNew> {
+  // Caching logic (remains the same)
+  static TransporterProfile? _profileCache;
+  static DateTime? _profileCacheTimestamp;
+  static const String _profileCacheKey = 'transporter_profile_cache_new_v2';
+  static const String _profileCacheTimestampKey =
+      'transporter_profile_cache_timestamp_new_v2';
+  Future<void> _loadProfileCacheFromPrefs() async {
+    final cachedData = await UserCache.getData(_profileCacheKey);
+    final timestampData = await UserCache.getData(_profileCacheTimestampKey);
+    if (cachedData is Map<String, dynamic> && timestampData is String) {
+      try {
+        _profileCache = TransporterProfile.fromJson(cachedData);
+        _profileCacheTimestamp = DateTime.tryParse(timestampData)?.toLocal();
+        print("Loaded profile from cache. Timestamp: $_profileCacheTimestamp");
+      } catch (e) {
+        print("Error parsing cached transporter profile (new): $e");
+        _profileCache = null;
+        _profileCacheTimestamp = null;
+        await UserCache.removeData(_profileCacheKey);
+        await UserCache.removeData(_profileCacheTimestampKey);
+      }
+    } else {
+      print("No valid profile cache found in prefs.");
+      _profileCache = null;
+      _profileCacheTimestamp = null;
+    }
+  }
+
+  Future<void> _saveProfileCacheToPrefs(TransporterProfile profile) async {
+    try {
+      Map<String, dynamic> cacheableProfile = profile.toJson();
+      await UserCache.saveData(_profileCacheKey, cacheableProfile);
+      final now = DateTime.now();
+      await UserCache.saveData(
+          _profileCacheTimestampKey, now.toIso8601String());
+      _profileCache = profile;
+      _profileCacheTimestamp = now;
+      print("Saved profile to cache. Timestamp: $_profileCacheTimestamp");
+    } catch (e) {
+      print("Error saving profile to cache: $e");
+    }
+  }
+
+  // State variables (mostly same)
+  int _selectedDrawerIndex = 0;
+  TransporterProfile? _transporterProfile;
+  List<Order> _allOrders = [];
+  List<Payment> _payments = [];
+  bool _isLoading = true;
+  bool _isLoadingProfile = true;
+  String? _errorMessage;
+  String? _profileFetchError;
+  bool _isOnline = false;
+  int _selectedDeliveryTab = 0;
+  final _profileEditFormKey = GlobalKey<FormState>();
+  late TextEditingController _nameController,
+      _emailController,
+      _phoneController,
+      _addressController,
+      _vehicleMakeController,
+      _vehicleModelController,
+      _vehicleYearController,
+      _licensePlateController,
+      _vehicleColorController;
+  File? _profileImageFile;
+  bool _isUploadingProfileImage = false;
+  bool _isSavingProfile = false;
+  bool _notifyNewOrders = true,
+      _notifyStatusUpdates = true,
+      _notifyEarnings = true,
+      _notifyPromotions = false,
+      // _useDarkMode = false, // Removed as not used
+      _soundAlerts = true,
+      _autoNavigate = true; // This preference now controls map auto-centering/zooming
+
+  // Order? _activeNavigationOrder; // Removed as not used
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeControllers();
+    _loadPreferences();
+    _loadInitialData();
+    // Mapbox initialization is now handled within OrderDetailsScreen when needed
+  }
+
+
+  void _initializeControllers() {
+    _nameController = TextEditingController();
+    _emailController = TextEditingController();
+    _phoneController = TextEditingController();
+    _addressController = TextEditingController();
+    _vehicleMakeController = TextEditingController();
+    _vehicleModelController = TextEditingController();
+    _vehicleYearController = TextEditingController();
+    _licensePlateController = TextEditingController();
+    _vehicleColorController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _addressController.dispose();
+    _vehicleMakeController.dispose();
+    _vehicleModelController.dispose();
+    _vehicleYearController.dispose();
+    _licensePlateController.dispose();
+    _vehicleColorController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadPreferences() async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      setStateIfMounted(() { // Use setStateIfMounted
+        _notifyNewOrders = prefs.getBool('notifyNewOrders') ?? true;
+        _notifyStatusUpdates = prefs.getBool('notifyStatusUpdates') ?? true;
+        _notifyEarnings = prefs.getBool('notifyEarnings') ?? true;
+        _notifyPromotions = prefs.getBool('notifyPromotions') ?? false;
+        // _useDarkMode = prefs.getBool('useDarkMode') ?? false; // Removed
+        _soundAlerts = prefs.getBool('soundAlerts') ?? true;
+        _autoNavigate = prefs.getBool('autoNavigate') ?? true;
+      });
+    } catch (e) {
+      print("Error loading preferences: $e");
+    }
+  }
+
+  Future<void> _initializeTransporterProfile() async {
+    if (mounted) {
+      setState(() {
+         _isLoadingProfile = true;
+         _profileFetchError = null;
+       });
+    }
+    await _loadProfileCacheFromPrefs();
+    if (_profileCache != null && mounted) {
+      final now = DateTime.now();
+      final bool cacheIsValid = _profileCacheTimestamp != null &&
+          now.difference(_profileCacheTimestamp!) <
+              CacheConfig.profileCacheDuration;
+      if (_transporterProfile == null || cacheIsValid) {
+        if (cacheIsValid) {
+          print("TransporterDashNew: Displaying valid cached profile.");
+        } else {
+          print("TransporterDashNew: Displaying expired cached profile while fetching.");
+        }
+        setStateIfMounted(() {
+          _transporterProfile = _profileCache;
+          _isOnline = _transporterProfile!.isActive;
+          _updateProfileControllers(_transporterProfile!);
+          _isLoadingProfile = !cacheIsValid; // Still loading if cache is expired
+        });
+      } else {
+         print("TransporterDashNew: Valid profile already in state, proceeding to fetch.");
+         setStateIfMounted(() => _isLoadingProfile = true);
+      }
+    } else if (mounted) {
+      print("TransporterDashNew: No cached profile found, fetching...");
+      setStateIfMounted(() => _isLoadingProfile = true);
+    }
+    await _fetchTransporterProfileAndUpdate();
+  }
+
+  Future<void> _fetchTransporterProfileAndUpdate() async {
+    try {
+      final profile = await TransporterApiService.fetchTransporterProfile(
+          widget.transporterId);
+      if (mounted &&
+          (_transporterProfile == null ||
+              profile.toJson().toString() !=
+                  _transporterProfile!.toJson().toString())) {
+        print("TransporterDashNew: Fetched fresh transporter profile data.");
+        await _saveProfileCacheToPrefs(profile);
+        setStateIfMounted(() {
+          _transporterProfile = profile;
+          _isOnline = profile.isActive;
+          _updateProfileControllers(profile);
+          _isLoadingProfile = false;
+          _profileFetchError = null;
+        });
+      } else if (mounted) {
+        print("TransporterDashNew: Fetched profile data is same as current state.");
+        setStateIfMounted(() {
+          _isLoadingProfile = false;
+          _profileFetchError = null;
+        });
+      }
+    } catch (error, stackTrace) {
+      print("Error fetching fresh transporter profile (new): $error\n$stackTrace");
+      if (mounted) {
+        if (_transporterProfile == null) { // Only show fatal error if NO profile is available
+          setStateIfMounted(() {
+            _profileFetchError = 'Failed to load profile: $error';
+            _isLoadingProfile = false;
+            _isLoading = false; // Stop main loader if profile fails critically
+            _errorMessage = _profileFetchError; // Show error in body
+          });
+        } else { // If we have a cached profile, just show a non-fatal error indicator
+          print("TransporterDashNew: Failed to fetch fresh profile, showing cached version. Error: $error");
+          setStateIfMounted(() {
+            _isLoadingProfile = false; // Stop profile-specific loader
+            _profileFetchError = "Couldn't refresh profile: $error"; // Store error for potential display
+          });
+          // Optionally show a snackbar about the refresh failure
+          _showErrorSnackBar("Couldn't refresh profile data.");
+        }
+      }
+    }
+  }
+
+
+  void setStateIfMounted(VoidCallback fn) {
+    if (mounted) {
+      setState(fn);
+    }
+  }
+
+  Future<void> _loadInitialData() async {
+    if (!mounted) return;
+    setStateIfMounted(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    // Fetch profile concurrently (it handles its own loading state)
+    _initializeTransporterProfile();
+
+    try {
+      // Fetch orders and payments
+      final results = await Future.wait([
+        TransporterApiService.fetchAllTransporterOrders(widget.transporterId),
+        TransporterApiService.fetchTransporterPayments(widget.transporterId),
+        TransporterApiService.fetchAvailableOrders(),
+      ]);
+
+      final allOrdersResult = results[0] as List<Order>;
+      final paymentsResult = results[1] as List<Payment>;
+      final availableOrdersResult = results[2] as List<Order>;
+
+      // Combine and deduplicate orders (available might overlap with all)
+      final allFetchedOrdersMap = <int, Order>{};
+      // Prioritize orders from the 'all' endpoint if duplicates exist
+      for (var order in allOrdersResult) {
+        allFetchedOrdersMap[order.orderId] = order;
+      }
+      for (var order in availableOrdersResult) {
+        allFetchedOrdersMap.putIfAbsent(order.orderId, () => order);
+      }
+
+      final combinedOrders = allFetchedOrdersMap.values.toList()
+        ..sort((a, b) => b.orderDate.compareTo(a.orderDate)); // Sort by date descending
+
+      setStateIfMounted(() {
+        _allOrders = combinedOrders;
+        _payments = paymentsResult;
+        // Only set _isLoading false if profile isn't also loading *initially*
+        // If profile is still loading but we have orders/payments, keep main loader?
+        // Let's tie main loader to orders/payments primarily, profile has its own indicator.
+        _isLoading = false;
+        _errorMessage = null;
+      });
+    } catch (e, stackTrace) {
+      print("Error loading initial data (orders/payments/available): $e\n$stackTrace");
+      if (mounted) {
+         // Don't overwrite fatal profile error if it occurred
+        if (_errorMessage == null) {
+          setStateIfMounted(() {
+            _errorMessage = "Failed to load data: ${e.toString()}";
+            _isLoading = false;
+            _allOrders = []; // Clear potentially partial data
+            _payments = [];
+          });
+        } else {
+           // Profile error already showing, just stop loading other data
+           setStateIfMounted(() {
+             _isLoading = false;
+           });
+        }
+      }
+    }
+  }
+
+
+  void _updateProfileControllers(TransporterProfile profile) {
+    // Only update if text is different to avoid cursor jumps
+    if (_nameController.text != profile.name) _nameController.text = profile.name;
+    if (_emailController.text != profile.email) _emailController.text = profile.email;
+    if (_phoneController.text != (profile.phoneNumber ?? '')) _phoneController.text = profile.phoneNumber ?? '';
+    if (_addressController.text != (profile.address ?? '')) _addressController.text = profile.address ?? '';
+    if (_licensePlateController.text != (profile.licensePlate ?? '')) _licensePlateController.text = profile.licensePlate ?? '';
+
+    // Use fallbacks if specific vehicle details aren't provided
+    if (_vehicleMakeController.text != (profile.vehicleMake ?? '')) _vehicleMakeController.text = profile.vehicleMake ?? '';
+    if (_vehicleModelController.text != (profile.vehicleModel ?? '')) _vehicleModelController.text = profile.vehicleModel ?? '';
+    if (_vehicleYearController.text != (profile.vehicleYear ?? '')) _vehicleYearController.text = profile.vehicleYear ?? '';
+    if (_vehicleColorController.text != (profile.vehicleColor ?? '')) _vehicleColorController.text = profile.vehicleColor ?? '';
+  }
+
+  // --- UI Build Methods ---
+  @override
+  Widget build(BuildContext context) {
+    // Show initial loader only if NO profile is cached/loaded and we are fetching data
+    bool showInitialLoader = _isLoading && _transporterProfile == null;
+    // Show fatal error only if NO profile is loaded and an error occurred
+    bool showFatalError = _errorMessage != null && _transporterProfile == null;
+
+    return Scaffold(
+      backgroundColor: _white,
+      appBar: AppBar(
+        title: _buildAppBarTitle(),
+        backgroundColor: _white,
+        foregroundColor: _darkTeal,
+        elevation: _selectedDrawerIndex == 2 ? 0 : 1, // No elevation for profile tab view
+        iconTheme: IconThemeData(color: _darkTeal),
+        actions: [
+          // Show subtle loading indicator in appbar if profile is refreshing in background
+          if (_isLoadingProfile && _transporterProfile != null)
+            Padding(
+                padding: const EdgeInsets.only(right: 16.0),
+                child: Center(
+                    child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: _primaryTeal))))
+        ],
+      ),
+      drawer: _buildDrawer(),
+      body: showInitialLoader
+          ? Center(child: CircularProgressIndicator(color: _primaryTeal))
+          : showFatalError
+              ? _buildFatalErrorBody(_errorMessage!)
+              : _buildBody(), // Build body even if profile is refreshing
+    );
+  }
+
+  Widget _buildFatalErrorBody(String message) {
+    return Center(
+        child: Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.error_outline, color: _red, size: 50),
+          SizedBox(height: 16),
+          Text(
+            'Failed to Load Dashboard',
+            style: TextStyle(
+                color: _red, fontSize: 18, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          SizedBox(height: 8),
+          Text(
+            message,
+            style: TextStyle(color: _grey),
+            textAlign: TextAlign.center,
+          ),
+          SizedBox(height: 24),
+          ElevatedButton.icon(
+            icon: Icon(Icons.refresh),
+            label: Text('Retry'),
+            onPressed: _loadInitialData,
+            style: ElevatedButton.styleFrom(
+                backgroundColor: _primaryTeal, foregroundColor: _white),
+          )
+        ],
+      ),
+    ));
+  }
+
+  Widget _buildAppBarTitle() {
+    String title;
+    Widget? titleWidget;
+    switch (_selectedDrawerIndex) {
+      case 0:
+        title = _transporterProfile?.name ?? 'Dashboard';
+        titleWidget = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: _primaryTeal.withOpacity(0.1),
+              backgroundImage: _transporterProfile?.profileImageUrl != null
+                  ? CachedNetworkImageProvider(_transporterProfile!.profileImageUrl!) // Use CachedNetworkImageProvider
+                  : null,
+              onBackgroundImageError: (_, __) {}, // Handle image load error
+              child: (_transporterProfile?.profileImageUrl == null &&
+                      _transporterProfile?.name.isNotEmpty == true)
+                  ? Text(_transporterProfile!.name[0].toUpperCase(),
+                      style: TextStyle(
+                          color: _primaryTeal, fontWeight: FontWeight.bold))
+                  : null,
+            ),
+            SizedBox(width: 10),
+            Text(title,
+                style: TextStyle(
+                    color: _darkTeal,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18)),
+          ],
+        );
+        break;
+      case 1:
+        title = 'Deliveries';
+        break;
+      case 2:
+        title = 'Profile';
+        break;
+      case 3:
+        title = 'Earnings History';
+        break;
+      default:
+        title = 'Dashboard';
+    }
+    return titleWidget ??
+        Text(title,
+            style: TextStyle(
+                color: _darkTeal, fontWeight: FontWeight.bold, fontSize: 18));
+  }
+
+  Widget _buildDrawer() {
+    return Drawer(
+      backgroundColor: _white,
+      child: ListView(
+        padding: EdgeInsets.zero,
+        children: <Widget>[
+          UserAccountsDrawerHeader(
+            decoration: BoxDecoration(color: _primaryTeal),
+            accountName: Text(
+              _transporterProfile?.name ?? 'Rider Name',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            accountEmail: Text(_transporterProfile?.email ?? 'rider@email.com'),
+            currentAccountPicture: CircleAvatar(
+              radius: 30, // Slightly larger
+              backgroundColor: _lightTeal,
+              backgroundImage: _transporterProfile?.profileImageUrl != null
+                  ? CachedNetworkImageProvider(_transporterProfile!.profileImageUrl!)
+                  : null,
+              onBackgroundImageError: (_, __) {},
+              child: (_transporterProfile?.profileImageUrl == null &&
+                      _transporterProfile?.name.isNotEmpty == true)
+                  ? Text(
+                      _transporterProfile!.name[0].toUpperCase(),
+                      style: TextStyle(
+                          fontSize: 30,
+                          color: _darkTeal,
+                          fontWeight: FontWeight.bold),
+                    )
+                  : null,
+            ),
+          ),
+          _buildDrawerItem(Icons.dashboard_customize_outlined, 'Dashboard', 0),
+          _buildDrawerItem(Icons.delivery_dining_outlined, 'Deliveries', 1),
+          _buildDrawerItem(Icons.person_outline, 'Profile', 2),
+          Divider(color: Colors.grey.shade300, indent: 16, endIndent: 16),
+          _buildDrawerItem(
+              Icons.account_balance_wallet_outlined, 'Earnings History', 3),
+          _buildDrawerItem(Icons.logout, 'Sign Out', 4),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDrawerItem(IconData icon, String title, int index) {
+    bool isSelected = _selectedDrawerIndex == index;
+    return ListTile(
+      leading: Icon(icon, color: isSelected ? _primaryTeal : _grey),
+      title: Text(
+        title,
+        style: TextStyle(
+          color: isSelected ? _primaryTeal : _darkTeal,
+          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+        ),
+      ),
+      tileColor: isSelected ? _primaryTeal.withOpacity(0.1) : null,
+      onTap: () {
+        Navigator.pop(context); // Close drawer
+        if (index == 4) {
+          _signOut();
+        } else if (index == 3) {
+          // Navigate to Earnings History Screen
+          Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) =>
+                      EarningsHistoryScreen(payments: _payments)));
+        } else {
+          // Switch main body view
+          if (_selectedDrawerIndex != index) {
+            setState(() {
+              _selectedDrawerIndex = index;
+              // Reset delivery tab if moving away from deliveries
+              if (index != 1) _selectedDeliveryTab = 0;
+            });
+          }
+        }
+      },
+    );
+  }
+
+  void _showSnackBar(String message, {bool isError = false, int durationSeconds = 3}) {
+     if (!mounted) return;
+     ScaffoldMessenger.of(context).removeCurrentSnackBar();
+     ScaffoldMessenger.of(context).showSnackBar(
+       SnackBar(
+         content: Text(message, style: TextStyle(color: _white), textAlign: TextAlign.center),
+         backgroundColor: isError ? _errorColor.withOpacity(0.9) : _darkTeal.withOpacity(0.9),
+         duration: Duration(seconds: durationSeconds),
+         behavior: SnackBarBehavior.floating,
+         margin: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 15.0),
+         padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 15.0),
+         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)),
+         elevation: 4.0,
+       ),
+     );
+   }
+
+  void _showErrorSnackBar(String message) => _showSnackBar(message, isError: true, durationSeconds: 4);
+  void _showSuccessSnackBar(String message) => _showSnackBar(message, isError: false);
+
+  Future<void> _signOut() async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Confirm Sign Out'),
+        content: Text('Are you sure you want to sign out?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Cancel', style: TextStyle(color: _grey))),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text('Sign Out', style: TextStyle(color: _red))),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      try {
+        SharedPreferences prefs = await SharedPreferences.getInstance();
+        await prefs.remove('transporter_token'); // Adjust key if needed
+        await prefs.remove('transporter_user_id'); // Adjust key if needed
+        // Clear cache
+        await UserCache.removeData(_profileCacheKey);
+        await UserCache.removeData(_profileCacheTimestampKey);
+        _profileCache = null;
+        _profileCacheTimestamp = null;
+
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (context) => const TransporterLoginPage()), // Navigate to login
+            (Route<dynamic> route) => false, // Remove all previous routes
+          );
+        }
+      } catch (e) {
+        print("Error during sign out: $e");
+        _showErrorSnackBar("Could not sign out properly: $e");
+         // Still attempt to navigate to login even if prefs/cache clearing fails
+         if (mounted) {
+           Navigator.pushAndRemoveUntil(
+             context,
+             MaterialPageRoute(builder: (context) => const TransporterLoginPage()),
+             (Route<dynamic> route) => false,
+           );
+         }
+      }
+    }
+  }
+
+
+  Widget _buildBody() {
+    switch (_selectedDrawerIndex) {
+      case 0:
+        return _buildDashboardBody();
+      case 1:
+        return _buildDeliveriesBody();
+      case 2:
+        return _buildProfileBody();
+      // Case 3 (Earnings) is handled by navigating to a separate screen
+      default:
+        return _buildDashboardBody();
+    }
+  }
+
+  Widget _buildDashboardBody() {
+    // Show loader if orders/payments haven't loaded yet, even if profile is cached
+    if (_isLoading && _allOrders.isEmpty && _payments.isEmpty) {
+      return Center(child: CircularProgressIndicator(color: _primaryTeal));
+    }
+    // Use the fatal error display if needed (handled in build method)
+
+    List<Order> activeDeliveries = _getActiveOrders();
+    List<Order> recentActivity = _getRecentActivityOrders();
+    List<Order> scheduledDeliveries = _getScheduledOrders();
+    double todaysEarnings = _calculateTodaysEarnings();
+
+    return RefreshIndicator(
+      onRefresh: _loadInitialData,
+      color: _primaryTeal,
+      child: ListView(
+        padding: EdgeInsets.all(16.0),
+        children: [
+          Text(
+            _transporterProfile != null
+                ? 'Welcome Back, ${_transporterProfile!.name}!'
+                : 'Welcome Back!',
+            style: TextStyle(
+                fontSize: 24, fontWeight: FontWeight.bold, color: _darkTeal),
+          ),
+          SizedBox(height: 8),
+          Text(
+            'Ready to make some deliveries?',
+            style: TextStyle(fontSize: 16, color: _grey),
+          ),
+          SizedBox(height: 20),
+          _buildDashboardActionButtons(),
+          SizedBox(height: 20),
+          _buildActiveDeliveriesCard(activeDeliveries.length),
+          SizedBox(height: 16),
+          _buildEarningsCard(todaysEarnings),
+          SizedBox(height: 16),
+          _buildGoOnlineCard(),
+          SizedBox(height: 20),
+          if (recentActivity.isNotEmpty) ...[
+            _buildRecentActivityCard(recentActivity),
+            SizedBox(height: 20),
+          ],
+          if (scheduledDeliveries.isNotEmpty) ...[
+            _buildScheduledDeliveriesCard(scheduledDeliveries),
+            SizedBox(height: 20),
+          ]
+          // Add more dashboard widgets as needed
+        ],
+      ),
+    );
+  }
+
+
+  Widget _buildDashboardActionButtons() {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            icon: Icon(Icons.delivery_dining, size: 18),
+            label: Text('Active Deliveries'),
+            onPressed: () {
+              setState(() {
+                _selectedDrawerIndex = 1;
+                _selectedDeliveryTab = 0; // Switch to Active tab
+              });
+            },
+            style: OutlinedButton.styleFrom(
+                foregroundColor: _darkTeal,
+                side: BorderSide(color: _lightTeal),
+                padding: EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8))),
+          ),
+        ),
+        SizedBox(width: 16),
+        Expanded(
+          child: ElevatedButton.icon(
+            icon: Icon(Icons.search, size: 18),
+            label: Text('Find Orders'),
+            onPressed: () {
+              setState(() {
+                _selectedDrawerIndex = 1;
+                _selectedDeliveryTab = 1; // Switch to Available tab
+              });
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _primaryTeal,
+              foregroundColor: _white,
+              padding: EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+              elevation: 2,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+
+ Widget _buildInfoCard({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color iconBgColor,
+    required Color iconColor,
+    String? actionText,
+    VoidCallback? onTap, // Renamed from onActionTap for clarity
+    Widget? trailingWidget,
+  }) {
+    return Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: _white,
+      child: InkWell( // Wrap with InkWell if onTap is provided
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: TextStyle(color: _grey, fontSize: 14)),
+                    SizedBox(height: 8),
+                    Text(value,
+                        style: TextStyle(
+                            color: _darkTeal,
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold)),
+                    if (actionText != null && onTap != null) ...[ // Only show action text if card is tappable
+                      SizedBox(height: 12),
+                       // Don't wrap actionText in InkWell, the whole card is tappable
+                       Text(
+                        actionText,
+                        style: TextStyle(
+                            color: _primaryTeal, fontWeight: FontWeight.w600),
+                      ),
+                    ]
+                  ],
+                ),
+              ),
+              Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Container(
+                    padding: EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: iconBgColor,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(icon, color: iconColor, size: 24),
+                  ),
+                  if (trailingWidget != null) ...[
+                    SizedBox(height: 15),
+                    trailingWidget,
+                  ]
+                ],
+              )
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+
+  Widget _buildActiveDeliveriesCard(int count) {
+    return _buildInfoCard(
+        title: 'Active Deliveries',
+        value: count.toString(),
+        icon: Icons.delivery_dining,
+        iconBgColor: _primaryTeal.withOpacity(0.1),
+        iconColor: _primaryTeal,
+        actionText: 'View active deliveries', // Updated text
+        trailingWidget: Icon(Icons.arrow_forward_ios, color: _primaryTeal.withOpacity(0.6), size: 16),
+        onTap: () {
+          setState(() {
+            _selectedDrawerIndex = 1;
+            _selectedDeliveryTab = 0; // Switch to Active tab
+          });
+        });
+  }
+
+
+  double _calculateTodaysEarnings() {
+    DateTime now = DateTime.now();
+    DateTime todayStart = DateTime(now.year, now.month, now.day);
+    DateTime todayEnd = todayStart.add(Duration(days: 1));
+    double total = 0;
+
+    // Sum successful payments made today
+    total += _payments
+        .where((p) =>
+            p.createdAt.isAfter(todayStart) &&
+            p.createdAt.isBefore(todayEnd) &&
+            p.disbursementTransactionStatus.toLowerCase() == 'successful')
+        .fold(0.0, (sum, p) => sum + p.amount);
+
+    // Removed the estimation logic based on completed orders without payments
+    // Rely solely on the payments data for accuracy.
+    return total;
+  }
+
+  List<Order> _getCompletedOrdersOnly() {
+     // Helper specifically for earnings calculation (only 'completed' status)
+     return _allOrders
+         .where((o) => o.orderStatus == Order.STATUS_COMPLETED)
+         .toList();
+   }
+
+
+  Widget _buildEarningsCard(double earnings) {
+    return _buildInfoCard(
+        title: 'Today\'s Earnings',
+        value: '\$${earnings.toStringAsFixed(2)}',
+        icon: Icons.attach_money,
+        iconBgColor: _green.withOpacity(0.1),
+        iconColor: _green,
+        actionText: 'View earnings history',
+        trailingWidget: Icon(Icons.arrow_forward_ios, color: _green.withOpacity(0.6), size: 16),
+        onTap: () {
+          Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) =>
+                      EarningsHistoryScreen(payments: _payments)));
+        });
+  }
+
+
+  Widget _buildGoOnlineCard() {
+    return Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _isOnline ? 'You are Online' : 'Go Online',
+              style: TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.bold, color: _darkTeal),
+            ),
+            SizedBox(height: 8),
+            Text(
+              _isOnline ? 'Ready to receive new delivery requests.' : 'Toggle switch to start receiving orders.',
+              style: TextStyle(color: _grey, fontSize: 14),
+            ),
+            SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                 Text(
+                   _isOnline ? 'Currently Available' : 'Currently Offline',
+                   style: TextStyle(
+                     fontSize: 16,
+                     fontWeight: FontWeight.w600,
+                     color: _isOnline ? _green : _red,
+                   ),
+                 ),
+                Switch(
+                   value: _isOnline,
+                   onChanged: _isLoadingProfile ? null : (value) => _toggleOnlineStatus(), // Pass value directly
+                   activeColor: _white,
+                   activeTrackColor: _primaryTeal,
+                   inactiveThumbColor: _white,
+                   inactiveTrackColor: Colors.grey[300], // Fix: Use grey[300]
+                 ),
+
+              ],
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _toggleOnlineStatus() async {
+     if (_transporterProfile == null) {
+       _showErrorSnackBar("Profile not loaded yet. Cannot change status.");
+       return;
+     }
+
+     final bool targetStatus = !_isOnline; // Determine the target state
+
+     _showLoadingSnackbar(targetStatus ? "Going Online..." : "Going Offline...");
+
+     try {
+       bool success = await TransporterApiService.updateTransporterActiveStatus(
+           widget.transporterId, targetStatus);
+
+       _dismissLoadingSnackbar(); // Dismiss loading *before* state update
+
+       if (success && mounted) {
+         // Update local state *after* successful API call
+         setState(() {
+           _isOnline = targetStatus;
+           _transporterProfile = _transporterProfile?.copyWith(isActive: targetStatus);
+           // Save updated profile to cache
+           if (_transporterProfile != null) {
+             _saveProfileCacheToPrefs(_transporterProfile!);
+           }
+         });
+         _showSuccessSnackBar(targetStatus ? 'You are now Online!' : 'You are now Offline.');
+       } else if (mounted) {
+         // API call failed or component unmounted
+         _showErrorSnackBar('Failed to update status. Please try again.');
+         // Revert visual state if API failed (optional, but good UX)
+         setState(() {
+           _isOnline = !targetStatus; // Revert switch/button state
+         });
+       }
+     } catch (e) {
+       _dismissLoadingSnackbar();
+       print("Failed to toggle online status: $e");
+       if (mounted) {
+         _showErrorSnackBar('Error updating status: ${e.toString()}');
+          // Revert visual state on error
+          setState(() {
+            _isOnline = !targetStatus;
+          });
+       }
+     }
+   }
+
+  void _showLoadingSnackbar(String message) {
+     if (!mounted) return;
+     ScaffoldMessenger.of(context).removeCurrentSnackBar(); // Remove previous snackbars
+     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+       content: Row(
+         mainAxisAlignment: MainAxisAlignment.center,
+         children: [
+           const SizedBox(
+               width: 16,
+               height: 16,
+               child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+           const SizedBox(width: 12),
+           Text(message, style: const TextStyle(color: Colors.white))
+         ]
+       ),
+       backgroundColor: Colors.black.withOpacity(0.7),
+       duration: const Duration(seconds: 60), // Long duration, dismiss manually
+       behavior: SnackBarBehavior.floating,
+       margin: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 50.0),
+       padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 15.0),
+       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.0)),
+     ));
+   }
+
+  void _dismissLoadingSnackbar() {
+     if (mounted) ScaffoldMessenger.of(context).removeCurrentSnackBar();
+   }
+
+  List<Order> _getRecentActivityOrders() {
+    // Includes completed, cancelled, rejected
+     List<Order> completedOrCancelled = _allOrders
+         .where((o) => [
+               Order.STATUS_COMPLETED,
+               Order.STATUS_CANCELLED,
+               Order.STATUS_RIDER_REJECTED,
+               Order.STATUS_DELIVERED // Include delivered but not yet completed if desired
+             ].contains(o.orderStatus))
+         .toList();
+     completedOrCancelled.sort((a, b) => b.orderDate.compareTo(a.orderDate)); // Most recent first
+     return completedOrCancelled.take(3).toList(); // Limit to 3
+   }
+
+  List<Order> _getScheduledOrders() {
+     // Orders assigned to the transporter but not yet started/picked up
+     return _allOrders
+         .where((o) => [Order.STATUS_ASSIGNED, Order.STATUS_RIDER_ACCEPTED].contains(o.orderStatus))
+         .toList()
+       ..sort((a, b) => a.orderDate.compareTo(b.orderDate)); // Oldest first (next up)
+   }
+
+  Widget _buildRecentActivityCard(List<Order> recentOrders) {
+    return Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Recent Activity',
+                style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: _darkTeal)),
+            Text('Your latest completed or ended deliveries', // Updated subtitle
+                style: TextStyle(color: _grey, fontSize: 14)),
+            SizedBox(height: 16),
+            if (recentOrders.isEmpty)
+              Text('No recent activity.', style: TextStyle(color: _grey))
+            else
+              Column(
+                children: [
+                  ...recentOrders.map((order) => _buildRecentActivityItem(order)),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12.0),
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: InkWell(
+                        onTap: () {
+                          setState(() {
+                            _selectedDrawerIndex = 1;
+                            _selectedDeliveryTab = 2; // Go to Completed tab
+                          });
+                        },
+                        child: Text(
+                          'View full history',
+                          style: TextStyle(
+                              color: _primaryTeal, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ),
+                  )
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+
+  Widget _buildRecentActivityItem(Order order) {
+    IconData statusIcon;
+    Color iconColor;
+    String relativeTime = _getRelativeTime(order.orderDate); // How long ago it finished/cancelled
+
+    switch (order.orderStatus.toLowerCase()) {
+      case Order.STATUS_COMPLETED:
+      case Order.STATUS_DELIVERED: // Consider delivered as success here
+        statusIcon = Icons.check_circle;
+        iconColor = _green;
+        break;
+      case Order.STATUS_CANCELLED:
+      case Order.STATUS_RIDER_REJECTED:
+        statusIcon = Icons.cancel;
+        iconColor = _red;
+        break;
+      default: // Should not happen in recent activity based on filter
+        statusIcon = Icons.help_outline;
+        iconColor = _grey;
+        relativeTime = "Unknown";
+        break;
+    }
+
+    IconData leadingIcon = order.orderType.toLowerCase() == 'meal'
+        ? Icons.restaurant_menu // Use restaurant_menu for meals
+        : Icons.inventory_2; // Use inventory for produce/other
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        children: [
+          Container(
+            padding: EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: _primaryTeal.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(leadingIcon, color: _primaryTeal, size: 20),
+          ),
+          SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Order #${order.orderId}',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600, color: _darkTeal)),
+                Text(_getStatusText(order.orderStatus), // User-friendly status
+                    style: TextStyle(color: _grey, fontSize: 13)),
+              ],
+            ),
+          ),
+          SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(relativeTime, style: TextStyle(color: _grey, fontSize: 12)),
+              SizedBox(height: 2),
+              Icon(statusIcon, color: iconColor, size: 16),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getRelativeTime(DateTime dateTime) {
+    final Duration difference = DateTime.now().difference(dateTime);
+
+    if (difference.inSeconds < 60) return '${difference.inSeconds}s ago';
+    if (difference.inMinutes < 60) return '${difference.inMinutes}m ago';
+    if (difference.inHours < 24) return '${difference.inHours}h ago';
+    if (difference.inDays < 2) return 'Yesterday';
+    if (difference.inDays < 7) return '${difference.inDays}d ago';
+    // For older dates, show month and day
+    return DateFormat('MMM d').format(dateTime);
+  }
+
+
+  String _getStatusText(String apiStatus) {
+    switch (apiStatus.toLowerCase()) {
+      case Order.STATUS_PENDING: return 'Pending';
+      case Order.STATUS_ASSIGNED: return 'Assigned';
+      case Order.STATUS_RIDER_ACCEPTED: return 'Accepted'; // Use new status
+      case Order.STATUS_PICKED_UP: return 'Picked Up';
+      case Order.STATUS_ON_THE_WAY: return 'On The Way';
+      case Order.STATUS_DELIVERING: return 'Delivering'; // Keep if used by backend sometimes
+      case Order.STATUS_DELIVERED: return 'Arrived / Verify'; // Adjusted text
+      case Order.STATUS_COMPLETED: return 'Completed';
+      case Order.STATUS_CANCELLED: return 'Cancelled';
+      case Order.STATUS_RIDER_REJECTED: return 'Rejected'; // Use new status
+      case 'available': return 'Available'; // Handle alternative status text
+      default: return apiStatus.replaceAll('_', ' ').split(' ').map((word) => word[0].toUpperCase() + word.substring(1)).join(' '); // Fallback formatting
+    }
+  }
+
+
+  Widget _buildScheduledDeliveriesCard(List<Order> scheduledOrders) {
+     return Card(
+       elevation: 1,
+       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+       child: Padding(
+         padding: EdgeInsets.all(16.0),
+         child: Column(
+           crossAxisAlignment: CrossAxisAlignment.start,
+           children: [
+             Text('Next Accepted Deliveries', // Updated title
+                 style: TextStyle(
+                     fontSize: 18,
+                     fontWeight: FontWeight.bold,
+                     color: _darkTeal)),
+             Text('Upcoming orders you have accepted', // Updated subtitle
+                 style: TextStyle(color: _grey, fontSize: 14)),
+             SizedBox(height: 16),
+             if (scheduledOrders.isEmpty)
+               Text('No scheduled deliveries found.', style: TextStyle(color: _grey))
+             else
+               Column(
+                 // Take only the next 2-3 scheduled deliveries for the dashboard card
+                 children: scheduledOrders.take(3).map(_buildScheduledDeliveryItem).toList(),
+               ),
+             if (scheduledOrders.length > 3)
+                Padding(
+                 padding: const EdgeInsets.only(top: 12.0),
+                 child: Align(
+                   alignment: Alignment.centerRight,
+                   child: InkWell(
+                     onTap: () {
+                       setState(() {
+                         _selectedDrawerIndex = 1;
+                         _selectedDeliveryTab = 0; // Go to Active tab
+                       });
+                     },
+                     child: Text(
+                       'View all active',
+                       style: TextStyle(
+                           color: _primaryTeal, fontWeight: FontWeight.w600),
+                     ),
+                   ),
+                 ),
+               )
+           ],
+         ),
+       ),
+     );
+   }
+
+  Widget _buildScheduledDeliveryItem(Order order) {
+    // Format time based on how far in the future it is
+    String formattedTime;
+    DateTime now = DateTime.now();
+    DateTime orderTime = order.orderDate;
+    if (orderTime.year == now.year && orderTime.month == now.month && orderTime.day == now.day) {
+      // Today
+      formattedTime = DateFormat('h:mm a').format(orderTime);
+    } else if (orderTime.year == now.year && orderTime.month == now.month && orderTime.day == now.day + 1) {
+      // Tomorrow
+      formattedTime = 'Tomorrow, ${DateFormat('h:mm a').format(orderTime)}';
+    } else {
+      // Other days
+      formattedTime = DateFormat('MMM d, h:mm a').format(orderTime);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12.0),
+      child: InkWell( // Make item tappable to go to details
+        onTap: () => _navigateToOrderDetails(order),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded( // Allow title to wrap if needed
+                  child: Text(
+                    order.productName ?? order.mealName ?? 'Order #${order.orderId}',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600, color: _darkTeal, fontSize: 15),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                SizedBox(width: 8), // Spacing
+                Row( // Time chip
+                  children: [
+                    Icon(Icons.access_time, size: 14, color: _grey),
+                    SizedBox(width: 4),
+                    Text(formattedTime, style: TextStyle(color: _grey, fontSize: 13)),
+                  ]
+                ),
+              ]
+            ),
+            SizedBox(height: 6),
+            Row( // Delivery Address
+              children: [
+                Icon(Icons.location_on_outlined, size: 14, color: _grey),
+                SizedBox(width: 4),
+                Expanded(
+                    child: Text(order.simplifiedDeliveryAddress,
+                        style: TextStyle(color: _grey, fontSize: 13),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1))
+              ]
+            ),
+            SizedBox(height: 8),
+            Row( // Distance and Earnings
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Dist: ${order.estimatedDistance}', style: TextStyle(color: _grey, fontSize: 13)),
+                Text(
+                    '\$${order.earnings.toStringAsFixed(2)}',
+                    style: TextStyle(color: _green, fontWeight: FontWeight.bold, fontSize: 14)
+                ),
+              ]
+            ),
+             Divider(color: _lightTeal.withOpacity(0.5), height: 20), // Separator
+          ],
+        ),
+      )
+    );
+  }
+
+  // --- Deliveries Screen ---
+  Widget _buildDeliveriesBody() {
+     List<Order> ordersToShow;
+     String tabTitle;
+
+     switch (_selectedDeliveryTab) {
+       case 0:
+         ordersToShow = _getActiveOrders();
+         tabTitle = 'Active';
+         break;
+       case 1:
+         ordersToShow = _getAvailableOrders();
+         tabTitle = 'Available';
+         break;
+       case 2:
+         ordersToShow = _getCompletedOrders();
+         tabTitle = 'Completed';
+         break;
+       default:
+         ordersToShow = [];
+         tabTitle = '';
+     }
+
+     return Column(
+       children: [
+         // Tabs
+         Padding(
+           padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+           child: _buildDeliveryTabs(),
+         ),
+         // Orders List
+         Expanded(
+           child: RefreshIndicator(
+             onRefresh: _loadInitialData, // Refresh fetches all data again
+             color: _primaryTeal,
+             child: ordersToShow.isEmpty
+                 ? Center(
+                     child: Text(
+                         'No $tabTitle deliveries found.',
+                         style: TextStyle(color: _grey, fontSize: 16)))
+                 : ListView.builder(
+                     itemCount: ordersToShow.length,
+                     padding: EdgeInsets.only(left: 16, right: 16, bottom: 16, top: 8),
+                     itemBuilder: (context, index) {
+                       return Padding(
+                         padding: const EdgeInsets.only(bottom: 12.0),
+                         child: _buildOrderCard(ordersToShow[index]),
+                       );
+                     },
+                   ),
+           ),
+         ),
+       ],
+     );
+   }
+
+  Widget _buildDeliveryTabs() {
+     return Container(
+       decoration: BoxDecoration(
+           color: _lightGrey, borderRadius: BorderRadius.circular(30)),
+       padding: EdgeInsets.all(4),
+       child: Row(
+         children: [
+           _buildTabItem('Active', 0),
+           _buildTabItem('Available', 1),
+           _buildTabItem('Completed', 2),
+         ],
+       ),
+     );
+   }
+
+  Widget _buildTabItem(String title, int index) {
+     bool isSelected = _selectedDeliveryTab == index;
+     return Expanded(
+       child: GestureDetector(
+         onTap: () {
+           if (_selectedDeliveryTab != index) {
+             setState(() {
+               _selectedDeliveryTab = index;
+             });
+           }
+         },
+         child: Container(
+           padding: EdgeInsets.symmetric(vertical: 10),
+           decoration: BoxDecoration(
+             color: isSelected ? _white : Colors.transparent,
+             borderRadius: BorderRadius.circular(30),
+             boxShadow: isSelected
+                 ? [
+                     BoxShadow(
+                         color: Colors.grey.withOpacity(0.2),
+                         spreadRadius: 1,
+                         blurRadius: 3,
+                         offset: Offset(0, 1))
+                   ]
+                 : [],
+           ),
+           child: Text(title,
+               textAlign: TextAlign.center,
+               style: TextStyle(
+                   color: isSelected ? _primaryTeal : _grey,
+                   fontWeight:
+                       isSelected ? FontWeight.bold : FontWeight.normal)),
+         ),
+       ),
+     );
+   }
+
+
+  List<Order> _getActiveOrders() {
+    // Includes accepted, picked up, on the way, delivered (but not completed)
+    const activeStatuses = {
+      Order.STATUS_RIDER_ACCEPTED,
+      Order.STATUS_PICKED_UP,
+      Order.STATUS_ON_THE_WAY,
+      Order.STATUS_DELIVERING, // Keep if backend uses it
+      Order.STATUS_ASSIGNED,    // If assigned means active for this user
+      Order.STATUS_DELIVERED,   // Delivered is active until completed
+    };
+    return _allOrders
+        .where((o) => activeStatuses.contains(o.orderStatus))
+        .toList()
+      ..sort((a, b) => a.orderDate.compareTo(b.orderDate)); // Sort chronologically (next up first)
+  }
+
+  List<Order> _getAvailableOrders() {
+    // Only pending/available status
+    const availableStatuses = {Order.STATUS_PENDING, 'available'};
+    return _allOrders
+        .where((o) => availableStatuses.contains(o.orderStatus.toLowerCase()))
+        .toList()
+      ..sort((a, b) => b.orderDate.compareTo(a.orderDate)); // Sort newest first
+  }
+
+  List<Order> _getCompletedOrders() {
+    // Includes completed, cancelled, rejected
+    const completedStatuses = {
+      Order.STATUS_COMPLETED,
+      Order.STATUS_CANCELLED,
+      Order.STATUS_RIDER_REJECTED,
+    };
+    return _allOrders
+        .where((o) => completedStatuses.contains(o.orderStatus))
+        .toList()
+      ..sort((a, b) => b.orderDate.compareTo(a.orderDate)); // Sort most recent first
+  }
+
+  // Removed _getTabName as it's not used
+
+  Widget _buildOrderCard(Order order) {
+    String status = order.orderStatus;
+    bool isAvailable = _selectedDeliveryTab == 1; // Check based on current tab
+    bool isCompletedOrRejected = _selectedDeliveryTab == 2;
+    bool isActive = _selectedDeliveryTab == 0;
+
+    Color statusColor;
+    String statusText = _getStatusText(status);
+    Widget? actionButton;
+
+    // Determine Status Color based on actual status, not tab
+    if (status == Order.STATUS_COMPLETED) statusColor = _green;
+    else if (status == Order.STATUS_CANCELLED || status == Order.STATUS_RIDER_REJECTED) statusColor = _red;
+    else if (status == Order.STATUS_PENDING || status == 'available') statusColor = _orange;
+    else if (status == Order.STATUS_DELIVERED) statusColor = _orange; // Orange for arrived/verify
+    else statusColor = _primaryTeal; // Default for other active statuses
+
+
+    // Determine Action Button based on current tab/status
+    if (isAvailable) {
+      // Available Tab: Accept/Reject buttons
+      actionButton = Row(children: [
+        Expanded(
+            child: OutlinedButton(
+          onPressed: () => _handleRejectOrder(order),
+          child: Text('Reject'),
+          style: OutlinedButton.styleFrom(
+              foregroundColor: _red,
+              padding: EdgeInsets.symmetric(vertical: 10),
+              side: BorderSide(color: Colors.red.shade100)),
+        )),
+        SizedBox(width: 8),
+        Expanded(
+            child: ElevatedButton(
+          onPressed: () => _handleAcceptOrder(order),
+          child: Text('Accept'),
+          style: ElevatedButton.styleFrom(
+              backgroundColor: _primaryTeal,
+              foregroundColor: _white,
+              padding: EdgeInsets.symmetric(vertical: 10),
+              ),
+        )),
+      ]);
+    } else if (isCompletedOrRejected) {
+      // Completed Tab: View Details button
+      actionButton = SizedBox(
+          width: double.infinity,
+          child: OutlinedButton(
+            onPressed: () => _navigateToOrderDetails(order),
+            child: Text('View Details'),
+            style: OutlinedButton.styleFrom(
+                foregroundColor: _darkTeal,
+                padding: EdgeInsets.symmetric(vertical: 10),
+                side: BorderSide(color: _lightTeal)),
+          ));
+    } else if (isActive) {
+      // Active Tab: Button depends on the specific active status
+      String buttonText = "View Details"; // Default for assigned?
+      VoidCallback onPressedAction = () => _navigateToOrderDetails(order);
+
+      if (status == Order.STATUS_RIDER_ACCEPTED) buttonText = "Go to Details / Start";
+      if (status == Order.STATUS_PICKED_UP) buttonText = "Go to Details / Navigate";
+      if (status == Order.STATUS_ON_THE_WAY) buttonText = "View Progress / Verify";
+      if (status == Order.STATUS_DELIVERED) buttonText = "Go to Details / Verify Code";
+
+      actionButton = SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: onPressedAction, // Navigate to details screen for all active
+            child: Text(buttonText),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: _primaryTeal,
+                foregroundColor: _white,
+                padding: EdgeInsets.symmetric(vertical: 10),
+                ),
+          ));
+    }
+
+    // Card Structure
+    return Card(
+      elevation: 2,
+      shadowColor: Colors.grey.withOpacity(0.3),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell( // Make the whole card tappable to go to details (except for available)
+        onTap: isAvailable ? null : () => _navigateToOrderDetails(order),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row( // Top Row: Order ID and Status Chip
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Order #${order.orderId}',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: _darkTeal)),
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(20)),
+                    child: Text(statusText,
+                        style: TextStyle(
+                            color: statusColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12)),
+                  ),
+                ]
+              ),
+              Text(DateFormat('M/d/yyyy, h:mm a').format(order.orderDate), // Order Date/Time
+                  style: TextStyle(color: _grey, fontSize: 12)),
+              SizedBox(height: 12),
+              // Pickup Address
+              _buildAddressRow(Icons.storefront, order.pickupAddress),
+              SizedBox(height: 6),
+              // Delivery Address
+              _buildAddressRow(Icons.location_on_outlined, order.simplifiedDeliveryAddress),
+              SizedBox(height: 12),
+              // Info Row: Distance, Time, Earnings
+              _buildOrderInfoRow(order),
+              SizedBox(height: 16),
+              // Action Button(s) if applicable
+              if (actionButton != null) actionButton,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAddressRow(IconData icon, String address) {
+    return Row(
+        crossAxisAlignment: CrossAxisAlignment.start, // Align icon top
+        children: [
+          Icon(icon, size: 16, color: _primaryTeal),
+          SizedBox(width: 8),
+          Expanded(
+              child: Text(address,
+                  style: TextStyle(fontSize: 14, color: _darkTeal),
+                  // overflow: TextOverflow.ellipsis, // Allow wrapping instead
+                  // maxLines: 1
+              )),
+        ]
+      );
+  }
+
+  Widget _buildOrderInfoRow(Order order) {
+    return Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          _buildInfoChip('Dist: ${order.estimatedDistance}'),
+          _buildInfoChip('Time: ${order.estimatedTime}'),
+          _buildInfoChip('Earn: \$${order.earnings.toStringAsFixed(2)}',
+              color: _green, fontWeight: FontWeight.bold),
+        ]);
+  }
+
+  Widget _buildInfoChip(String text, {Color color = _grey, FontWeight fontWeight = FontWeight.normal}) {
+     return Container(
+       padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+       decoration: BoxDecoration(
+           color: _lightGrey,
+           borderRadius: BorderRadius.circular(8),
+           border: Border.all(color: Colors.grey[300]!, width: 0.5)), // Fix: Use grey[300]!
+       child: Text(text, style: TextStyle(fontSize: 12, color: color, fontWeight: fontWeight)),
+     );
+   }
+
+  void _navigateToOrderDetails(Order order) {
+     // Navigate and potentially pass a callback to refresh this list if status changes
+     Navigator.push(
+         context,
+         MaterialPageRoute(
+             builder: (_) => OrderDetailsScreen(
+                   order: order,
+                   transporterId: widget.transporterId,
+                   onStatusUpdate: _loadInitialData, // Pass refresh function
+                   autoNavigatePreference: _autoNavigate, // Pass preference
+                 ))).then((_) {
+                   // Optional: Refresh list when returning from details screen
+                   // _loadInitialData();
+                 });
+   }
+
+
+  Future<void> _handleAcceptOrder(Order order) async {
+    // Confirmation Dialog
+    bool confirm = await showDialog<bool>(
+            context: context,
+            builder: (BuildContext context) => AlertDialog(
+                  title: Text('Accept Order?'),
+                  content: Text('Do you want to accept Order #${order.orderId}?'),
+                  actions: <Widget>[
+                    TextButton(
+                      child: Text('Cancel', style: TextStyle(color: _grey)),
+                      onPressed: () => Navigator.of(context).pop(false),
+                    ),
+                    ElevatedButton( // Make Accept more prominent
+                      child: Text('Accept'),
+                       style: ElevatedButton.styleFrom(backgroundColor: _primaryTeal, foregroundColor: _white),
+                      onPressed: () => Navigator.of(context).pop(true),
+                    ),
+                  ],
+                )) ?? false; // Default to false if dialog dismissed
+
+    if (confirm) {
+      _showLoadingSnackbar("Accepting Order #${order.orderId}...");
+      try {
+        bool success = await TransporterApiService.acceptOrder(order.orderId, widget.transporterId); // Use new method
+        _dismissLoadingSnackbar();
+        if (success && mounted) {
+          _showSuccessSnackBar('Order #${order.orderId} accepted.');
+          await _loadInitialData(); // Refresh lists to move order to Active
+           // Optionally switch to the Active tab
+           setStateIfMounted(() { // Use setStateIfMounted
+             _selectedDeliveryTab = 0;
+           });
+        } else if (mounted) {
+          _showErrorSnackBar('Failed to accept order. It might have been taken.');
+          await _loadInitialData(); // Refresh available list
+        }
+      } catch (e) {
+        _dismissLoadingSnackbar();
+        print("Failed to accept order: $e");
+        if (mounted) _showErrorSnackBar('Failed to accept order: ${e.toString()}');
+         await _loadInitialData(); // Refresh available list on error
+      }
+    }
+  }
+
+  Future<void> _handleRejectOrder(Order order) async {
+     // Confirmation Dialog
+     bool confirm = await showDialog<bool>(
+             context: context,
+             builder: (BuildContext context) => AlertDialog(
+                   title: Text('Reject Order?'),
+                   content: Text(
+                       'Are you sure you want to reject Order #${order.orderId}? You won\'t see it again.'),
+                   actions: <Widget>[
+                     TextButton(
+                       child: Text('Cancel', style: TextStyle(color: _grey)),
+                       onPressed: () => Navigator.of(context).pop(false),
+                     ),
+                     TextButton(
+                       child: Text('Reject', style: TextStyle(color: _red)),
+                       onPressed: () => Navigator.of(context).pop(true),
+                     ),
+                   ],
+                 )) ?? false; // Default to false if dialog dismissed
+
+     if (confirm) {
+       _showLoadingSnackbar("Rejecting Order #${order.orderId}...");
+       try {
+         bool success = await TransporterApiService.rejectOrder(order.orderId, widget.transporterId); // Use new method
+         _dismissLoadingSnackbar();
+         if (success && mounted) {
+           _showSuccessSnackBar('Order #${order.orderId} rejected.');
+           await _loadInitialData(); // Refresh available list
+         } else if (mounted) {
+           _showErrorSnackBar('Failed to reject order.');
+           await _loadInitialData(); // Refresh list anyway
+         }
+       } catch (e) {
+         _dismissLoadingSnackbar();
+         print("Failed to reject order: $e");
+         if (mounted) _showErrorSnackBar('Failed to reject order: ${e.toString()}');
+         await _loadInitialData(); // Refresh list on error
+       }
+     }
+   }
+
+
+  // --- Profile Screen ---
+  Widget _buildProfileBody() {
+     // Show loader only if profile is truly null initially
+     if (_isLoadingProfile && _transporterProfile == null) {
+        // If there's also a fatal error message, show that instead
+       if (_errorMessage != null) return _buildFatalErrorBody(_errorMessage!);
+       return Center(child: CircularProgressIndicator(color: _primaryTeal));
+     }
+     // If profile is loaded (even cached/stale), build the profile screen
+     if (_transporterProfile == null) {
+        // This case should ideally be covered by the fatal error check, but as a fallback:
+        return _buildFatalErrorBody(_profileFetchError ?? "Profile data is unavailable.");
+     }
+
+
+     // Use DefaultTabController for the nested tabs
+     return DefaultTabController(
+       length: 3, // Number of tabs
+       child: NestedScrollView(
+         headerSliverBuilder: (BuildContext context, bool innerBoxIsScrolled) {
+           // These are the slivers that show above the TabBar
+           return <Widget>[
+             SliverOverlapAbsorber( // Prevents AppBar shadow overlapping content
+               handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
+               sliver: SliverAppBar(
+                 expandedHeight: 280.0, // Adjust as needed for header+stats
+                 floating: false,
+                 pinned: false, // Header itself doesn't pin
+                 backgroundColor: _white,
+                 automaticallyImplyLeading: false, // No back button here
+                 flexibleSpace: FlexibleSpaceBar(
+                    background: Column( // Header + Stats combined
+                      children: [
+                        _buildProfileHeader(),
+                        _buildProfileStats(),
+                        SizedBox(height: 8), // Space before tab bar starts
+                      ],
+                    )
+                 ),
+               ),
+             ),
+             SliverPersistentHeader(
+               delegate: _SliverAppBarDelegate( // Pinned TabBar
+                 TabBar(
+                   labelColor: _primaryTeal,
+                   unselectedLabelColor: _grey,
+                   indicatorColor: _primaryTeal,
+                   tabs: [
+                     Tab(text: 'Personal'),
+                     Tab(text: 'Vehicle'),
+                     Tab(text: 'Settings') // Renamed from Preferences
+                   ],
+                 ),
+               ),
+               pinned: true,
+             ),
+           ];
+         },
+         body: TabBarView( // Content for each tab
+            children: [
+              _buildPersonalInfoTab(),
+              _buildVehicleTab(),
+              _buildPreferencesTab(), // Renamed from _buildPreferencesTab
+            ],
+          ),
+       ),
+     );
+   }
+
+
+  Widget _buildProfileHeader() {
+    // Use loaded profile data
+    final profile = _transporterProfile!; // Assumed not null here based on build logic
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 8.0), // Reduced bottom padding
+      child: Column(
+        children: [
+          GestureDetector(
+            onTap: _pickProfileImage,
+            child: Stack(
+              alignment: Alignment.bottomRight,
+              children: [
+                CircleAvatar(
+                  radius: 50,
+                  backgroundColor: _lightTeal,
+                  backgroundImage: _profileImageFile != null
+                      ? FileImage(_profileImageFile!) as ImageProvider // Show picked file preview
+                      : (profile.profileImageUrl != null
+                          ? CachedNetworkImageProvider(profile.profileImageUrl!) // Show network image
+                          : null), // Show placeholder icon if no image
+                   onBackgroundImageError: (_, __) {}, // Handle network image error silently
+                  child: (_profileImageFile == null && profile.profileImageUrl == null)
+                      ? Icon(Icons.person, size: 60, color: _primaryTeal) // Placeholder Icon
+                      : null,
+                ),
+                 // Loading indicator during upload
+                 if (_isUploadingProfileImage)
+                  Positioned.fill(
+                    child: Container(
+                      decoration: BoxDecoration(
+                         color: Colors.black.withOpacity(0.3),
+                         shape: BoxShape.circle,
+                       ),
+                      child: Center(child: CircularProgressIndicator(color: _white, strokeWidth: 2)),
+                    ),
+                  ),
+                 // Edit Icon
+                 if (!_isUploadingProfileImage)
+                  Container(
+                    padding: EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                        color: _primaryTeal,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: _white, width: 1.5)),
+                    child: Icon(Icons.edit, color: _white, size: 16),
+                  )
+              ],
+            ),
+          ),
+          SizedBox(height: 12),
+          Text(profile.name,
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: _darkTeal)),
+          SizedBox(height: 4),
+          // Row for Vehicle Type and Rating Chips
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (profile.vehicleType != null && profile.vehicleType!.isNotEmpty)
+                 Chip(
+                    label: Text(profile.vehicleType!, style: TextStyle(fontSize: 12, color: _darkTeal)),
+                    backgroundColor: _primaryTeal.withOpacity(0.1),
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    visualDensity: VisualDensity(horizontal: 0.0, vertical: -4), // Makes chip smaller
+                    side: BorderSide.none
+                  ),
+              if (profile.vehicleType != null && profile.vehicleType!.isNotEmpty && profile.rating != null)
+                 SizedBox(width: 8), // Spacer only if both exist
+              if (profile.rating != null)
+                 Container( // Rating Chip Style
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: _lightTeal.withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(12)
+                    ),
+                   child: Row(
+                     mainAxisSize: MainAxisSize.min,
+                     children: [
+                       Icon(Icons.star, color: Colors.amber, size: 16),
+                       SizedBox(width: 4),
+                       Text(profile.rating!.toStringAsFixed(1),
+                           style: TextStyle(color: _darkTeal, fontWeight: FontWeight.bold, fontSize: 12)),
+                     ]
+                   )
+                  ),
+            ]
+          ),
+          // Removed redundant Log Out button, moved Sign Out to drawer
+        ],
+      ),
+    );
+  }
+
+
+  Widget _buildProfileStats() {
+    // Calculate stats based on loaded data
+     int totalDeliveries = _getCompletedOrdersOnly().length; // Only count fully completed
+     double acceptanceRate = 95.0; // Placeholder - Needs backend data
+     double totalEarnings = _payments
+         .where((p) => p.disbursementTransactionStatus.toLowerCase() == 'successful')
+         .fold(0.0, (sum, p) => sum + p.amount); // Sum successful payments
+
+     return Card(
+       margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+       elevation: 1,
+       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+       child: Padding(
+         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0), // Adjusted padding
+         child: Column( // Removed unnecessary inner column
+           crossAxisAlignment: CrossAxisAlignment.start,
+           children: [
+             Row( // Two rows of two stats each
+               mainAxisAlignment: MainAxisAlignment.spaceAround,
+               children: [
+                 _buildStatItem(Icons.motorcycle, totalDeliveries.toString(), 'Completed'),
+                 _buildStatItem(Icons.star_border, _transporterProfile?.rating?.toStringAsFixed(1) ?? 'N/A', 'Rating'),
+               ]
+             ),
+             SizedBox(height: 16), // Spacer between rows
+             Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildStatItem(Icons.thumb_up_alt_outlined, '${acceptanceRate.toStringAsFixed(0)}%', 'Acceptance', color: _primaryTeal), // Example stat
+                 _buildStatItem(Icons.account_balance_wallet_outlined, '\$${totalEarnings.toStringAsFixed(0)}', 'Total Earned', color: _green),
+               ]
+             ),
+           ]
+         ),
+       ),
+     );
+   }
+
+  Widget _buildStatItem(IconData icon, String value, String label, {Color color = _primaryTeal}) {
+     return Column(
+       children: [
+         Container(
+           padding: EdgeInsets.all(8), // Smaller padding
+           decoration: BoxDecoration(
+             color: color.withOpacity(0.1),
+             shape: BoxShape.circle,
+           ),
+           child: Icon(icon, color: color, size: 20), // Smaller icon
+         ),
+         SizedBox(height: 6), // Reduced space
+         Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkTeal)), // Smaller value text
+         Text(label, style: TextStyle(fontSize: 11, color: _grey)), // Smaller label text
+       ]
+     );
+   }
+
+
+  // Tab specific widgets
+  Widget _buildPersonalInfoTab() {
+     // Wrap content in a Builder to get correct context for SafeArea/Overlap
+     return Builder(builder: (context) {
+        // Use CustomScrollView + SliverList for proper integration with NestedScrollView
+        return CustomScrollView(
+          slivers: [
+             SliverOverlapInjector( // Injects padding handled by header
+               handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
+             ),
+            SliverPadding( // Add padding around the content
+              padding: EdgeInsets.all(16.0),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  Form(
+                    key: _profileEditFormKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // No need for title row if using tabs
+                        _buildTextField(_nameController, 'Full Name', validator: (val) => val == null || val.isEmpty ? 'Name cannot be empty' : null),
+                        SizedBox(height: 16),
+                        _buildTextField(_emailController, 'Email', enabled: false), // Email usually not editable
+                        SizedBox(height: 16),
+                        _buildTextField(_phoneController, 'Phone Number', keyboardType: TextInputType.phone),
+                        SizedBox(height: 16),
+                        _buildTextField(_addressController, 'Address (Optional)', keyboardType: TextInputType.streetAddress),
+                        SizedBox(height: 24),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: _isSavingProfile ? null : _savePersonalChanges,
+                            child: _isSavingProfile
+                                ? SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: _white, strokeWidth: 2))
+                                : Text('Save Personal Info'),
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: _primaryTeal,
+                                foregroundColor: _white,
+                                padding: EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                          )
+                        ),
+                        SizedBox(height: 30),
+                        // Optionally add Documents Section if needed in this tab
+                        // _buildDocumentsSection(),
+                      ]
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          ],
+        );
+     });
+   }
+
+  Widget _buildVehicleTab() {
+     return Builder(builder: (context) {
+         return CustomScrollView(
+          slivers: [
+             SliverOverlapInjector(handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context)),
+             SliverPadding(
+               padding: EdgeInsets.all(16.0),
+               sliver: SliverList(
+                 delegate: SliverChildListDelegate([
+                     // Vehicle Details Form
+                     _buildTextField(_vehicleMakeController, 'Vehicle Make'),
+                     SizedBox(height: 16),
+                     _buildTextField(_vehicleModelController, 'Vehicle Model'),
+                     SizedBox(height: 16),
+                     _buildTextField(_vehicleYearController, 'Year', keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], maxLength: 4),
+                     SizedBox(height: 16),
+                     _buildTextField(_licensePlateController, 'License Plate'),
+                     SizedBox(height: 16),
+                     _buildTextField(_vehicleColorController, 'Color'),
+                     SizedBox(height: 24),
+                     SizedBox(
+                       width: double.infinity,
+                       child: ElevatedButton(
+                         onPressed: _isSavingProfile ? null : _saveVehicleChanges,
+                         child: _isSavingProfile
+                             ? SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: _white, strokeWidth: 2))
+                             : Text('Save Vehicle Info'),
+                         style: ElevatedButton.styleFrom(
+                             backgroundColor: _primaryTeal,
+                             foregroundColor: _white,
+                             padding: EdgeInsets.symmetric(vertical: 12),
+                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                       )
+                     ),
+                 ]),
+               ),
+             ),
+           ]);
+     });
+   }
+
+   Widget _buildPreferencesTab() {
+     return Builder(builder: (context) {
+       return CustomScrollView(
+         slivers: [
+           SliverOverlapInjector(handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context)),
+           SliverPadding(
+             padding: EdgeInsets.all(16.0),
+             sliver: SliverList(
+               delegate: SliverChildListDelegate([
+                 _buildPreferenceSectionTitle('Notification Preferences', 'Customize how you receive alerts'),
+                 _buildSwitchPreference('New Order Alerts', 'Notify when new orders are available', _notifyNewOrders, (v) => _updatePreference('notifyNewOrders', v)),
+                 _buildSwitchPreference('Status Updates', 'Notify about order status changes', _notifyStatusUpdates, (v) => _updatePreference('notifyStatusUpdates', v)),
+                 _buildSwitchPreference('Earnings Updates', 'Notify about payments and earnings', _notifyEarnings, (v) => _updatePreference('notifyEarnings', v)),
+                 _buildSwitchPreference('Promotions & News', 'Receive promotional messages', _notifyPromotions, (v) => _updatePreference('notifyPromotions', v)),
+                 SizedBox(height: 30),
+
+                 _buildPreferenceSectionTitle('Map & App Preferences', 'Customize your app experience'),
+                 // _buildSwitchPreference('Dark Mode', 'Use dark theme (requires app restart)', _useDarkMode, (v) => _updatePreference('useDarkMode', v)), // Dark mode needs theme switching logic
+                 _buildSwitchPreference('Sound Alerts', 'Play sounds for notifications', _soundAlerts, (v) => _updatePreference('soundAlerts', v)),
+                 _buildSwitchPreference('Auto-Zoom Map', 'Automatically zoom map on navigation', _autoNavigate, (v) => _updatePreference('autoNavigate', v)), // Changed label
+                 SizedBox(height: 30),
+
+                 _buildPreferenceSectionTitle('Account Actions', ''),
+                 ListTile(
+                   contentPadding: EdgeInsets.zero, // Align with switches
+                   leading: Icon(Icons.lock_reset, color: _darkTeal),
+                   title: Text("Change Password", style: TextStyle(color: _darkTeal)),
+                   trailing: Icon(Icons.arrow_forward_ios, size: 16, color: _grey),
+                   onTap: (){ _showSnackBar("Change Password: Not Implemented", isError: true); },
+                 ),
+                 ListTile(
+                   contentPadding: EdgeInsets.zero,
+                   leading: Icon(Icons.logout, color: _red),
+                   title: Text("Sign Out", style: TextStyle(color: _red)),
+                    trailing: Icon(Icons.arrow_forward_ios, size: 16, color: _grey),
+                   onTap: _signOut, // Use existing sign out
+                 ),
+                 ListTile(
+                   contentPadding: EdgeInsets.zero,
+                   leading: Icon(Icons.delete_forever, color: _red),
+                   title: Text("Delete Account", style: TextStyle(color: _red)),
+                    trailing: Icon(Icons.arrow_forward_ios, size: 16, color: _grey),
+                    onTap: (){ _showSnackBar("Delete Account: Not Implemented", isError: true); },
+                 ),
+               ]),
+             ),
+           ),
+         ],
+       );
+     });
+   }
+
+
+  // Helper for text fields
+  Widget _buildTextField(TextEditingController controller, String label,
+      {bool enabled = true,
+      TextInputType keyboardType = TextInputType.text,
+      List<TextInputFormatter>? inputFormatters,
+      int? maxLength,
+      String? Function(String?)? validator}) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      enabled: enabled,
+      inputFormatters: inputFormatters,
+      maxLength: maxLength,
+      style: TextStyle(color: enabled ? _darkTeal : _grey),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: TextStyle(color: _grey),
+        filled: true,
+        fillColor: enabled ? _lightGrey : Colors.grey[200], // Fix: use grey[200]
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8.0), borderSide: BorderSide.none),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8.0), borderSide: BorderSide(color: _primaryTeal)),
+        disabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8.0), borderSide: BorderSide(color: Colors.grey[300]!)), // Fix: use grey[300]!
+        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        floatingLabelBehavior: FloatingLabelBehavior.auto, // Or always
+        counterText: "", // Hide counter if maxLength is used
+      ),
+       validator: validator, // Add validator
+       autovalidateMode: AutovalidateMode.onUserInteraction, // Validate on interaction
+    );
+  }
+
+  // Helper for saving personal info
+  Future<void> _savePersonalChanges() async {
+     if (!(_profileEditFormKey.currentState?.validate() ?? false)) {
+       _showErrorSnackBar("Please fix errors in the form.");
+       return;
+     }
+     if (_isUploadingProfileImage) {
+       _showErrorSnackBar("Please wait for image upload to complete.");
+       return;
+     }
+
+     setState(() => _isSavingProfile = true);
+     _showLoadingSnackbar("Saving Profile...");
+
+     String? uploadedImageUrl = _transporterProfile?.profileImageUrl; // Start with current URL
+
+     try {
+       // 1. Upload Image if a new one was picked
+       if (_profileImageFile != null) {
+         setState(() => _isUploadingProfileImage = true);
+         _dismissLoadingSnackbar(); // Dismiss saving snackbar
+         _showLoadingSnackbar("Uploading image...");
+         try {
+           uploadedImageUrl = await TransporterApiService.uploadImageToImgur(_profileImageFile!);
+           if (uploadedImageUrl == null) throw Exception("Image upload returned null URL.");
+           setState(() => _isUploadingProfileImage = false);
+           _dismissLoadingSnackbar(); // Dismiss upload snackbar
+           _showLoadingSnackbar("Saving Profile..."); // Show saving again
+         } catch (imgErr) {
+           setState(() => _isUploadingProfileImage = false);
+           _dismissLoadingSnackbar();
+           // Let the outer catch handle showing the error, but throw specific message
+           throw Exception("Image upload failed: $imgErr");
+         }
+       }
+
+       // 2. Prepare Update Data
+       Map<String, dynamic> updateData = {
+         // Only include fields if they actually changed
+         if (_nameController.text != _transporterProfile?.name)
+            'name': _nameController.text,
+         if (_phoneController.text != (_transporterProfile?.phoneNumber ?? ''))
+            'phone_number': _phoneController.text.isEmpty ? null : _phoneController.text, // Send null if empty
+         if (_addressController.text != (_transporterProfile?.address ?? ''))
+            'address': _addressController.text.isEmpty ? null : _addressController.text, // Send null if empty
+          // Only include image URL if it changed (either new upload or cleared?)
+         if (uploadedImageUrl != _transporterProfile?.profileImageUrl)
+           'profile_image_url': uploadedImageUrl,
+       };
+
+       // Remove null values unless API expects them explicitly
+        updateData.removeWhere((key, value) => value == null && key != 'profile_image_url' && key != 'phone_number' && key != 'address'); // Keep null for specific fields if intended
+
+       // 3. Send Update Request if data changed
+       if (updateData.isNotEmpty) {
+         print("Sending profile update data: $updateData");
+         bool success = await TransporterApiService.updateTransporterProfile(widget.transporterId, updateData);
+         if (!success) throw Exception("Profile update API call failed.");
+
+         // 4. Refresh Profile Data from Server
+         await _fetchTransporterProfileAndUpdate(); // Fetch latest profile data
+
+         // 5. Clear picked image file state only on success
+         setState(() { _profileImageFile = null; });
+         _dismissLoadingSnackbar();
+         _showSuccessSnackBar('Profile updated successfully!');
+
+       } else {
+         _dismissLoadingSnackbar();
+         _showSnackBar("No changes detected to save.", isError: false);
+       }
+
+     } catch (e) {
+       print("Failed to save personal changes: $e");
+       _dismissLoadingSnackbar();
+       if (mounted) _showErrorSnackBar('Failed to save profile: ${e.toString()}');
+     } finally {
+       // Ensure loading states are reset
+       if (mounted) {
+          setState(() {
+            _isSavingProfile = false;
+             _isUploadingProfileImage = false; // Also reset image upload flag here
+           });
+       }
+     }
+   }
+
+  // Helper for saving vehicle info
+  Future<void> _saveVehicleChanges() async {
+     setState(() => _isSavingProfile = true);
+     _showLoadingSnackbar("Saving Vehicle Info...");
+
+     Map<String, dynamic> updateData = {
+        // Include only if changed from current profile state
+       if (_vehicleMakeController.text != (_transporterProfile?.vehicleMake ?? ''))
+          'vehicle_make': _vehicleMakeController.text.isEmpty ? null : _vehicleMakeController.text,
+       if (_vehicleModelController.text != (_transporterProfile?.vehicleModel ?? ''))
+          'vehicle_model': _vehicleModelController.text.isEmpty ? null : _vehicleModelController.text,
+       if (_vehicleYearController.text != (_transporterProfile?.vehicleYear ?? ''))
+          'vehicle_year': _vehicleYearController.text.isEmpty ? null : _vehicleYearController.text,
+       if (_licensePlateController.text != (_transporterProfile?.licensePlate ?? ''))
+          'license_plate': _licensePlateController.text.isEmpty ? null : _licensePlateController.text,
+       if (_vehicleColorController.text != (_transporterProfile?.vehicleColor ?? ''))
+          'vehicle_color': _vehicleColorController.text.isEmpty ? null : _vehicleColorController.text,
+     };
+
+     // Remove unchanged fields / nulls if API doesn't expect them
+     updateData.removeWhere((key, value) => value == null);
+
+     try {
+       if (updateData.isNotEmpty) {
+         print("Sending vehicle update data: $updateData");
+         bool success = await TransporterApiService.updateTransporterProfile(widget.transporterId, updateData);
+         if (!success) throw Exception("Vehicle update API call failed.");
+
+         await _fetchTransporterProfileAndUpdate(); // Refresh profile
+         _dismissLoadingSnackbar();
+         _showSuccessSnackBar('Vehicle information updated!');
+       } else {
+         _dismissLoadingSnackbar();
+         _showSnackBar("No vehicle changes detected.", isError: false);
+       }
+     } catch (e) {
+       _dismissLoadingSnackbar();
+       print("Failed to save vehicle changes: $e");
+       if (mounted) _showErrorSnackBar('Failed to save vehicle info: ${e.toString()}');
+     } finally {
+       if (mounted) setState(() => _isSavingProfile = false);
+     }
+   }
+
+  // Helpers for Preferences/Settings Tab
+   Widget _buildPreferenceSectionTitle(String title, String subtitle) {
+     return Padding(
+       padding: const EdgeInsets.only(top: 8.0, bottom: 8.0), // Adjusted padding
+       child: Column(
+         crossAxisAlignment: CrossAxisAlignment.start,
+         children: [
+           Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkTeal)),
+           if (subtitle.isNotEmpty)
+              Text(subtitle, style: TextStyle(color: _grey, fontSize: 13)),
+         ]
+       )
+     );
+   }
+
+   Widget _buildSwitchPreference(String title, String subtitle, bool value, ValueChanged<bool> onChanged) {
+     return SwitchListTile(
+       contentPadding: EdgeInsets.zero,
+       title: Text(title, style: TextStyle(fontWeight: FontWeight.w600, color: _darkTeal, fontSize: 15)),
+       subtitle: subtitle.isNotEmpty ? Text(subtitle, style: TextStyle(color: _grey, fontSize: 13)) : null,
+       value: value,
+       onChanged: onChanged,
+       activeColor: _white, // Thumb color when ON
+       activeTrackColor: _primaryTeal, // Track color when ON
+       inactiveThumbColor: _white, // Thumb color when OFF
+       inactiveTrackColor: Colors.grey[300]!, // Fix: Use grey[300]!
+       dense: true, // Reduces vertical padding
+     );
+   }
+
+    // Update and save preference immediately
+   Future<void> _updatePreference(String key, bool value) async {
+     setState(() {
+       switch (key) {
+         case 'notifyNewOrders': _notifyNewOrders = value; break;
+         case 'notifyStatusUpdates': _notifyStatusUpdates = value; break;
+         case 'notifyEarnings': _notifyEarnings = value; break;
+         case 'notifyPromotions': _notifyPromotions = value; break;
+         // case 'useDarkMode': _useDarkMode = value; break; // Removed
+         case 'soundAlerts': _soundAlerts = value; break;
+         case 'autoNavigate': _autoNavigate = value; break;
+       }
+     });
+
+     try {
+       SharedPreferences prefs = await SharedPreferences.getInstance();
+       await prefs.setBool(key, value);
+       // Optional: Show brief confirmation
+       // _showSnackBar("$key preference saved.", isError: false, durationSeconds: 1);
+     } catch (e) {
+       _showErrorSnackBar("Failed to save preference: $e");
+       // Optionally revert state if saving fails
+       // setState(() { ... revert value ... });
+     }
+   }
+
+
+  // Image Picker Logic
+  Future<void> _pickProfileImage() async {
+     final image_picker.ImagePicker picker = image_picker.ImagePicker(); // Use alias
+     try {
+       final image_picker.XFile? image = await picker.pickImage( // Use alias
+           source: image_picker.ImageSource.gallery, // Use alias
+           imageQuality: 70, // Compress image slightly
+           maxWidth: 800 // Resize image
+           );
+       if (image != null && mounted) {
+         setState(() {
+           _profileImageFile = File(image.path); // Store file for preview and upload
+         });
+         _showSnackBar("Image selected. Press 'Save Personal Info' to apply.", isError: false);
+       }
+     } catch (e) {
+       print("Image picking error: $e");
+       if (mounted) _showErrorSnackBar('Failed to pick image: ${e.toString()}');
+     }
+   }
+
+} // End of _TransporterDashNewState
+
+// ================================================
+// === HELPER WIDGETS =============================
+// ================================================
+
+// Pinned TabBar Delegate for NestedScrollView
+class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
+  _SliverAppBarDelegate(this._tabBar);
+
+  final TabBar _tabBar;
+
+  @override
+  double get minExtent => _tabBar.preferredSize.height;
+  @override
+  double get maxExtent => _tabBar.preferredSize.height;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    // Added Material for elevation and background consistency
+    return Material(
+        color: _white, // Ensures background matches scaffold
+        elevation: 1, // Slight elevation to distinguish pinned tab bar
+        child: _tabBar
+    );
+  }
+
+  @override
+  bool shouldRebuild(_SliverAppBarDelegate oldDelegate) {
+    return false; // Keep false if tab bar itself doesn't change
+  }
+}
+
+
+// ================================================
+// === ORDER DETAILS SCREEN (with Mapbox Map) =====
+// ================================================
+class OrderDetailsScreen extends StatefulWidget {
+  final Order order;
+  final String transporterId;
+  final Future<void> Function() onStatusUpdate;
+  final bool autoNavigatePreference; // Pass user preference
+
+  const OrderDetailsScreen({
+    Key? key,
+    required this.order,
+    required this.transporterId,
+    required this.onStatusUpdate,
+    required this.autoNavigatePreference,
+  }) : super(key: key);
+
+  @override
+  _OrderDetailsScreenState createState() => _OrderDetailsScreenState();
+}
+
+class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
+  late Order _currentOrder;
+  final TextEditingController _verificationCodeController = TextEditingController();
+  bool _isUpdatingStatus = false;
+  bool _isVerificationVisible = false;
+
+  // --- Mapbox State (Using mapbox_maps_flutter) ---
+  mapbox.MapboxMap? _mapController; // Use alias
+  mapbox.Point? _originPoint; // Pickup coordinates // Use alias
+  mapbox.Point? _destinationPoint; // Delivery coordinates // Use alias
+  mapbox.Point? _currentUserLocation; // Track current location // Use alias
+  bool _isMapboxReady = false; // Tracks if map style is loaded
+  bool _isNavigating = false; // Tracks if route is active
+  bool _hasLocationPermission = false;
+  bool _isFetchingRoute = false;
+  StreamSubscription<geolocator.Position>? _positionStreamSubscription; // Specify geolocator.Position
+  CancelableOperation? _locationListenerToken; // For mapbox location listener
+
+  // Route drawing constants
+  static const String ROUTE_SOURCE_ID = "route-source";
+  static const String ROUTE_LAYER_ID = "route-layer";
+  static const double ARRIVAL_THRESHOLD_METERS = 50.0;
+
+  // --- End Mapbox State ---
+
+
+  @override
+  void initState() {
+    super.initState();
+    _currentOrder = widget.order;
+    _isVerificationVisible = _currentOrder.orderStatus == Order.STATUS_DELIVERED; // Show verification if already delivered
+
+    // Parse coordinates on init
+    _originPoint = _currentOrder.pickupCoordinates;
+    _destinationPoint = _currentOrder.deliveryCoordinates;
+
+    // Check location permission status
+    _checkAndRequestLocationPermission();
+
+    // If order status is already 'on_the_way' or 'delivered', potentially show route immediately
+    if ((_currentOrder.orderStatus == Order.STATUS_ON_THE_WAY || _currentOrder.orderStatus == Order.STATUS_DELIVERED) && widget.autoNavigatePreference) {
+       _isNavigating = true; // Set navigation state
+       // The route will be fetched/drawn in onStyleLoaded if _isNavigating is true
+    }
+  }
+
+  @override
+  void dispose() {
+    _verificationCodeController.dispose();
+     // VERY IMPORTANT: Cancel mapbox listeners and streams
+     _locationListenerToken?.cancel();
+     _positionStreamSubscription?.cancel();
+     _mapController?.dispose(); // Dispose map controller
+    super.dispose();
+  }
+
+  // --- Location Permission Handling ---
+  Future<void> _checkAndRequestLocationPermission() async {
+    bool serviceEnabled;
+    geolocator.LocationPermission permission; // Specify geolocator.LocationPermission
+
+    // Test if location services are enabled.
+    serviceEnabled = await geolocator.Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      _showErrorSnackBar('Location services are disabled. Please enable them.');
+       setStateIfMounted(() => _hasLocationPermission = false); // Use setStateIfMounted
+      return;
+    }
+
+    permission = await geolocator.Geolocator.checkPermission();
+    if (permission == geolocator.LocationPermission.denied) {
+      permission = await geolocator.Geolocator.requestPermission();
+      if (permission == geolocator.LocationPermission.denied) {
+         _showErrorSnackBar('Location permissions are denied.');
+          setStateIfMounted(() => _hasLocationPermission = false); // Use setStateIfMounted
+         return;
+      }
+    }
+
+    if (permission == geolocator.LocationPermission.deniedForever) {
+      // Permissions are denied forever, handle appropriately.
+       _showErrorSnackBar('Location permissions are permanently denied, we cannot request permissions.');
+       setStateIfMounted(() => _hasLocationPermission = false); // Use setStateIfMounted
+      return;
+    }
+
+    // When we reach here, permissions are granted
+    print("Location permission granted.");
+    setStateIfMounted(() => _hasLocationPermission = true); // Use setStateIfMounted
+    // If map is ready, enable location component now
+    if (_mapController != null && _isMapboxReady) {
+      _enableLocationTracking();
+    }
+    // Start listening to geolocator stream for proximity checks
+     _startGeolocatorPositionStream();
+  }
+
+
+  // --- Mapbox Setup and Control ---
+
+   void _onMapCreated(mapbox.MapboxMap controller) { // Use alias
+     print("Map created");
+     _mapController = controller;
+     // Style loaded callback (_onStyleLoaded) is more reliable for setup after this
+   }
+
+   void _onStyleLoaded() {
+     print("Style loaded");
+     setStateIfMounted(() { // Use setStateIfMounted
+       _isMapboxReady = true;
+     });
+
+     // Enable location puck if permission granted
+     if (_hasLocationPermission) {
+       _enableLocationTracking();
+     }
+
+     // If we are in navigating state (e.g., returned to screen), fetch/draw route
+     if (_isNavigating) {
+        if (_originPoint != null && _destinationPoint != null) {
+          _fetchAndDrawRoute(_originPoint!, _destinationPoint!);
+        } else {
+           print("Cannot draw route: Origin or destination point is null.");
+           _showErrorSnackBar("Missing coordinates for routing.");
+        }
+     } else if (_destinationPoint != null) {
+       // If not navigating, just move camera to destination
+        _mapController?.flyTo(
+          mapbox.CameraOptions(center: _destinationPoint, zoom: 14.0), // Use alias
+          mapbox.MapAnimationOptions(duration: 1500) // Use alias
+        );
+     }
+   }
+
+    // Enable the location puck on the map
+   Future<void> _enableLocationTracking() async {
+     if (!_isMapboxReady || _mapController == null || !_hasLocationPermission) return;
+     print("Enabling location tracking component...");
+     try {
+        // Simplified approach for older versions (like 0.2.7 syntax)
+        await _mapController!.location.updateSettings(mapbox.LocationComponentSettings(enabled: true)); // Use alias
+       print("Location tracking enabled (basic).");
+     } catch (e) {
+       print("Error enabling location tracking: $e");
+       _showErrorSnackBar("Could not show current location: $e");
+     }
+   }
+
+
+   // Start listening to position updates from Geolocator
+   void _startGeolocatorPositionStream() {
+      if (!_hasLocationPermission) return;
+       _positionStreamSubscription?.cancel(); // Cancel existing subscription
+       // Use geolocator.LocationSettings
+       final geolocator.LocationSettings locationSettings = geolocator.LocationSettings(
+         accuracy: geolocator.LocationAccuracy.high,
+         distanceFilter: 10, // Notify every 10 meters change
+       );
+       _positionStreamSubscription = geolocator.Geolocator.getPositionStream(locationSettings: locationSettings)
+           .listen((geolocator.Position position) { // Specify geolocator.Position
+             if (!mounted) return;
+            // print("Geolocator Position: ${position.latitude}, ${position.longitude}");
+            // mapbox_maps_flutter Position expects (longitude, latitude)
+             _currentUserLocation = mapbox.Point(coordinates: mapbox.Position(position.longitude, position.latitude)); // Use alias
+
+              // Center map on user if navigating and preference allows
+              if (_isNavigating && widget.autoNavigatePreference && _mapController != null) {
+                 // Use explicit null check for heading to resolve warning
+                 final currentBearing = position.heading != null ? position.heading! : 0.0;
+                 _mapController!.flyTo(
+                   mapbox.CameraOptions( // Use alias
+                     center: _currentUserLocation,
+                     zoom: 16.0,
+                     bearing: currentBearing // Use checked bearing
+                   ),
+                   mapbox.MapAnimationOptions(duration: 1000) // Smooth animation // Use alias
+                 );
+              }
+
+             // Check for arrival if navigating
+             if (_isNavigating && _destinationPoint != null) {
+               double distance = geolocator.Geolocator.distanceBetween(
+                 position.latitude,
+                 position.longitude,
+                 _destinationPoint!.coordinates.lat as double,
+                 _destinationPoint!.coordinates.lng as double,
+               );
+              // print("Distance to destination: $distance meters");
+               if (distance < ARRIVAL_THRESHOLD_METERS) {
+                 print("Arrival threshold reached!");
+                 _handleArrival();
+               }
+             }
+           },
+           onError: (error) {
+              print("Geolocator position stream error: $error");
+              _showErrorSnackBar("Error getting location updates: $error");
+           });
+   }
+
+   // Fetch route from API and draw on map
+   Future<void> _fetchAndDrawRoute(mapbox.Point origin, mapbox.Point destination) async { // Use alias
+     if (!_isMapboxReady || _mapController == null) {
+       print("Cannot draw route: Map not ready.");
+       return;
+     }
+     if (_isFetchingRoute) return; // Avoid multiple calls
+
+     print("Fetching and drawing route...");
+     setStateIfMounted(() => _isFetchingRoute = true); // Use setStateIfMounted
+     _showLoadingSnackbar("Calculating route..."); // Show loading indicator
+
+     try {
+        // Use the raw HTTP call method as Directions helper isn't available in v2.7.0
+        final routeData = await TransporterApiService.fetchRoute(origin, destination);
+         _dismissLoadingSnackbar(); // Hide loading indicator
+
+        if (routeData == null || routeData['geometry'] == null) {
+           throw Exception("Failed to fetch route data or route geometry missing.");
+        }
+        final geometry = routeData['geometry']; // GeoJSON geometry as Map<String, dynamic>
+
+        // Ensure previous route layers/sources are removed
+        await _removeRoute();
+
+        // Add route source
+        // GeoJsonSource expects a String or Uint8List. Encode the geometry map.
+        await _mapController!.style.addSource(
+            mapbox.GeoJsonSource(id: ROUTE_SOURCE_ID, data: json.encode(geometry)) // Use alias
+        );
+
+        // Add route layer
+        await _mapController!.style.addLayer(mapbox.LineLayer( // Use alias
+            id: ROUTE_LAYER_ID,
+            sourceId: ROUTE_SOURCE_ID,
+            lineColor: Colors.blue.value, // Use Colors.blue.value for integer color
+            lineWidth: 5.0,
+            lineOpacity: 0.8,
+            lineJoin: mapbox.LineJoin.ROUND, // Use alias
+            lineCap: mapbox.LineCap.ROUND // Use alias
+        ));
+        print("Route drawn successfully.");
+
+         // Adjust camera to fit route bounds
+          final bounds = mapbox.CoordinateBounds( // Use alias
+              southwest: origin, // Use Point directly
+              northeast: destination, // Use Point directly
+              infiniteBounds: false);
+
+          // Use mapbox.MbxEdgeInsets for padding
+          final padding = mapbox.MbxEdgeInsets(top: 50.0, left: 50.0, bottom: 100.0, right: 50.0);
+
+          // Delay slightly to ensure layout?
+          await Future.delayed(Duration(milliseconds: 100));
+          _mapController?.cameraForCoordinateBounds(bounds, padding).then((cameraOptions) {
+                _mapController?.flyTo(cameraOptions, mapbox.MapAnimationOptions(duration: 1500)); // Use alias
+          });
+
+
+     } catch (e) {
+       print("Error fetching or drawing route: $e");
+       _dismissLoadingSnackbar();
+       _showErrorSnackBar("Could not calculate route: ${e.toString()}");
+     } finally {
+        if(mounted) setStateIfMounted(() => _isFetchingRoute = false); // Use setStateIfMounted
+     }
+   }
+
+    // Remove route line from map
+   Future<void> _removeRoute() async {
+     if (_mapController == null) return;
+     try {
+       // Check if layer exists before removing
+       final layerExists = await _mapController!.style.styleLayerExists(ROUTE_LAYER_ID);
+       if (layerExists == true) {
+         await _mapController!.style.removeStyleLayer(ROUTE_LAYER_ID);
+         print("Route layer removed.");
+       }
+        // Check if source exists before removing
+        final sourceExists = await _mapController!.style.styleSourceExists(ROUTE_SOURCE_ID);
+        if (sourceExists == true) {
+          await _mapController!.style.removeStyleSource(ROUTE_SOURCE_ID);
+          print("Route source removed.");
+        }
+     } catch (e) {
+       print("Error removing route layer/source: $e");
+       // Non-critical error, maybe layer/source didn't exist
+     }
+   }
+
+
+  // --- Status Logic & Actions ---
+
+  String _getStatusText(String apiStatus) { // Keep local version for details screen
+     switch (apiStatus.toLowerCase()) {
+       case Order.STATUS_PENDING: return 'Pending';
+       case Order.STATUS_ASSIGNED: return 'Assigned';
+       case Order.STATUS_RIDER_ACCEPTED: return 'Accepted';
+       case Order.STATUS_PICKED_UP: return 'Picked Up';
+       case Order.STATUS_ON_THE_WAY: return 'On The Way';
+       case Order.STATUS_DELIVERING: return 'Delivering';
+       case Order.STATUS_DELIVERED: return 'Arrived / Verify Code';
+       case Order.STATUS_COMPLETED: return 'Completed';
+       case Order.STATUS_CANCELLED: return 'Cancelled';
+       case Order.STATUS_RIDER_REJECTED: return 'Rejected';
+       default: return apiStatus.replaceAll('_', ' ').split(' ').map((word) => word[0].toUpperCase() + word.substring(1)).join(' ');
+     }
+   }
+
+
+  // Determines the next logical status based on the current one
+  String? _getNextStatus() {
+    switch (_currentOrder.orderStatus) {
+      case Order.STATUS_RIDER_ACCEPTED:
+        return Order.STATUS_PICKED_UP; // After accepting, next step is pickup
+      case Order.STATUS_PICKED_UP:
+        return Order.STATUS_ON_THE_WAY; // After pickup, next is driving
+      case Order.STATUS_ON_THE_WAY:
+         // Arrived status, next step is verification (handled by arrival detection/button)
+        return Order.STATUS_DELIVERED;
+      // No automatic next step from DELIVERED or COMPLETED/CANCELLED etc.
+      default:
+        return null;
+    }
+  }
+
+  // Should verification be required for this order? (Assume yes for now)
+  bool _needsVerification() => true; // Or check order type/settings if needed
+
+  // Text for the main action button
+  String _getActionButtonText() {
+    switch (_currentOrder.orderStatus) {
+      case Order.STATUS_RIDER_ACCEPTED:
+        // Need to distinguish pickup from starting navigation if required by UI
+        // Let's assume "Start Delivery" implies going to pickup AND starting navigation flow
+        return 'Start Delivery (Navigate)';
+      case Order.STATUS_PICKED_UP:
+        return 'Start Navigation'; // Explicitly start map navigation after pickup
+      case Order.STATUS_ON_THE_WAY:
+        return 'View Progress / Verify'; // Implies user has arrived or wants to check map
+      case Order.STATUS_DELIVERED:
+        return 'Verify Code'; // Button shown after reaching destination
+      case Order.STATUS_COMPLETED:
+        return 'Delivery Complete';
+      case Order.STATUS_CANCELLED:
+      case Order.STATUS_RIDER_REJECTED:
+        return 'Order Cancelled/Rejected';
+      default:
+        return 'Update Status'; // Fallback
+    }
+  }
+
+  // Can the main action button be shown?
+  bool _canShowActionButton() {
+    // Show button for states where the rider needs to take the next action
+    return [
+      Order.STATUS_RIDER_ACCEPTED,
+      Order.STATUS_PICKED_UP,
+      Order.STATUS_ON_THE_WAY,
+      Order.STATUS_DELIVERED,
+    ].contains(_currentOrder.orderStatus);
+  }
+
+  // --- Main Action Button Handler ---
+  Future<void> _handleActionButtonPress() async {
+    String currentStatus = _currentOrder.orderStatus;
+
+    if (_isUpdatingStatus) return; // Prevent double taps
+
+    // --- Rider Accepted: Mark Picked Up & Start Driving ---
+    if (currentStatus == Order.STATUS_RIDER_ACCEPTED) {
+      // Mark as picked up first (API call)
+       final nextStatus = _getNextStatus(); // Should be 'picked_up'
+       if (nextStatus != null) {
+          bool success = await _performStatusUpdate(nextStatus);
+          if (success && mounted) {
+             // If picked up successfully, THEN start navigation flow
+             await _startDrivingNavigation();
+          }
+       }
+    }
+    // --- Picked Up: Start Navigation ---
+    else if (currentStatus == Order.STATUS_PICKED_UP) {
+        await _startDrivingNavigation();
+    }
+    // --- On The Way: Handle Arrival (or Re-center Map) ---
+    else if (currentStatus == Order.STATUS_ON_THE_WAY) {
+       // This button might now mean "I've arrived" or just "Show Map"
+       // Let's assume it manually triggers the arrival state update.
+       // Arrival should ideally be detected automatically via location stream.
+       // If clicked manually, update status to Delivered.
+       print("Manually marking as arrived...");
+       await _performStatusUpdate(Order.STATUS_DELIVERED);
+       if(mounted) setStateIfMounted(() => _isVerificationVisible = _needsVerification()); // Use setStateIfMounted
+       _removeRoute(); // Stop showing route line
+       if (_positionStreamSubscription != null) {
+          // Pause or modify stream if needed after arrival? Keep listening for now.
+       }
+       setStateIfMounted(() => _isNavigating = false); // Exit navigation map mode // Use setStateIfMounted
+    }
+    // --- Delivered: Trigger Verification ---
+    else if (currentStatus == Order.STATUS_DELIVERED) {
+      if (_isVerificationVisible) {
+        await _handleVerifyCode(); // Call the code verification logic
+      } else {
+        // Should not happen if logic is correct, but handle gracefully
+        setStateIfMounted(() => _isVerificationVisible = true); // Use setStateIfMounted
+        _showSnackBar("Please enter verification code.", isError: false);
+      }
+    } else {
+      print("No action defined for status: $currentStatus");
+    }
+  }
+
+
+  // --- Helper to Start the Driving/Navigation Flow ---
+  Future<void> _startDrivingNavigation() async {
+      if (_originPoint == null || _destinationPoint == null) {
+        _showErrorSnackBar("Missing coordinates for navigation.");
+        return;
+      }
+      if (!_hasLocationPermission) {
+          _showErrorSnackBar("Location permission needed to navigate.");
+          _checkAndRequestLocationPermission(); // Try requesting again
+          return;
+      }
+      if (!_isMapboxReady || _mapController == null) {
+         _showErrorSnackBar("Map is not ready for navigation.");
+         return;
+      }
+
+       // Update status to 'on_the_way' if not already set
+       if (_currentOrder.orderStatus != Order.STATUS_ON_THE_WAY) {
+          bool success = await _performStatusUpdate(Order.STATUS_ON_THE_WAY);
+          if (!success) {
+            _showErrorSnackBar("Failed to update status before navigating.");
+            return; // Don't navigate if status update fails
+          }
+       }
+
+       // Set navigation state and trigger route drawing/location tracking
+       setStateIfMounted(() { // Use setStateIfMounted
+         _isNavigating = true;
+         // _activeNavigationOrder = _currentOrder; // Removed as unused
+       });
+
+       // Ensure location tracking is active
+       await _enableLocationTracking();
+       // Fetch and draw the route
+       await _fetchAndDrawRoute(_originPoint!, _destinationPoint!);
+       // Start Geolocator stream if not already running
+       _startGeolocatorPositionStream();
+   }
+
+
+  // --- Handle Arrival Logic ---
+  Future<void> _handleArrival() async {
+    // Prevent multiple arrival triggers
+    if (!mounted || !_isNavigating || _currentOrder.orderStatus == Order.STATUS_DELIVERED || _currentOrder.orderStatus == Order.STATUS_COMPLETED) {
+      return;
+    }
+     print("Handling Arrival...");
+
+    // 1. Stop showing the route line
+    await _removeRoute();
+
+    // 2. Update Status to Delivered (API Call)
+    // Perform update in background, update UI optimistically first
+    setStateIfMounted(() {
+      _isNavigating = false; // Exit map navigation mode
+      _currentOrder = _currentOrder.copyWith(orderStatus: Order.STATUS_DELIVERED);
+      _isVerificationVisible = _needsVerification(); // Show verification card
+      _showSuccessSnackBar("You have arrived at the destination!");
+    });
+
+    // 3. Make API call to confirm delivered status
+    await _performStatusUpdate(Order.STATUS_DELIVERED, showLoading: false); // Update status via API silently
+
+    // 4. Cancel or modify location listener if needed
+    // Keep Geolocator stream running for now, maybe useful on verification screen?
+    // _positionStreamSubscription?.cancel(); // Optional: stop precise tracking
+
+  }
+
+  // --- Verification using NEW /rr/rc endpoint ---
+  Future<void> _handleVerifyCode() async {
+    String code = _verificationCodeController.text.trim();
+    if (code.length != 6) {
+      _showErrorSnackBar('Please enter a 6-digit verification code.');
+      return;
+    }
+    FocusScope.of(context).unfocus(); // Hide keyboard
+    _showLoadingSnackbar("Verifying Code & Completing...");
+    setStateIfMounted(() => _isUpdatingStatus = true); // Use setStateIfMounted
+
+    try {
+      // Call the NEW verification endpoint
+      bool success = await TransporterApiService.verifyDeliveryCode(_currentOrder.orderId, code);
+
+       // No need to dismiss loading snackbar here, handled in finally
+
+       if (success && mounted) {
+        _showSuccessSnackBar('Delivery completed successfully!');
+        // Update local state to 'completed'
+        setStateIfMounted(() { // Use setStateIfMounted
+          _currentOrder = _currentOrder.copyWith(orderStatus: Order.STATUS_COMPLETED);
+          _isVerificationVisible = false; // Hide verification card
+        });
+        await widget.onStatusUpdate(); // Refresh list on previous screen
+
+        // Optionally pop after a short delay
+        await Future.delayed(Duration(seconds: 1));
+        if (mounted) Navigator.pop(context);
+
+      } else if (!success && mounted) {
+         // API returned false but didn't throw (shouldn't happen with current API logic)
+         throw Exception("Verification API returned false.");
+      }
+      // If verifyDeliveryCode throws an exception, it's caught below
+
+    } catch (e) {
+      print("Verification failed: $e");
+      if (mounted) _showErrorSnackBar('Verification failed: ${e.toString()}');
+      // Clear code field on error?
+      _verificationCodeController.clear();
+    } finally {
+      if (mounted) {
+         _dismissLoadingSnackbar(); // Dismiss loading indicator
+         setStateIfMounted(() => _isUpdatingStatus = false); // Use setStateIfMounted
+       }
+    }
+  }
+
+  // Helper to perform non-verification status updates
+  Future<bool> _performStatusUpdate(String newStatus, {bool showLoading = true}) async {
+    if (_isUpdatingStatus) return false; // Avoid concurrent updates
+
+    if (showLoading) _showLoadingSnackbar("Updating status to ${_getStatusText(newStatus)}...");
+    setStateIfMounted(() => _isUpdatingStatus = true); // Use setStateIfMounted
+    bool success = false;
+    try {
+      success = await TransporterApiService.updateOrderStatusByTransporter(
+          _currentOrder.orderId, newStatus, widget.transporterId);
+
+      if (success && mounted) {
+        if(showLoading) _showSuccessSnackBar('Order status updated to ${_getStatusText(newStatus)}!');
+        // Update local state *after* successful API call
+        setStateIfMounted(() { // Use setStateIfMounted
+          _currentOrder = _currentOrder.copyWith(orderStatus: newStatus);
+           // If moving away from delivered, hide verification
+           if(newStatus != Order.STATUS_DELIVERED) {
+             _isVerificationVisible = false;
+           }
+        });
+        await widget.onStatusUpdate(); // Notify previous screen
+      } else if (!success && mounted) {
+        // API call returned false explicitly
+         throw Exception("Update status API failed silently or component unmounted.");
+      }
+    } catch (e) {
+      print("Failed to update order status to $newStatus: $e");
+      if (mounted && showLoading) _showErrorSnackBar('Failed to update status: ${e.toString()}');
+      success = false; // Ensure success is false on error
+    } finally {
+      if (mounted) {
+         if(showLoading) _dismissLoadingSnackbar();
+         setStateIfMounted(() => _isUpdatingStatus = false); // Use setStateIfMounted
+       }
+    }
+    return success; // Return status of the operation
+  }
+
+  // Removed _promptForVerification as it's unused
+
+  // --- Build Methods ---
+  @override
+  Widget build(BuildContext context) {
+    String status = _currentOrder.orderStatus;
+    Color statusColor;
+    String statusText = _getStatusText(status); // User-friendly status
+
+    switch (status) {
+      case Order.STATUS_COMPLETED: statusColor = _green; break;
+      case Order.STATUS_CANCELLED:
+      case Order.STATUS_RIDER_REJECTED: statusColor = _red; break;
+      case Order.STATUS_DELIVERED: statusColor = _orange; break; // Orange when arrived, pre-verification
+      case Order.STATUS_PENDING: statusColor = _grey; break;
+      default: statusColor = _primaryTeal; break; // Active statuses
+    }
+
+    return Scaffold(
+      backgroundColor: _white,
+      appBar: AppBar(
+        backgroundColor: _white,
+        foregroundColor: _darkTeal,
+        elevation: 1,
+        title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Order #${_currentOrder.orderId}', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: _darkTeal)),
+              Container(
+                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                      color: statusColor.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(20)),
+                  child: Text(statusText, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 12))),
+            ]
+        ),
+        leading: IconButton(
+            icon: Icon(Icons.arrow_back, color: _darkTeal),
+            onPressed: () => Navigator.of(context).pop()),
+      ),
+      body: Column( // Use Column instead of Stack for simpler layout switching
+         children: [
+            // Map Area
+            Expanded(
+              flex: _isNavigating ? 3 : 1, // Give map more space when navigating
+              child: _buildMapArea(),
+            ),
+
+            // Details Area (Scrollable)
+            Expanded(
+               flex: 2, // Give details less space than map when navigating
+               child: ListView(
+                 padding: const EdgeInsets.all(16.0),
+                 children: [
+                    _buildOrderDetailsCard(),
+                    SizedBox(height: 16),
+                    _buildStatusTimelineCard(),
+                    SizedBox(height: 16),
+                    if (_isVerificationVisible) ...[
+                      _buildDeliveryVerificationCard(),
+                      SizedBox(height: 16),
+                    ],
+                    // Action button at the bottom of details
+                    if (_canShowActionButton())
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0, bottom: 16.0), // Add bottom padding
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: _isUpdatingStatus ? null : _handleActionButtonPress,
+                            child: _isUpdatingStatus
+                                ? SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: _white))
+                                : Text(_getActionButtonText()),
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: _primaryTeal,
+                                foregroundColor: _white,
+                                padding: EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                          ),
+                        ),
+                      ),
+                 ],
+               ),
+             ),
+         ],
+      ),
+    );
+  }
+
+  // Builds the Mapbox Map Widget or placeholders
+  Widget _buildMapArea() {
+    // Show map only if token is available
+     if (mapboxAccessToken == null || mapboxAccessToken!.isEmpty) {
+       return _buildMapPlaceholder("Map requires setup (Missing Token)");
+     }
+    // Show permission request/denied message
+     if (!_hasLocationPermission) {
+        return _buildMapPlaceholder("Location permission needed for map.", showRequestButton: true);
+     }
+
+     // Show the actual map
+     return mapbox.MapWidget( // Use alias
+       // Remove accessToken prop - not used directly in constructor for this version
+       // accessToken: mapboxAccessToken!,
+       onMapCreated: _onMapCreated,
+       onStyleLoadedListener: mapbox.OnStyleLoadedListener(_onStyleLoaded), // Use alias
+        // Use mapbox_maps_flutter's CameraOptions for initial position
+       cameraOptions: mapbox.CameraOptions( // Use alias
+         // Start near destination or origin if available
+         // Ensure center is a Point
+         center: _destinationPoint ?? _originPoint ?? mapbox.Point(coordinates: mapbox.Position(-115.1738779, 36.1175275)), // Fallback coordinates // Ensure Point is used
+         zoom: 11.0,
+       ),
+       // Use standard Mapbox style URLs
+       styleUri: "mapbox://styles/mapbox/streets-v11", // Or specify URL directly
+       // styleString: "mapbox://styles/mapbox/streets-v11", // Or specify URL directly
+       // Gestures are typically enabled by default, removing explicit recognizers
+     );
+  }
+
+  // Placeholder widget for map area
+  Widget _buildMapPlaceholder(String message, {bool showRequestButton = false}) {
+     return Container(
+       color: _lightGrey,
+       child: Center(
+         child: Padding(
+           padding: const EdgeInsets.all(20.0),
+           child: Column(
+             mainAxisAlignment: MainAxisAlignment.center,
+             children: [
+               Icon(Icons.map_outlined, size: 40, color: _grey),
+               SizedBox(height: 12),
+               Text(
+                 message,
+                 textAlign: TextAlign.center,
+                 style: TextStyle(color: _grey, fontSize: 16),
+               ),
+                if(showRequestButton) ...[
+                   SizedBox(height: 16),
+                   ElevatedButton(
+                      onPressed: _checkAndRequestLocationPermission,
+                      child: Text("Grant Permission"),
+                      style: ElevatedButton.styleFrom(backgroundColor: _primaryTeal, foregroundColor: _white),
+                   )
+                ]
+             ],
+           ),
+         ),
+       ),
+     );
+   }
+
+
+  Widget _buildOrderDetailsCard() {
+    // Placeholder phone numbers - replace with actual data if available
+    String restaurantPhone = _currentOrder.orderType == 'meal' ? "(555) 123-CHEF" : "(555) 456-PROD";
+    String customerPhone = "(555) 987-CUST"; // Needs real data source
+
+    return Card(
+        elevation: 1,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Order Details', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: _darkTeal)),
+                  SizedBox(height: 16),
+                  // Pickup Section
+                  _buildDetailRow(Icons.storefront, _currentOrder.chefName ?? _currentOrder.producerName ?? 'Pickup Location', isTitle: true),
+                  _buildDetailRow(null, _currentOrder.pickupAddress, isAddress: true),
+                  _buildDetailRow(Icons.phone_outlined, restaurantPhone), // Placeholder phone
+                  Divider(height: 24, color: _lightTeal.withOpacity(0.6)),
+                  // Delivery Section
+                  _buildDetailRow(Icons.person_pin_circle_outlined, 'Delivery To', isTitle: true), // Use different icon for customer
+                  _buildDetailRow(null, _currentOrder.simplifiedDeliveryAddress, isAddress: true),
+                  _buildDetailRow(Icons.phone_outlined, customerPhone), // Placeholder phone
+                  Divider(height: 24, color: _lightTeal.withOpacity(0.6)),
+                  // Items Section
+                  Text('Order Items:', style: TextStyle(fontWeight: FontWeight.w600, color: _darkTeal)),
+                  SizedBox(height: 8),
+                  ..._currentOrder.orderItems
+                      .map((item) => Padding(
+                          padding: const EdgeInsets.only(left: 8.0, bottom: 4.0),
+                          child: Text('• $item', style: TextStyle(color: _darkTeal))))
+                      .toList(),
+                  SizedBox(height: 16),
+                  // Info Chips
+                  _buildOrderInfoRow(_currentOrder),
+                ])));
+  }
+
+  Widget _buildDetailRow(IconData? icon, String text, {bool isTitle = false, bool isAddress = false}) {
+     return Padding(
+       padding: EdgeInsets.only(bottom: isAddress ? 8 : 4.0, left: isTitle ? 0 : (icon != null ? 0 : 28)), // Indent non-icon rows
+       child: Row(
+         crossAxisAlignment: CrossAxisAlignment.start,
+         children: [
+           if (icon != null) ...[
+             Icon(icon, size: 16, color: _primaryTeal),
+             SizedBox(width: 12)
+           ],
+           Expanded(
+               child: Text(text,
+                   style: TextStyle(
+                       fontSize: isTitle ? 15 : 14,
+                       fontWeight: isTitle ? FontWeight.w600 : FontWeight.normal,
+                       color: isTitle ? _darkTeal : _subtleTextColor, // Use subtle text color
+                       height: 1.3 // Line height
+                       )))
+         ]));
+   }
+
+  Widget _buildOrderInfoRow(Order order) {
+     return Row(
+       mainAxisAlignment: MainAxisAlignment.spaceBetween,
+       children: [
+         _buildInfoChip('Dist: ${order.estimatedDistance}'),
+         _buildInfoChip('Time: ${order.estimatedTime}'),
+         _buildInfoChip('Earn: \$${order.earnings.toStringAsFixed(2)}', color: _green, fontWeight: FontWeight.bold),
+       ]
+     );
+   }
+
+  Widget _buildInfoChip(String text, {Color color = _grey, FontWeight fontWeight = FontWeight.normal}) {
+     return Container(
+       padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+       decoration: BoxDecoration(
+           color: _lightGrey,
+           borderRadius: BorderRadius.circular(8),
+           border: Border.all(color: Colors.grey[300]!, width: 0.5)), // Fix: Use grey[300]!
+       child: Text(text, style: TextStyle(fontSize: 12, color: color, fontWeight: fontWeight)),
+     );
+   }
+
+
+  Widget _buildStatusTimelineCard() {
+     // Determine which statuses are met
+     bool acceptedMet = _isStatusMet([Order.STATUS_RIDER_ACCEPTED, Order.STATUS_PICKED_UP, Order.STATUS_ON_THE_WAY, Order.STATUS_DELIVERED, Order.STATUS_COMPLETED]);
+     bool pickedUpMet = _isStatusMet([Order.STATUS_PICKED_UP, Order.STATUS_ON_THE_WAY, Order.STATUS_DELIVERED, Order.STATUS_COMPLETED]);
+     bool onTheWayMet = _isStatusMet([Order.STATUS_ON_THE_WAY, Order.STATUS_DELIVERED, Order.STATUS_COMPLETED]);
+     bool deliveredMet = _isStatusMet([Order.STATUS_DELIVERED, Order.STATUS_COMPLETED]);
+     bool completedMet = _isStatusMet([Order.STATUS_COMPLETED]);
+
+     return Card(
+         elevation: 1,
+         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+         child: Padding(
+             padding: EdgeInsets.all(16.0),
+             child: Column(
+                 crossAxisAlignment: CrossAxisAlignment.start,
+                 children: [
+                   Text('Status Timeline', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: _darkTeal)),
+                   SizedBox(height: 16),
+                   _buildStatusItem('Accepted', 'You accepted the order', acceptedMet),
+                   _buildStatusItem('Picked Up', 'Order collected from pickup', pickedUpMet),
+                   _buildStatusItem('On The Way', 'Delivery in progress', onTheWayMet),
+                   _buildStatusItem('Arrived / Verify', _getDeliveredSubtitle(), deliveredMet, needsVerification: _needsVerification() && !completedMet),
+                   _buildStatusItem('Completed', 'Delivery verified & finished', completedMet, isLast: true),
+                 ])));
+   }
+
+
+  Widget _buildStatusItem(String title, String subtitle, bool isCompleted, {bool isLast = false, bool needsVerification = false}) {
+     IconData iconData;
+     Color iconColor;
+     Color textColor;
+
+     if (isCompleted) {
+       iconData = Icons.check_circle;
+       iconColor = _green;
+       textColor = _darkTeal;
+     } else if (needsVerification && _currentOrder.orderStatus == Order.STATUS_DELIVERED) {
+        // Special state: Arrived but needs code
+        iconData = Icons.pin_drop; // Use a location pin icon
+        iconColor = _orange; // Use orange for pending verification
+        textColor = _orange;
+     }
+      else {
+       iconData = Icons.radio_button_unchecked;
+       iconColor = Colors.grey[400]!; // Fix: Use grey[400]!
+       textColor = _grey;
+     }
+
+     // Line color depends on completion of *this* step
+     Color lineColor = isCompleted ? _green : Colors.grey[300]!; // Fix: Use grey[300]!
+
+     return Row(
+       crossAxisAlignment: CrossAxisAlignment.start,
+       children: [
+         Column( // Icon and Line column
+           children: [
+             Icon(iconData, color: iconColor, size: 24),
+             if (!isLast)
+               Container(
+                   width: 1.5, // Slightly thicker line
+                   height: 30,
+                   color: lineColor, // Line color based on this step's completion
+                   margin: EdgeInsets.symmetric(vertical: 4))
+           ]
+         ),
+         SizedBox(width: 12),
+         Expanded( // Text column
+           child: Padding(
+             padding: const EdgeInsets.only(top: 2.0, bottom: 16.0), // Adjust padding for alignment
+             child: Column(
+               crossAxisAlignment: CrossAxisAlignment.start,
+               children: [
+                 Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor)),
+                 Text(subtitle, style: TextStyle(fontSize: 13, color: _grey)), // Subtitle always grey
+               ]
+             )
+           )
+         ),
+       ]
+     );
+   }
+
+  // Checks if the current order status is one of the target statuses or beyond
+  bool _isStatusMet(List<String> targetStatuses) {
+     // Define the order sequence
+     const statusOrder = [
+        Order.STATUS_PENDING, Order.STATUS_ASSIGNED, Order.STATUS_RIDER_ACCEPTED,
+        Order.STATUS_PICKED_UP, Order.STATUS_ON_THE_WAY, Order.STATUS_DELIVERED,
+        Order.STATUS_COMPLETED
+     ];
+     // Find the index of the current status
+     int currentIndex = statusOrder.indexOf(_currentOrder.orderStatus);
+     // Find the minimum index required by targetStatuses
+     int requiredIndex = -1;
+      for(String target in targetStatuses) {
+         int idx = statusOrder.indexOf(target);
+         if (idx != -1) {
+            requiredIndex = (requiredIndex == -1) ? idx : ((idx < requiredIndex) ? idx : requiredIndex);
+         }
+      }
+     // If current status index is >= required index, the status is met or surpassed
+     return currentIndex != -1 && requiredIndex != -1 && currentIndex >= requiredIndex;
+  }
+
+  // Get subtitle text for the "Delivered" status item
+  String _getDeliveredSubtitle() {
+    if (_isStatusMet([Order.STATUS_COMPLETED])) return 'Delivery successfully completed';
+    if (_isStatusMet([Order.STATUS_DELIVERED])) return 'Awaiting verification code';
+    return 'Pending arrival'; // Default if not yet delivered
+  }
+
+  // Verification Card (shown when status is delivered)
+  Widget _buildDeliveryVerificationCard() {
+    return Card(
+        elevation: 1,
+        color: _orange.withOpacity(0.05), // Slight orange background
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+             side: BorderSide(color: _orange.withOpacity(0.5)) // Orange border
+        ),
+        child: Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Delivery Verification', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: _darkTeal)),
+                  SizedBox(height: 8),
+                  Text('Ask the customer for their 6-digit verification code to complete the delivery.', style: TextStyle(color: _grey, fontSize: 14)),
+                  SizedBox(height: 16),
+                  // Code Input Field
+                  TextField(
+                    controller: _verificationCodeController,
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    textAlign: TextAlign.center,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly], // Ensure only digits
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 8, color: _darkTeal),
+                    decoration: InputDecoration(
+                      hintText: '______',
+                      hintStyle: TextStyle(color: Colors.grey[400], fontSize: 24, letterSpacing: 8), // Fix: Use grey[400]
+                      counterText: "", // Hide the counter
+                      filled: true,
+                      fillColor: _white, // White background for input
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0), borderSide: BorderSide(color: Colors.grey[300]!)), // Fix: Use grey[300]!
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0), borderSide: BorderSide(color: _primaryTeal)),
+                      contentPadding: EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  // Verify Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _isUpdatingStatus ? null : _handleVerifyCode, // Call verify handler
+                      child: _isUpdatingStatus
+                          ? SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: _white))
+                          : Text('Verify & Complete Delivery'),
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: _green, // Use Green for final confirmation
+                          foregroundColor: _white,
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                    ),
+                  ),
+                ])));
+  }
+
+   // Helper method to update state safely
+   void setStateIfMounted(VoidCallback fn) {
+     if (mounted) {
+       setState(fn);
+     }
+   }
+
+   // SnackBar helpers (local to this screen)
+   void _showSnackBar(String m, {bool isError = false, int d = 3}) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).removeCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(m, style: TextStyle(color: _white), textAlign: TextAlign.center),
+        backgroundColor: isError ? _errorColor.withOpacity(0.9) : _darkTeal.withOpacity(0.9),
+        duration: Duration(seconds: d),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(15.0, 5.0, 15.0, 10.0), // Adjust margins
+        padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 15.0),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)),
+        elevation: 4.0,
+      ));
+    }
+   void _showErrorSnackBar(String message) => _showSnackBar(message, isError: true, d: 4);
+   void _showSuccessSnackBar(String message) => _showSnackBar(message, isError: false);
+   void _showLoadingSnackbar(String message) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).removeCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+          const SizedBox(width: 12),
+          Text(message, style: const TextStyle(color: Colors.white))
+        ]),
+        backgroundColor: Colors.black.withOpacity(0.7),
+        duration: const Duration(seconds: 60),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(50.0, 5.0, 50.0, 10.0), // Adjust margins
+        padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 15.0),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.0)),
+      ));
+    }
+   void _dismissLoadingSnackbar() {
+      if (mounted) ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    }
+
+} // End OrderDetailsScreen
+
+// ================================================
+// === EARNINGS HISTORY SCREEN ====================
+// ================================================
+class EarningsHistoryScreen extends StatelessWidget {
+  final List<Payment> payments;
+  const EarningsHistoryScreen({Key? key, required this.payments}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    // Group payments by date (day only)
+    Map<DateTime, List<Payment>> groupedPayments = {};
+    for (var payment in payments) {
+      DateTime dateKey = DateTime(payment.createdAt.year, payment.createdAt.month, payment.createdAt.day);
+      groupedPayments.putIfAbsent(dateKey, () => []).add(payment);
+    }
+    // Sort dates descending (most recent first)
+    List<DateTime> sortedDates = groupedPayments.keys.toList()
+      ..sort((a, b) => b.compareTo(a));
+
+    return Scaffold(
+      backgroundColor: _white,
+      appBar: AppBar(
+        title: Text('Earnings History', style: TextStyle(color: _darkTeal, fontWeight: FontWeight.bold)),
+        backgroundColor: _white,
+        foregroundColor: _darkTeal,
+        elevation: 1,
+        leading: IconButton(
+            icon: Icon(Icons.arrow_back, color: _darkTeal),
+            onPressed: () => Navigator.of(context).pop()),
+      ),
+      body: payments.isEmpty
+          ? Center(child: Text('No payment history found.', style: TextStyle(color: _grey)))
+          : ListView.builder(
+              itemCount: sortedDates.length,
+              padding: EdgeInsets.all(16),
+              itemBuilder: (context, index) {
+                DateTime date = sortedDates[index];
+                List<Payment> dailyPayments = groupedPayments[date]!;
+                // Calculate daily total only from successful payments
+                double dailyTotal = dailyPayments
+                    .where((p)=> p.disbursementTransactionStatus.toLowerCase() == 'successful')
+                    .fold(0.0, (sum, p) => sum + p.amount);
+                String formattedDate = DateFormat('EEEE, MMM d, yyyy').format(date);
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16.0),
+                  child: Card(
+                      elevation: 1,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Date Header Row
+                                Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(formattedDate, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkTeal)),
+                                      Text('\$${dailyTotal.toStringAsFixed(2)}', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _green)),
+                                    ]),
+                                Divider(height: 20, color: _lightTeal.withOpacity(0.6)),
+                                // List of payments for that day
+                                ...dailyPayments.map((payment) => _buildPaymentItem(payment)).toList(),
+                              ]))),
+                );
+              }),
+    );
+  }
+
+  Widget _buildPaymentItem(Payment payment) {
+    Color statusColor;
+    IconData statusIcon;
+    String statusText = payment.disbursementTransactionStatus; // Show the disbursement status
+
+    switch (statusText.toLowerCase()) {
+      case 'successful':
+        statusColor = _green;
+        statusIcon = Icons.check_circle;
+        break;
+      case 'pending':
+        statusColor = _grey;
+        statusIcon = Icons.hourglass_empty;
+        break;
+      case 'in progress':
+         statusColor = Colors.orange;
+         statusIcon = Icons.sync;
+         statusText = 'Processing'; // Make it clearer
+         break;
+      case 'failed':
+        statusColor = _red;
+        statusIcon = Icons.error;
+        break;
+      default:
+        statusColor = _grey;
+        statusIcon = Icons.help_outline;
+    }
+
+    return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8.0),
+        child: Row(
+            children: [
+              Icon(Icons.receipt_long_outlined, color: _primaryTeal, size: 20),
+              SizedBox(width: 12),
+              Expanded( // Order Info
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Order #${payment.orderId} (${payment.orderType})', style: TextStyle(fontWeight: FontWeight.w600)),
+                        // Optional: Show order transaction status if different/useful
+                        // Text('Order: ${payment.orderTransactionStatus}', style: TextStyle(color: _grey, fontSize: 12)),
+                         Text(DateFormat('h:mm a').format(payment.createdAt), style: TextStyle(color: _grey, fontSize: 12)), // Show time
+                      ])),
+              SizedBox(width: 8),
+              Column( // Amount and Status
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('\$${payment.amount.toStringAsFixed(2)}', style: TextStyle(fontWeight: FontWeight.bold, color: _darkTeal)),
+                    Row(children: [
+                      Icon(statusIcon, size: 12, color: statusColor),
+                      SizedBox(width: 4),
+                      Text(statusText, style: TextStyle(color: statusColor, fontSize: 11)),
+                    ]),
+                  ]),
+            ]));
+  }
+}

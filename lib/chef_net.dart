@@ -668,33 +668,6 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
             ),
       ]),
        // Floating Action Button - Added from Source file (as it was present there)
-       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          // Check if user is logged in before navigating to create gig
-          final prefs = await SharedPreferences.getInstance();
-          final userId = prefs.getInt('user_id');
-          if (userId == null) {
-            // If not logged in, navigate to the signup/login page
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => SignUpOrLoginPage()),
-            );
-          } else {
-            // If logged in, navigate to the create gig screen
-            Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => CreateGigScreen(
-                      chefData: {}), // Pass an empty map when no chef is pre-selected
-                ));
-          }
-        },
-        label: Text('Post a Gig', style: GoogleFonts.poppins()),
-        icon: Icon(Icons.add),
-        backgroundColor: kColorAccent,
-        foregroundColor: kColorTextOnPrimary,
-        elevation: 4,
-      ),
     );
   }
 
@@ -1305,8 +1278,21 @@ class ChefDetailScreen extends StatelessWidget {
     final serviceRadius = chef['serviceradius']?.toString();
     final responseTime = chef['responsetime']?.toString();
     final minNotice = chef['minnotice']?.toString();
-    final Map<String, dynamic>? pricingData =
-        chef['pricing'] is Map<String, dynamic> ? chef['pricing'] : null;
+    Map<String, dynamic>? pricingData;
+    final dynamic pricingRaw = chef['pricing'];
+    if (pricingRaw is String) {
+      try {
+        pricingData = json.decode(pricingRaw);
+      } catch (e) {
+        print("Error decoding pricing JSON string: $e");
+        pricingData = null; // Set to null if decoding fails
+      }
+    } else if (pricingRaw is Map<String, dynamic>) {
+      pricingData = pricingRaw;
+    } else {
+      pricingData = null;
+    }
+
     final Map<String, dynamic>? perGigPricing =
         pricingData?['per_gig'] is Map<String, dynamic>
             ? pricingData!['per_gig']
@@ -1590,7 +1576,7 @@ class ChefDetailScreen extends StatelessWidget {
                   ? Icons.event_available_outlined
                   : Icons.event_busy_outlined,
               size: 20),
-          label: Text(canBookGig ? 'Request Booking' : 'Booking Unavailable'),
+          label: Text(canBookGig ? 'Request Booking' : 'unavailable for this chef'),
           style: ElevatedButton.styleFrom(
             backgroundColor:
                 canBookGig ? kColorPrimaryDark : Colors.grey.shade500,
@@ -1651,11 +1637,14 @@ class ChefDetailScreen extends StatelessWidget {
                   // 3. Handle the result after returning
                   if (gigAddedSuccessfully == true) {
                     if (!context.mounted)
-                      return; // Check context before showing dialog
+                      return; // Check context before navigation
                     print(
-                        "Returned from CreateGigScreen. Gig added successfully.");
-                    _showPostGigNavigationDialog(
-                        context); // Show navigation options
+                        "Returned from CreateGigScreen. Gig added successfully. Navigating to Cart.");
+                    // Navigate directly to the ShoppingCartScreen
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => ShoppingCartScreen()),
+                    );
                   } else {
                     print(
                         "Returned from CreateGigScreen. Gig not added (cancelled or failed).");

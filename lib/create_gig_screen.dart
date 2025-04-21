@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart'; // For date/time formatting
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi2/cart.dart' as cart; // Use prefix
+import 'dart:convert'; // For json.decode
 
 // Re-use color constants (or import from a central theme file)
 const Color kColorPrimaryDark = Color(0xFF004D40);
@@ -73,8 +74,24 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
   }
 
   void _extractPricingOptions() {
-    final pricingData = widget.chefData['pricing'] as Map<String, dynamic>?;
-    _perGigPricing = pricingData?['per_gig'] as Map<String, dynamic>?;
+    Map<String, dynamic>? pricingData;
+    final dynamic pricingRaw = widget.chefData['pricing'];
+    if (pricingRaw is String) {
+      try {
+        pricingData = json.decode(pricingRaw);
+      } catch (e) {
+        print("Error decoding pricing JSON string in CreateGigScreen: $e");
+        pricingData = null; // Set to null if decoding fails
+      }
+    } else if (pricingRaw is Map<String, dynamic>) {
+      pricingData = pricingRaw;
+    } else {
+      pricingData = null;
+    }
+
+    _perGigPricing = pricingData?['per_gig'] is Map<String, dynamic>
+        ? pricingData!['per_gig']
+        : null;
 
     if (_perGigPricing != null && _perGigPricing!.isNotEmpty) {
       _numberOfPeopleOptions = _perGigPricing!.keys.toList();
@@ -257,7 +274,7 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
       );
       // Ensure navigation happens only if the widget is still mounted
       if (mounted) {
-         Navigator.of(context).pop(); // Go back to the chef detail screen
+         Navigator.of(context).pop(true); // Go back to the chef detail screen and indicate success
       }
 
     } catch (e, stackTrace) { // Capture stack trace for more details
@@ -306,7 +323,7 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
     return Scaffold(
       backgroundColor: kColorBackground,
       appBar: AppBar(
-        title: Text('Book Gig with $chefName'),
+        title: Text('Book $chefName'),
         backgroundColor: kColorPrimaryDark,
         foregroundColor: kColorTextOnPrimary,
         elevation: 2,
