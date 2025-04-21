@@ -1972,6 +1972,10 @@ class Orders(BaseRepository):
         else:
             logger.warning(f"Attempted to delete non-existent order ID: {order_id}")
             return False
+##deisbuseemrt class
+import asyncpg
+from fastapi import HTTPException
+
 
 
 # --- Calculation Logic Class (No DB interaction, remains synchronous) ---
@@ -3641,6 +3645,42 @@ async def get_all_meals_endpoint(conn: asyncpg.Connection = Depends(get_db)):
     # fetch_all_meals raises HTTPException on failure
     result = await fetcher.fetch_all_meals(conn)
     return result
+
+from fastapi import FastAPI, Depends, Query, Body
+
+
+@app.post("/rr/disbursements/{disbursement_type}", status_code=status.HTTP_201_CREATED)
+async def create_disbursement_endpoint(disbursement_type: str, disbursement_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
+    """Create a new disbursement."""
+    disbursement = Disbursements()
+    response = await disbursement.create_disbursement(conn, disbursement_data, disbursement_type)
+    return response
+
+@app.put("/rr/disbursements/{disbursement_type}/{disbursement_id}")
+async def update_disbursement_endpoint(disbursement_type: str, disbursement_id: int, updates: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
+    """Update an existing disbursement."""
+    disbursement = Disbursements()
+    await disbursement.update_disbursement(conn, disbursement_id, updates, disbursement_type)
+    return {'message': f'{disbursement_type.capitalize()} disbursement updated successfully'}
+
+@app.get("/rr/disbursements")
+async def list_disbursements_endpoint(
+    disbursement_id: int = Query(None, description="ID of the specific disbursement to filter by"),
+    disbursement_type: str = Query(None, description="Type of disbursement (chef, producer, etc.)"),
+    foreign_key_id: int = Query(None, description="Foreign key ID (chef_id, producer_id, etc.) to filter by"),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """List disbursements with optional filtering by ID, type, and foreign key."""
+    disbursement = Disbursements()
+    data = await disbursement.list_disbursements(conn, disbursement_id, disbursement_type, foreign_key_id)
+    return {'message': 'Disbursements retrieved.', 'data': data}
+
+@app.delete("/rr/disbursements/{disbursement_type}/{disbursement_id}", status_code=status.HTTP_200_OK)
+async def delete_disbursement_endpoint(disbursement_type: str, disbursement_id: int, conn: asyncpg.Connection = Depends(get_db)):
+    """Delete a disbursement by ID."""
+    disbursement = Disbursements()
+    response = await disbursement.delete_disbursement(conn, disbursement_id, disbursement_type)
+    return response
 
 # --- Configuration Setup (Run before App Definition or in Lifespan) ---
 # Configure PayPal
