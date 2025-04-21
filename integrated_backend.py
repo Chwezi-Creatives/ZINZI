@@ -1738,7 +1738,7 @@ class Spices(BaseRepository):
 # --- Orders Class (Updated for asyncpg) ---
 class Orders(BaseRepository):
     ALLOWED_ORDER_TYPES = {'meal', 'supplement', 'gig', 'herbal', 'gadget', 'spice', 'produce'}
-    ALLOWED_ORDER_STATUSES = {'cancelled', 'assigned', 'delivered', 'shipped', 'preparing', 'confirmed', 'pending', 'accepted', 'dispatched', 'picked up', 'delivering'}
+    ALLOWED_ORDER_STATUSES = {'cancelled', 'assigned','anyrider', 'delivered', 'shipped', 'preparing', 'confirmed', 'pending', 'accepted', 'dispatched', 'picked up', 'delivering'}
     ALLOWED_PAYMENT_STATUSES = {'failed', 'refunded', 'paid', 'pending', 'completed'}
     ALLOWED_PAYMENT_MODES = {'cash', 'momo', 'mobile money', 'Airtel Card', 'paypal', 'stripe', 'debit card', 'credit card'}
 
@@ -1973,6 +1973,193 @@ class Orders(BaseRepository):
             logger.warning(f"Attempted to delete non-existent order ID: {order_id}")
             return False
 ##deisbuseemrt class
+import asyncpg
+from typing import List, Dict, Optional
+
+class BaseRepository:
+    async def _execute_query(self, conn: asyncpg.Connection, query: str, params: tuple) -> List[Dict]:
+        result = await conn.fetch(query, *params)
+        return [dict(record) for record in result]
+
+
+class Disbursements(BaseRepository):
+    ### Chef Disbursements ###
+    async def list_chef_disbursements(self, conn: asyncpg.Connection, chef_id: Optional[int] = None, order_id: Optional[int] = None):
+        query = "SELECT * FROM chef_disbursements WHERE TRUE"
+        params = []
+
+        if chef_id is not None:
+            query += " AND chef_id = $1"
+            params.append(chef_id)
+
+        if order_id is not None:
+            query += " AND order_id = $2"
+            params.append(order_id)
+
+        return await self._execute_query(conn, query, tuple(params))
+
+    ### Producer Disbursements ###
+    async def list_producer_disbursements(self, conn: asyncpg.Connection, producer_id: Optional[int] = None, order_id: Optional[int] = None):
+        query = "SELECT * FROM producer_disbursements WHERE TRUE"
+        params = []
+
+        if producer_id is not None:
+            query += " AND producer_id = $1"
+            params.append(producer_id)
+
+        if order_id is not None:
+            query += " AND order_id = $2"
+            params.append(order_id)
+
+        return await self._execute_query(conn, query, tuple(params))
+
+    ### Transporter Disbursements ###
+    async def list_transporter_disbursements(self, conn: asyncpg.Connection, transporter_id: Optional[int] = None, order_id: Optional[int] = None):
+        query = "SELECT * FROM transporter_disbursements WHERE TRUE"
+        params = []
+
+        if transporter_id is not None:
+            query += " AND transporter_id = $1"
+            params.append(transporter_id)
+
+        if order_id is not None:
+            query += " AND order_id = $2"
+            params.append(order_id)
+
+        return await self._execute_query(conn, query, tuple(params))
+
+    ### Stakeholder Disbursements ###
+    async def list_stakeholder_disbursements(self, conn: asyncpg.Connection, stakeholder_id: Optional[int] = None, order_id: Optional[int] = None):
+        query = "SELECT * FROM stakeholder_disbursements WHERE TRUE"
+        params = []
+
+        if stakeholder_id is not None:
+            query += " AND stakeholder_id = $1"
+            params.append(stakeholder_id)
+
+        if order_id is not None:
+            query += " AND order_id = $2"
+            params.append(order_id)
+
+        return await self._execute_query(conn, query, tuple(params))
+
+    ### Chef Disbursements Update ###
+    async def update_chef_disbursement(self, conn: asyncpg.Connection, disbursement_id: int, updates: dict, chef_id: Optional[int] = None):
+        query = """
+        UPDATE chef_disbursements SET 
+            chef_id = COALESCE($1, chef_id), 
+            order_id = COALESCE($2, order_id), 
+            order_type = COALESCE($3, order_type), 
+            amount = COALESCE($4, amount), 
+            disbursement_transaction_status = COALESCE($5, disbursement_transaction_status), 
+            order_transaction_status = COALESCE($6, order_transaction_status), 
+            updated_at = NOW()
+        WHERE id = $7
+        """
+        params = (
+            updates.get('chef_id'),
+            updates.get('order_id'),
+            updates.get('order_type'),
+            updates.get('amount'),
+            updates.get('disbursement_transaction_status'),
+            updates.get('order_transaction_status'),
+            disbursement_id
+        )
+
+        if chef_id is not None:
+            query += " AND chef_id = $8"
+            params += (chef_id,)  # Append chef_id if filtering by it
+
+        await self._execute_query(conn, query, params)
+
+    ### Producer Disbursements Update ###
+    async def update_producer_disbursement(self, conn: asyncpg.Connection, disbursement_id: int, updates: dict, producer_id: Optional[int] = None):
+        query = """
+        UPDATE producer_disbursements SET 
+            producer_id = COALESCE($1, producer_id), 
+            order_id = COALESCE($2, order_id), 
+            order_type = COALESCE($3, order_type), 
+            amount = COALESCE($4, amount), 
+            disbursement_transaction_status = COALESCE($5, disbursement_transaction_status), 
+            order_transaction_status = COALESCE($6, order_transaction_status),
+            updated_at = NOW()
+        WHERE id = $7
+        """
+        params = (
+            updates.get('producer_id'),
+            updates.get('order_id'),
+            updates.get('order_type'),
+            updates.get('amount'),
+            updates.get('disbursement_transaction_status'),
+            updates.get('order_transaction_status'),
+            disbursement_id
+        )
+
+        if producer_id is not None:
+            query += " AND producer_id = $8"
+            params += (producer_id,)
+
+        await self._execute_query(conn, query, params)
+
+    ### Transporter Disbursements Update ###
+    async def update_transporter_disbursement(self, conn: asyncpg.Connection, disbursement_id: int, updates: dict, transporter_id: Optional[int] = None):
+        query = """
+        UPDATE transporter_disbursements SET 
+            transporter_id = COALESCE($1, transporter_id), 
+            order_id = COALESCE($2, order_id), 
+            order_type = COALESCE($3, order_type), 
+            amount = COALESCE($4, amount), 
+            disbursement_transaction_status = COALESCE($5, disbursement_transaction_status), 
+            order_transaction_status = COALESCE($6, order_transaction_status),
+            updated_at = NOW()
+        WHERE id = $7
+        """
+        params = (
+            updates.get('transporter_id'),
+            updates.get('order_id'),
+            updates.get('order_type'),
+            updates.get('amount'),
+            updates.get('disbursement_transaction_status'),
+            updates.get('order_transaction_status'),
+            disbursement_id
+        )
+
+        if transporter_id is not None:
+            query += " AND transporter_id = $8"
+            params += (transporter_id,)
+
+        await self._execute_query(conn, query, params)
+
+    ### Stakeholder Disbursements Update ###
+    async def update_stakeholder_disbursement(self, conn: asyncpg.Connection, disbursement_id: int, updates: dict, stakeholder_id: Optional[int] = None):
+        query = """
+        UPDATE stakeholder_disbursements SET 
+            stakeholder_id = COALESCE($1, stakeholder_id), 
+            order_id = COALESCE($2, order_id), 
+            order_type = COALESCE($3, order_type), 
+            amount = COALESCE($4, amount), 
+            disbursement_transaction_status = COALESCE($5, disbursement_transaction_status), 
+            order_transaction_status = COALESCE($6, order_transaction_status),
+            updated_at = NOW()
+        WHERE id = $7
+        """
+        params = (
+            updates.get('stakeholder_id'),
+            updates.get('order_id'),
+            updates.get('order_type'),
+            updates.get('amount'),
+            updates.get('disbursement_transaction_status'),
+            updates.get('order_transaction_status'),
+            disbursement_id
+        )
+
+        if stakeholder_id is not None:
+            query += " AND stakeholder_id = $8"
+            params += (stakeholder_id,)
+
+        await self._execute_query(conn, query, params)
+
+##end of disbursemnt class
 import asyncpg
 from fastapi import HTTPException
 
@@ -3646,41 +3833,100 @@ async def get_all_meals_endpoint(conn: asyncpg.Connection = Depends(get_db)):
     result = await fetcher.fetch_all_meals(conn)
     return result
 
+####begining of disbursement endpoints
 from fastapi import FastAPI, Depends, Query, Body
 
+from fastapi import FastAPI, Depends, Body
+import asyncpg
 
-@app.post("/rr/disbursements/{disbursement_type}", status_code=status.HTTP_201_CREATED)
-async def create_disbursement_endpoint(disbursement_type: str, disbursement_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
-    """Create a new disbursement."""
-    disbursement = Disbursements()
-    response = await disbursement.create_disbursement(conn, disbursement_data, disbursement_type)
-    return response
+app = FastAPI()
+disbursement_handler = Disbursements()
 
-@app.put("/rr/disbursements/{disbursement_type}/{disbursement_id}")
-async def update_disbursement_endpoint(disbursement_type: str, disbursement_id: int, updates: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
-    """Update an existing disbursement."""
-    disbursement = Disbursements()
-    await disbursement.update_disbursement(conn, disbursement_id, updates, disbursement_type)
-    return {'message': f'{disbursement_type.capitalize()} disbursement updated successfully'}
+async def get_db():
+    # Placeholder for the actual database connection implementation
+    pass
 
-@app.get("/rr/disbursements")
-async def list_disbursements_endpoint(
-    disbursement_id: int = Query(None, description="ID of the specific disbursement to filter by"),
-    disbursement_type: str = Query(None, description="Type of disbursement (chef, producer, etc.)"),
-    foreign_key_id: int = Query(None, description="Foreign key ID (chef_id, producer_id, etc.) to filter by"),
+# Chef Disbursements Endpoints
+@app.get("/rr/disbursements/chef")
+async def list_chef_disbursements(
+    chef_id: Optional[int] = None,
+    order_id: Optional[int] = None,
     conn: asyncpg.Connection = Depends(get_db)
 ):
-    """List disbursements with optional filtering by ID, type, and foreign key."""
-    disbursement = Disbursements()
-    data = await disbursement.list_disbursements(conn, disbursement_id, disbursement_type, foreign_key_id)
-    return {'message': 'Disbursements retrieved.', 'data': data}
+    data = await disbursement_handler.list_chef_disbursements(conn, chef_id, order_id)
+    return {"data": data}
 
-@app.delete("/rr/disbursements/{disbursement_type}/{disbursement_id}", status_code=status.HTTP_200_OK)
-async def delete_disbursement_endpoint(disbursement_type: str, disbursement_id: int, conn: asyncpg.Connection = Depends(get_db)):
-    """Delete a disbursement by ID."""
-    disbursement = Disbursements()
-    response = await disbursement.delete_disbursement(conn, disbursement_id, disbursement_type)
-    return response
+@app.put("/rr/disbursements/chef/{disbursement_id}")
+async def update_chef_disbursement(
+    disbursement_id: int,
+    updates: dict = Body(...),
+    chef_id: Optional[int] = None,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    await disbursement_handler.update_chef_disbursement(conn, disbursement_id, updates, chef_id)
+    return {"message": "Chef disbursement updated successfully"}
+
+# Producer Disbursements Endpoints
+@app.get("/rr/disbursements/producer")
+async def list_producer_disbursements(
+    producer_id: Optional[int] = None,
+    order_id: Optional[int] = None,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    data = await disbursement_handler.list_producer_disbursements(conn, producer_id, order_id)
+    return {"data": data}
+
+@app.put("/rr/disbursements/producer/{disbursement_id}")
+async def update_producer_disbursement(
+    disbursement_id: int,
+    updates: dict = Body(...),
+    producer_id: Optional[int] = None,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    await disbursement_handler.update_producer_disbursement(conn, disbursement_id, updates, producer_id)
+    return {"message": "Producer disbursement updated successfully"}
+
+# Transporter Disbursements Endpoints
+@app.get("/rr/disbursements/transporter")
+async def list_transporter_disbursements(
+    transporter_id: Optional[int] = None,
+    order_id: Optional[int] = None,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    data = await disbursement_handler.list_transporter_disbursements(conn, transporter_id, order_id)
+    return {"data": data}
+
+@app.put("/rr/disbursements/transporter/{disbursement_id}")
+async def update_transporter_disbursement(
+    disbursement_id: int,
+    updates: dict = Body(...),
+    transporter_id: Optional[int] = None,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    await disbursement_handler.update_transporter_disbursement(conn, disbursement_id, updates, transporter_id)
+    return {"message": "Transporter disbursement updated successfully"}
+
+# Stakeholder Disbursements Endpoints
+@app.get("/rr/disbursements/stakeholder")
+async def list_stakeholder_disbursements(
+    stakeholder_id: Optional[int] = None,
+    order_id: Optional[int] = None,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    data = await disbursement_handler.list_stakeholder_disbursements(conn, stakeholder_id, order_id)
+    return {"data": data}
+
+@app.put("/rr/disbursements/stakeholder/{disbursement_id}")
+async def update_stakeholder_disbursement(
+    disbursement_id: int,
+    updates: dict = Body(...),
+    stakeholder_id: Optional[int] = None,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    await disbursement_handler.update_stakeholder_disbursement(conn, disbursement_id, updates, stakeholder_id)
+    return {"message": "Stakeholder disbursement updated successfully"}
+
+####end of disbursement endpoints
 
 # --- Configuration Setup (Run before App Definition or in Lifespan) ---
 # Configure PayPal
