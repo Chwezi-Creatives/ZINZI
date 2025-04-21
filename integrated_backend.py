@@ -162,44 +162,41 @@ def deserialize_list_from_json_string(json_string):
         return [item.strip() for item in json_string.split(',') if item.strip()]
 
 
-# --- Base Class for Common DB Operations (Updated for asyncpg) ---
+import asyncpg
+from fastapi import HTTPException, status
+from typing import Optional, Any
+
+# Assuming logger is set up previously; you can use your logging framework here
+import logging
+
+logger = logging.getLogger(__name__)
+
 class BaseRepository:
     async def _execute_query(self, conn: asyncpg.Connection, sql: str, params: Optional[tuple] = None, fetch_one: bool = False, fetch_all: bool = False, commit: bool = False, returning_id_column: Optional[str] = None) -> Any:
         """Executes SQL query asynchronously with asyncpg."""
         results = None
         returned_id = None
-        params = params or () # Ensure params is a tuple
+        params = params or ()  # Ensure params is a tuple
         logger.debug(f"Executing SQL: {sql} with params: {params}")
 
         try:
-            # asyncpg handles transactions often via context managers, but explicit check might be needed if commit=True is used outside a transaction block
-            # For simplicity, assuming operations are atomic or wrapped in transactions at a higher level if needed.
-            # The `commit` flag might become less relevant with asyncpg's transaction handling.
-
             if returning_id_column:
-                # fetchrow returns a Record or None
                 row = await conn.fetchrow(sql, *params)
                 if row:
-                    returned_id = row[0] # Access by index (usually the ID)
+                    returned_id = row[0]  # Access by index (usually the ID)
                     logger.debug(f"Returning {returning_id_column}: {returned_id}")
             elif fetch_one:
                 row = await conn.fetchrow(sql, *params)
                 if row:
-                    results = dict(row) # Convert Record to dict
+                    results = dict(row)  # Convert Record to dict
                 logger.debug(f"Fetched one: {results}")
             elif fetch_all:
                 rows = await conn.fetch(sql, *params)
-                results = [dict(row) for row in rows] # Convert list of Records to list of dicts
+                results = [dict(row) for row in rows]  # Convert list of Records to list of dicts
                 logger.debug(f"Fetched all ({len(results)} rows)")
-            else: # Just execute (INSERT, UPDATE, DELETE without RETURNING)
+            else:  # Just execute (INSERT, UPDATE, DELETE without RETURNING)
                 await conn.execute(sql, *params)
                 logger.debug("Executed statement without fetching.")
-
-            # Note: Commits are typically handled by transaction blocks (`async with conn.transaction():`)
-            # The `commit` flag here might need rethinking depending on how transactions are managed in calling methods.
-            if commit:
-                 logger.warning("Manual commit requested in _execute_query. Ensure this is intended within the transaction context.")
-                 # If not in a transaction, this doesn't do much. If in one, it might commit early.
 
             if returning_id_column:
                 return returned_id
@@ -208,12 +205,10 @@ class BaseRepository:
 
         except asyncpg.PostgresError as e:
             logger.error(f"Database Error executing SQL: {sql} | Params: {params} | Error: {e}", exc_info=True)
-            # Raise HTTPException for FastAPI to handle
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database operation failed: {e}") from e
         except Exception as e:
             logger.error(f"Unexpected Error during DB operation: {sql} | Params: {params} | Error: {e}", exc_info=True)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred during database operation.") from e
-
 
 # --- Authentication Class (Updated for asyncpg) ---
 class AuthenticationAndUsers(BaseRepository):
@@ -1834,10 +1829,11 @@ class Orders(BaseRepository):
         else:
              raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order creation failed unexpectedly.")
 
+    ## reading orders
     async def read_orders(self, conn: asyncpg.Connection, order_id=None, chef_id=None, producer_id=None, user_id=None, transporter_id=None):
-        # SQL query remains the same structure
+        # SQL query with added chef location and pickup_location
         sql = """
-           WITH MealDetails AS (
+            WITH MealDetails AS (
                 SELECT
                     m.meal_id,
                     m.meal_name,
@@ -1886,6 +1882,7 @@ class Orders(BaseRepository):
                 producer.name AS producer_name,
                 producer.location AS producer_address,
                 chef.name AS chef_name,
+                chef.location AS chef_address,
                 transporter.name AS transporter_name,
                 o.gig_details,
                 COALESCE(
@@ -1896,7 +1893,8 @@ class Orders(BaseRepository):
                     CASE WHEN o.order_type = 'spice' THEN sd.product_name END,
                     CASE WHEN o.order_type = 'produce' THEN prod.product_name END,
                     'Unknown'
-                ) AS product_name
+                ) AS product_name,
+                COALESCE(chef.location, producer.location, '') AS pickup_location
             FROM orders o
             LEFT JOIN MealDetails md ON o.product_id::varchar = md.meal_id::varchar AND o.order_type = 'meal'
             LEFT JOIN SupplementDetails supd ON o.product_id::varchar = supd.supplement_id::varchar AND o.order_type = 'supplement'
@@ -1911,6 +1909,7 @@ class Orders(BaseRepository):
         """
         params = []
         param_index = 1
+
         def _safe_int(val, field_name="ID"):
             if val is None: return None
             try: return int(val)
@@ -1939,28 +1938,52 @@ class Orders(BaseRepository):
                 if key == 'gig_details' and value:
                     try: processed_order['gig_details'] = json.loads(value)
                     except (json.JSONDecodeError, TypeError):
-                         logger.warning(f"Failed to parse gig_details for order_id {processed_order.get('order_id')}")
-                         processed_order['gig_details'] = None # Or keep original string?
+                        logger.warning(f"Failed to parse gig_details for order_id {processed_order.get('order_id')}")
+                        processed_order['gig_details'] = None
             processed_results.append(processed_order)
 
         logger.info(f"Retrieved {len(processed_results)} orders matching criteria.")
         return processed_results
 
-    async def update_order_status(self, conn: asyncpg.Connection, order_id: int, new_status: str):
+    async def update_order_status(self, conn: asyncpg.Connection, order_id: int, new_status: str, transporter_id: int = None):
         new_status_l = str(new_status).lower().strip()
         if new_status_l not in self.ALLOWED_ORDER_STATUSES:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid target order status: {new_status}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid target order status: {new_status}"
+            )
 
-        sql = "UPDATE orders SET order_status = $1, updated_at = NOW() WHERE order_id = $2 RETURNING order_id"
-        updated_id = await conn.fetchval(sql, new_status_l, order_id)
+        # Update logic for 'assigned' status with transporter_id
+        if new_status_l == 'assigned':
+            if transporter_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail='transporter_id is required when assigning an order'
+                )
+            sql = """
+                UPDATE orders
+                SET order_status = $1, transporter_id = $2, updated_at = NOW()
+                WHERE order_id = $3
+                RETURNING order_id
+            """
+            updated_id = await conn.fetchval(sql, new_status_l, transporter_id, order_id)
+        else:
+            # General status update
+            sql = """
+                UPDATE orders
+                SET order_status = $1, updated_at = NOW()
+                WHERE order_id = $2
+                RETURNING order_id
+            """
+            updated_id = await conn.fetchval(sql, new_status_l, order_id)
 
         if updated_id == order_id:
             logger.info(f"Updated order ID {order_id} status to {new_status_l}")
             return True
         else:
-            # Order ID not found
             logger.warning(f"Attempted to update status for non-existent order ID: {order_id}")
-            return False # Or raise 404
+            return False
+
 
     async def delete_order(self, conn: asyncpg.Connection, order_id: int):
         logger.warning(f"Attempting to delete order ID: {order_id}")
@@ -1972,15 +1995,11 @@ class Orders(BaseRepository):
         else:
             logger.warning(f"Attempted to delete non-existent order ID: {order_id}")
             return False
-##deisbuseemrt class
+        
+## begining of deisbuseemrt class
 import asyncpg
-from typing import List, Dict, Optional
-
-class BaseRepository:
-    async def _execute_query(self, conn: asyncpg.Connection, query: str, params: tuple) -> List[Dict]:
-        result = await conn.fetch(query, *params)
-        return [dict(record) for record in result]
-
+from fastapi import HTTPException, Body
+from typing import Optional
 
 class Disbursements(BaseRepository):
     ### Chef Disbursements ###
@@ -1996,7 +2015,7 @@ class Disbursements(BaseRepository):
             query += " AND order_id = $2"
             params.append(order_id)
 
-        return await self._execute_query(conn, query, tuple(params))
+        return await self._execute_query(conn, query, tuple(params), fetch_all=True)
 
     ### Producer Disbursements ###
     async def list_producer_disbursements(self, conn: asyncpg.Connection, producer_id: Optional[int] = None, order_id: Optional[int] = None):
@@ -2011,7 +2030,7 @@ class Disbursements(BaseRepository):
             query += " AND order_id = $2"
             params.append(order_id)
 
-        return await self._execute_query(conn, query, tuple(params))
+        return await self._execute_query(conn, query, tuple(params), fetch_all=True)
 
     ### Transporter Disbursements ###
     async def list_transporter_disbursements(self, conn: asyncpg.Connection, transporter_id: Optional[int] = None, order_id: Optional[int] = None):
@@ -2026,7 +2045,7 @@ class Disbursements(BaseRepository):
             query += " AND order_id = $2"
             params.append(order_id)
 
-        return await self._execute_query(conn, query, tuple(params))
+        return await self._execute_query(conn, query, tuple(params), fetch_all=True)
 
     ### Stakeholder Disbursements ###
     async def list_stakeholder_disbursements(self, conn: asyncpg.Connection, stakeholder_id: Optional[int] = None, order_id: Optional[int] = None):
@@ -2041,7 +2060,7 @@ class Disbursements(BaseRepository):
             query += " AND order_id = $2"
             params.append(order_id)
 
-        return await self._execute_query(conn, query, tuple(params))
+        return await self._execute_query(conn, query, tuple(params), fetch_all=True)
 
     ### Chef Disbursements Update ###
     async def update_chef_disbursement(self, conn: asyncpg.Connection, disbursement_id: int, updates: dict, chef_id: Optional[int] = None):
@@ -2159,6 +2178,110 @@ class Disbursements(BaseRepository):
 
         await self._execute_query(conn, query, params)
 
+    
+    ### Chef Disbursements Insert ###
+    async def insert_chef_disbursement(self, conn: asyncpg.Connection, chef_id: int, order_data: dict):
+        query = """
+        INSERT INTO chef_disbursements (
+            chef_id, 
+            order_id, 
+            order_type, 
+            amount, 
+            disbursement_transaction_status, 
+            order_transaction_status, 
+            created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        RETURNING id
+        """
+        params = (
+            chef_id,
+            order_data.get('order_id'),
+            order_data.get('order_type'),
+            order_data.get('amount'),
+            order_data.get('disbursement_transaction_status'),
+            order_data.get('order_transaction_status'),
+        )
+        
+        new_id = await self._execute_query(conn, query, params, returning_id_column='id')
+        return new_id
+
+    ### Producer Disbursements Insert ###
+    async def insert_producer_disbursement(self, conn: asyncpg.Connection, producer_id: int, order_data: dict):
+        query = """
+        INSERT INTO producer_disbursements (
+            producer_id, 
+            order_id, 
+            order_type, 
+            amount, 
+            disbursement_transaction_status, 
+            order_transaction_status, 
+            created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        RETURNING id
+        """
+        params = (
+            producer_id,
+            order_data.get('order_id'),
+            order_data.get('order_type'),
+            order_data.get('amount'),
+            order_data.get('disbursement_transaction_status'),
+            order_data.get('order_transaction_status'),
+        )
+        
+        new_id = await self._execute_query(conn, query, params, returning_id_column='id')
+        return new_id
+
+    ### Transporter Disbursements Insert ###
+    async def insert_transporter_disbursement(self, conn: asyncpg.Connection, transporter_id: int, order_data: dict):
+        query = """
+        INSERT INTO transporter_disbursements (
+            transporter_id, 
+            order_id, 
+            order_type, 
+            amount, 
+            disbursement_transaction_status, 
+            order_transaction_status, 
+            created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        RETURNING id
+        """
+        params = (
+            transporter_id,
+            order_data.get('order_id'),
+            order_data.get('order_type'),
+            order_data.get('amount'),
+            order_data.get('disbursement_transaction_status'),
+            order_data.get('order_transaction_status'),
+        )
+        
+        new_id = await self._execute_query(conn, query, params, returning_id_column='id')
+        return new_id
+
+    ### Stakeholder Disbursements Insert ###
+    async def insert_stakeholder_disbursement(self, conn: asyncpg.Connection, stakeholder_id: int, order_data: dict):
+        query = """
+        INSERT INTO stakeholder_disbursements (
+            stakeholder_id, 
+            order_id, 
+            order_type, 
+            amount, 
+            disbursement_transaction_status, 
+            order_transaction_status, 
+            created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        RETURNING id
+        """
+        params = (
+            stakeholder_id,
+            order_data.get('order_id'),
+            order_data.get('order_type'),
+            order_data.get('amount'),
+            order_data.get('disbursement_transaction_status'),
+            order_data.get('order_transaction_status'),
+        )
+        
+        new_id = await self._execute_query(conn, query, params, returning_id_column='id')
+        return new_id
 ##end of disbursemnt class
 import asyncpg
 from fastapi import HTTPException
@@ -2854,6 +2977,7 @@ orders_crud = Orders()
 transporters_crud = Transporters()
 calc_logic = CalculationLogic() # Doesn't need DB, can be global
 meal_fetcher = GetAllMeals() # Needs DB, instantiate per request or pass conn
+disbursement_handler = Disbursements()
 
 
 # --- FastAPI Endpoints ---
@@ -3547,22 +3671,36 @@ async def get_orders_endpoint(
 @app.patch('/rr/orders/{order_id}/status')
 async def update_order_status_endpoint(
     order_id: int,
-    status_update: dict = Body(...), # Expect {'order_status': 'new_status'}
+    status_update: dict = Body(...),  # Expect at least {'order_status': 'new_status'}
     conn: asyncpg.Connection = Depends(get_db)
 ):
     """Updates the status of a specific order."""
     if 'order_status' not in status_update:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Request body must contain "order_status" field')
-    new_status = status_update['order_status']
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Request body must contain "order_status" field'
+        )
 
-    # update_order_status raises HTTPException on failure (invalid status, DB error)
-    success = await orders_crud.update_order_status(conn, order_id, new_status)
+    new_status = status_update['order_status']
+    transporter_id = status_update.get('transporter_id')
+
+    # If assigning to a transporter, transporter_id must be present
+    if str(new_status).lower().strip() == 'assigned' and transporter_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='When setting status to "assigned", a "transporter_id" must be provided'
+        )
+
+    success = await orders_crud.update_order_status(conn, order_id, new_status, transporter_id)
 
     if success:
         return {'message': f'Order {order_id} status updated to {new_status}'}
     else:
-        # If update_order_status returns False, it means the order wasn't found
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'Order {order_id} not found.')
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f'Order {order_id} not found.'
+        )
+
 
 
 @app.delete('/rr/orders/{order_id}', status_code=status.HTTP_200_OK)
@@ -3838,24 +3976,23 @@ from fastapi import FastAPI, Depends, Query, Body
 
 from fastapi import FastAPI, Depends, Body
 import asyncpg
+from fastapi import FastAPI, Depends, Body, HTTPException
+import asyncpg
 
-app = FastAPI()
+
 disbursement_handler = Disbursements()
 
-async def get_db():
-    # Placeholder for the actual database connection implementation
-    pass
-
-# Chef Disbursements Endpoints
+##begining of disbrsement endpoints
+# Chef Disbursements Endpoints (get)
 @app.get("/rr/disbursements/chef")
 async def list_chef_disbursements(
     chef_id: Optional[int] = None,
     order_id: Optional[int] = None,
     conn: asyncpg.Connection = Depends(get_db)
 ):
-    data = await disbursement_handler.list_chef_disbursements(conn, chef_id, order_id)
-    return {"data": data}
+    return await disbursement_handler.list_chef_disbursements(conn, chef_id, order_id)
 
+# Chef Disbursements Endpoints (put)
 @app.put("/rr/disbursements/chef/{disbursement_id}")
 async def update_chef_disbursement(
     disbursement_id: int,
@@ -3866,16 +4003,15 @@ async def update_chef_disbursement(
     await disbursement_handler.update_chef_disbursement(conn, disbursement_id, updates, chef_id)
     return {"message": "Chef disbursement updated successfully"}
 
-# Producer Disbursements Endpoints
+# Producer Disbursements Endpoints (get)
 @app.get("/rr/disbursements/producer")
 async def list_producer_disbursements(
     producer_id: Optional[int] = None,
     order_id: Optional[int] = None,
     conn: asyncpg.Connection = Depends(get_db)
 ):
-    data = await disbursement_handler.list_producer_disbursements(conn, producer_id, order_id)
-    return {"data": data}
-
+    return await disbursement_handler.list_producer_disbursements(conn, producer_id, order_id)
+# producer  Disbursements Endpoints (put)
 @app.put("/rr/disbursements/producer/{disbursement_id}")
 async def update_producer_disbursement(
     disbursement_id: int,
@@ -3886,16 +4022,16 @@ async def update_producer_disbursement(
     await disbursement_handler.update_producer_disbursement(conn, disbursement_id, updates, producer_id)
     return {"message": "Producer disbursement updated successfully"}
 
-# Transporter Disbursements Endpoints
+# Transporter Disbursements Endpoints (get)
 @app.get("/rr/disbursements/transporter")
 async def list_transporter_disbursements(
     transporter_id: Optional[int] = None,
     order_id: Optional[int] = None,
     conn: asyncpg.Connection = Depends(get_db)
 ):
-    data = await disbursement_handler.list_transporter_disbursements(conn, transporter_id, order_id)
-    return {"data": data}
+    return await disbursement_handler.list_transporter_disbursements(conn, transporter_id, order_id)
 
+# transporter Disbursements Endpoints (put)
 @app.put("/rr/disbursements/transporter/{disbursement_id}")
 async def update_transporter_disbursement(
     disbursement_id: int,
@@ -3906,16 +4042,16 @@ async def update_transporter_disbursement(
     await disbursement_handler.update_transporter_disbursement(conn, disbursement_id, updates, transporter_id)
     return {"message": "Transporter disbursement updated successfully"}
 
-# Stakeholder Disbursements Endpoints
+# Stakeholder Disbursements Endpoints (get)
 @app.get("/rr/disbursements/stakeholder")
 async def list_stakeholder_disbursements(
     stakeholder_id: Optional[int] = None,
     order_id: Optional[int] = None,
     conn: asyncpg.Connection = Depends(get_db)
 ):
-    data = await disbursement_handler.list_stakeholder_disbursements(conn, stakeholder_id, order_id)
-    return {"data": data}
+    return await disbursement_handler.list_stakeholder_disbursements(conn, stakeholder_id, order_id)
 
+# stakeholder Disbursements Endpoints (put)
 @app.put("/rr/disbursements/stakeholder/{disbursement_id}")
 async def update_stakeholder_disbursement(
     disbursement_id: int,
@@ -3926,6 +4062,46 @@ async def update_stakeholder_disbursement(
     await disbursement_handler.update_stakeholder_disbursement(conn, disbursement_id, updates, stakeholder_id)
     return {"message": "Stakeholder disbursement updated successfully"}
 
+##post endpoints (post)
+# Chef Disbursements Endpoints
+@app.post("/rr/disbursements/chef")
+async def create_chef_disbursement(
+    chef_id: int,
+    order_data: dict = Body(...),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    new_id = await disbursement_handler.insert_chef_disbursement(conn, chef_id, order_data)
+    return {"message": "Chef disbursement created successfully", "disbursement_id": new_id}
+
+# Producer Disbursements Endpoints (post)
+@app.post("/rr/disbursements/producer")
+async def create_producer_disbursement(
+    producer_id: int,
+    order_data: dict = Body(...),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    new_id = await disbursement_handler.insert_producer_disbursement(conn, producer_id, order_data)
+    return {"message": "Producer disbursement created successfully", "disbursement_id": new_id}
+
+# Transporter Disbursements Endpoints (post)
+@app.post("/rr/disbursements/transporter")
+async def create_transporter_disbursement(
+    transporter_id: int = 4,  # Hardcoded transporter_id as requested
+    order_data: dict = Body(...),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    new_id = await disbursement_handler.insert_transporter_disbursement(conn, transporter_id, order_data)
+    return {"message": "Transporter disbursement created successfully", "disbursement_id": new_id}
+
+# Stakeholder Disbursements Endpoints (post)
+@app.post("/rr/disbursements/stakeholder")
+async def create_stakeholder_disbursement(
+    stakeholder_id: int,
+    order_data: dict = Body(...),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    new_id = await disbursement_handler.insert_stakeholder_disbursement(conn, stakeholder_id, order_data)
+    return {"message": "Stakeholder disbursement created successfully", "disbursement_id": new_id}
 ####end of disbursement endpoints
 
 # --- Configuration Setup (Run before App Definition or in Lifespan) ---
