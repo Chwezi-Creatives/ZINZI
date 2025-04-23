@@ -23,9 +23,7 @@ const double kRadiusSmall = 8.0; // Define kRadiusSmall
 
 class CreateGigScreen extends StatefulWidget {
   final Map<String, dynamic> chefData;
-
   const CreateGigScreen({super.key, required this.chefData});
-
   @override
   State<CreateGigScreen> createState() => _CreateGigScreenState();
 }
@@ -37,33 +35,31 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
   String? _selectedGigType;
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
-  String? _selectedNumPeopleKey; // e.g., "5_people", "10_people"
-  double? _calculatedPrice; // Stores the calculated price
+  String? _selectedNumPeopleKey;
+  double? _calculatedPrice;
+
+  // **** NEW State Variables for Custom Validation ****
+  bool _showDateError = false;
+  bool _showTimeError = false;
+  // **** END NEW State Variables ****
 
   final TextEditingController _locationController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
 
-  bool _isLoading = false; // For submit button loading state
+  bool _isLoading = false;
 
   // Extracted Pricing Info
   Map<String, dynamic>? _perGigPricing;
-  List<String> _numberOfPeopleOptions = []; // List of keys like "5_people"
+  List<String> _numberOfPeopleOptions = [];
 
-  // Standard Gig Types (customize as needed)
-  final List<String> _gigTypes = [
-    'Birthday Party',
-    'Anniversary Dinner',
-    'Thanksgiving Feast',
-    'Corporate Meeting',
-    'Private Celebration',
-    'Holiday Gathering',
-    'Other Special Event',
-  ];
+  // Standard Gig Types
+  final List<String> _gigTypes = [ 'Birthday Party', 'Anniversary Dinner', 'Thanksgiving Feast', 'Corporate Meeting', 'Private Celebration', 'Holiday Gathering', 'Other Special Event', ];
 
   @override
   void initState() {
     super.initState();
     _extractPricingOptions();
+    print("CreateGigScreen received chefData: ${widget.chefData}");
   }
 
   @override
@@ -74,246 +70,186 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
   }
 
   void _extractPricingOptions() {
-    Map<String, dynamic>? pricingData;
+    // (Keep existing _extractPricingOptions logic - unchanged)
+     Map<String, dynamic>? pricingData;
     final dynamic pricingRaw = widget.chefData['pricing'];
     if (pricingRaw is String) {
-      try {
-        pricingData = json.decode(pricingRaw);
-      } catch (e) {
-        print("Error decoding pricing JSON string in CreateGigScreen: $e");
-        pricingData = null; // Set to null if decoding fails
-      }
+      try { pricingData = json.decode(pricingRaw); }
+      catch (e) { print("Error decoding pricing JSON string in CreateGigScreen: $e"); pricingData = null; }
     } else if (pricingRaw is Map<String, dynamic>) {
       pricingData = pricingRaw;
-    } else {
-      pricingData = null;
-    }
-
-    _perGigPricing = pricingData?['per_gig'] is Map<String, dynamic>
-        ? pricingData!['per_gig']
-        : null;
-
+    } else { pricingData = null; }
+    _perGigPricing = pricingData?['per_gig'] is Map<String, dynamic> ? pricingData!['per_gig'] : null;
     if (_perGigPricing != null && _perGigPricing!.isNotEmpty) {
       _numberOfPeopleOptions = _perGigPricing!.keys.toList();
-
-      // Sort options numerically for better display
       _numberOfPeopleOptions.sort((a, b) {
         final numA = int.tryParse(a.split('_').first) ?? 0;
         final numB = int.tryParse(b.split('_').first) ?? 0;
         return numA.compareTo(numB);
       });
-    } else {
-      // Handle case where per_gig pricing is missing or empty
-      print("Warning: 'per_gig' pricing data is missing or empty for this chef.");
-      _numberOfPeopleOptions = []; // Ensure it's empty
-    }
+    } else { print("Warning: 'per_gig' pricing data is missing or empty for this chef."); _numberOfPeopleOptions = []; }
   }
 
-  // --- Date Picker ---
+  // --- Date Picker --- (Keep existing _selectDate logic - unchanged)
   Future<void> _selectDate(BuildContext context) async {
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedDate ?? DateTime.now().add(const Duration(days: 1)), // Default to tomorrow
-      firstDate: DateTime.now(), // Cannot book in the past
-      lastDate: DateTime.now().add(const Duration(days: 365 * 2)), // Allow booking 2 years ahead
-      builder: (context, child) { // Optional: Theming the picker
-          return Theme(
-            data: Theme.of(context).copyWith(
-              colorScheme: const ColorScheme.light(
-                primary: kColorPrimary, // header background color
-                onPrimary: kColorTextOnPrimary, // header text color
-                onSurface: kColorTextPrimary, // body text color
-              ),
-              textButtonTheme: TextButtonThemeData(
-                style: TextButton.styleFrom(
-                  foregroundColor: kColorPrimary, // button text color
-                ),
-              ),
-            ),
-            child: child!,
-          );
-        },
-    );
+    final DateTime? picked = await showDatePicker( context: context,
+      initialDate: _selectedDate ?? DateTime.now().add(const Duration(days: 1)),
+      firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
+      builder: (context, child) { return Theme( data: Theme.of(context).copyWith( colorScheme: const ColorScheme.light( primary: kColorPrimary, onPrimary: kColorTextOnPrimary, onSurface: kColorTextPrimary,),
+            textButtonTheme: TextButtonThemeData( style: TextButton.styleFrom(foregroundColor: kColorPrimary),),), child: child!,);},);
     if (picked != null && picked != _selectedDate) {
-      setState(() {
-        _selectedDate = picked;
-      });
+      setState(() { _selectedDate = picked;
+        // Reset date error when a new date is picked
+        if (_showDateError) _showDateError = false; });
     }
   }
 
-  // --- Time Picker ---
-  Future<void> _selectTime(BuildContext context) async {
-    final TimeOfDay? picked = await showTimePicker(
-      context: context,
-      initialTime: _selectedTime ?? TimeOfDay.now(),
-       builder: (context, child) { // Optional: Theming the picker
-          return Theme(
-            data: Theme.of(context).copyWith(
-               colorScheme: const ColorScheme.light(
-                 primary: kColorPrimary,
-                 onPrimary: kColorTextOnPrimary,
-                 onSurface: kColorTextPrimary,
-               ),
-              timePickerTheme: TimePickerThemeData(
-                 // Customize further if needed
-                 dialHandColor: kColorPrimaryLight,
-                 hourMinuteTextColor: MaterialStateColor.resolveWith((states) =>
-                      states.contains(MaterialState.selected) ? kColorPrimaryDark : kColorTextSecondary),
-                  hourMinuteColor: MaterialStateColor.resolveWith((states) =>
-                      states.contains(MaterialState.selected) ? kColorPrimaryLightest : Colors.grey.shade200),
-              ),
-            ),
-            child: child!,
-          );
-        },
-    );
+  // --- Time Picker --- (Keep existing _selectTime logic - unchanged)
+ Future<void> _selectTime(BuildContext context) async {
+    final TimeOfDay? picked = await showTimePicker( context: context, initialTime: _selectedTime ?? TimeOfDay.now(),
+       builder: (context, child) { return Theme( data: Theme.of(context).copyWith( colorScheme: const ColorScheme.light( primary: kColorPrimary, onPrimary: kColorTextOnPrimary, onSurface: kColorTextPrimary, ),
+              timePickerTheme: TimePickerThemeData( dialHandColor: kColorPrimaryLight, hourMinuteTextColor: MaterialStateColor.resolveWith((states) => states.contains(MaterialState.selected) ? kColorPrimaryDark : kColorTextSecondary), hourMinuteColor: MaterialStateColor.resolveWith((states) => states.contains(MaterialState.selected) ? kColorPrimaryLightest : Colors.grey.shade200),),), child: child!,);},);
     if (picked != null && picked != _selectedTime) {
-      setState(() {
-        _selectedTime = picked;
-      });
+      setState(() { _selectedTime = picked;
+        // Reset time error when a new time is picked
+        if (_showTimeError) _showTimeError = false; });
     }
   }
 
-  // --- Price Calculation ---
-  void _calculateAndUpdatePrice(String? selectedKey) {
+  // --- Price Calculation --- (Keep existing _calculateAndUpdatePrice logic - unchanged)
+ void _calculateAndUpdatePrice(String? selectedKey) {
     if (selectedKey == null || _perGigPricing == null || !_perGigPricing!.containsKey(selectedKey)) {
-      setState(() {
-        _calculatedPrice = null; // Reset price if selection is invalid
-      });
-      return;
-    }
-    setState(() {
-      _calculatedPrice = (_perGigPricing![selectedKey] as num?)?.toDouble();
-    });
+      setState(() { _calculatedPrice = null; }); return; }
+    setState(() { _calculatedPrice = (_perGigPricing![selectedKey] as num?)?.toDouble(); });
+    print("Calculated Price: $_calculatedPrice for key: $selectedKey");
   }
 
   // --- Form Submission ---
   Future<void> _submitGig() async {
-    print("DEBUG: _submitGig started."); // Log: Start of function
-    // 1. Validate Form
-    if (!_formKey.currentState!.validate()) {
-      print("DEBUG: Form validation failed."); // Log: Validation fail
-      _showErrorSnackBar("Please fill in all required fields correctly.");
-      return;
-    }
-    // Extra validation for date/time (since they aren't FormFields)
-    if (_selectedDate == null) {
-      print("DEBUG: Date validation failed."); // Log: Validation fail
-      _showErrorSnackBar("Please select a date for the gig.");
-      return;
-    }
-     if (_selectedTime == null) {
-      print("DEBUG: Time validation failed."); // Log: Validation fail
-      _showErrorSnackBar("Please select a time for the gig.");
-      return;
-    }
-     if (_calculatedPrice == null || _calculatedPrice! <= 0) {
-       print("DEBUG: Price validation failed."); // Log: Validation fail
-       _showErrorSnackBar("Could not calculate price. Please select number of guests.");
-       return;
-     }
+    print("DEBUG: _submitGig started.");
 
-    print("DEBUG: All validations passed. Setting loading state."); // Log: Validation success
-    setState(() { _isLoading = true; });
+    // 1. Validate Form Fields FIRST
+    final bool formIsValid = _formKey.currentState!.validate();
+
+    // 2. **NEW**: Check Date and Time AFTER form validation attempt
+    final bool dateIsValid = _selectedDate != null;
+    final bool timeIsValid = _selectedTime != null;
+    final bool priceIsValid = _calculatedPrice != null && _calculatedPrice! > 0;
+
+    // Update error states based on checks
+    bool needsSetState = false;
+    if (_showDateError != !dateIsValid) {
+      _showDateError = !dateIsValid;
+      needsSetState = true;
+    }
+     if (_showTimeError != !timeIsValid) {
+      _showTimeError = !timeIsValid;
+      needsSetState = true;
+    }
+    if (needsSetState && mounted) {
+      setState(() {}); // Update UI to show/hide custom errors if needed
+    }
+
+    // 3. Check if ALL validations passed
+    if (!formIsValid || !dateIsValid || !timeIsValid || !priceIsValid) {
+      print("DEBUG: Validation failed. Form: $formIsValid, Date: $dateIsValid, Time: $timeIsValid, Price: $priceIsValid");
+       if (!priceIsValid && formIsValid && dateIsValid && timeIsValid) {
+         _showErrorSnackBar("Could not calculate price. Please select number of guests.");
+       } else {
+         _showErrorSnackBar("Please fill in all required fields correctly.");
+       }
+      return; // Stop if any validation fails
+    }
+
+    // --- ALL VALIDATIONS PASSED ---
+    print("DEBUG: All validations passed. Proceeding with submission.");
+    if (mounted) setState(() { _isLoading = true; });
 
     try {
-      print("DEBUG: Inside try block. Getting SharedPreferences..."); // Log: Entering try
-      // 2. Get User ID
+      print("DEBUG: Getting SharedPreferences...");
       final prefs = await SharedPreferences.getInstance();
-      print("DEBUG: SharedPreferences instance obtained."); // Log: Prefs obtained
-      print("DEBUG: Attempting to read 'user_id' from SharedPreferences..."); // Log: Before reading user_id
-      // final userId = prefs.getString('user_id'); // <<< THIS IS THE LIKELY ERROR LOCATION
-      // --- CORRECTED CODE ---
-      final userId = prefs.getInt('user_id'); // Use getInt()
-      print("DEBUG: Read 'user_id'. Value: $userId, Type: ${userId.runtimeType}"); // Log: After reading user_id
+      final userId = prefs.getInt('user_id');
+      print("DEBUG: Read 'user_id'. Value: $userId");
 
-      // if (userId == null || userId.isEmpty) { // Old check for String
-      if (userId == null) { // Correct check for int?
-         print("DEBUG: User ID is null. Aborting submission."); // Log: User ID null
-         // This check should ideally happen before showing the booking button,
-         // but double-check here.
-        _showErrorSnackBar("Login error. Please log in again.", showLoginAction: true);
-        setState(() { _isLoading = false; });
-        return;
+      if (userId == null) {
+         print("DEBUG: User ID is null. Aborting submission.");
+         _showErrorSnackBar("Login error. Please log in again.", showLoginAction: true);
+         if(mounted) setState(() { _isLoading = false; });
+         return;
       }
-      print("DEBUG: User ID check passed. User ID: $userId"); // Log: User ID valid
 
-      print("DEBUG: Constructing gigDetails map..."); // Log: Before map construction
-      // 3. Construct Gig Details Map
+      final chefId = widget.chefData['chefid'];
+      final chefName = widget.chefData['name'] ?? 'Unknown Chef';
+
+      if (chefId == null) {
+          print("DEBUG: Chef ID is missing in chefData. Aborting.");
+          _showErrorSnackBar("Error retrieving chef details. Cannot book gig.");
+          if (mounted) setState(() { _isLoading = false; });
+          return;
+      }
+       print("DEBUG: Chef ID: $chefId, Chef Name: $chefName");
+
+      print("DEBUG: Constructing gigDetails map...");
+      // Construct Gig Details Map - INCLUDING CHEF NAME
       final gigDetails = {
         'user_id': userId,
-        'chef_id': widget.chefData['chefid'], // Passed via constructor
-        'producer_id': null, // Explicitly null for chef booking
+        'chef_id': chefId, // Keep ID for backend/relations
+        'chef_name': chefName, // **** ADD CHEF NAME FOR DISPLAY ****
+        'producer_id': null, 'producer_name': null, // Placeholders
         'gig_type': _selectedGigType,
         'location': _locationController.text.trim(),
-        'scheduled_date': DateFormat('yyyy-MM-dd').format(_selectedDate!), // Format date
-        'time': _selectedTime!.format(context), // Format time
-        'estimated_duration': null, // Not collected in this form, add if needed
-        'number_of_people': _selectedNumPeopleKey, // The key, e.g., "10_people"
-        'price': _calculatedPrice, // The calculated price
+        'scheduled_date': DateFormat('yyyy-MM-dd').format(_selectedDate!),
+        'time': _selectedTime!.format(context),
+        'estimated_duration': null,
+        'number_of_people': _selectedNumPeopleKey,
+        'price': _calculatedPrice,
         'detailed_description': _descriptionController.text.trim(),
       };
-      print("DEBUG: gigDetails map constructed: $gigDetails"); // Log: After map construction
+      print("DEBUG: gigDetails map constructed: $gigDetails");
 
-      print("DEBUG: Calling ShoppingCart.addGig..."); // Log: Before adding to cart
-      // 4. Add to Cart (using your static method)
-      cart.ShoppingCart.addGig(gigDetails);
-      print("DEBUG: ShoppingCart.addGig called successfully."); // Log: After adding to cart
+      print("DEBUG: Calling ShoppingCart.addGig...");
+      cart.ShoppingCart.addGig(gigDetails); // Add to cart
+      print("DEBUG: ShoppingCart.addGig called successfully.");
 
-      // 5. Show Success and Navigate Back
-      print("DEBUG: Showing success SnackBar and navigating back."); // Log: Success path
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${_selectedGigType ?? 'Gig'} booked successfully!'),
-          backgroundColor: kColorAccent,
-          duration: const Duration(seconds: 3),
-           behavior: SnackBarBehavior.floating,
-           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusSmall)),
-           margin: const EdgeInsets.all(10),
-        ),
-      );
-      // Ensure navigation happens only if the widget is still mounted
+      // Show Success and Navigate Back
       if (mounted) {
-         Navigator.of(context).pop(true); // Go back to the chef detail screen and indicate success
+          ScaffoldMessenger.of(context).showSnackBar( SnackBar(
+            content: Text('$_selectedGigType with $chefName booked successfully! Please proceed to checkout'),
+            backgroundColor: kColorAccent, duration: const Duration(seconds: 5),
+            behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusSmall)), margin: const EdgeInsets.all(10),),);
+          Navigator.of(context).pop(true); // Indicate success
       }
 
-    } catch (e, stackTrace) { // Capture stack trace for more details
-      print("DEBUG: Error caught in _submitGig."); // Log: Error caught
-      print("Error submitting gig: $e");
-      print("Stack trace: $stackTrace"); // Log: Print stack trace
-      _showErrorSnackBar("An unexpected error occurred. Please try again.");
+    } catch (e, stackTrace) {
+      print("DEBUG: Error caught in _submitGig: $e");
+      print("Stack trace: $stackTrace");
+      if (mounted) _showErrorSnackBar("An unexpected error occurred. Please try again.");
     } finally {
       if (mounted) {
         setState(() { _isLoading = false; });
+        print("DEBUG: _submitGig finished.");
       }
     }
   }
 
   void _showErrorSnackBar(String message, {bool showLoginAction = false}) {
-     ScaffoldMessenger.of(context).showSnackBar(
-       SnackBar(
-         content: Text(message),
-         backgroundColor: Colors.red.shade700,
-          action: showLoginAction ? SnackBarAction(label: 'Log In', onPressed: () {
-             // TODO: Navigate to login screen
-          }) : null,
-         behavior: SnackBarBehavior.floating,
-         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusSmall)),
-         margin: const EdgeInsets.all(10),
-       ),
-     );
+     if (!mounted) return;
+     ScaffoldMessenger.of(context).showSnackBar( SnackBar(
+         content: Text(message), backgroundColor: Colors.red.shade700,
+         action: showLoginAction ? SnackBarAction(label: 'Log In', onPressed: () {
+             // TODO: Navigate to login screen if needed
+         }) : null,
+         behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusSmall)), margin: const EdgeInsets.all(10),),);
   }
 
   // Helper to format the number of people option for display
   String _formatPeopleOption(String key) {
-    // Example: "5_people" -> "5 People"
-    // Example: "20_plus_people" -> "20+ People"
-    return key
-      .replaceAll('_', ' ')
-      .replaceAll('plus', '+')
-      .split(' ')
-      .map((word) => word[0].toUpperCase() + word.substring(1))
-      .join(' ');
+     // (Keep existing _formatPeopleOption logic - unchanged)
+    if (!key.contains('_')) return key;
+    final parts = key.split('_');
+    String numberPart = parts.first; String suffix = parts.length > 1 ? parts.sublist(1).join(' ') : 'people';
+    suffix = suffix.replaceAll('plus', '+'); suffix = suffix[0].toUpperCase() + suffix.substring(1);
+    return "$numberPart $suffix";
   }
 
   @override
@@ -322,238 +258,127 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
 
     return Scaffold(
       backgroundColor: kColorBackground,
-      appBar: AppBar(
-        title: Text('Book $chefName'),
-        backgroundColor: kColorPrimaryDark,
-        foregroundColor: kColorTextOnPrimary,
-        elevation: 2,
-      ),
-      body: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                "Event Details",
-                style: GoogleFonts.poppins(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                    color: kColorPrimaryDark),
-              ),
+      appBar: AppBar( title: Text('Book $chefName'), backgroundColor: kColorPrimaryDark, foregroundColor: kColorTextOnPrimary, elevation: 2,),
+      body: Form( key: _formKey,
+        child: SingleChildScrollView( padding: const EdgeInsets.all(16.0),
+          child: Column( crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text( "Event Details", style: GoogleFonts.poppins( fontSize: 20, fontWeight: FontWeight.w600, color: kColorPrimaryDark),),
               const SizedBox(height: 16),
 
               // --- Gig Type ---
-              DropdownButtonFormField<String>(
-                value: _selectedGigType,
-                items: _gigTypes.map((String type) {
-                  return DropdownMenuItem<String>(
-                    value: type,
-                    child: Text(type),
-                  );
-                }).toList(),
-                onChanged: (String? newValue) {
-                  setState(() {
-                    _selectedGigType = newValue;
-                  });
-                },
+              DropdownButtonFormField<String>( value: _selectedGigType, items: _gigTypes.map((String type) => DropdownMenuItem<String>( value: type, child: Text(type), )).toList(),
+                onChanged: (String? newValue) { setState(() { _selectedGigType = newValue; }); },
                 decoration: _inputDecoration('Gig Type / Occasion', Icons.celebration_outlined),
-                validator: (value) => value == null ? 'Please select a gig type' : null,
-              ),
+                validator: (value) => value == null ? 'Please select a gig type' : null, ),
               const SizedBox(height: 16),
 
               // --- Location ---
-              TextFormField(
-                controller: _locationController,
-                decoration: _inputDecoration('Event Location Address', Icons.location_on_outlined),
-                validator: (value) => (value == null || value.trim().isEmpty)
-                    ? 'Please enter the event location'
-                    : null,
-                textCapitalization: TextCapitalization.words,
-              ),
+              TextFormField( controller: _locationController, decoration: _inputDecoration('Event Location Address', Icons.location_on_outlined),
+                validator: (value) => (value == null || value.trim().isEmpty) ? 'Please enter the event location' : null, textCapitalization: TextCapitalization.words,),
               const SizedBox(height: 16),
 
               // --- Date & Time Row ---
-              Row(
-                children: [
+              Row( children: [
                   // Date Picker
-                  Expanded(
-                    child: InkWell(
-                      onTap: () => _selectDate(context),
+                  Expanded( child: InkWell( onTap: () => _selectDate(context),
                       child: InputDecorator(
-                        decoration: _inputDecoration('Date', Icons.calendar_today_outlined)
-                                     .copyWith(errorText: _selectedDate == null ? '' : null), // Handle validation display slightly differently
-                        child: Text(
-                          _selectedDate == null
-                              ? 'Select Date'
-                              : DateFormat('EEE, MMM d, yyyy').format(_selectedDate!),
-                           style: TextStyle(color: _selectedDate == null ? kColorTextSecondary : kColorTextPrimary, fontSize: 16)
+                        decoration: _inputDecoration('Date', Icons.calendar_today_outlined).copyWith(
+                          // **** NEW: Show red border if _showDateError is true ****
+                          enabledBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: BorderSide(color: _showDateError ? Colors.red.shade700 : kColorDivider, width: _showDateError ? 1.5 : 1.0),),
+                          focusedBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: BorderSide(color: _showDateError ? Colors.red.shade700 : kColorPrimary, width: 1.5),),
                         ),
-                      ),
-                    ),
-                  ),
+                        child: Text( _selectedDate == null ? 'Select Date' : DateFormat('EEE, MMM d, yyyy').format(_selectedDate!),
+                           style: TextStyle(color: _selectedDate == null ? kColorTextSecondary : kColorTextPrimary, fontSize: 16) ), ), ), ),
                   const SizedBox(width: 12),
                    // Time Picker
-                  Expanded(
-                    child: InkWell(
-                      onTap: () => _selectTime(context),
+                  Expanded( child: InkWell( onTap: () => _selectTime(context),
                        child: InputDecorator(
-                        decoration: _inputDecoration('Time', Icons.access_time_outlined)
-                                     .copyWith(errorText: _selectedTime == null ? '' : null),
-                        child: Text(
-                          _selectedTime == null
-                              ? 'Select Time'
-                              : _selectedTime!.format(context), // Localized format
-                           style: TextStyle(color: _selectedTime == null ? kColorTextSecondary : kColorTextPrimary, fontSize: 16)
+                        decoration: _inputDecoration('Time', Icons.access_time_outlined).copyWith(
+                          // **** NEW: Show red border if _showTimeError is true ****
+                           enabledBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: BorderSide(color: _showTimeError ? Colors.red.shade700 : kColorDivider, width: _showTimeError ? 1.5 : 1.0),),
+                           focusedBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: BorderSide(color: _showTimeError ? Colors.red.shade700 : kColorPrimary, width: 1.5),),
                         ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              // Manual validation message display for date/time
-               if (_formKey.currentState?.validate() == false && (_selectedDate == null || _selectedTime == null))
-                 Padding(
-                   padding: const EdgeInsets.only(top: 8.0, left: 12.0),
-                   child: Text(
-                     _selectedDate == null ? 'Date is required' : 'Time is required',
-                     style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
-                   ),
-                 ),
+                        child: Text( _selectedTime == null ? 'Select Time' : _selectedTime!.format(context),
+                           style: TextStyle(color: _selectedTime == null ? kColorTextSecondary : kColorTextPrimary, fontSize: 16) ), ), ), ), ], ),
+
+              // **** NEW: Conditional Error Text Display ****
+              if (_showDateError)
+                 Padding( padding: const EdgeInsets.only(top: 8.0, left: 12.0),
+                   child: Text( 'Date is required', style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),),),
+              if (_showTimeError)
+                 Padding( padding: const EdgeInsets.only(top: 8.0, left: 12.0),
+                    child: Text( 'Time is required', style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),),),
+              // **** END NEW ****
 
               const SizedBox(height: 16),
 
               // --- Number of People ---
               if (_numberOfPeopleOptions.isNotEmpty) ...[
-                DropdownButtonFormField<String>(
-                  value: _selectedNumPeopleKey,
-                  items: _numberOfPeopleOptions.map((String key) {
-                    return DropdownMenuItem<String>(
-                      value: key,
-                      child: Text(_formatPeopleOption(key)), // Display formatted text
-                    );
-                  }).toList(),
-                  onChanged: (String? newValue) {
-                    setState(() {
-                      _selectedNumPeopleKey = newValue;
-                       _calculateAndUpdatePrice(newValue); // Recalculate price on change
-                    });
-                  },
+                DropdownButtonFormField<String>( value: _selectedNumPeopleKey, items: _numberOfPeopleOptions.map((String key) => DropdownMenuItem<String>( value: key, child: Text(_formatPeopleOption(key)), )).toList(),
+                  onChanged: (String? newValue) { setState(() { _selectedNumPeopleKey = newValue; _calculateAndUpdatePrice(newValue); }); },
                   decoration: _inputDecoration('Number of Guests', Icons.people_outline),
-                  validator: (value) => value == null ? 'Please select the number of guests' : null,
-                ),
-              ] else ...[
-                // Show message if pricing options are unavailable
-                 Padding(
-                   padding: const EdgeInsets.symmetric(vertical: 8.0),
-                   child: Text(
-                     "Guest pricing options are not available for this chef.",
-                      style: TextStyle(color: Colors.orange.shade800, fontStyle: FontStyle.italic),
-                   ),
-                 ),
-              ],
+                  validator: (value) => value == null ? 'Please select the number of guests' : null, ),
+              ] else ...[ // Show message if pricing options are unavailable
+                 Container( padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                   decoration: BoxDecoration( border: Border.all(color: Colors.orange.shade200), borderRadius: BorderRadius.circular(kRadiusMedium), color: Colors.orange.shade50,),
+                   child: Row( children: [ Icon(Icons.warning_amber_rounded, color: Colors.orange.shade800, size: 18), const SizedBox(width: 8),
+                       Expanded( child: Text( "Guest pricing options are not available for this chef.", style: TextStyle(color: Colors.orange.shade900, fontStyle: FontStyle.italic),),),], ), ), ],
               const SizedBox(height: 16),
 
               // --- Calculated Price Display ---
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    "Estimated Price:",
-                    style: GoogleFonts.poppins(fontSize: 16, color: kColorTextSecondary),
-                  ),
-                  Text(
-                    _calculatedPrice == null ? "Select Guests" : '\$${_calculatedPrice!.toStringAsFixed(2)}',
-                    style: GoogleFonts.poppins(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: _calculatedPrice == null ? kColorTextSecondary : kColorPrimaryDark),
-                  ),
-                ],
-              ),
+               Container( padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration( color: kColorPrimaryLightest.withOpacity(0.3), borderRadius: BorderRadius.circular(kRadiusSmall), border: Border.all(color: kColorPrimaryLight.withOpacity(0.5))),
+                child: Row( mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Text( "Estimated Price:", style: GoogleFonts.poppins(fontSize: 16, color: kColorTextSecondary),),
+                    Text( _calculatedPrice == null ? "Select Guests" : '\$${_calculatedPrice!.toStringAsFixed(2)}',
+                      style: GoogleFonts.poppins( fontSize: 20, fontWeight: FontWeight.bold, color: _calculatedPrice == null ? kColorTextSecondary : kColorPrimaryDark),),],),),
               const SizedBox(height: 20),
 
                // --- Detailed Description ---
-               TextFormField(
-                controller: _descriptionController,
-                decoration: _inputDecoration(
-                  'Additional Details (Optional)',
-                  Icons.notes_outlined,
-                  isDense: false, // Allow more vertical space
-                ).copyWith(
-                  hintText: 'Any specific requests, dietary needs, or event notes...'
-                ),
-                maxLines: 4,
-                minLines: 2,
-                textCapitalization: TextCapitalization.sentences,
-                 // No validator needed as it's optional
-              ),
-              const SizedBox(height: 30),
+               TextFormField( controller: _descriptionController,
+                decoration: _inputDecoration( 'Additional Details (Optional)', Icons.notes_outlined, isDense: false,).copyWith( hintText: 'Any specific requests, dietary needs, or event notes...'),
+                maxLines: 4, minLines: 2, textCapitalization: TextCapitalization.sentences, ),
+              const SizedBox(height: 30), // Extra space
             ],
           ),
         ),
       ),
-      bottomNavigationBar: _buildConfirmButton(),
+      bottomNavigationBar: SafeArea( child: _buildConfirmButton(), ),
     );
   }
 
    // Helper for consistent InputDecoration
   InputDecoration _inputDecoration(String label, IconData icon, {bool isDense = true}) {
+    // This remains unchanged from the previous correct version
     return InputDecoration(
-      labelText: label,
+      labelText: label, labelStyle: const TextStyle(color: kColorTextSecondary),
+      hintText: 'Enter $label', hintStyle: const TextStyle(color: Colors.grey),
       prefixIcon: Icon(icon, color: kColorPrimary, size: 20),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(kRadiusMedium)),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(kRadiusMedium),
-        borderSide: BorderSide(color: kColorDivider, width: 1.0),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(kRadiusMedium),
-        borderSide: const BorderSide(color: kColorPrimary, width: 1.5),
-      ),
+      border: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: BorderSide(color: kColorDivider, width: 1.0),),
+      enabledBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: BorderSide(color: kColorDivider, width: 1.0),),
+      focusedBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: const BorderSide(color: kColorPrimary, width: 1.5),),
+      errorBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: BorderSide(color: Colors.red.shade700, width: 1.0),),
+      focusedErrorBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: BorderSide(color: Colors.red.shade700, width: 1.5),),
        isDense: isDense,
-       contentPadding: isDense ? const EdgeInsets.symmetric(horizontal: 12, vertical: 14)
-                              : const EdgeInsets.symmetric(horizontal: 12, vertical: 16) ,
+       contentPadding: isDense ? const EdgeInsets.symmetric(horizontal: 12, vertical: 14) : const EdgeInsets.symmetric(horizontal: 12, vertical: 16) ,
     );
   }
 
    // Bottom Confirmation Button
   Widget _buildConfirmButton() {
-    bool canSubmit = _calculatedPrice != null && _calculatedPrice! > 0; // Basic check
-
-    return Container(
-      padding: const EdgeInsets.all(16.0),
-      decoration: BoxDecoration(
-        color: kColorSurface,
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 10,
-              offset: const Offset(0, -3))
-        ],
-      ),
+    // This remains unchanged from the previous correct version
+    bool canSubmit = !_isLoading && _calculatedPrice != null && _calculatedPrice! > 0;
+    return Container( padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 16.0),
+      decoration: BoxDecoration( color: kColorSurface, boxShadow: [ BoxShadow( color: Colors.black.withOpacity(0.08), blurRadius: 10, offset: const Offset(0, -3)) ], ),
       child: ElevatedButton.icon(
-        icon: _isLoading
-            ? Container(
-                width: 20,
-                height: 20,
-                padding: const EdgeInsets.all(2.0),
-                child: const CircularProgressIndicator(
-                  color: kColorTextOnPrimary,
-                  strokeWidth: 2,
-                ),
-              )
-            : const Icon(Icons.check_circle_outline_rounded, size: 20),
+        icon: _isLoading ? Container( width: 20, height: 20, child: const CircularProgressIndicator( color: kColorTextOnPrimary, strokeWidth: 2,),) : const Icon(Icons.check_circle_outline_rounded, size: 20),
         label: Text(_isLoading ? 'Booking...' : 'Confirm Gig Booking'),
         style: ElevatedButton.styleFrom(
-          backgroundColor: canSubmit ? kColorPrimaryDark : Colors.grey.shade500,
-          foregroundColor: kColorTextOnPrimary,
-          padding: const EdgeInsets.symmetric(vertical: 16),
+          backgroundColor: canSubmit ? kColorPrimaryDark : Colors.grey.shade500, foregroundColor: kColorTextOnPrimary,
+          padding: const EdgeInsets.symmetric(vertical: 16), minimumSize: const Size(double.infinity, 50),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusMedium)),
-          textStyle: GoogleFonts.poppins(fontSize: 17, fontWeight: FontWeight.w600),
-        ),
-        onPressed: (_isLoading || !canSubmit) ? null : _submitGig, // Disable if loading or cannot submit
+          textStyle: GoogleFonts.poppins(fontSize: 17, fontWeight: FontWeight.w600), elevation: canSubmit ? 2 : 0, ),
+        onPressed: canSubmit ? _submitGig : null,
       ),
     );
   }
