@@ -374,8 +374,7 @@ class _AllMealsScreenState extends State<AllMealsScreen> {
       ),
       // Replace with the standardized AppDrawer
       drawer: AppDrawer(
-        userType: 'customer', // Default to customer type for meal browsing
-        userIdKey: 'user_id', // Standard key for user ID in SharedPreferences
+        // Standard key for user ID in SharedPreferences
       ),
       body: RefreshIndicator(
         // Add pull-to-refresh

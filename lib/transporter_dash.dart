@@ -420,13 +420,14 @@ class Product {
 // === TRANSPORTER API SERVICE =======
 // ===================================
 class TransporterApiService {
-
   // Helper to handle common API response structure
   static dynamic _handleApiResponse(dynamic responseData) {
     if (responseData is List) return responseData;
-    if (responseData is Map && responseData.containsKey('data')) return responseData['data'];
+    if (responseData is Map && responseData.containsKey('data'))
+      return responseData['data'];
     if (responseData is Map) return responseData; // Return map if no 'data' key
-    print("API Warning: Unhandled transporter response format. Got: ${responseData.runtimeType}");
+    print(
+        "API Warning: Unhandled transporter response format. Got: ${responseData.runtimeType}");
     return null;
   }
 
@@ -442,36 +443,46 @@ class TransporterApiService {
   }
 
   // Fetch transporter profile using the provided ID
-  static Future<TransporterProfile> fetchTransporterProfile(String transporterId) async {
+  static Future<TransporterProfile> fetchTransporterProfile(
+      String transporterId) async {
     if (transporterId.isEmpty) {
       throw Exception('Transporter ID provided is empty.');
     }
     final Uri uri = Uri.parse('$apibaseurl/rr/transporters/$transporterId');
     print("Fetching transporter profile from: $uri");
     try {
-      final response = await http.get(uri, headers: _getWriteHeaders(requiresAuth: true)); // Assuming auth needed
+      final response = await http.get(uri,
+          headers:
+              _getWriteHeaders(requiresAuth: true)); // Assuming auth needed
       if (response.statusCode == 200) {
         final dynamic rawData = json.decode(response.body);
         final dynamic handledData = _handleApiResponse(rawData);
         if (handledData == null) {
-          throw Exception('Failed to parse profile: Unexpected API response format.');
+          throw Exception(
+              'Failed to parse profile: Unexpected API response format.');
         }
         // Handle API returning a list with one item or the item directly
         if (handledData is Map<String, dynamic>) {
           return TransporterProfile.fromJson(handledData);
-        } else if (handledData is List && handledData.isNotEmpty && handledData[0] is Map<String, dynamic>) {
+        } else if (handledData is List &&
+            handledData.isNotEmpty &&
+            handledData[0] is Map<String, dynamic>) {
           return TransporterProfile.fromJson(handledData[0]);
         } else {
-          throw Exception('Failed to parse profile: Expected a Map or List<Map> but got ${handledData.runtimeType}');
+          throw Exception(
+              'Failed to parse profile: Expected a Map or List<Map> but got ${handledData.runtimeType}');
         }
       } else {
-        print("Error fetching transporter profile: ${response.statusCode} ${response.body}");
-        throw Exception('Failed to load transporter profile (Code: ${response.statusCode})');
+        print(
+            "Error fetching transporter profile: ${response.statusCode} ${response.body}");
+        throw Exception(
+            'Failed to load transporter profile (Code: ${response.statusCode})');
       }
     } catch (e) {
       print("Exception fetching transporter profile: $e");
       if (e is Exception) rethrow; // Rethrow specific exceptions
-      throw Exception('Failed to load transporter profile: $e'); // Wrap other errors
+      throw Exception(
+          'Failed to load transporter profile: $e'); // Wrap other errors
     }
   }
 
@@ -480,10 +491,13 @@ class TransporterApiService {
     if (transporterId.isEmpty) {
       throw Exception('Transporter ID provided is empty.');
     }
-    final Uri uri = Uri.parse('$apibaseurl/rr/orders?transporter_id=$transporterId');
+    final Uri uri =
+        Uri.parse('$apibaseurl/rr/orders?transporter_id=$transporterId');
     print("Fetching assigned orders from: $uri");
     try {
-      final response = await http.get(uri, headers: _getWriteHeaders(requiresAuth: true)); // Assuming auth needed
+      final response = await http.get(uri,
+          headers:
+              _getWriteHeaders(requiresAuth: true)); // Assuming auth needed
       if (response.statusCode == 200) {
         final dynamic rawData = json.decode(response.body);
         final dynamic ordersList = _handleApiResponse(rawData);
@@ -493,11 +507,13 @@ class TransporterApiService {
               .map((item) => Order.fromJson(item))
               .toList();
         } else {
-          print("Assigned orders API response format unexpected: Expected List, got ${ordersList?.runtimeType}");
+          print(
+              "Assigned orders API response format unexpected: Expected List, got ${ordersList?.runtimeType}");
           return []; // Return empty list on format error
         }
       } else {
-        print("Error fetching assigned orders: ${response.statusCode} ${response.body}");
+        print(
+            "Error fetching assigned orders: ${response.statusCode} ${response.body}");
         throw Exception('Failed to load orders (Code: ${response.statusCode})');
       }
     } catch (e) {
@@ -505,8 +521,8 @@ class TransporterApiService {
       if (e is Exception) rethrow;
       throw Exception('Failed to load orders: $e');
     }
-
   }
+
   // Fetch orders by status
   static Future<List<Order>> fetchOrdersByStatus(String status) async {
     if (status.isEmpty) {
@@ -515,7 +531,9 @@ class TransporterApiService {
     final Uri uri = Uri.parse('$apibaseurl/rr/orders?order_status=$status');
     print("Fetching orders with status '$status' from: $uri");
     try {
-      final response = await http.get(uri, headers: _getWriteHeaders(requiresAuth: true)); // Assuming auth needed
+      final response = await http.get(uri,
+          headers:
+              _getWriteHeaders(requiresAuth: true)); // Assuming auth needed
       if (response.statusCode == 200) {
         final dynamic rawData = json.decode(response.body);
         final dynamic ordersList = _handleApiResponse(rawData);
@@ -525,12 +543,15 @@ class TransporterApiService {
               .map((item) => Order.fromJson(item))
               .toList();
         } else {
-          print("Orders by status API response format unexpected: Expected List, got ${ordersList?.runtimeType}");
+          print(
+              "Orders by status API response format unexpected: Expected List, got ${ordersList?.runtimeType}");
           return []; // Return empty list on format error
         }
       } else {
-        print("Error fetching orders by status: ${response.statusCode} ${response.body}");
-        throw Exception('Failed to load orders by status (Code: ${response.statusCode})');
+        print(
+            "Error fetching orders by status: ${response.statusCode} ${response.body}");
+        throw Exception(
+            'Failed to load orders by status (Code: ${response.statusCode})');
       }
     } catch (e) {
       print("Exception fetching orders by status: $e");
@@ -540,9 +561,11 @@ class TransporterApiService {
   }
 
   // Update order status (called by transporter)
-  static Future<bool> updateOrderStatusByTransporter(int orderId, String newStatus) async {
+  static Future<bool> updateOrderStatusByTransporter(
+      int orderId, String newStatus) async {
     final Uri uri = Uri.parse('$apibaseurl/rr/orders/$orderId/status');
-    print("Updating order $orderId status by transporter to $newStatus via $uri");
+    print(
+        "Updating order $orderId status by transporter to $newStatus via $uri");
     try {
       final response = await http.patch(
         uri,
@@ -552,7 +575,8 @@ class TransporterApiService {
       if (response.statusCode == 200 || response.statusCode == 204) {
         return true;
       } else {
-        print("Error updating order status (Transporter): ${response.statusCode} ${response.body}");
+        print(
+            "Error updating order status (Transporter): ${response.statusCode} ${response.body}");
         return false;
       }
     } catch (e) {
@@ -562,10 +586,13 @@ class TransporterApiService {
   }
 
   // Update transporter's active/online status
-  static Future<bool> updateTransporterStatus(String transporterId, bool isActive) async {
+  static Future<bool> updateTransporterStatus(
+      String transporterId, bool isActive) async {
     // Accepts ID as argument now
-    if (transporterId.isEmpty) throw Exception('Transporter ID provided is empty.');
-    final Uri uri = Uri.parse('$apibaseurl/rr/transporters/$transporterId/status');
+    if (transporterId.isEmpty)
+      throw Exception('Transporter ID provided is empty.');
+    final Uri uri =
+        Uri.parse('$apibaseurl/rr/transporters/$transporterId/status');
     print("Updating transporter $transporterId status to $isActive via $uri");
     try {
       final response = await http.patch(
@@ -576,7 +603,8 @@ class TransporterApiService {
       if (response.statusCode == 200 || response.statusCode == 204) {
         return true;
       } else {
-        print("Error updating transporter status: ${response.statusCode} ${response.body}");
+        print(
+            "Error updating transporter status: ${response.statusCode} ${response.body}");
         return false;
       }
     } catch (e) {
@@ -586,17 +614,21 @@ class TransporterApiService {
   }
 
   // Update transporter's profile details
-  static Future<bool> updateTransporterProfile(String transporterId, Map<String, dynamic> updateData) async {
-     // Accepts ID as argument now
-    if (transporterId.isEmpty) throw Exception('Transporter ID provided is empty.');
+  static Future<bool> updateTransporterProfile(
+      String transporterId, Map<String, dynamic> updateData) async {
+    // Accepts ID as argument now
+    if (transporterId.isEmpty)
+      throw Exception('Transporter ID provided is empty.');
     final Uri uri = Uri.parse('$apibaseurl/rr/transporters/$transporterId');
     // Remove null/empty values before sending
-    updateData.removeWhere((key, value) => value == null || (value is String && value.isEmpty));
+    updateData.removeWhere(
+        (key, value) => value == null || (value is String && value.isEmpty));
     if (updateData.isEmpty) {
       print("Update profile called with no data to update.");
       return true; // Nothing to update
     }
-    print("Updating transporter profile $transporterId with data: ${jsonEncode(updateData)}");
+    print(
+        "Updating transporter profile $transporterId with data: ${jsonEncode(updateData)}");
     try {
       final response = await http.patch(
         uri,
@@ -606,7 +638,8 @@ class TransporterApiService {
       if (response.statusCode == 200 || response.statusCode == 204) {
         return true;
       } else {
-        print("Error updating transporter profile: ${response.statusCode} ${response.body}");
+        print(
+            "Error updating transporter profile: ${response.statusCode} ${response.body}");
         return false;
       }
     } catch (e) {
@@ -622,20 +655,24 @@ class TransporterApiService {
       throw Exception("Image upload configuration missing.");
     }
     try {
-      var request = http.MultipartRequest('POST', Uri.parse('https://api.imgur.com/3/image'));
+      var request = http.MultipartRequest(
+          'POST', Uri.parse('https://api.imgur.com/3/image'));
       request.headers['Authorization'] = 'Client-ID $imgurClientId';
-      request.files.add(await http.MultipartFile.fromPath('image', imageFile.path));
+      request.files
+          .add(await http.MultipartFile.fromPath('image', imageFile.path));
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        if (responseData['success'] == true && responseData['data']?['link'] != null) {
+        if (responseData['success'] == true &&
+            responseData['data']?['link'] != null) {
           return responseData['data']['link'];
         } else {
           throw Exception('Imgur upload failed: Invalid response structure.');
         }
       } else {
-        throw Exception('Imgur upload failed: ${response.statusCode} ${response.body}');
+        throw Exception(
+            'Imgur upload failed: ${response.statusCode} ${response.body}');
       }
     } catch (e) {
       print("Imgur upload error: $e");
@@ -825,12 +862,14 @@ class _TransporterDashboardScreenState extends State<TransporterDashboardScreen>
     }
   }
 
-  Future<void> _loadInitialProfileForAppBar(String transporterId) async { // Add argument
+  Future<void> _loadInitialProfileForAppBar(String transporterId) async {
+    // Add argument
     if (!mounted) return;
     setState(() => _isAppBarLoading = true);
     try {
       // Pass ID to fetch profile
-      final profile = await TransporterApiService.fetchTransporterProfile(transporterId);
+      final profile =
+          await TransporterApiService.fetchTransporterProfile(transporterId);
       if (mounted) {
         setState(() {
           _currentProfileData = profile;
@@ -878,8 +917,7 @@ class _TransporterDashboardScreenState extends State<TransporterDashboardScreen>
         if (mounted) {
           Navigator.pushAndRemoveUntil(
             context,
-            MaterialPageRoute(
-                builder: (context) => const SignUpOrLoginPage()),
+            MaterialPageRoute(builder: (context) => const SignUpOrLoginPage()),
             (Route<dynamic> route) => false,
           );
         }
@@ -937,10 +975,7 @@ class _TransporterDashboardScreenState extends State<TransporterDashboardScreen>
 
     return Scaffold(
       // Add the standard drawer
-      drawer: const AppDrawer(
-        userType: 'Transporter',
-        userIdKey: 'transporter_id',
-      ),
+      drawer: const AppDrawer(),
       backgroundColor: lightBackgroundColor,
       appBar: AppBar(
         title: Text(_appBarTitle,
@@ -980,7 +1015,8 @@ class _TransporterDashboardScreenState extends State<TransporterDashboardScreen>
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [ // Remove const
+        children: [
+          // Remove const
           // Pass the ID down to the tabs
           TransporterProfileTab(transporterId: widget.transporterId),
           TransporterOrdersTab(transporterId: widget.transporterId),
@@ -1005,12 +1041,14 @@ class TransporterProfileTab extends StatefulWidget {
   State<TransporterProfileTab> createState() => _TransporterProfileTabState();
 }
 
-class _TransporterProfileTabState extends State<TransporterProfileTab> with AutomaticKeepAliveClientMixin {
+class _TransporterProfileTabState extends State<TransporterProfileTab>
+    with AutomaticKeepAliveClientMixin {
   // --- Caching for Transporter Profile ---
   static TransporterProfile? _profileCache;
   static DateTime? _profileCacheTimestamp;
   static const String _profileCacheKey = 'transporter_profile_cache';
-  static const String _profileCacheTimestampKey = 'transporter_profile_cache_timestamp';
+  static const String _profileCacheTimestampKey =
+      'transporter_profile_cache_timestamp';
 
   // Load cache from UserCache
   static Future<void> _loadProfileCacheFromPrefs() async {
@@ -1019,7 +1057,8 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
 
     if (cachedData is Map<String, dynamic> && timestampData is String) {
       try {
-        _profileCache = TransporterProfile.fromJson(cachedData); // Assuming fromJson works for cached data
+        _profileCache = TransporterProfile.fromJson(
+            cachedData); // Assuming fromJson works for cached data
         _profileCacheTimestamp = DateTime.parse(timestampData);
       } catch (e) {
         print("Error parsing cached transporter profile: $e");
@@ -1030,13 +1069,14 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
         await UserCache.removeData(_profileCacheTimestampKey);
       }
     } else {
-       _profileCache = null;
-       _profileCacheTimestamp = null;
+      _profileCache = null;
+      _profileCacheTimestamp = null;
     }
   }
 
   // Save cache to UserCache
-  static Future<void> _saveProfileCacheToPrefs(TransporterProfile profile) async {
+  static Future<void> _saveProfileCacheToPrefs(
+      TransporterProfile profile) async {
     // Convert profile to a suitable Map for JSON encoding if needed
     // Assuming TransporterProfile has a toJson method or can be directly encoded
     // For simplicity, we'll cache the result of toJson() if available, or just the map from fromJson
@@ -1064,7 +1104,6 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
       'location': profile.location,
       'registration_date': profile.registrationDate?.toIso8601String(),
     };
-
 
     await UserCache.saveData(_profileCacheKey, cacheableProfile);
     await UserCache.saveData(
@@ -1166,53 +1205,56 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
 
   // Combined cache load and background fetch for Transporter Profile
   Future<void> _initializeProfileData() async {
-     if (mounted) {
-       setState(() {
-         _isLoadingProfile = true; // Start profile loading
-         _profileFetchError = '';
-         _cancelEditMode(); // Ensure edit mode is off on load/reload
-       });
-     }
+    if (mounted) {
+      setState(() {
+        _isLoadingProfile = true; // Start profile loading
+        _profileFetchError = '';
+        _cancelEditMode(); // Ensure edit mode is off on load/reload
+      });
+    }
 
-     // 1. Load from cache
-     await _loadProfileCacheFromPrefs();
+    // 1. Load from cache
+    await _loadProfileCacheFromPrefs();
 
-     // 2. Display cached data immediately if available
-     if (_profileCache != null && mounted) {
-       final now = DateTime.now();
-       final bool cacheIsValid = _profileCacheTimestamp != null &&
-           now.difference(_profileCacheTimestamp!) < CacheConfig.profileCacheDuration; // Use correct duration
+    // 2. Display cached data immediately if available
+    if (_profileCache != null && mounted) {
+      final now = DateTime.now();
+      final bool cacheIsValid = _profileCacheTimestamp != null &&
+          now.difference(_profileCacheTimestamp!) <
+              CacheConfig.profileCacheDuration; // Use correct duration
 
-       if (cacheIsValid) {
-          print("TransporterProfileTab: Displaying valid cached profile.");
-          setState(() {
-            _currentProfile = _profileCache;
-            _isLoadingProfile = false; // Stop profile loading indicator
-          });
-       } else {
-          print("TransporterProfileTab: Cached profile expired, will fetch fresh data.");
-          // Keep showing stale cache while fetching, but indicate background loading
-          setState(() {
-             _currentProfile = _profileCache; // Show stale data
-             _isLoadingProfile = true; // Indicate background loading
-          });
-       }
-     } else if (mounted) {
-        print("TransporterProfileTab: No cached profile found, fetching...");
-        // No cache, ensure loading is true
+      if (cacheIsValid) {
+        print("TransporterProfileTab: Displaying valid cached profile.");
         setState(() {
-          _isLoadingProfile = true;
+          _currentProfile = _profileCache;
+          _isLoadingProfile = false; // Stop profile loading indicator
         });
-     }
+      } else {
+        print(
+            "TransporterProfileTab: Cached profile expired, will fetch fresh data.");
+        // Keep showing stale cache while fetching, but indicate background loading
+        setState(() {
+          _currentProfile = _profileCache; // Show stale data
+          _isLoadingProfile = true; // Indicate background loading
+        });
+      }
+    } else if (mounted) {
+      print("TransporterProfileTab: No cached profile found, fetching...");
+      // No cache, ensure loading is true
+      setState(() {
+        _isLoadingProfile = true;
+      });
+    }
 
-     // 3. Fetch fresh data in the background (regardless of cache state)
-     await _fetchTransporterProfileAndUpdate();
+    // 3. Fetch fresh data in the background (regardless of cache state)
+    await _fetchTransporterProfileAndUpdate();
   }
 
   // Separate function to fetch Transporter Profile and update state/cache
   Future<void> _fetchTransporterProfileAndUpdate() async {
     try {
-      final profile = await TransporterApiService.fetchTransporterProfile(widget.transporterId);
+      final profile = await TransporterApiService.fetchTransporterProfile(
+          widget.transporterId);
       if (mounted) {
         print("TransporterProfileTab: Fetched fresh transporter profile data.");
         await _saveProfileCacheToPrefs(profile); // Save fresh data to cache
@@ -1231,13 +1273,15 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
             _profileFetchError = 'Failed to load profile: $error';
             _isLoadingProfile = false; // Stop loading
           });
-          _showErrorSnackbar('Error loading profile: $error'); // Use existing snackbar
+          _showErrorSnackbar(
+              'Error loading profile: $error'); // Use existing snackbar
         } else {
-           // Keep showing cached data, log error silently or show subtle indicator
-           print("TransporterProfileTab: Failed to fetch fresh profile, showing cached version. Error: $error");
-           setState(() {
-              _isLoadingProfile = false; // Ensure loading indicator stops
-           });
+          // Keep showing cached data, log error silently or show subtle indicator
+          print(
+              "TransporterProfileTab: Failed to fetch fresh profile, showing cached version. Error: $error");
+          setState(() {
+            _isLoadingProfile = false; // Ensure loading indicator stops
+          });
         }
       }
     }
@@ -1245,16 +1289,15 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
 
   // Renamed original _loadProfile to _refreshProfile for clarity (used by refresh indicator)
   Future<void> _refreshProfile() async {
-     if (!mounted) return;
-     setState(() {
-       _isLoadingProfile = true; // Show loading indicator during manual refresh
-       _profileFetchError = '';
-       _cancelEditMode(); // Ensure edit mode is off on reload
-     });
-     // Fetch fresh data and update
-     await _fetchTransporterProfileAndUpdate();
+    if (!mounted) return;
+    setState(() {
+      _isLoadingProfile = true; // Show loading indicator during manual refresh
+      _profileFetchError = '';
+      _cancelEditMode(); // Ensure edit mode is off on reload
+    });
+    // Fetch fresh data and update
+    await _fetchTransporterProfileAndUpdate();
   }
-
 
   // --- Image Handling for Edit ---
   Future<void> _pickEditImage(ImageSource source) async {
@@ -1369,7 +1412,8 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
 
       // --- Build updateData only with changed fields ---
       Map<String, dynamic> updateData = {};
-      final originalProfile = _currentProfile!; // Already checked for null earlier
+      final originalProfile =
+          _currentProfile!; // Already checked for null earlier
 
       final newName = _nameController.text.trim();
       if (newName != originalProfile.name) {
@@ -1396,7 +1440,8 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
         updateData['location'] = newLocation;
       }
 
-      if (_editUploadedImageUrl != null && _editUploadedImageUrl != originalProfile.profileImageUrl) {
+      if (_editUploadedImageUrl != null &&
+          _editUploadedImageUrl != originalProfile.profileImageUrl) {
         updateData['profile_image_url'] = _editUploadedImageUrl;
       }
       // --- End building updateData ---
@@ -1416,15 +1461,15 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
         bool success =
             // Pass ID to update profile
             // Access ID via widget.transporterId
-            await TransporterApiService.updateTransporterProfile(widget.transporterId, updateData);
+            await TransporterApiService.updateTransporterProfile(
+                widget.transporterId, updateData);
         _dismissLoadingSnackbar();
         if (!mounted) return;
         setState(() => _isLoadingStatus = false);
         if (success) {
           _showSuccessSnackbar('Profile updated successfully!');
           _refreshProfile(); // Reload to see changes
-        }
-        else {
+        } else {
           _showErrorSnackbar('Failed to save profile changes.');
         }
       } catch (e) {
@@ -1450,7 +1495,8 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
       bool success =
           // Pass ID to update status
           // Access ID via widget.transporterId
-          await TransporterApiService.updateTransporterStatus(widget.transporterId, newValue);
+          await TransporterApiService.updateTransporterStatus(
+              widget.transporterId, newValue);
       _dismissLoadingSnackbar();
       if (!mounted) return;
       setState(() => _isLoadingStatus = false);
@@ -1546,13 +1592,13 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
     }
     // If _currentProfile is null here, it means there was no cache and fetch failed
     if (_currentProfile == null) {
-       // This case should ideally be caught by the error state above, but as a safeguard:
-       return _buildEmptyState(
-           "Profile Not Found", "Could not load your profile details.");
+      // This case should ideally be caught by the error state above, but as a safeguard:
+      return _buildEmptyState(
+          "Profile Not Found", "Could not load your profile details.");
     }
 
-
-    final profile = _currentProfile!; // Use the potentially cached or fresh profile
+    final profile =
+        _currentProfile!; // Use the potentially cached or fresh profile
     return RefreshIndicator(
       onRefresh: _refreshProfile, // Use the new refresh method
       color: primaryTeal,
@@ -1570,7 +1616,7 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
             const SizedBox(height: 80),
             // Show loading indicator if a background fetch is in progress AND we are not editing
             if (_isLoadingProfile && !_isEditing)
-               const LinearProgressIndicator(),
+              const LinearProgressIndicator(),
           ],
         ),
       ),
@@ -1725,171 +1771,197 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
       } catch (_) {}
     }
 
-   return Card(
-     elevation: 1.0,
-     color: cardBackground.withOpacity(0.95),
-     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-     child: Padding(
-       padding: const EdgeInsets.all(16.0),
-       child: Column(
-         crossAxisAlignment: CrossAxisAlignment.center, // Center column items horizontally
-         children: [
-           Row(
-             mainAxisAlignment: MainAxisAlignment.spaceBetween, // Space between image column and button
-             crossAxisAlignment: CrossAxisAlignment.start, // Align top
-             children: [
-               // --- Spacer to help center the image column ---
-               const SizedBox(width: 50), // Adjust width as needed for balance
-               // --- Image and Rating Column (Centered) ---
-               Column(
-                 children: [
-                   _isEditing
-                       ? _buildEditableProfileImage(displayImage)
-                       : CachedImageWithShimmer(
-                           imageUrl: profile.profileImageUrl,
-                           width: 90,
-                           height: 90,
-                           borderRadius: 45,
-                           fit: BoxFit.cover,
-                           errorIcon: Icons.person_outline,
-                           iconSize: 40,
-                           errorText: "No Image",
-                         ),
-                   // --- Rating below image ---
-                   if (profile.rating != null && !_isEditing) ...[
-                     const SizedBox(height: 8),
-                     Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                       Icon(Icons.star_rounded, color: starColor, size: 18),
-                       const SizedBox(width: 4),
-                       Text(profile.rating!.toStringAsFixed(1),
-                           style: const TextStyle(
-                               fontSize: 14,
-                               fontWeight: FontWeight.bold,
-                               color: darkTeal)),
-                     ]),
-                   ],
-                 ],
-               ),
-               // --- Edit/Save Buttons beside image ---
-                Align( // Keep button aligned top right relative to its space
-                   alignment: Alignment.topRight,
-                   child: _buildEditToggleButtons(), // Contains Save/Cancel or Edit button
-                 ),
-             ],
-           ),
-           const SizedBox(height: 16), // Space below image row
-           // --- Name ---
-           _isEditing
-               ? TextFormField(
-                   controller: _nameController,
-                   textAlign: TextAlign.center,
-                   style: const TextStyle(
-                       fontSize: 20,
-                       fontWeight: FontWeight.bold,
-                       color: darkTeal),
-                   decoration: _inputDecorationFlat('Rider Name'),
-                   validator: (v) =>
-                       (v == null || v.isEmpty) ? 'Name required' : null,
-                 )
-               : Text(
-                   profile.name,
-                   style: const TextStyle(
-                       fontSize: 20,
-                       fontWeight: FontWeight.bold,
-                       color: darkTeal),
-                   textAlign: TextAlign.center,
-                 ),
-           const SizedBox(height: 8),
-           // --- Email and Phone Row ---
-           _isEditing
-               ? Row( // Edit mode: Two TextFormFields
-                   children: [
-                     Expanded(
-                       child: TextFormField(
-                         initialValue: profile.email, // Display email but don't allow editing
-                         readOnly: true,
-                         textAlign: TextAlign.center,
-                         style: const TextStyle(fontSize: 13, color: subtleTextColor),
-                         decoration: _inputDecorationFlat('Email (Cannot Edit)'),
-                       ),
-                     ),
-                     const SizedBox(width: 16),
-                     Expanded(
-                       child: TextFormField(
-                         controller: _phoneController,
-                         decoration: _inputDecorationFlat('Phone Number'),
-                         style: const TextStyle(color: darkTeal, fontSize: 13),
-                         textAlign: TextAlign.center,
-                         keyboardType: TextInputType.phone,
-                         validator: (v) =>
-                             (v == null || v.isEmpty) ? 'Phone required' : null,
-                       ),
-                     ),
-                   ],
-                 )
-               : Row( // View mode: Email and Phone Text
-                   mainAxisAlignment: MainAxisAlignment.center,
-                   children: [
-                     Icon(Icons.email_outlined, size: 14, color: subtleTextColor),
-                     const SizedBox(width: 4),
-                     Text(
-                       profile.email,
-                       style: const TextStyle(fontSize: 13, color: subtleTextColor),
-                     ),
-                     const SizedBox(width: 16), // Spacer
-                     Icon(Icons.phone_outlined, size: 14, color: subtleTextColor),
-                     const SizedBox(width: 4),
-                     Text(
-                       profile.phoneNumber ?? 'No Phone',
-                       style: const TextStyle(fontSize: 13, color: subtleTextColor),
-                     ),
-                   ],
-                 ),
-           const SizedBox(height: 16), // More space before toggle
-           // --- Status Toggle Redesign ---
-           Container(
-             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-             decoration: BoxDecoration(
-               color: _isEditing ? Colors.grey.shade200 : (profile.isActive ? lighterTeal : Colors.grey.shade300),
-               borderRadius: BorderRadius.circular(30), // Rounded corners
-               border: Border.all(
-                 color: _isEditing ? Colors.grey.shade400 : (profile.isActive ? primaryTeal.withOpacity(0.5) : Colors.grey.shade400),
-                 width: 1.5
-               )
-             ),
-             child: Row(
-               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-               children: [
-                 Padding(
-                   padding: const EdgeInsets.only(left: 8.0),
-                   child: Text(
-                     profile.isActive ? 'ONLINE' : 'OFFLINE',
-                     style: TextStyle(
-                       fontSize: 15,
-                       fontWeight: FontWeight.bold,
-                       color: _isEditing ? subtleTextColor : (profile.isActive ? darkTeal : Colors.black54),
-                       letterSpacing: 0.5,
-                     ),
-                   ),
-                 ),
-                 Transform.scale( // Make switch slightly larger
-                   scale: 1.1,
-                   child: Switch(
-                     value: profile.isActive,
-                     onChanged: _isEditing || _isLoadingStatus ? null : _toggleActiveStatus,
-                     activeColor: accentTeal,
-                     inactiveThumbColor: Colors.grey.shade600,
-                     inactiveTrackColor: Colors.grey.shade400,
-                     activeTrackColor: primaryTeal.withOpacity(0.6),
-                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                   ),
-                 ),
-               ],
-             ),
-           ),
-         ],
-       ),
-     ),
+    return Card(
+      elevation: 1.0,
+      color: cardBackground.withOpacity(0.95),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment:
+              CrossAxisAlignment.center, // Center column items horizontally
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment
+                  .spaceBetween, // Space between image column and button
+              crossAxisAlignment: CrossAxisAlignment.start, // Align top
+              children: [
+                // --- Spacer to help center the image column ---
+                const SizedBox(width: 50), // Adjust width as needed for balance
+                // --- Image and Rating Column (Centered) ---
+                Column(
+                  children: [
+                    _isEditing
+                        ? _buildEditableProfileImage(displayImage)
+                        : CachedImageWithShimmer(
+                            imageUrl: profile.profileImageUrl,
+                            width: 90,
+                            height: 90,
+                            borderRadius: 45,
+                            fit: BoxFit.cover,
+                            errorIcon: Icons.person_outline,
+                            iconSize: 40,
+                            errorText: "No Image",
+                          ),
+                    // --- Rating below image ---
+                    if (profile.rating != null && !_isEditing) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.star_rounded,
+                                color: starColor, size: 18),
+                            const SizedBox(width: 4),
+                            Text(profile.rating!.toStringAsFixed(1),
+                                style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: darkTeal)),
+                          ]),
+                    ],
+                  ],
+                ),
+                // --- Edit/Save Buttons beside image ---
+                Align(
+                  // Keep button aligned top right relative to its space
+                  alignment: Alignment.topRight,
+                  child:
+                      _buildEditToggleButtons(), // Contains Save/Cancel or Edit button
+                ),
+              ],
+            ),
+            const SizedBox(height: 16), // Space below image row
+            // --- Name ---
+            _isEditing
+                ? TextFormField(
+                    controller: _nameController,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: darkTeal),
+                    decoration: _inputDecorationFlat('Rider Name'),
+                    validator: (v) =>
+                        (v == null || v.isEmpty) ? 'Name required' : null,
+                  )
+                : Text(
+                    profile.name,
+                    style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: darkTeal),
+                    textAlign: TextAlign.center,
+                  ),
+            const SizedBox(height: 8),
+            // --- Email and Phone Row ---
+            _isEditing
+                ? Row(
+                    // Edit mode: Two TextFormFields
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          initialValue: profile
+                              .email, // Display email but don't allow editing
+                          readOnly: true,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              fontSize: 13, color: subtleTextColor),
+                          decoration:
+                              _inputDecorationFlat('Email (Cannot Edit)'),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _phoneController,
+                          decoration: _inputDecorationFlat('Phone Number'),
+                          style: const TextStyle(color: darkTeal, fontSize: 13),
+                          textAlign: TextAlign.center,
+                          keyboardType: TextInputType.phone,
+                          validator: (v) => (v == null || v.isEmpty)
+                              ? 'Phone required'
+                              : null,
+                        ),
+                      ),
+                    ],
+                  )
+                : Row(
+                    // View mode: Email and Phone Text
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.email_outlined,
+                          size: 14, color: subtleTextColor),
+                      const SizedBox(width: 4),
+                      Text(
+                        profile.email,
+                        style: const TextStyle(
+                            fontSize: 13, color: subtleTextColor),
+                      ),
+                      const SizedBox(width: 16), // Spacer
+                      Icon(Icons.phone_outlined,
+                          size: 14, color: subtleTextColor),
+                      const SizedBox(width: 4),
+                      Text(
+                        profile.phoneNumber ?? 'No Phone',
+                        style: const TextStyle(
+                            fontSize: 13, color: subtleTextColor),
+                      ),
+                    ],
+                  ),
+            const SizedBox(height: 16), // More space before toggle
+            // --- Status Toggle Redesign ---
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                  color: _isEditing
+                      ? Colors.grey.shade200
+                      : (profile.isActive ? lighterTeal : Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(30), // Rounded corners
+                  border: Border.all(
+                      color: _isEditing
+                          ? Colors.grey.shade400
+                          : (profile.isActive
+                              ? primaryTeal.withOpacity(0.5)
+                              : Colors.grey.shade400),
+                      width: 1.5)),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8.0),
+                    child: Text(
+                      profile.isActive ? 'ONLINE' : 'OFFLINE',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: _isEditing
+                            ? subtleTextColor
+                            : (profile.isActive ? darkTeal : Colors.black54),
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                  Transform.scale(
+                    // Make switch slightly larger
+                    scale: 1.1,
+                    child: Switch(
+                      value: profile.isActive,
+                      onChanged: _isEditing || _isLoadingStatus
+                          ? null
+                          : _toggleActiveStatus,
+                      activeColor: accentTeal,
+                      inactiveThumbColor: Colors.grey.shade600,
+                      inactiveTrackColor: Colors.grey.shade400,
+                      activeTrackColor: primaryTeal.withOpacity(0.6),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2000,9 +2072,7 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
           // For now, this card might become empty or display less critical info.
           // Example: Registration Date
           if (profile.registrationDate != null)
-            _buildDetailRow(
-                Icons.calendar_today_outlined,
-                'Joined:',
+            _buildDetailRow(Icons.calendar_today_outlined, 'Joined:',
                 DateFormat('MMM d, yyyy').format(profile.registrationDate!))
           else
             const SizedBox.shrink(), // Hide if no other info
@@ -2040,8 +2110,10 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
   }
 
   // Added isCentered parameter
-  Widget _buildDetailRow(IconData icon, String label, String value, {bool isCentered = false}) {
-    final mainAxisAlignment = isCentered ? MainAxisAlignment.center : MainAxisAlignment.start;
+  Widget _buildDetailRow(IconData icon, String label, String value,
+      {bool isCentered = false}) {
+    final mainAxisAlignment =
+        isCentered ? MainAxisAlignment.center : MainAxisAlignment.start;
     final textAlign = isCentered ? TextAlign.center : TextAlign.start;
     final labelWidth = isCentered ? null : 65.0; // No fixed width if centered
 
@@ -2055,19 +2127,20 @@ class _TransporterProfileTabState extends State<TransporterProfileTab> with Auto
           if (!isCentered) // Only show fixed-width label if not centered
             SizedBox(
               width: labelWidth,
-              child: Text(label, style: const TextStyle(fontSize: 13, color: subtleTextColor)),
+              child: Text(label,
+                  style: const TextStyle(fontSize: 13, color: subtleTextColor)),
             ),
           if (isCentered) // Show label directly if centered
-             Text(label, style: const TextStyle(fontSize: 13, color: subtleTextColor)),
-          const SizedBox(width: 4), // Space between label and value when centered
+            Text(label,
+                style: const TextStyle(fontSize: 13, color: subtleTextColor)),
+          const SizedBox(
+              width: 4), // Space between label and value when centered
           Expanded(
             flex: isCentered ? 0 : 1, // Don't expand if centered
             child: Text(
               value.isEmpty ? '-' : value,
               style: const TextStyle(
-                  fontSize: 14,
-                  color: darkTeal,
-                  fontWeight: FontWeight.w500),
+                  fontSize: 14, color: darkTeal, fontWeight: FontWeight.w500),
               textAlign: textAlign, // Use parameter
             ),
           ),
@@ -2176,7 +2249,8 @@ class TransporterOrdersTab extends StatefulWidget {
   State<TransporterOrdersTab> createState() => _TransporterOrdersTabState();
 }
 
-class _TransporterOrdersTabState extends State<TransporterOrdersTab> with AutomaticKeepAliveClientMixin {
+class _TransporterOrdersTabState extends State<TransporterOrdersTab>
+    with AutomaticKeepAliveClientMixin {
   List<Order> _assignedOrders = [];
   bool _isLoading = true;
   String _error = '';
@@ -2213,7 +2287,8 @@ class _TransporterOrdersTabState extends State<TransporterOrdersTab> with Automa
     try {
       // Pass ID to fetch orders
       // Access ID via widget.transporterId
-      final orders = await TransporterApiService.fetchAssignedOrders(widget.transporterId);
+      final orders =
+          await TransporterApiService.fetchAssignedOrders(widget.transporterId);
       if (mounted) {
         setState(() {
           _assignedOrders = orders;
@@ -2368,9 +2443,11 @@ class _TransporterOrdersTabState extends State<TransporterOrdersTab> with Automa
               color: Colors.teal.shade50,
               margin: const EdgeInsets.only(bottom: 12.0),
               elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 12.0),
+                padding: const EdgeInsets.symmetric(
+                    vertical: 10.0, horizontal: 12.0),
                 child: Row(
                   children: const [
                     Icon(Icons.refresh, color: Colors.teal, size: 20),
@@ -2740,4 +2817,3 @@ class _TransporterOrdersTabState extends State<TransporterOrdersTab> with Automa
     }
   }
 } // End of _TransporterOrdersTabState
-

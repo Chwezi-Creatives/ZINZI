@@ -91,7 +91,8 @@ class _SplashScreenState extends State<SplashScreen>
           const begin = Offset(1.0, 0.0);
           const end = Offset.zero;
           final curve = Curves.easeInOutCubic;
-          var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+          var tween =
+              Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
           var offsetAnimation = animation.drive(tween);
 
           return SlideTransition(
@@ -123,7 +124,8 @@ class _SplashScreenState extends State<SplashScreen>
     final now = DateTime.now();
 
     // Check and fetch/save Chefs if cache is invalid
-    final dynamic chefsTimestampData = await UserCache.getData('chefs_list_cache_timestamp');
+    final dynamic chefsTimestampData =
+        await UserCache.getData('chefs_list_cache_timestamp');
     DateTime? chefsCacheTimestamp;
     if (chefsTimestampData is String) {
       try {
@@ -131,7 +133,8 @@ class _SplashScreenState extends State<SplashScreen>
       } catch (_) {}
     }
     final bool chefsCacheValid = chefsCacheTimestamp != null &&
-        now.difference(chefsCacheTimestamp) < CacheConfig.chefProducerDetailCacheDuration;
+        now.difference(chefsCacheTimestamp) <
+            CacheConfig.chefProducerDetailCacheDuration;
 
     if (!chefsCacheValid) {
       print("Splash: Chef cache invalid, fetching...");
@@ -150,7 +153,8 @@ class _SplashScreenState extends State<SplashScreen>
     }
 
     // Check and fetch/save Producers if cache is invalid
-    final dynamic producersTimestampData = await UserCache.getData('producers_list_cache_timestamp');
+    final dynamic producersTimestampData =
+        await UserCache.getData('producers_list_cache_timestamp');
     DateTime? producersCacheTimestamp;
     if (producersTimestampData is String) {
       try {
@@ -158,13 +162,16 @@ class _SplashScreenState extends State<SplashScreen>
       } catch (_) {}
     }
     final bool producersCacheValid = producersCacheTimestamp != null &&
-        now.difference(producersCacheTimestamp) < CacheConfig.chefProducerDetailCacheDuration;
+        now.difference(producersCacheTimestamp) <
+            CacheConfig.chefProducerDetailCacheDuration;
 
     if (!producersCacheValid) {
       print("Splash: Producer cache invalid, fetching...");
-      preloadTasks.add(ApiService.fetchProducersStatic().then((fetchedProducers) async {
+      preloadTasks
+          .add(ApiService.fetchProducersStatic().then((fetchedProducers) async {
         if (fetchedProducers != null) {
-          await MealDetailScreen.saveProducersCacheToUserCache(fetchedProducers);
+          await MealDetailScreen.saveProducersCacheToUserCache(
+              fetchedProducers);
           print("Splash: Fetched and saved new producer cache.");
         } else {
           print("Splash: Failed to fetch new producer cache.");
@@ -256,8 +263,8 @@ class _SplashScreenState extends State<SplashScreen>
                 SlideTransition(
                   position: _slideAnimation,
                   child: FadeTransition(
-                    opacity: _controller.drive(CurveTween(
-                        curve: const Interval(0.5, 1.0))),
+                    opacity: _controller
+                        .drive(CurveTween(curve: const Interval(0.5, 1.0))),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 30.0),
                       child: Column(

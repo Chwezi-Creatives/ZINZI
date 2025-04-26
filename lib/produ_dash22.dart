@@ -7,7 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:shimmer/shimmer.dart';
+
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
@@ -59,7 +59,8 @@ class Order {
 
     return Order(
       orderId: parseInt(json['order_id']),
-      mealName: json['meal_name'] as String? ?? 'Unknown Meal', // Handle potential null
+      mealName: json['meal_name'] as String? ??
+          'Unknown Meal', // Handle potential null
       orderDate: DateTime.parse(json['order_date'] as String),
       totalPrice: parseDouble(json['total_price']),
       quantity: parseInt(json['quantity']),
@@ -255,7 +256,8 @@ class Product {
 
     return Product(
       produceId: json['produce_id'] as String,
-      produceName: json['produce_name'] as String? ?? '', // Ensure name is not null
+      produceName:
+          json['produce_name'] as String? ?? '', // Ensure name is not null
       calories: parseInt(json['calories']),
       carbohydrates: json['carbohydrates'] != null
           ? (json['carbohydrates'] as num).toDouble()
@@ -326,8 +328,7 @@ class ProducerApiService {
       throw Exception('Producer ID not found. Please log in again.');
     }
 
-    final Uri uri =
-        Uri.parse('$apibaseurl/rr/rproducers/$producerId');
+    final Uri uri = Uri.parse('$apibaseurl/rr/rproducers/$producerId');
     print("Fetching producer profile from: $uri");
 
     try {
@@ -342,11 +343,12 @@ class ProducerApiService {
         if (handledData is List && handledData.isNotEmpty) {
           profileMap = handledData[0] as Map<String, dynamic>;
         } else if (handledData is Map<String, dynamic>) {
-           profileMap = handledData; // If API returns the object directly
+          profileMap = handledData; // If API returns the object directly
         }
 
         if (profileMap == null) {
-          throw Exception('Failed to parse profile: Unexpected API response format or empty data.');
+          throw Exception(
+              'Failed to parse profile: Unexpected API response format or empty data.');
         }
 
         return ProducerProfile.fromJson(profileMap);
@@ -440,13 +442,12 @@ class ProducerApiService {
     }
   }
 
-
   static Map<String, String> _getReadHeaders() {
-     // Basic headers for GET requests, adjust if auth is needed
-     return {
-       'Accept': 'application/json',
-     };
-   }
+    // Basic headers for GET requests, adjust if auth is needed
+    return {
+      'Accept': 'application/json',
+    };
+  }
 
   static Map<String, String> _getWriteHeaders({bool requiresAuth = true}) {
     String? authToken = null; // TODO: Implement token retrieval if needed
@@ -520,7 +521,8 @@ class ProducerApiService {
     };
 
     try {
-      final response = await http.put( // Using PUT for full profile update
+      final response = await http.put(
+        // Using PUT for full profile update
         uri,
         headers: _getWriteHeaders(requiresAuth: true), // Assuming auth needed
         body: jsonEncode(payload),
@@ -538,7 +540,7 @@ class ProducerApiService {
     }
   }
 
-    // --- Methods for Managing Individual Produce Items (Add, Update, Delete) ---
+  // --- Methods for Managing Individual Produce Items (Add, Update, Delete) ---
 
   static Future<Product?> addProduce(Map<String, dynamic> produceData) async {
     final Uri uri = Uri.parse('$apibaseurl/rr/produce');
@@ -549,18 +551,21 @@ class ProducerApiService {
         'produce_name': produceData['produce_name'] as String?, // Required
         'calories': int.tryParse(produceData['calories']?.toString() ?? ''),
         'proteins': double.tryParse(produceData['proteins']?.toString() ?? ''),
-        'carbohydrates': double.tryParse(produceData['carbohydrates']?.toString() ?? ''),
+        'carbohydrates':
+            double.tryParse(produceData['carbohydrates']?.toString() ?? ''),
         'fats': double.tryParse(produceData['fats']?.toString() ?? ''),
         'unit_grams': int.tryParse(produceData['unit_grams']?.toString() ?? ''),
         'source': produceData['source'] as String?,
       };
       // Remove null values before sending
-      payload.removeWhere((key, value) => value == null || (value is String && value.isEmpty));
+      payload.removeWhere(
+          (key, value) => value == null || (value is String && value.isEmpty));
 
       // Validate required fields
-      if (payload['produce_name'] == null || (payload['produce_name'] as String).isEmpty) {
-          print("Error adding produce: Produce name is required.");
-          return null;
+      if (payload['produce_name'] == null ||
+          (payload['produce_name'] as String).isEmpty) {
+        print("Error adding produce: Produce name is required.");
+        return null;
       }
 
       print("Adding produce with payload: ${jsonEncode(payload)}");
@@ -571,14 +576,16 @@ class ProducerApiService {
         body: jsonEncode(payload),
       );
 
-      if (response.statusCode == 201) { // Check for 201 Created
+      if (response.statusCode == 201) {
+        // Check for 201 Created
         final dynamic responseData = json.decode(response.body);
         final dynamic createdProduceData = _handleApiResponse(responseData);
 
         if (createdProduceData is Map<String, dynamic>) {
           return Product.fromJson(createdProduceData);
         } else {
-          print("Add produce succeeded but couldn't parse response body: ${response.body}");
+          print(
+              "Add produce succeeded but couldn't parse response body: ${response.body}");
           // Might need to fetch the item again if the response isn't the full object
           return null;
         }
@@ -603,29 +610,32 @@ class ProducerApiService {
     // Using the ?produce_id= format based on original code
     final Uri uri = Uri.parse('$apibaseurl/rr/uproduce?produce_id=$produceId');
 
-
     try {
       // Prepare payload similar to addProduce
-       final payload = {
+      final payload = {
         'produce_name': produceData['produce_name'] as String?, // Required
         'calories': int.tryParse(produceData['calories']?.toString() ?? ''),
         'proteins': double.tryParse(produceData['proteins']?.toString() ?? ''),
-        'carbohydrates': double.tryParse(produceData['carbohydrates']?.toString() ?? ''),
+        'carbohydrates':
+            double.tryParse(produceData['carbohydrates']?.toString() ?? ''),
         'fats': double.tryParse(produceData['fats']?.toString() ?? ''),
         'unit_grams': int.tryParse(produceData['unit_grams']?.toString() ?? ''),
         'source': produceData['source'] as String?,
       };
-      payload.removeWhere((key, value) => value == null || (value is String && value.isEmpty));
+      payload.removeWhere(
+          (key, value) => value == null || (value is String && value.isEmpty));
 
       // Validate required fields for update
-      if (payload['produce_name'] == null || (payload['produce_name'] as String).trim().isEmpty) {
-          print("Error updating produce: Produce name cannot be empty.");
-          return false;
+      if (payload['produce_name'] == null ||
+          (payload['produce_name'] as String).trim().isEmpty) {
+        print("Error updating produce: Produce name cannot be empty.");
+        return false;
       }
 
       print("Updating produce $produceId with payload: ${jsonEncode(payload)}");
 
-      final response = await http.put( // Usually PUT for updates
+      final response = await http.put(
+        // Usually PUT for updates
         uri,
         headers: _getWriteHeaders(requiresAuth: true), // Assuming auth needed
         body: jsonEncode(payload),
@@ -634,7 +644,8 @@ class ProducerApiService {
       if (response.statusCode == 200 || response.statusCode == 204) {
         return true;
       } else {
-        print("Error updating produce $produceId: ${response.statusCode} ${response.body}");
+        print(
+            "Error updating produce $produceId: ${response.statusCode} ${response.body}");
         return false;
       }
     } catch (e) {
@@ -660,7 +671,8 @@ class ProducerApiService {
       if (response.statusCode == 200 || response.statusCode == 204) {
         return true;
       } else {
-        print("Error deleting produce $produceId: ${response.statusCode} ${response.body}");
+        print(
+            "Error deleting produce $produceId: ${response.statusCode} ${response.body}");
         return false;
       }
     } catch (e) {
@@ -668,9 +680,7 @@ class ProducerApiService {
       return false;
     }
   }
-
 }
-
 
 class ProducerDash22 extends StatefulWidget {
   const ProducerDash22({Key? key}) : super(key: key);
@@ -684,7 +694,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
   static ProducerProfile? _profileCache;
   static DateTime? _profileCacheTimestamp;
   static const String _profileCacheKey = 'producer_profile_cache';
-  static const String _profileCacheTimestampKey = 'producer_profile_cache_timestamp';
+  static const String _profileCacheTimestampKey =
+      'producer_profile_cache_timestamp';
 
   // Load cache from UserCache
   static Future<void> _loadProfileCacheFromPrefs() async {
@@ -693,7 +704,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
     if (cachedData is Map<String, dynamic> && timestampData is String) {
       try {
-        _profileCache = ProducerProfile.fromJson(cachedData); // Assuming fromJson works for cached data
+        _profileCache = ProducerProfile.fromJson(
+            cachedData); // Assuming fromJson works for cached data
         _profileCacheTimestamp = DateTime.parse(timestampData);
       } catch (e) {
         print("Error parsing cached producer profile: $e");
@@ -704,8 +716,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
         await UserCache.removeData(_profileCacheTimestampKey);
       }
     } else {
-       _profileCache = null;
-       _profileCacheTimestamp = null;
+      _profileCache = null;
+      _profileCacheTimestamp = null;
     }
   }
 
@@ -742,7 +754,6 @@ class _ProducerDash22State extends State<ProducerDash22> {
       'stock': profile.stock, // Include stock in cache
     };
 
-
     await UserCache.saveData(_profileCacheKey, cacheableProfile);
     await UserCache.saveData(
         _profileCacheTimestampKey, DateTime.now().toIso8601String());
@@ -768,7 +779,9 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
   // Ensure stock items have valid names and handle quantities
   List<Map<String, dynamic>> get _selectedProduceStock {
-    final selectedProducts = _produce.where((p) => _selectedProduceIds.contains(p.produceId)).toList();
+    final selectedProducts = _produce
+        .where((p) => _selectedProduceIds.contains(p.produceId))
+        .toList();
     return selectedProducts
         .where((p) =>
             p.produceId.isNotEmpty &&
@@ -791,7 +804,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
   // Upload to Imgur (Ensure IMGUR_CLIENT_ID is in .env)
   Future<String> _uploadImageToImgur(File image) async {
     final imgurClientID = dotenv.env['IMGUR_CLIENT_ID'] ?? '';
-    if (imgurClientID.isEmpty) throw Exception('Imgur Client ID not configured.');
+    if (imgurClientID.isEmpty)
+      throw Exception('Imgur Client ID not configured.');
     final uploadUrl = 'https://api.imgur.com/3/image';
     final request = http.MultipartRequest('POST', Uri.parse(uploadUrl));
     request.headers['Authorization'] = 'Client-ID $imgurClientID';
@@ -803,14 +817,16 @@ class _ProducerDash22State extends State<ProducerDash22> {
       return jsonResponse['data']['link'];
     } else {
       print("Imgur Upload Error: ${responseData.body}");
-      throw Exception('Failed to upload image. Status Code: ${response.statusCode}');
+      throw Exception(
+          'Failed to upload image. Status Code: ${response.statusCode}');
     }
   }
 
   // Pick and upload profile image to Imgur
   Future<void> _pickAndUploadProfileImage() async {
     final picker = ImagePicker();
-    final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    final picked =
+        await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
     if (picked == null) return;
     setState(() => _isUploadingProfileImage = true);
     try {
@@ -836,13 +852,18 @@ class _ProducerDash22State extends State<ProducerDash22> {
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) throw Exception('Location permissions denied.');
+        if (permission == LocationPermission.denied)
+          throw Exception('Location permissions denied.');
       }
-      if (permission == LocationPermission.deniedForever) throw Exception('Location permissions permanently denied.');
-      Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-      String displayAddress = "Lat: ${position.latitude.toStringAsFixed(4)}, Lon: ${position.longitude.toStringAsFixed(4)}";
+      if (permission == LocationPermission.deniedForever)
+        throw Exception('Location permissions permanently denied.');
+      Position position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high);
+      String displayAddress =
+          "Lat: ${position.latitude.toStringAsFixed(4)}, Lon: ${position.longitude.toStringAsFixed(4)}";
       try {
-        final apiUrl = 'https://geocode.maps.co/reverse?lat=${position.latitude}&lon=${position.longitude}';
+        final apiUrl =
+            'https://geocode.maps.co/reverse?lat=${position.latitude}&lon=${position.longitude}';
         final response = await http.get(Uri.parse(apiUrl));
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
@@ -862,7 +883,6 @@ class _ProducerDash22State extends State<ProducerDash22> {
     }
   }
 
-
   Future<void> _updateProducerStock() async {
     if (_profile == null) {
       _showErrorSnackBar('Profile not loaded. Cannot update stock.');
@@ -874,7 +894,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
     // Check if any valid items were selected
     if (stockList.isEmpty) {
-      _showErrorSnackBar('Please select at least one valid produce item to update stock.');
+      _showErrorSnackBar(
+          'Please select at least one valid produce item to update stock.');
       return;
     }
 
@@ -891,27 +912,33 @@ class _ProducerDash22State extends State<ProducerDash22> {
     // }
 
     // Show loading indicator potentially
-     _showLoadingSnackbar('Updating stock...');
+    _showLoadingSnackbar('Updating stock...');
 
     // Construct the payload the API expects (e.g., {"stock": [...]})
     final payload = jsonEncode({"stock": stockList});
     print("Updating stock with payload: $payload");
 
     try {
-      final response = await http.patch( // Use PATCH as per original code
-        Uri.parse('${ProducerApiService.apibaseurl}/rr/producers/${_profile!.producerId}'),
-        headers: {'Content-Type': 'application/json'}, // Add auth headers if needed
+      final response = await http.patch(
+        // Use PATCH as per original code
+        Uri.parse(
+            '${ProducerApiService.apibaseurl}/rr/producers/${_profile!.producerId}'),
+        headers: {
+          'Content-Type': 'application/json'
+        }, // Add auth headers if needed
         body: payload,
       );
 
-       _dismissLoadingSnackbar(); // Dismiss loading indicator
+      _dismissLoadingSnackbar(); // Dismiss loading indicator
 
-      if (response.statusCode == 200 || response.statusCode == 204) { // Check for 200 or 204 No Content
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        // Check for 200 or 204 No Content
         _showSuccessSnackbar('Stock updated successfully.');
 
         // Refresh profile data to get the updated stock from the backend
         try {
-          final updatedProfile = await ProducerApiService.fetchProducerProfile();
+          final updatedProfile =
+              await ProducerApiService.fetchProducerProfile();
           if (mounted) {
             setState(() {
               _profile = updatedProfile;
@@ -920,34 +947,35 @@ class _ProducerDash22State extends State<ProducerDash22> {
             });
           }
         } catch (e) {
-           if (mounted) {
-             _showErrorSnackBar('Stock updated, but failed to refresh profile: $e');
-           }
+          if (mounted) {
+            _showErrorSnackBar(
+                'Stock updated, but failed to refresh profile: $e');
+          }
         }
-
       } else {
         // Try to parse error message from response body
         String errorMsg = 'Unknown error';
         try {
           final errorBody = jsonDecode(response.body);
-          errorMsg = errorBody['error'] ?? errorBody['message'] ?? response.body;
+          errorMsg =
+              errorBody['error'] ?? errorBody['message'] ?? response.body;
         } catch (_) {
-           errorMsg = response.body; // Use raw body if JSON parsing fails
+          errorMsg = response.body; // Use raw body if JSON parsing fails
         }
-        _showErrorSnackBar('Failed to update stock (Code: ${response.statusCode}): $errorMsg');
+        _showErrorSnackBar(
+            'Failed to update stock (Code: ${response.statusCode}): $errorMsg');
         print("Stock update failed: ${response.statusCode} ${response.body}");
       }
     } catch (e) {
-       _dismissLoadingSnackbar(); // Dismiss loading indicator
-       if (mounted) {
+      _dismissLoadingSnackbar(); // Dismiss loading indicator
+      if (mounted) {
         _showErrorSnackBar('Error connecting to server: $e');
-       }
-       print("Exception updating stock: $e");
+      }
+      print("Exception updating stock: $e");
     }
   }
 
   // --- END: Applied Fix ---
-
 
   String _error = '';
   bool _isEditingProfile = false;
@@ -974,7 +1002,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
   static const Color textOnTeal = Colors.white;
   static const Color textOnWhite = Color(0xFF212121);
   static const Color subtleText = Color(0xFF757575);
-  static const Color cardBackground = Color(0xFFF1F8F8); // Slightly off-white teal tint
+  static const Color cardBackground =
+      Color(0xFFF1F8F8); // Slightly off-white teal tint
   static const Color errorColor = Color(0xFFD32F2F);
   static const Color starColor = Color(0xFFFFC107); // Amber/Gold
   static const Color dividerColor = Color(0xFFE0E0E0);
@@ -985,14 +1014,19 @@ class _ProducerDash22State extends State<ProducerDash22> {
   static final Color deliveredColor = Colors.green.shade600;
   static final Color cancelledColor = Colors.red.shade600;
   static final Color defaultStatusColor = Colors.grey.shade600;
-  static const Color actionButtonBackground = Color(0xFFE0F2F1); // Faint light teal
+  static const Color actionButtonBackground =
+      Color(0xFFE0F2F1); // Faint light teal
   static const Color actionButtonForeground = darkTeal;
-  static const Color destructiveButtonBackground = Color(0xFFFFEBEE); // Light red
-  static const Color destructiveButtonForeground = Color(0xFFC62828); // Darker red
-  static const String placeholderImagePath = 'assets/images/placeholder_avatar.png'; // Ensure this asset exists
+  static const Color destructiveButtonBackground =
+      Color(0xFFFFEBEE); // Light red
+  static const Color destructiveButtonForeground =
+      Color(0xFFC62828); // Darker red
+  static const String placeholderImagePath =
+      'assets/images/placeholder_avatar.png'; // Ensure this asset exists
 
   // Form Keys
-  final GlobalKey<FormState> _produceFormKey = GlobalKey<FormState>(); // For adding/editing produce item
+  final GlobalKey<FormState> _produceFormKey =
+      GlobalKey<FormState>(); // For adding/editing produce item
   final GlobalKey<FormState> _profileFormKey = GlobalKey<FormState>();
 
   @override
@@ -1010,7 +1044,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
     // Fetch data only if it hasn't been loaded yet or if dependencies change
     // Added checks to prevent multiple fetches on rebuilds unless needed
     if (_isLoading && _profile == null && _orders.isEmpty && _produce.isEmpty) {
-       _fetchAllData();
+      _fetchAllData();
     }
   }
 
@@ -1042,46 +1076,47 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
   // Combined cache load and background fetch for Producer Profile
   Future<void> _initializeProducerProfile() async {
-     if (mounted) {
-       setState(() {
-         _isLoadingProfile = true; // Start profile loading
-         _profileFetchError = '';
-       });
-     }
+    if (mounted) {
+      setState(() {
+        _isLoadingProfile = true; // Start profile loading
+        _profileFetchError = '';
+      });
+    }
 
-     // 1. Load from cache
-     await _loadProfileCacheFromPrefs();
+    // 1. Load from cache
+    await _loadProfileCacheFromPrefs();
 
-     // 2. Display cached data immediately if available
-     if (_profileCache != null && mounted) {
-       final now = DateTime.now();
-       final bool cacheIsValid = _profileCacheTimestamp != null &&
-           now.difference(_profileCacheTimestamp!) < CacheConfig.profileCacheDuration; // Use correct duration
+    // 2. Display cached data immediately if available
+    if (_profileCache != null && mounted) {
+      final now = DateTime.now();
+      final bool cacheIsValid = _profileCacheTimestamp != null &&
+          now.difference(_profileCacheTimestamp!) <
+              CacheConfig.profileCacheDuration; // Use correct duration
 
-       if (cacheIsValid) {
-          print("ProducerDash: Displaying valid cached profile.");
-          setState(() {
-            _profile = _profileCache;
-            _isLoadingProfile = false; // Stop profile loading indicator
-          });
-       } else {
-          print("ProducerDash: Cached profile expired, will fetch fresh data.");
-          // Keep showing stale cache while fetching, but indicate background loading
-          setState(() {
-             _profile = _profileCache; // Show stale data
-             _isLoadingProfile = true; // Indicate background loading
-          });
-       }
-     } else if (mounted) {
-        print("ProducerDash: No cached profile found, fetching...");
-        // No cache, ensure loading is true
+      if (cacheIsValid) {
+        print("ProducerDash: Displaying valid cached profile.");
         setState(() {
-          _isLoadingProfile = true;
+          _profile = _profileCache;
+          _isLoadingProfile = false; // Stop profile loading indicator
         });
-     }
+      } else {
+        print("ProducerDash: Cached profile expired, will fetch fresh data.");
+        // Keep showing stale cache while fetching, but indicate background loading
+        setState(() {
+          _profile = _profileCache; // Show stale data
+          _isLoadingProfile = true; // Indicate background loading
+        });
+      }
+    } else if (mounted) {
+      print("ProducerDash: No cached profile found, fetching...");
+      // No cache, ensure loading is true
+      setState(() {
+        _isLoadingProfile = true;
+      });
+    }
 
-     // 3. Fetch fresh data in the background (regardless of cache state)
-     await _fetchProducerProfileAndUpdate();
+    // 3. Fetch fresh data in the background (regardless of cache state)
+    await _fetchProducerProfileAndUpdate();
   }
 
   // Separate function to fetch Producer Profile and update state/cache
@@ -1106,18 +1141,19 @@ class _ProducerDash22State extends State<ProducerDash22> {
             _profileFetchError = 'Failed to load profile: $error';
             _isLoadingProfile = false; // Stop loading
           });
-          _showErrorSnackBar('Error loading profile: $error'); // Use existing snackbar
+          _showErrorSnackBar(
+              'Error loading profile: $error'); // Use existing snackbar
         } else {
-           // Keep showing cached data, log error silently or show subtle indicator
-           print("ProducerDash: Failed to fetch fresh profile, showing cached version. Error: $error");
-           setState(() {
-              _isLoadingProfile = false; // Ensure loading indicator stops
-           });
+          // Keep showing cached data, log error silently or show subtle indicator
+          print(
+              "ProducerDash: Failed to fetch fresh profile, showing cached version. Error: $error");
+          setState(() {
+            _isLoadingProfile = false; // Ensure loading indicator stops
+          });
         }
       }
     }
   }
-
 
   // Modified _fetchAllData to only fetch orders and produce, and trigger profile fetch
   Future<void> _fetchAllData() async {
@@ -1125,7 +1161,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
     // Ensure isLoading is true only when starting the fetch for orders/produce
     // Profile loading is managed by _isLoadingProfile
     if (!_isLoading) {
-       setState(() => _isLoading = true);
+      setState(() => _isLoading = true);
     }
     _error = ''; // General error for orders/produce
     _cancelAllEdits(); // Cancel any ongoing edits before refresh
@@ -1137,7 +1173,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
       // Fetch orders and produce concurrently
       final results = await Future.wait([
         ProducerApiService.fetchProducerOrders(),
-        ProducerApiService.fetchProducerProduce(), // Fetch the global list of produce
+        ProducerApiService
+            .fetchProducerProduce(), // Fetch the global list of produce
       ], eagerError: true); // Stop on first error
 
       // Process results if mounted
@@ -1151,7 +1188,9 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
           _sortOrders(); // Sort orders after fetching
           // Sort produce list alphabetically by name
-          _produce.sort((a, b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase()));
+          _produce.sort((a, b) => a.produceName
+              .toLowerCase()
+              .compareTo(b.produceName.toLowerCase()));
 
           // Sync the selection UI state (_selectedProduceIds, _produceQuantities)
           // based on the fetched profile's stock.
@@ -1166,8 +1205,9 @@ class _ProducerDash22State extends State<ProducerDash22> {
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _error = 'Failed to load data. Please check your connection and try again.';
-           // Clear potentially stale data on error
+          _error =
+              'Failed to load data. Please check your connection and try again.';
+          // Clear potentially stale data on error
           _profile = null;
           _orders = [];
           _produce = [];
@@ -1180,26 +1220,31 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
   // Helper to initialize selections based on profile stock
   void _syncSelectionFromProfile() {
-      _selectedProduceIds.clear();
-      _produceQuantities.clear();
-      if (_profile?.stock != null) {
-         for (var stockItem in _profile!.stock!) {
-            final String? produceId = stockItem['produce_id']?.toString();
-            final int? quantity = int.tryParse(stockItem['quantity']?.toString() ?? '');
+    _selectedProduceIds.clear();
+    _produceQuantities.clear();
+    if (_profile?.stock != null) {
+      for (var stockItem in _profile!.stock!) {
+        final String? produceId = stockItem['produce_id']?.toString();
+        final int? quantity =
+            int.tryParse(stockItem['quantity']?.toString() ?? '');
 
-            // Check if the produce ID from stock exists in our master _produce list
-            if (produceId != null && produceId.isNotEmpty && _produce.any((p) => p.produceId == produceId)) {
-               _selectedProduceIds.add(produceId);
-               _produceQuantities[produceId] = quantity ?? 0; // Default to 0 if quantity is missing/invalid
-            } else {
-               print("Warning: Stock item with ID '$produceId' not found in master produce list.");
-            }
-         }
+        // Check if the produce ID from stock exists in our master _produce list
+        if (produceId != null &&
+            produceId.isNotEmpty &&
+            _produce.any((p) => p.produceId == produceId)) {
+          _selectedProduceIds.add(produceId);
+          _produceQuantities[produceId] =
+              quantity ?? 0; // Default to 0 if quantity is missing/invalid
+        } else {
+          print(
+              "Warning: Stock item with ID '$produceId' not found in master produce list.");
+        }
       }
-       // Ensure quantities map only contains keys present in selected IDs
-      _produceQuantities.removeWhere((key, value) => !_selectedProduceIds.contains(key));
+    }
+    // Ensure quantities map only contains keys present in selected IDs
+    _produceQuantities
+        .removeWhere((key, value) => !_selectedProduceIds.contains(key));
   }
-
 
   void _sortOrders() {
     _orders.sort((a, b) {
@@ -1253,17 +1298,20 @@ class _ProducerDash22State extends State<ProducerDash22> {
     if (newStatus != null && newStatus != order.orderStatus) {
       _showLoadingSnackbar('Updating order #${order.orderId}...');
       try {
-        bool success = await ProducerApiService.updateOrderStatus(order.orderId, newStatus);
+        bool success = await ProducerApiService.updateOrderStatus(
+            order.orderId, newStatus);
         _dismissLoadingSnackbar();
         if (!mounted) return;
 
         if (success) {
           _updateLocalOrderState(order.orderId, newStatus);
           setState(() {}); // Force UI refresh for expanded/collapsed state
-          _showSuccessSnackbar('Order #${order.orderId} updated to $newStatus.');
+          _showSuccessSnackbar(
+              'Order #${order.orderId} updated to $newStatus.');
           _showOrderNextStepDialog(newStatus);
         } else {
-          _showErrorSnackBar('Failed to update order #${order.orderId}. Please try again.');
+          _showErrorSnackBar(
+              'Failed to update order #${order.orderId}. Please try again.');
         }
       } catch (e) {
         _dismissLoadingSnackbar();
@@ -1273,7 +1321,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
         }
       }
     } else {
-      debugPrint("No status change needed for action '$action' on order ${order.orderId}.");
+      debugPrint(
+          "No status change needed for action '$action' on order ${order.orderId}.");
     }
   }
 
@@ -1284,12 +1333,14 @@ class _ProducerDash22State extends State<ProducerDash22> {
     switch (newStatus) {
       case Order.STATUS_ACCEPTED:
         title = "Order Accepted";
-        message = "You have accepted the order. Next, start preparing the meal when ready.";
+        message =
+            "You have accepted the order. Next, start preparing the meal when ready.";
         icon = Icons.check_circle_outline;
         break;
       case Order.STATUS_PREPARING:
         title = "Order Preparing";
-        message = "You are now preparing the order. Mark as dispatched when ready for delivery.";
+        message =
+            "You are now preparing the order. Mark as dispatched when ready for delivery.";
         icon = Icons.restaurant_menu_outlined;
         break;
       case Order.STATUS_DISPATCHED:
@@ -1368,8 +1419,12 @@ class _ProducerDash22State extends State<ProducerDash22> {
       try {
         // Get trimmed values from controllers
         final String name = _profileNameController.text.trim();
-        final String? phone = _profilePhoneController.text.trim().isEmpty ? null : _profilePhoneController.text.trim();
-        final String? location = _profileLocationController.text.trim().isEmpty ? null : _profileLocationController.text.trim();
+        final String? phone = _profilePhoneController.text.trim().isEmpty
+            ? null
+            : _profilePhoneController.text.trim();
+        final String? location = _profileLocationController.text.trim().isEmpty
+            ? null
+            : _profileLocationController.text.trim();
 
         bool success = await ProducerApiService.updateProducerProfile(
           _profile!.producerId,
@@ -1393,7 +1448,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
           });
           _showSuccessSnackbar('Profile updated successfully.');
         } else {
-          _showErrorSnackBar('Failed to save profile changes. Please try again.');
+          _showErrorSnackBar(
+              'Failed to save profile changes. Please try again.');
         }
       } catch (e) {
         debugPrint("Error saving profile via API: $e");
@@ -1412,18 +1468,22 @@ class _ProducerDash22State extends State<ProducerDash22> {
     if (!mounted) return;
     debugPrint('Cancel Profile Edit Action Triggered');
     setState(() {
-      _isEditingProfile = false; // Just exit editing mode, don't revert unsaved changes visually yet
+      _isEditingProfile =
+          false; // Just exit editing mode, don't revert unsaved changes visually yet
     });
   }
 
   Future<void> _handleToggleActiveStatus(bool newStatus) async {
-    if (_profile == null || !mounted || _isEditingProfile) return; // Prevent during edit
-    debugPrint('Toggle Active Status Action Triggered: New Status = $newStatus');
+    if (_profile == null || !mounted || _isEditingProfile)
+      return; // Prevent during edit
+    debugPrint(
+        'Toggle Active Status Action Triggered: New Status = $newStatus');
     _showLoadingSnackbar('Updating status...'); // Use loading snackbar
 
     try {
-      bool success = await ProducerApiService.updateProducerStatus(_profile!.producerId, newStatus);
-       _dismissLoadingSnackbar(); // Dismiss loading snackbar
+      bool success = await ProducerApiService.updateProducerStatus(
+          _profile!.producerId, newStatus);
+      _dismissLoadingSnackbar(); // Dismiss loading snackbar
       if (!mounted) return;
 
       if (success) {
@@ -1433,7 +1493,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
         });
         final statusText = newStatus ? "Active" : "Offline";
         String message = 'Profile status updated to $statusText.';
-        if (!newStatus) message += '\nCustomers may not see you in search results.';
+        if (!newStatus)
+          message += '\nCustomers may not see you in search results.';
         _showSuccessSnackbar(message);
       } else {
         // Revert the switch visually if the API call failed
@@ -1442,9 +1503,9 @@ class _ProducerDash22State extends State<ProducerDash22> {
       }
     } catch (e) {
       debugPrint("Error toggling active status via API: $e");
-       _dismissLoadingSnackbar(); // Dismiss loading snackbar
+      _dismissLoadingSnackbar(); // Dismiss loading snackbar
       if (mounted) {
-         setState(() {}); // Revert visual state on error
+        setState(() {}); // Revert visual state on error
         _showErrorSnackBar('An error occurred while updating status: $e');
       }
     }
@@ -1453,28 +1514,32 @@ class _ProducerDash22State extends State<ProducerDash22> {
   // --- Methods for Adding/Editing/Deleting Individual Produce Items ---
   // Note: These manage the master list of _produce, not the producer's stock selection
   void _handleAddProduce() {
-    if (_editingProduceId != null || !mounted || _isEditingProfile) return; // Prevent conflicts
+    if (_editingProduceId != null || !mounted || _isEditingProfile)
+      return; // Prevent conflicts
     debugPrint('Add Produce Action Triggered');
     // Create a temporary ID for the new item until saved
     final newId = 'TEMP_${DateTime.now().millisecondsSinceEpoch}';
-    final newProduct = Product(produceId: newId, produceName: ''); // Start with empty name
+    final newProduct =
+        Product(produceId: newId, produceName: ''); // Start with empty name
 
     // Initialize controllers for the new item
-     _initializeProduceEditControllers(newProduct);
+    _initializeProduceEditControllers(newProduct);
 
     setState(() {
       // Add the new product temporarily to the list to show the edit form
       // It might be better to show the form in a dialog or separate screen
       // But following the pattern, we add it and enter edit mode
       _produce.add(newProduct);
-      _produce.sort((a, b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase()));
+      _produce.sort((a, b) =>
+          a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase()));
       _editingProduceId = newId; // Enter edit mode for the new item
-       // Scroll to the new item if possible (needs ScrollController)
+      // Scroll to the new item if possible (needs ScrollController)
     });
-     _showSnackbar('Fill in the details for the new produce item.', isError: false);
+    _showSnackbar('Fill in the details for the new produce item.',
+        isError: false);
   }
 
-   void _handleEditProduce(Product product) {
+  void _handleEditProduce(Product product) {
     if (!mounted || _isEditingProfile) return; // Prevent conflicts
     debugPrint('Edit Produce Action Triggered for ID: ${product.produceId}');
     _cancelAllEdits(exceptProduceId: product.produceId); // Cancel other edits
@@ -1487,16 +1552,21 @@ class _ProducerDash22State extends State<ProducerDash22> {
     });
   }
 
-  void _initializeProduceEditControllers(Product product){
-     _produceNameController = TextEditingController(text: product.produceName);
-     _produceCaloriesController = TextEditingController(text: product.calories?.toString() ?? '');
-     _produceProteinsController = TextEditingController(text: product.proteins?.toStringAsFixed(1) ?? '');
-     _produceCarbsController = TextEditingController(text: product.carbohydrates?.toStringAsFixed(1) ?? '');
-     _produceFatsController = TextEditingController(text: product.fats?.toStringAsFixed(1) ?? '');
-     _produceUnitGramsController = TextEditingController(text: product.unitGrams?.toString() ?? '');
-     _produceSourceController = TextEditingController(text: product.source ?? '');
+  void _initializeProduceEditControllers(Product product) {
+    _produceNameController = TextEditingController(text: product.produceName);
+    _produceCaloriesController =
+        TextEditingController(text: product.calories?.toString() ?? '');
+    _produceProteinsController =
+        TextEditingController(text: product.proteins?.toStringAsFixed(1) ?? '');
+    _produceCarbsController = TextEditingController(
+        text: product.carbohydrates?.toStringAsFixed(1) ?? '');
+    _produceFatsController =
+        TextEditingController(text: product.fats?.toStringAsFixed(1) ?? '');
+    _produceUnitGramsController =
+        TextEditingController(text: product.unitGrams?.toString() ?? '');
+    _produceSourceController =
+        TextEditingController(text: product.source ?? '');
   }
-
 
   Future<void> _saveProduceChanges() async {
     if (_editingProduceId == null || !mounted) return;
@@ -1504,7 +1574,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
     if (_produceFormKey.currentState?.validate() ?? false) {
       final String idToSave = _editingProduceId!;
       final int index = _produce.indexWhere((p) => p.produceId == idToSave);
-      if (index == -1) { // Should not happen if ID is valid
+      if (index == -1) {
+        // Should not happen if ID is valid
         _cancelProduceEdit();
         return;
       }
@@ -1538,7 +1609,9 @@ class _ProducerDash22State extends State<ProducerDash22> {
             setState(() {
               _produce.removeAt(index); // Remove TEMP item
               _produce.add(addedProduct); // Add real item
-              _produce.sort((a, b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase())); // Re-sort
+              _produce.sort((a, b) => a.produceName
+                  .toLowerCase()
+                  .compareTo(b.produceName.toLowerCase())); // Re-sort
               _editingProduceId = null; // Exit edit mode
               _disposeProduceEditControllers(); // Clean up controllers
             });
@@ -1554,32 +1627,42 @@ class _ProducerDash22State extends State<ProducerDash22> {
           }
         } else {
           // Update existing produce item via API
-          bool success = await ProducerApiService.updateProduce(idToSave, payload);
+          bool success =
+              await ProducerApiService.updateProduce(idToSave, payload);
           _dismissLoadingSnackbar();
           if (!mounted) return;
 
           if (success) {
             // Create updated product object locally
-             final updatedProduct = _produce[index].copyWith(
-              produceName: _produceNameController?.text.trim() ?? _produce[index].produceName,
-              calories: int.tryParse(_produceCaloriesController?.text.trim() ?? ''),
-              proteins: double.tryParse(_produceProteinsController?.text.trim() ?? ''),
-              carbohydrates: double.tryParse(_produceCarbsController?.text.trim() ?? ''),
+            final updatedProduct = _produce[index].copyWith(
+              produceName: _produceNameController?.text.trim() ??
+                  _produce[index].produceName,
+              calories:
+                  int.tryParse(_produceCaloriesController?.text.trim() ?? ''),
+              proteins: double.tryParse(
+                  _produceProteinsController?.text.trim() ?? ''),
+              carbohydrates:
+                  double.tryParse(_produceCarbsController?.text.trim() ?? ''),
               fats: double.tryParse(_produceFatsController?.text.trim() ?? ''),
-              unitGrams: int.tryParse(_produceUnitGramsController?.text.trim() ?? ''),
+              unitGrams:
+                  int.tryParse(_produceUnitGramsController?.text.trim() ?? ''),
               source: _produceSourceController?.text.trim().isNotEmpty == true
-                      ? _produceSourceController?.text.trim() : null,
+                  ? _produceSourceController?.text.trim()
+                  : null,
             );
             // Update the list and exit edit mode
             setState(() {
               _produce[index] = updatedProduct; // Update item in list
-               _produce.sort((a, b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase())); // Re-sort
+              _produce.sort((a, b) => a.produceName
+                  .toLowerCase()
+                  .compareTo(b.produceName.toLowerCase())); // Re-sort
               _editingProduceId = null; // Exit edit mode
               _disposeProduceEditControllers(); // Clean up controllers
             });
             _showSuccessSnackbar('Updated "${updatedProduct.produceName}".');
           } else {
-            _showErrorSnackBar('Failed to update "${payload['produce_name'] ?? 'produce item'}". Please try again.');
+            _showErrorSnackBar(
+                'Failed to update "${payload['produce_name'] ?? 'produce item'}". Please try again.');
             // Optionally keep edit mode open on failure
             // setState(() { _editingProduceId = null; _disposeProduceEditControllers(); });
           }
@@ -1590,15 +1673,17 @@ class _ProducerDash22State extends State<ProducerDash22> {
         if (mounted) {
           _showErrorSnackBar('An error occurred while saving produce: $e');
           // Handle TEMP item removal on exception if needed
-           if (isNewItem) {
-               setState(() {
-                   if (index >= 0 && index < _produce.length && _produce[index].produceId == idToSave) {
-                       _produce.removeAt(index);
-                   }
-                   _editingProduceId = null;
-                   _disposeProduceEditControllers();
-               });
-           }
+          if (isNewItem) {
+            setState(() {
+              if (index >= 0 &&
+                  index < _produce.length &&
+                  _produce[index].produceId == idToSave) {
+                _produce.removeAt(index);
+              }
+              _editingProduceId = null;
+              _disposeProduceEditControllers();
+            });
+          }
         }
       }
     } else {
@@ -1625,14 +1710,17 @@ class _ProducerDash22State extends State<ProducerDash22> {
   }
 
   void _handleDeleteProduce(Product product) {
-     // Prevent deletion while editing profile or another produce item
-    if (!mounted || _isEditingProfile || (_editingProduceId != null && _editingProduceId != product.produceId)) return;
+    // Prevent deletion while editing profile or another produce item
+    if (!mounted ||
+        _isEditingProfile ||
+        (_editingProduceId != null && _editingProduceId != product.produceId))
+      return;
     debugPrint('Delete Produce Action Triggered for ID: ${product.produceId}');
 
-     // If it's a temporary item being edited, just cancel the edit
+    // If it's a temporary item being edited, just cancel the edit
     if (product.produceId.startsWith('TEMP_')) {
-        _cancelProduceEdit();
-        return;
+      _cancelProduceEdit();
+      return;
     }
 
     // Show confirmation dialog for permanent items
@@ -1641,7 +1729,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
       builder: (BuildContext ctx) {
         return AlertDialog(
           backgroundColor: whiteColor.withOpacity(0.95),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
           title: const Row(
             children: [
               Icon(Icons.warning_amber_rounded, color: errorColor),
@@ -1666,7 +1755,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
                 backgroundColor: destructiveButtonBackground,
                 foregroundColor: destructiveButtonForeground,
                 elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: () {
                 Navigator.of(ctx).pop(); // Close the dialog
@@ -1699,7 +1789,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
         });
         _showSuccessSnackbar('Deleted "$deletedName".');
       } else {
-        _showErrorSnackBar('Failed to delete "${product.produceName}". Please try again.');
+        _showErrorSnackBar(
+            'Failed to delete "${product.produceName}". Please try again.');
       }
     } catch (e) {
       debugPrint("Error deleting produce via API: $e");
@@ -1709,7 +1800,6 @@ class _ProducerDash22State extends State<ProducerDash22> {
       }
     }
   }
-
 
   // Helper to cancel any active editing modes (profile or produce)
   void _cancelAllEdits({String? exceptProduceId}) {
@@ -1722,10 +1812,10 @@ class _ProducerDash22State extends State<ProducerDash22> {
     }
     if (_editingProduceId != null && _editingProduceId != exceptProduceId) {
       // If cancelling a TEMP item edit, remove it
-       if (_editingProduceId!.startsWith('TEMP_')) {
-         _produce.removeWhere((p) => p.produceId == _editingProduceId);
-         debugPrint("Removed temporary produce item due to action/switch.");
-       }
+      if (_editingProduceId!.startsWith('TEMP_')) {
+        _produce.removeWhere((p) => p.produceId == _editingProduceId);
+        debugPrint("Removed temporary produce item due to action/switch.");
+      }
       _editingProduceId = null;
       _disposeProduceEditControllers();
       didCancel = true;
@@ -1739,29 +1829,38 @@ class _ProducerDash22State extends State<ProducerDash22> {
   }
 
   // --- Snackbar Helpers ---
-  void _showSnackbar(String message, {bool isError = false, int durationSeconds = 3}) {
+  void _showSnackbar(String message,
+      {bool isError = false, int durationSeconds = 3}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).hideCurrentSnackBar(); // Hide previous snackbar
+    ScaffoldMessenger.of(context)
+        .hideCurrentSnackBar(); // Hide previous snackbar
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           message,
-          style: TextStyle(color: isError ? whiteColor : textOnTeal), // Adjust text color based on type
+          style: TextStyle(
+              color: isError
+                  ? whiteColor
+                  : textOnTeal), // Adjust text color based on type
           textAlign: TextAlign.center,
         ),
-        backgroundColor: isError ? errorColor.withOpacity(0.9) : primaryTeal.withOpacity(0.9),
+        backgroundColor: isError
+            ? errorColor.withOpacity(0.9)
+            : primaryTeal.withOpacity(0.9),
         duration: Duration(seconds: durationSeconds),
         behavior: SnackBarBehavior.floating, // Floating looks nicer
         margin: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 15.0),
         padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 15.0),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)),
         elevation: 4.0,
       ),
     );
   }
 
   void _showErrorSnackBar(String message) {
-    _showSnackbar(message, isError: true, durationSeconds: 4); // Longer duration for errors
+    _showSnackbar(message,
+        isError: true, durationSeconds: 4); // Longer duration for errors
   }
 
   void _showSuccessSnackbar(String message) {
@@ -1771,7 +1870,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
   // Loading Snackbar (non-dismissible by swipe)
   void _showLoadingSnackbar(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).removeCurrentSnackBar(); // Remove any previous ones
+    ScaffoldMessenger.of(context)
+        .removeCurrentSnackBar(); // Remove any previous ones
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
@@ -1780,18 +1880,22 @@ class _ProducerDash22State extends State<ProducerDash22> {
             const SizedBox(
               width: 18, // Slightly larger spinner
               height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+              child: CircularProgressIndicator(
+                  strokeWidth: 2.5, color: Colors.white),
             ),
             const SizedBox(width: 15),
-            Text(message, style: const TextStyle(color: Colors.white, fontSize: 14)),
+            Text(message,
+                style: const TextStyle(color: Colors.white, fontSize: 14)),
           ],
         ),
         backgroundColor: Colors.black.withOpacity(0.8), // Darker background
         duration: const Duration(minutes: 1), // Long duration, dismiss manually
         behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 50.0), // Centered more
+        margin: const EdgeInsets.symmetric(
+            vertical: 20.0, horizontal: 50.0), // Centered more
         padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 15.0),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25.0)), // More rounded
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(25.0)), // More rounded
       ),
     );
   }
@@ -1800,7 +1904,6 @@ class _ProducerDash22State extends State<ProducerDash22> {
     if (mounted) ScaffoldMessenger.of(context).removeCurrentSnackBar();
   }
 
-
   // --- Build Method and UI Widgets ---
   @override
   Widget build(BuildContext context) {
@@ -1808,7 +1911,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
     // Use _profile and _isLoadingProfile for profile image
     ImageProvider? appBarAvatarImage;
     if (_isLoadingProfile || _profile == null) {
-      appBarAvatarImage = const AssetImage(placeholderImagePath); // Placeholder while loading
+      appBarAvatarImage =
+          const AssetImage(placeholderImagePath); // Placeholder while loading
     } else if (_profile!.image != null && _profile!.image!.isNotEmpty) {
       try {
         // Validate URL before creating NetworkImage
@@ -1816,18 +1920,17 @@ class _ProducerDash22State extends State<ProducerDash22> {
         appBarAvatarImage = NetworkImage(_profile!.image!);
       } catch (e) {
         debugPrint("Invalid URL format for AppBar image: ${_profile!.image}");
-        appBarAvatarImage = const AssetImage(placeholderImagePath); // Fallback on error
+        appBarAvatarImage =
+            const AssetImage(placeholderImagePath); // Fallback on error
       }
     } else {
-      appBarAvatarImage = const AssetImage(placeholderImagePath); // Default placeholder
+      appBarAvatarImage =
+          const AssetImage(placeholderImagePath); // Default placeholder
     }
 
     return Scaffold(
       // Add the standard drawer
-      drawer: const AppDrawer(
-        userType: 'Producer',
-        userIdKey: 'producer_id',
-      ),
+      drawer: const AppDrawer(),
       backgroundColor: whiteColor, // Solid white background
       appBar: AppBar(
         backgroundColor: primaryTeal,
@@ -1835,39 +1938,40 @@ class _ProducerDash22State extends State<ProducerDash22> {
         iconTheme: const IconThemeData(color: textOnTeal), // White icons
         title: Text(
           _getAppBarTitle(),
-          style: const TextStyle(color: textOnTeal, fontWeight: FontWeight.w600, fontSize: 18),
+          style: const TextStyle(
+              color: textOnTeal, fontWeight: FontWeight.w600, fontSize: 18),
         ),
         centerTitle: false, // Align title left (common practice)
         actions: [
           // Profile Avatar in AppBar
-          if (!_isLoadingProfile && _profile != null) // Show only when profile is loaded
-             Padding(
-               padding: const EdgeInsets.only(right: 10.0),
-               child: CircleAvatar(
-                 radius: 18,
-                 backgroundColor: lightTeal.withOpacity(0.5),
-                 child: _profile!.image != null && _profile!.image!.isNotEmpty
-                     ? ClipOval(
-                         child: CachedNetworkImage(
-                           imageUrl: _profile!.image!,
-                           width: 36,
-                           height: 36,
-                           fit: BoxFit.cover,
-                           placeholder: (context, url) => Shimmer.fromColors(
-                             baseColor: Colors.grey[300]!,
-                             highlightColor: Colors.grey[100]!,
-                             child: Container(
-                               width: 36,
-                               height: 36,
-                               color: Colors.white,
-                             ),
-                           ),
-                           errorWidget: (context, url, error) => Icon(Icons.person_off, color: Colors.grey, size: 24),
-                         ),
-                       )
-                     : Icon(Icons.person, color: Colors.grey, size: 24),
-               ),
-             ),
+          if (!_isLoadingProfile &&
+              _profile != null) // Show only when profile is loaded
+            Padding(
+              padding: const EdgeInsets.only(right: 10.0),
+              child: CircleAvatar(
+                radius: 18,
+                backgroundColor: lightTeal.withOpacity(0.5),
+                child: _profile!.image != null && _profile!.image!.isNotEmpty
+                    ? ClipOval(
+                        child: CachedNetworkImage(
+                          imageUrl: _profile!.image!,
+                          width: 36,
+                          height: 36,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) => Container(
+                            color: Colors.teal.withOpacity(0.1),
+                            child: const Center(
+                              child: CircularProgressIndicator(
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(Colors.teal),
+                              ),
+                            ),
+                          ),
+                        ),
+                      )
+                    : Icon(Icons.person, color: Colors.grey, size: 24),
+              ),
+            ),
           // Logout Button (Example action)
           IconButton(
             icon: const Icon(Icons.logout_outlined, color: textOnTeal),
@@ -1886,11 +1990,13 @@ class _ProducerDash22State extends State<ProducerDash22> {
       body: Container(
         decoration: const BoxDecoration(
           image: DecorationImage(
-             // Use a subtle background if desired
-            image: AssetImage("assets/images/soft.jpg"), // Ensure this asset exists
+            // Use a subtle background if desired
+            image: AssetImage(
+                "assets/images/soft.jpg"), // Ensure this asset exists
             fit: BoxFit.cover,
             // Apply a filter to make text readable
-            colorFilter: ColorFilter.mode(Color(0xE6FFFFFF), BlendMode.dstATop), // Lighten image
+            colorFilter: ColorFilter.mode(
+                Color(0xE6FFFFFF), BlendMode.dstATop), // Lighten image
           ),
         ),
         child: _buildBodyContent(), // Main content based on state
@@ -1905,57 +2011,66 @@ class _ProducerDash22State extends State<ProducerDash22> {
             setState(() => _currentIndex = index);
           }
         },
-        backgroundColor: whiteColor.withOpacity(0.98), // Slightly transparent white
+        backgroundColor:
+            whiteColor.withOpacity(0.98), // Slightly transparent white
         selectedItemColor: primaryTeal, // Color for selected item
-        unselectedItemColor: subtleText.withOpacity(0.9), // Color for unselected items
-        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11),
+        unselectedItemColor:
+            subtleText.withOpacity(0.9), // Color for unselected items
+        selectedLabelStyle:
+            const TextStyle(fontWeight: FontWeight.w600, fontSize: 11),
         unselectedLabelStyle: const TextStyle(fontSize: 10),
         type: BottomNavigationBarType.fixed, // Ensure all labels are visible
         elevation: 8.0, // Shadow for separation
         items: [
-          _buildBottomNavItem(Icons.account_circle_outlined, Icons.account_circle, 'Profile', 0),
-          _buildBottomNavItem(Icons.receipt_long_outlined, Icons.receipt_long, 'Orders', 1),
+          _buildBottomNavItem(Icons.account_circle_outlined,
+              Icons.account_circle, 'Profile', 0),
+          _buildBottomNavItem(
+              Icons.receipt_long_outlined, Icons.receipt_long, 'Orders', 1),
           // Changed icon and label for Produce/Stock management
-          _buildBottomNavItem(Icons.inventory_2_outlined, Icons.inventory_2, 'Stock', 2),
+          _buildBottomNavItem(
+              Icons.inventory_2_outlined, Icons.inventory_2, 'Stock', 2),
         ],
       ),
       // Floating Action Button (Contextual)
       floatingActionButton: _buildFloatingActionButton(),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat, // Standard position
+      floatingActionButtonLocation:
+          FloatingActionButtonLocation.endFloat, // Standard position
     );
   }
 
   // Helper for building BottomNavigationBarItems with active state handling
-  BottomNavigationBarItem _buildBottomNavItem(IconData icon, IconData activeIcon, String label, int index) {
+  BottomNavigationBarItem _buildBottomNavItem(
+      IconData icon, IconData activeIcon, String label, int index) {
     bool isSelected = _currentIndex == index;
     return BottomNavigationBarItem(
       icon: _buildNavItemIcon(icon, isSelected),
-      activeIcon: _buildNavItemIcon(isSelected ? activeIcon : icon, isSelected), // Use filled icon when active
+      activeIcon: _buildNavItemIcon(isSelected ? activeIcon : icon,
+          isSelected), // Use filled icon when active
       label: label,
     );
   }
 
   // Helper for styling the nav item icon (adds background circle when selected)
   Widget _buildNavItemIcon(IconData iconData, bool isSelected) {
-     final icon = Icon(
-       iconData,
-       color: isSelected ? primaryTeal : subtleText.withOpacity(0.8),
-       size: 24, // Standard size
-     );
-     if (isSelected) {
-       // Add a subtle background highlight when selected
-       return Container(
-         padding: const EdgeInsets.all(4),
-         decoration: BoxDecoration(
-           color: lightTeal.withOpacity(0.25),
-           shape: BoxShape.circle,
-         ),
-         child: icon,
-       );
-     } else {
-       // Ensure consistent sizing for unselected icons
-       return SizedBox(width: 32, height: 32, child: Center(child: icon));
-     }
+    final icon = Icon(
+      iconData,
+      color: isSelected ? primaryTeal : subtleText.withOpacity(0.8),
+      size: 24, // Standard size
+    );
+    if (isSelected) {
+      // Add a subtle background highlight when selected
+      return Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: lightTeal.withOpacity(0.25),
+          shape: BoxShape.circle,
+        ),
+        child: icon,
+      );
+    } else {
+      // Ensure consistent sizing for unselected icons
+      return SizedBox(width: 32, height: 32, child: Center(child: icon));
+    }
   }
 
   // Dynamically set AppBar title based on current tab and editing state
@@ -1967,7 +2082,11 @@ class _ProducerDash22State extends State<ProducerDash22> {
         return 'Manage Orders';
       case 2:
         // Title depends on whether editing a specific produce item or viewing stock list
-        return _editingProduceId != null ? (_editingProduceId!.startsWith("TEMP_") ? 'Add Produce Item' : 'Edit Produce Item') : 'Manage Stock & Produce';
+        return _editingProduceId != null
+            ? (_editingProduceId!.startsWith("TEMP_")
+                ? 'Add Produce Item'
+                : 'Edit Produce Item')
+            : 'Manage Stock & Produce';
       default:
         return 'Producer Dashboard';
     }
@@ -1975,16 +2094,20 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
   // Determine which FAB to show based on the current tab and editing state
   Widget? _buildFloatingActionButton() {
-     // No FAB when editing profile or a specific produce item
-     if (_isEditingProfile || _editingProduceId != null) return null;
+    // No FAB when editing profile or a specific produce item
+    if (_isEditingProfile || _editingProduceId != null) return null;
 
     switch (_currentIndex) {
       case 0: // Profile Tab
         // Show FAB only when profile is loaded and not loading
         return FloatingActionButton.small(
-          onPressed: (_profile == null || _isLoadingProfile) ? null : _handleEditProfile,
+          onPressed: (_profile == null || _isLoadingProfile)
+              ? null
+              : _handleEditProfile,
           tooltip: 'Edit Profile',
-          backgroundColor: (_profile == null || _isLoadingProfile) ? Colors.grey : primaryTeal,
+          backgroundColor: (_profile == null || _isLoadingProfile)
+              ? Colors.grey
+              : primaryTeal,
           foregroundColor: textOnTeal,
           child: const Icon(Icons.edit_outlined, size: 20),
           heroTag: 'fab_profile_edit', // Unique tag
@@ -1994,26 +2117,27 @@ class _ProducerDash22State extends State<ProducerDash22> {
       case 2: // Produce/Stock Tab
         // Show "Update Stock" FAB only if items are selected, otherwise show "Add Produce" FAB
         if (_selectedProduceIds.isNotEmpty) {
-           // Show Update Stock FAB when items are selected
-           return FloatingActionButton.extended(
-             onPressed: _updateProducerStock, // Calls method which checks if empty
-             tooltip: 'Update Stock Levels',
-             icon: const Icon(Icons.update),
-             label: const Text("Update Stock"),
-             backgroundColor: darkTeal, // Use darkTeal to differentiate
-             foregroundColor: textOnTeal,
-             heroTag: 'fab_stock_update', // Unique tag
-           );
+          // Show Update Stock FAB when items are selected
+          return FloatingActionButton.extended(
+            onPressed:
+                _updateProducerStock, // Calls method which checks if empty
+            tooltip: 'Update Stock Levels',
+            icon: const Icon(Icons.update),
+            label: const Text("Update Stock"),
+            backgroundColor: darkTeal, // Use darkTeal to differentiate
+            foregroundColor: textOnTeal,
+            heroTag: 'fab_stock_update', // Unique tag
+          );
         } else {
-           // Show Add Produce FAB if no stock items are selected
-           return FloatingActionButton(
-             onPressed: _handleAddProduce,
-             tooltip: 'Add New Produce Item',
-             backgroundColor: primaryTeal, // Use primaryTeal for Add
-             foregroundColor: textOnTeal,
-             child: const Icon(Icons.add),
-             heroTag: 'fab_produce_add', // Unique tag
-           );
+          // Show Add Produce FAB if no stock items are selected
+          return FloatingActionButton(
+            onPressed: _handleAddProduce,
+            tooltip: 'Add New Produce Item',
+            backgroundColor: primaryTeal, // Use primaryTeal for Add
+            foregroundColor: textOnTeal,
+            child: const Icon(Icons.add),
+            heroTag: 'fab_produce_add', // Unique tag
+          );
         }
       default:
         return null;
@@ -2025,7 +2149,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
     if (_isLoading) {
       return Container(
         color: Colors.transparent, // Let background show through
-        child: const Center(child: CircularProgressIndicator(color: primaryTeal)),
+        child:
+            const Center(child: CircularProgressIndicator(color: primaryTeal)),
       );
     }
     if (_error.isNotEmpty) {
@@ -2052,7 +2177,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
         padding: const EdgeInsets.all(20.0),
         child: Card(
           color: whiteColor.withOpacity(0.9), // Semi-transparent card
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           elevation: 2,
           child: Padding(
             padding: const EdgeInsets.all(25.0),
@@ -2074,8 +2200,10 @@ class _ProducerDash22State extends State<ProducerDash22> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: primaryTeal,
                     foregroundColor: textOnTeal,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 10),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
                   ),
                   onPressed: _fetchAllData, // Retry fetching data
                 ),
@@ -2086,7 +2214,6 @@ class _ProducerDash22State extends State<ProducerDash22> {
       ),
     );
   }
-
 
   // --- Profile Tab UI ---
   Widget _buildProfileTab() {
@@ -2115,7 +2242,11 @@ class _ProducerDash22State extends State<ProducerDash22> {
     }
 
     // --- Info Card Helper ---
-    Widget infoCard({required IconData icon, required String label, required String value, int maxLines = 3}) {
+    Widget infoCard(
+        {required IconData icon,
+        required String label,
+        required String value,
+        int maxLines = 3}) {
       return Card(
         elevation: 0.5,
         margin: const EdgeInsets.all(4),
@@ -2131,11 +2262,16 @@ class _ProducerDash22State extends State<ProducerDash22> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: darkTeal)),
+                    Text(label,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                            color: darkTeal)),
                     const SizedBox(height: 2),
                     Text(
                       value.isEmpty ? 'Not provided' : value,
-                      style: const TextStyle(fontSize: 13, color: subtleText, height: 1.4),
+                      style: const TextStyle(
+                          fontSize: 13, color: subtleText, height: 1.4),
                       maxLines: maxLines,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -2172,28 +2308,42 @@ class _ProducerDash22State extends State<ProducerDash22> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(profile.name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: darkTeal)),
-                  if (profile.producerType != null && profile.producerType!.isNotEmpty)
+                  Text(profile.name,
+                      style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: darkTeal)),
+                  if (profile.producerType != null &&
+                      profile.producerType!.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 2.0),
-                      child: Text(profile.producerType!, style: const TextStyle(fontSize: 14, color: subtleText)),
+                      child: Text(profile.producerType!,
+                          style:
+                              const TextStyle(fontSize: 14, color: subtleText)),
                     ),
                   if (profile.rating != null && profile.rating! > 0)
                     Padding(
                       padding: const EdgeInsets.only(top: 8.0),
                       child: Row(
                         children: [
-                          const Icon(Icons.star_rounded, color: starColor, size: 18),
+                          const Icon(Icons.star_rounded,
+                              color: starColor, size: 18),
                           const SizedBox(width: 4),
                           Text(
                             profile.rating!.toStringAsFixed(1),
-                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textOnWhite),
+                            style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: textOnWhite),
                           ),
-                          if (profile.reviews != null && profile.reviews!.isNotEmpty && profile.reviews!.toLowerCase() != 'none') ...[
+                          if (profile.reviews != null &&
+                              profile.reviews!.isNotEmpty &&
+                              profile.reviews!.toLowerCase() != 'none') ...[
                             const SizedBox(width: 6),
                             Text(
                               '(${profile.reviews} reviews)',
-                              style: const TextStyle(fontSize: 12, color: subtleText),
+                              style: const TextStyle(
+                                  fontSize: 12, color: subtleText),
                             ),
                           ],
                         ],
@@ -2217,14 +2367,22 @@ class _ProducerDash22State extends State<ProducerDash22> {
         child: SwitchListTile(
           value: profile.isActive,
           onChanged: _isEditingProfile ? null : _handleToggleActiveStatus,
-          title: const Text('Active Status', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: darkTeal)),
+          title: const Text('Active Status',
+              style: TextStyle(
+                  fontWeight: FontWeight.w600, fontSize: 16, color: darkTeal)),
           subtitle: Text(
-            profile.isActive ? 'Visible to customers' : 'Not visible to customers',
+            profile.isActive
+                ? 'Visible to customers'
+                : 'Not visible to customers',
             style: const TextStyle(fontSize: 13, color: subtleText),
           ),
           secondary: Icon(
-            profile.isActive ? Icons.check_circle_outline_rounded : Icons.power_settings_new_outlined,
-            color: profile.isActive ? Colors.green.shade600 : Colors.orange.shade700,
+            profile.isActive
+                ? Icons.check_circle_outline_rounded
+                : Icons.power_settings_new_outlined,
+            color: profile.isActive
+                ? Colors.green.shade600
+                : Colors.orange.shade700,
             size: 28,
           ),
           activeColor: primaryTeal,
@@ -2237,19 +2395,46 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
     // --- Info Cards Grid ---
     List<Widget> infoCards = [
-      infoCard(icon: Icons.info_outline_rounded, label: 'Bio', value: profile.producerType ?? ''),
-      infoCard(icon: Icons.star_outline_rounded, label: 'Specialties', value: profile.reviews ?? ''),
+      infoCard(
+          icon: Icons.info_outline_rounded,
+          label: 'Bio',
+          value: profile.producerType ?? ''),
+      infoCard(
+          icon: Icons.star_outline_rounded,
+          label: 'Specialties',
+          value: profile.reviews ?? ''),
       infoCard(icon: Icons.timer_outlined, label: 'Experience', value: 'N/A'),
       infoCard(icon: Icons.language_rounded, label: 'Languages', value: 'N/A'),
-      infoCard(icon: Icons.calendar_today_rounded, label: 'Availability', value: 'N/A'),
-      infoCard(icon: Icons.verified_user_outlined, label: 'Certifications', value: 'N/A'),
-      infoCard(icon: Icons.attach_money_rounded, label: 'Base Price/Fee', value: 'N/A'),
-      infoCard(icon: Icons.schedule_rounded, label: 'Response Time', value: 'N/A'),
-      infoCard(icon: Icons.menu_book_rounded, label: 'Sample Menu', value: 'N/A'),
-      infoCard(icon: Icons.build_circle_outlined, label: 'Equipment', value: 'N/A'),
-      infoCard(icon: Icons.location_on_outlined, label: 'Location', value: profile.location ?? ''),
-      infoCard(icon: Icons.phone_outlined, label: 'Phone', value: profile.phoneNumber ?? ''),
-      infoCard(icon: Icons.email_outlined, label: 'Email', value: profile.email ?? ''),
+      infoCard(
+          icon: Icons.calendar_today_rounded,
+          label: 'Availability',
+          value: 'N/A'),
+      infoCard(
+          icon: Icons.verified_user_outlined,
+          label: 'Certifications',
+          value: 'N/A'),
+      infoCard(
+          icon: Icons.attach_money_rounded,
+          label: 'Base Price/Fee',
+          value: 'N/A'),
+      infoCard(
+          icon: Icons.schedule_rounded, label: 'Response Time', value: 'N/A'),
+      infoCard(
+          icon: Icons.menu_book_rounded, label: 'Sample Menu', value: 'N/A'),
+      infoCard(
+          icon: Icons.build_circle_outlined, label: 'Equipment', value: 'N/A'),
+      infoCard(
+          icon: Icons.location_on_outlined,
+          label: 'Location',
+          value: profile.location ?? ''),
+      infoCard(
+          icon: Icons.phone_outlined,
+          label: 'Phone',
+          value: profile.phoneNumber ?? ''),
+      infoCard(
+          icon: Icons.email_outlined,
+          label: 'Email',
+          value: profile.email ?? ''),
     ];
 
     // --- Main Layout ---
@@ -2271,8 +2456,11 @@ class _ProducerDash22State extends State<ProducerDash22> {
             children: [
               TextButton(
                 onPressed: _cancelProfileEdit,
-                child: const Text('Cancel', style: TextStyle(color: subtleText)),
-                style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8)),
+                child:
+                    const Text('Cancel', style: TextStyle(color: subtleText)),
+                style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 8)),
               ),
               const SizedBox(width: 12),
               ElevatedButton.icon(
@@ -2281,8 +2469,10 @@ class _ProducerDash22State extends State<ProducerDash22> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: primaryTeal,
                   foregroundColor: textOnTeal,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
                 ),
                 onPressed: _saveProfileChanges,
               ),
@@ -2296,7 +2486,10 @@ class _ProducerDash22State extends State<ProducerDash22> {
   }
 
   // Helper to build reusable section cards in the profile tab
-  Widget _buildProfileSectionCard({required String title, required IconData icon, required List<Widget> children}) {
+  Widget _buildProfileSectionCard(
+      {required String title,
+      required IconData icon,
+      required List<Widget> children}) {
     return Card(
       elevation: 1.0, // Subtle elevation
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)),
@@ -2313,16 +2506,21 @@ class _ProducerDash22State extends State<ProducerDash22> {
                 const SizedBox(width: 8),
                 Text(
                   title,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: darkTeal),
+                  style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: darkTeal),
                 ),
               ],
             ),
-            const Divider(height: 16, thickness: 0.8, color: dividerColor), // Separator
+            const Divider(
+                height: 16, thickness: 0.8, color: dividerColor), // Separator
             // Section Content
             ...children.map((child) => Padding(
-                 padding: const EdgeInsets.only(bottom: 4.0), // Consistent padding between items
-                 child: child,
-               )),
+                  padding: const EdgeInsets.only(
+                      bottom: 4.0), // Consistent padding between items
+                  child: child,
+                )),
           ],
         ),
       ),
@@ -2334,7 +2532,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start, // Align text top if value wraps
+        crossAxisAlignment:
+            CrossAxisAlignment.start, // Align text top if value wraps
         children: [
           Icon(icon, size: 15, color: primaryTeal.withOpacity(0.9)),
           const SizedBox(width: 10),
@@ -2343,7 +2542,10 @@ class _ProducerDash22State extends State<ProducerDash22> {
             width: 85, // Adjust width as needed
             child: Text(
               '$label:',
-              style: const TextStyle(fontWeight: FontWeight.w600, color: textOnWhite, fontSize: 13),
+              style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: textOnWhite,
+                  fontSize: 13),
             ),
           ),
           // Expanded value field
@@ -2363,47 +2565,57 @@ class _ProducerDash22State extends State<ProducerDash22> {
   }
 
   // Helper for creating an editable TextFormField item in the profile edit form
-  Widget _buildEditableItem(TextEditingController controller, String label, IconData icon, {int maxLines = 1, TextInputType keyboardType = TextInputType.text}) {
+  Widget _buildEditableItem(
+      TextEditingController controller, String label, IconData icon,
+      {int maxLines = 1, TextInputType keyboardType = TextInputType.text}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6.0), // Slightly more padding for input fields
+      padding: const EdgeInsets.symmetric(
+          vertical: 6.0), // Slightly more padding for input fields
       child: TextFormField(
         controller: controller,
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: Icon(icon, size: 18, color: primaryTeal.withOpacity(0.9)),
-          prefixIconConstraints: const BoxConstraints(minWidth: 36), // Ensure space for icon
+          prefixIconConstraints:
+              const BoxConstraints(minWidth: 36), // Ensure space for icon
           isDense: true, // Compact field
-          contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 10.0),
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 12.0, horizontal: 10.0),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8.0),
             borderSide: BorderSide(color: dividerColor),
           ),
-          enabledBorder: OutlineInputBorder( // Style for when not focused
+          enabledBorder: OutlineInputBorder(
+            // Style for when not focused
             borderRadius: BorderRadius.circular(8.0),
             borderSide: BorderSide(color: dividerColor),
           ),
-          focusedBorder: OutlineInputBorder( // Style for when focused
+          focusedBorder: OutlineInputBorder(
+            // Style for when focused
             borderRadius: BorderRadius.circular(8.0),
             borderSide: const BorderSide(color: primaryTeal, width: 1.5),
           ),
           labelStyle: const TextStyle(color: subtleText, fontSize: 13),
-          floatingLabelStyle: const TextStyle(color: primaryTeal), // Label style when focused
+          floatingLabelStyle:
+              const TextStyle(color: primaryTeal), // Label style when focused
         ),
-        style: const TextStyle(color: textOnWhite, fontSize: 13), // Input text style
+        style: const TextStyle(
+            color: textOnWhite, fontSize: 13), // Input text style
         maxLines: maxLines,
         keyboardType: keyboardType,
         // Optional: Add specific validation for phone/email if needed
         validator: (value) {
           if (label.contains('Phone') && value != null && value.isNotEmpty) {
             // Basic phone format check (allows digits, spaces, -, +, ())
-             if (!RegExp(r'^[\d\s\-+()]+$').hasMatch(value)) {
-               return 'Invalid phone format';
-             }
+            if (!RegExp(r'^[\d\s\-+()]+$').hasMatch(value)) {
+              return 'Invalid phone format';
+            }
           }
           // Add other validations if required (e.g., email format)
           return null; // Return null if valid
         },
-         autovalidateMode: AutovalidateMode.onUserInteraction, // Validate on change
+        autovalidateMode:
+            AutovalidateMode.onUserInteraction, // Validate on change
       ),
     );
   }
@@ -2412,34 +2624,45 @@ class _ProducerDash22State extends State<ProducerDash22> {
   Widget _buildActiveStatusToggle(bool isActive) {
     return SwitchListTile(
       value: isActive,
-      onChanged: _isEditingProfile ? null : _handleToggleActiveStatus, // Disable toggle during profile edit
+      onChanged: _isEditingProfile
+          ? null
+          : _handleToggleActiveStatus, // Disable toggle during profile edit
       title: Text(
         isActive ? 'Account Active' : 'Account Offline',
         style: TextStyle(
           fontWeight: FontWeight.w600,
-          color: _isEditingProfile ? subtleText : textOnWhite, // Dim text if disabled
+          color: _isEditingProfile
+              ? subtleText
+              : textOnWhite, // Dim text if disabled
           fontSize: 13,
         ),
       ),
-      subtitle: Text( // Add a subtitle explaining the status
-         isActive ? 'Visible to customers' : 'Hidden from search results',
-         style: TextStyle(fontSize: 11, color: subtleText.withOpacity(0.8)),
+      subtitle: Text(
+        // Add a subtitle explaining the status
+        isActive ? 'Visible to customers' : 'Hidden from search results',
+        style: TextStyle(fontSize: 11, color: subtleText.withOpacity(0.8)),
       ),
       secondary: Icon(
-        isActive ? Icons.check_circle_outline_rounded : Icons.power_settings_new_outlined,
+        isActive
+            ? Icons.check_circle_outline_rounded
+            : Icons.power_settings_new_outlined,
         size: 18,
         color: isActive
-          ? (_isEditingProfile ? lightTeal.withOpacity(0.5) : primaryTeal) // Dim icon if disabled
-          : subtleText,
+            ? (_isEditingProfile
+                ? lightTeal.withOpacity(0.5)
+                : primaryTeal) // Dim icon if disabled
+            : subtleText,
       ),
       activeColor: primaryTeal, // Color of the switch thumb when on
-      activeTrackColor: lightTeal.withOpacity(0.6), // Color of the track when on
+      activeTrackColor:
+          lightTeal.withOpacity(0.6), // Color of the track when on
       inactiveThumbColor: subtleText.withOpacity(0.8),
       inactiveTrackColor: Colors.grey.shade300,
       dense: true, // Make it more compact
       contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
       visualDensity: VisualDensity.compact,
-      controlAffinity: ListTileControlAffinity.leading, // Place switch on the left
+      controlAffinity:
+          ListTileControlAffinity.leading, // Place switch on the left
     );
   }
 
@@ -2451,30 +2674,41 @@ class _ProducerDash22State extends State<ProducerDash22> {
       color: primaryTeal, // Spinner color
       backgroundColor: whiteColor, // Background of spinner container
       child: Container(
-         color: Colors.transparent, // Let background show through
-         // Use ListView for scrollability, even if content fits screen
-         child: ListView(
-           padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 80.0), // Padding including bottom for FAB
-           physics: const AlwaysScrollableScrollPhysics(), // Ensure scrollability for refresh
-           children: [
-             // Optional: Summary Section
-             _buildSummarySection(),
-             if (_orders.isNotEmpty) const SizedBox(height: 24), // Spacing if orders exist
-             // Orders List Section
-             _buildOrdersListSection(),
-           ],
-         ),
+        color: Colors.transparent, // Let background show through
+        // Use ListView for scrollability, even if content fits screen
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+              16.0, 16.0, 16.0, 80.0), // Padding including bottom for FAB
+          physics:
+              const AlwaysScrollableScrollPhysics(), // Ensure scrollability for refresh
+          children: [
+            // Optional: Summary Section
+            _buildSummarySection(),
+            if (_orders.isNotEmpty)
+              const SizedBox(height: 24), // Spacing if orders exist
+            // Orders List Section
+            _buildOrdersListSection(),
+          ],
+        ),
       ),
     );
   }
 
   // Helper to build the summary card at the top of the Orders tab
   Widget _buildSummarySection() {
-     if (_orders.isEmpty) return const SizedBox.shrink(); // Don't show if no orders
+    if (_orders.isEmpty)
+      return const SizedBox.shrink(); // Don't show if no orders
 
     // Calculate summary counts
-    int pendingOrders = _orders.where((o) => o.orderStatus == Order.STATUS_PENDING).length;
-    int activeOrders = _orders.where((o) => [Order.STATUS_ACCEPTED, Order.STATUS_PREPARING, Order.STATUS_DISPATCHED].contains(o.orderStatus)).length;
+    int pendingOrders =
+        _orders.where((o) => o.orderStatus == Order.STATUS_PENDING).length;
+    int activeOrders = _orders
+        .where((o) => [
+              Order.STATUS_ACCEPTED,
+              Order.STATUS_PREPARING,
+              Order.STATUS_DISPATCHED
+            ].contains(o.orderStatus))
+        .length;
     // Example: Calculate total revenue for delivered orders today (more complex)
     // double revenueToday = _orders.where((o) => o.orderStatus == Order.STATUS_DELIVERED && isToday(o.orderDate)).fold(0.0, (sum, item) => sum + item.totalPrice);
 
@@ -2486,12 +2720,16 @@ class _ProducerDash22State extends State<ProducerDash22> {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround, // Distribute items evenly
+          mainAxisAlignment:
+              MainAxisAlignment.spaceAround, // Distribute items evenly
           children: [
-            _buildSummaryItem('Pending', pendingOrders.toString(), Icons.pending_actions_outlined),
-            _buildSummaryItem('In Progress', activeOrders.toString(), Icons.local_shipping_outlined), // Icon for active orders
-            _buildSummaryItem('Total Today', _orders.length.toString(), Icons.list_alt_outlined), // Example: Total orders today
-             // _buildSummaryItem('Revenue', '\$${revenueToday.toStringAsFixed(2)}', Icons.attach_money),
+            _buildSummaryItem('Pending', pendingOrders.toString(),
+                Icons.pending_actions_outlined),
+            _buildSummaryItem('In Progress', activeOrders.toString(),
+                Icons.local_shipping_outlined), // Icon for active orders
+            _buildSummaryItem('Total Today', _orders.length.toString(),
+                Icons.list_alt_outlined), // Example: Total orders today
+            // _buildSummaryItem('Revenue', '\$${revenueToday.toStringAsFixed(2)}', Icons.attach_money),
           ],
         ),
       ),
@@ -2507,12 +2745,16 @@ class _ProducerDash22State extends State<ProducerDash22> {
         const SizedBox(height: 4),
         Text(
           value,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: whiteColor),
+          style: const TextStyle(
+              fontSize: 18, fontWeight: FontWeight.bold, color: whiteColor),
         ),
         const SizedBox(height: 2),
         Text(
           title,
-          style: const TextStyle(fontSize: 11, color: lightTeal, letterSpacing: 0.5), // Lighter text for title
+          style: const TextStyle(
+              fontSize: 11,
+              color: lightTeal,
+              letterSpacing: 0.5), // Lighter text for title
         ),
       ],
     );
@@ -2531,18 +2773,19 @@ class _ProducerDash22State extends State<ProducerDash22> {
     // Use ListView.builder for efficiency if list can be long
     return ListView.builder(
       shrinkWrap: true, // Important inside another ListView
-      physics: const NeverScrollableScrollPhysics(), // Disable scrolling for the inner list
+      physics:
+          const NeverScrollableScrollPhysics(), // Disable scrolling for the inner list
       itemCount: _orders.length,
       itemBuilder: (context, index) {
         // Add padding between order cards
         return Padding(
-          padding: EdgeInsets.only(bottom: (index == _orders.length - 1) ? 0 : 12.0),
+          padding:
+              EdgeInsets.only(bottom: (index == _orders.length - 1) ? 0 : 12.0),
           child: _buildOrderItem(_orders[index]), // Build each order item card
         );
       },
     );
   }
-
 
   // --- Produce/Stock Tab UI ---
   Widget _buildProduceTab() {
@@ -2554,17 +2797,19 @@ class _ProducerDash22State extends State<ProducerDash22> {
       child: Container(
         color: Colors.transparent, // Let background show through
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 80.0), // Padding + space for FAB
-          physics: const AlwaysScrollableScrollPhysics(), // Ensure scrollable for refresh
+          padding: const EdgeInsets.fromLTRB(
+              16.0, 16.0, 16.0, 80.0), // Padding + space for FAB
+          physics:
+              const AlwaysScrollableScrollPhysics(), // Ensure scrollable for refresh
           children: [
             // Conditional UI: Show edit form or the list
             if (_editingProduceId != null)
-               _buildProduceEditSection() // Show form for adding/editing a produce item
+              _buildProduceEditSection() // Show form for adding/editing a produce item
             else
-               _buildStockSelectionSection(), // Show list for selecting stock
+              _buildStockSelectionSection(), // Show list for selecting stock
 
             // Add extra space at the bottom if the edit form is shown
-             if (_editingProduceId != null) const SizedBox(height: 100),
+            if (_editingProduceId != null) const SizedBox(height: 100),
           ],
         ),
       ),
@@ -2573,14 +2818,14 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
   // Section for selecting stock quantities
   Widget _buildStockSelectionSection() {
-     if (_produce.isEmpty && !_isLoading) {
-       // Show empty state if no produce items exist in the system yet
-       return _buildEmptyState(
-         'No Produce Items Found',
-         'Tap the (+) button below to add the first produce item to the system.',
-         icon: Icons.eco_outlined,
-       );
-     }
+    if (_produce.isEmpty && !_isLoading) {
+      // Show empty state if no produce items exist in the system yet
+      return _buildEmptyState(
+        'No Produce Items Found',
+        'Tap the (+) button below to add the first produce item to the system.',
+        icon: Icons.eco_outlined,
+      );
+    }
 
     // Use the _buildProduceList provided in the fix for stock selection
     return _buildProduceList();
@@ -2588,67 +2833,85 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
   // Section for adding/editing a specific produce item
   Widget _buildProduceEditSection() {
-     if (_editingProduceId == null) return const SizedBox.shrink(); // Should not happen
+    if (_editingProduceId == null)
+      return const SizedBox.shrink(); // Should not happen
 
-     // Find the product being edited (could be a TEMP one)
-     final productToEdit = _produce.firstWhere((p) => p.produceId == _editingProduceId, orElse: () {
-         // Fallback if somehow the ID is invalid - cancel edit
-         print("Error: Product with ID $_editingProduceId not found for editing.");
-         // Schedule cancellation after build
-         WidgetsBinding.instance.addPostFrameCallback((_) => _cancelProduceEdit());
-         return Product(produceId: 'invalid', produceName: 'Error'); // Temporary invalid product
-     });
+    // Find the product being edited (could be a TEMP one)
+    final productToEdit = _produce
+        .firstWhere((p) => p.produceId == _editingProduceId, orElse: () {
+      // Fallback if somehow the ID is invalid - cancel edit
+      print("Error: Product with ID $_editingProduceId not found for editing.");
+      // Schedule cancellation after build
+      WidgetsBinding.instance.addPostFrameCallback((_) => _cancelProduceEdit());
+      return Product(
+          produceId: 'invalid',
+          produceName: 'Error'); // Temporary invalid product
+    });
 
-      if (productToEdit.produceId == 'invalid') return const SizedBox.shrink(); // Don't build if fallback triggered
+    if (productToEdit.produceId == 'invalid')
+      return const SizedBox.shrink(); // Don't build if fallback triggered
 
-     // Show the edit form for this product
-     return _buildProduceEditForm(productToEdit);
+    // Show the edit form for this product
+    return _buildProduceEditForm(productToEdit);
   }
-
 
   // --- START: Applied Fix (_buildProduceList) ---
   // Builds the list of produce for stock selection
   Widget _buildProduceList() {
     if (_produce.isEmpty) {
-       return _buildEmptyState("No Produce Available", "Add produce items first using the (+) button.", icon: Icons.inventory_2_outlined);
+      return _buildEmptyState("No Produce Available",
+          "Add produce items first using the (+) button.",
+          icon: Icons.inventory_2_outlined);
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start, // Align content left
       children: [
-         // Optional: Add a title for this section
-         Padding(
-            padding: const EdgeInsets.only(bottom: 12.0),
-            child: Text(
-                "Select Available Stock",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: darkTeal),
-            ),
-         ),
-         // Use Card for better visual grouping
-         Card(
-           elevation: 1.5,
-           color: whiteColor.withOpacity(0.9),
-           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)),
-           child: Padding(
-             padding: const EdgeInsets.symmetric(vertical: 8.0), // Padding inside card
-             child: ListView.builder(
+        // Optional: Add a title for this section
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12.0),
+          child: Text(
+            "Select Available Stock",
+            style: TextStyle(
+                fontSize: 18, fontWeight: FontWeight.bold, color: darkTeal),
+          ),
+        ),
+        // Use Card for better visual grouping
+        Card(
+          elevation: 1.5,
+          color: whiteColor.withOpacity(0.9),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+                vertical: 8.0), // Padding inside card
+            child: ListView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: _produce.length,
               itemBuilder: (context, index) {
                 final product = _produce[index];
-                final bool isSelected = _selectedProduceIds.contains(product.produceId);
-                final bool isValidProduct = product.produceName.isNotEmpty && product.produceName.trim().isNotEmpty;
+                final bool isSelected =
+                    _selectedProduceIds.contains(product.produceId);
+                final bool isValidProduct = product.produceName.isNotEmpty &&
+                    product.produceName.trim().isNotEmpty;
 
                 return Column(
                   children: [
                     CheckboxListTile(
                       title: Text(
-                        isValidProduct ? product.produceName : 'Unnamed Produce',
+                        isValidProduct
+                            ? product.produceName
+                            : 'Unnamed Produce',
                         style: TextStyle(
                           fontSize: 14, // Slightly smaller font
-                          color: isValidProduct ? textOnWhite : Colors.grey.shade600, // Grey out invalid items
-                          decoration: isValidProduct ? null : TextDecoration.lineThrough, // Strike through invalid
+                          color: isValidProduct
+                              ? textOnWhite
+                              : Colors.grey.shade600, // Grey out invalid items
+                          decoration: isValidProduct
+                              ? null
+                              : TextDecoration
+                                  .lineThrough, // Strike through invalid
                         ),
                       ),
                       value: isSelected,
@@ -2659,27 +2922,38 @@ class _ProducerDash22State extends State<ProducerDash22> {
                                 if (selected == true) {
                                   _selectedProduceIds.add(product.produceId);
                                   // Default quantity to 1 only if it doesn't exist yet
-                                  _produceQuantities.putIfAbsent(product.produceId, () => 1);
+                                  _produceQuantities.putIfAbsent(
+                                      product.produceId, () => 1);
                                 } else {
                                   _selectedProduceIds.remove(product.produceId);
-                                  _produceQuantities.remove(product.produceId); // Remove quantity when deselected
+                                  _produceQuantities.remove(product
+                                      .produceId); // Remove quantity when deselected
                                 }
                               });
                             }
                           : null, // Disable onChanged for invalid items
-                      controlAffinity: ListTileControlAffinity.leading, // Checkbox on the left
+                      controlAffinity: ListTileControlAffinity
+                          .leading, // Checkbox on the left
                       dense: true, // Make tile more compact
-                       activeColor: primaryTeal, // Color of the checkbox
-                       // Optional: Add a subtle visual cue for invalid items besides text style
-                       tileColor: isValidProduct ? null : Colors.grey.shade100.withOpacity(0.5),
+                      activeColor: primaryTeal, // Color of the checkbox
+                      // Optional: Add a subtle visual cue for invalid items besides text style
+                      tileColor: isValidProduct
+                          ? null
+                          : Colors.grey.shade100.withOpacity(0.5),
                     ),
                     // Show quantity input only if item is selected AND valid
                     if (isSelected && isValidProduct)
                       Padding(
-                        padding: const EdgeInsets.only(left: 56.0, right: 16.0, bottom: 12.0, top: 0.0), // Indent quantity input, adjust padding
+                        padding: const EdgeInsets.only(
+                            left: 56.0,
+                            right: 16.0,
+                            bottom: 12.0,
+                            top: 0.0), // Indent quantity input, adjust padding
                         child: Row(
                           children: [
-                            const Text("Quantity:", style: TextStyle(fontSize: 13, color: subtleText)),
+                            const Text("Quantity:",
+                                style:
+                                    TextStyle(fontSize: 13, color: subtleText)),
                             const SizedBox(width: 12),
                             SizedBox(
                               width: 80, // Slightly wider input field
@@ -2687,40 +2961,54 @@ class _ProducerDash22State extends State<ProducerDash22> {
                               child: TextFormField(
                                 // Use a key based on produceId to ensure state is preserved correctly
                                 key: ValueKey(product.produceId),
-                                initialValue: _produceQuantities[product.produceId]?.toString() ?? '1', // Default initial value to '1' if selected
+                                initialValue: _produceQuantities[
+                                            product.produceId]
+                                        ?.toString() ??
+                                    '1', // Default initial value to '1' if selected
                                 keyboardType: TextInputType.number,
                                 decoration: const InputDecoration(
                                   isDense: true,
-                                  contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                                  contentPadding: EdgeInsets.symmetric(
+                                      vertical: 8, horizontal: 10),
                                   border: OutlineInputBorder(),
-                                   // Optional: Add suffix text like "units" or "kg" if applicable
-                                   // suffixText: "units",
+                                  // Optional: Add suffix text like "units" or "kg" if applicable
+                                  // suffixText: "units",
                                   hintText: "0", // Hint for quantity
                                   hintStyle: TextStyle(fontSize: 13),
                                 ),
-                                style: const TextStyle(fontSize: 14, color: textOnWhite),
+                                style: const TextStyle(
+                                    fontSize: 14, color: textOnWhite),
                                 // Only allow digits
-                                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly
+                                ],
                                 onChanged: (val) {
                                   // Update the quantity in the map, ensuring it's non-negative
                                   setState(() {
-                                    final parsed = int.tryParse(val) ?? 0; // Default to 0 if parsing fails
-                                    _produceQuantities[product.produceId] = parsed >= 0 ? parsed : 0; // Store non-negative value
+                                    final parsed = int.tryParse(val) ??
+                                        0; // Default to 0 if parsing fails
+                                    _produceQuantities[product.produceId] =
+                                        parsed >= 0
+                                            ? parsed
+                                            : 0; // Store non-negative value
                                   });
                                 },
                                 // Basic validation for the quantity field
                                 validator: (val) {
-                                  if (val == null || val.isEmpty) return 'Enter #'; // Short error message
+                                  if (val == null || val.isEmpty)
+                                    return 'Enter #'; // Short error message
                                   final num = int.tryParse(val);
-                                  if (num == null || num < 0) return 'Invalid'; // Short error message
+                                  if (num == null || num < 0)
+                                    return 'Invalid'; // Short error message
                                   return null; // Valid
                                 },
-                                 autovalidateMode: AutovalidateMode.onUserInteraction, // Validate as user types
+                                autovalidateMode: AutovalidateMode
+                                    .onUserInteraction, // Validate as user types
                               ),
                             ),
                             const Spacer(), // Push buttons to the right if needed
-                             // Optional: Add quick +/- buttons
-                             /*
+                            // Optional: Add quick +/- buttons
+                            /*
                              IconButton(
                                icon: Icon(Icons.remove_circle_outline, size: 20, color: errorColor.withOpacity(0.7)),
                                padding: EdgeInsets.zero,
@@ -2751,38 +3039,44 @@ class _ProducerDash22State extends State<ProducerDash22> {
                           ],
                         ),
                       ),
-                      // Add divider between items inside the card, except for the last one
-                      if (index < _produce.length - 1)
-                         Divider(height: 1, thickness: 0.5, indent: 16, endIndent: 16, color: dividerColor.withOpacity(0.5)),
+                    // Add divider between items inside the card, except for the last one
+                    if (index < _produce.length - 1)
+                      Divider(
+                          height: 1,
+                          thickness: 0.5,
+                          indent: 16,
+                          endIndent: 16,
+                          color: dividerColor.withOpacity(0.5)),
                   ],
                 );
               },
-                 ),
-           ),
-         ),
-         const SizedBox(height: 24), // Space before the button
-         // Center the update button - REMOVED, now handled by FAB
-         // const SizedBox(height: 20), // Bottom padding after button - REMOVED
-
-          // Optional: Add a section to view/manage the master produce list
-          Divider(height: 40, thickness: 1, color: dividerColor),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                 "Manage Produce Items",
-                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: darkTeal),
-               ),
-              IconButton(
-                 icon: Icon(Icons.add_circle_outline, color: primaryTeal),
-                 tooltip: "Add New Produce Item",
-                 onPressed: _handleAddProduce, // FAB also does this, but good to have here too
-              )
-            ],
+            ),
           ),
-           const SizedBox(height: 12),
-           _buildMasterProduceListForEditing(), // Display the list of all produce items for editing/deleting
+        ),
+        const SizedBox(height: 24), // Space before the button
+        // Center the update button - REMOVED, now handled by FAB
+        // const SizedBox(height: 20), // Bottom padding after button - REMOVED
 
+        // Optional: Add a section to view/manage the master produce list
+        Divider(height: 40, thickness: 1, color: dividerColor),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              "Manage Produce Items",
+              style: TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.bold, color: darkTeal),
+            ),
+            IconButton(
+              icon: Icon(Icons.add_circle_outline, color: primaryTeal),
+              tooltip: "Add New Produce Item",
+              onPressed:
+                  _handleAddProduce, // FAB also does this, but good to have here too
+            )
+          ],
+        ),
+        const SizedBox(height: 12),
+        _buildMasterProduceListForEditing(), // Display the list of all produce items for editing/deleting
       ],
     );
   }
@@ -2793,48 +3087,56 @@ class _ProducerDash22State extends State<ProducerDash22> {
   Widget _buildMasterProduceListForEditing() {
     if (_produce.isEmpty) {
       return const Padding(
-         padding: EdgeInsets.symmetric(vertical: 16.0),
-         child: Text("No produce items defined in the system yet.", textAlign: TextAlign.center, style: TextStyle(color: subtleText)),
+        padding: EdgeInsets.symmetric(vertical: 16.0),
+        child: Text("No produce items defined in the system yet.",
+            textAlign: TextAlign.center, style: TextStyle(color: subtleText)),
       );
     }
 
     return ListView.builder(
-       shrinkWrap: true,
-       physics: const NeverScrollableScrollPhysics(),
-       itemCount: _produce.length,
-       itemBuilder: (context, index) {
-         final product = _produce[index];
-          // Don't show the item if it's currently being edited inline (form is shown instead)
-          if (product.produceId == _editingProduceId) {
-             return const SizedBox.shrink(); // Hide item, form is visible elsewhere
-          }
-          return Padding(
-            padding: EdgeInsets.only(bottom: (index == _produce.length - 1) ? 0 : 8.0),
-            child: _buildProduceItem(product), // Build the display card for the produce item
-          );
-       },
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: _produce.length,
+      itemBuilder: (context, index) {
+        final product = _produce[index];
+        // Don't show the item if it's currently being edited inline (form is shown instead)
+        if (product.produceId == _editingProduceId) {
+          return const SizedBox
+              .shrink(); // Hide item, form is visible elsewhere
+        }
+        return Padding(
+          padding:
+              EdgeInsets.only(bottom: (index == _produce.length - 1) ? 0 : 8.0),
+          child: _buildProduceItem(
+              product), // Build the display card for the produce item
+        );
+      },
     );
   }
-
 
   // Builds the display card for a single produce item in the master list
   Widget _buildProduceItem(Product product) {
     final bool isTemp = product.produceId.startsWith('TEMP_');
     return Card(
       elevation: 1.0,
-      color: isTemp ? Colors.yellow.shade100.withOpacity(0.7) : whiteColor.withOpacity(0.9), // Highlight temporary items
+      color: isTemp
+          ? Colors.yellow.shade100.withOpacity(0.7)
+          : whiteColor.withOpacity(0.9), // Highlight temporary items
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8.0),
         side: BorderSide(color: primaryTeal.withOpacity(0.3), width: 0.8),
       ),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
         title: Text(
-          product.produceName.isEmpty ? (isTemp ? 'New Item (Editing...)' : 'Unnamed Produce') : product.produceName,
+          product.produceName.isEmpty
+              ? (isTemp ? 'New Item (Editing...)' : 'Unnamed Produce')
+              : product.produceName,
           style: TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
-              color: product.produceName.isEmpty ? subtleText : textOnWhite,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+            color: product.produceName.isEmpty ? subtleText : textOnWhite,
           ),
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
@@ -2844,41 +3146,45 @@ class _ProducerDash22State extends State<ProducerDash22> {
           child: Text(
             // Show some nutritional info or placeholder
             product.calories != null
-              ? '${product.calories} kcal${product.unitGrams != null ? ' / ${product.unitGrams}g' : ''}'
-              : (isTemp ? '...' : 'Nutritional info missing'),
+                ? '${product.calories} kcal${product.unitGrams != null ? ' / ${product.unitGrams}g' : ''}'
+                : (isTemp ? '...' : 'Nutritional info missing'),
             style: TextStyle(fontSize: 11, color: subtleText.withOpacity(0.8)),
           ),
         ),
-        trailing: isTemp ?
-           const SizedBox(width: 40, child: Center(child: CircularProgressIndicator(strokeWidth: 2))) // Indicate saving/loading
-           : Row( // Action buttons for existing items
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // IconButton( // Commented out edit button
-                //   icon: const Icon(Icons.edit_outlined, size: 20),
-                //   color: actionButtonForeground, // Use defined color
-                //   tooltip: 'Edit Item Details',
-                //   padding: EdgeInsets.zero,
-                //   constraints: const BoxConstraints(), // Compact button
-                //    onPressed: () => _handleEditProduce(product), // Open edit form
-                // ),
-                // const SizedBox(width: 4), // Space between buttons
-                // IconButton( // Commented out delete button
-                //   icon: const Icon(Icons.delete_outline, size: 20),
-                //   color: destructiveButtonForeground, // Use defined color
-                //   tooltip: 'Delete Item',
-                //   padding: EdgeInsets.zero,
-                //    constraints: const BoxConstraints(), // Compact button
-                //   onPressed: () => _handleDeleteProduce(product), // Show delete confirmation
-                // ),
-              ],
-            ),
-         // Allow tapping the whole tile to edit as well
-         onTap: isTemp ? null : () => _handleEditProduce(product),
+        trailing: isTemp
+            ? const SizedBox(
+                width: 40,
+                child: Center(
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2))) // Indicate saving/loading
+            : Row(
+                // Action buttons for existing items
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // IconButton( // Commented out edit button
+                  //   icon: const Icon(Icons.edit_outlined, size: 20),
+                  //   color: actionButtonForeground, // Use defined color
+                  //   tooltip: 'Edit Item Details',
+                  //   padding: EdgeInsets.zero,
+                  //   constraints: const BoxConstraints(), // Compact button
+                  //    onPressed: () => _handleEditProduce(product), // Open edit form
+                  // ),
+                  // const SizedBox(width: 4), // Space between buttons
+                  // IconButton( // Commented out delete button
+                  //   icon: const Icon(Icons.delete_outline, size: 20),
+                  //   color: destructiveButtonForeground, // Use defined color
+                  //   tooltip: 'Delete Item',
+                  //   padding: EdgeInsets.zero,
+                  //    constraints: const BoxConstraints(), // Compact button
+                  //   onPressed: () => _handleDeleteProduce(product), // Show delete confirmation
+                  // ),
+                ],
+              ),
+        // Allow tapping the whole tile to edit as well
+        onTap: isTemp ? null : () => _handleEditProduce(product),
       ),
     );
   }
-
 
   // Builds the form for adding or editing a produce item's details
   Widget _buildProduceEditForm(Product product) {
@@ -2887,9 +3193,9 @@ class _ProducerDash22State extends State<ProducerDash22> {
       elevation: 3.0, // More elevation for the edit form
       color: whiteColor.withOpacity(0.98), // Near solid white
       shape: RoundedRectangleBorder(
-         borderRadius: BorderRadius.circular(12.0),
-         side: BorderSide(color: primaryTeal, width: 1.5) // Highlight border
-      ),
+          borderRadius: BorderRadius.circular(12.0),
+          side: BorderSide(color: primaryTeal, width: 1.5) // Highlight border
+          ),
       margin: const EdgeInsets.only(bottom: 16.0), // Margin below the form
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -2897,21 +3203,27 @@ class _ProducerDash22State extends State<ProducerDash22> {
           key: _produceFormKey, // Use the form key for validation
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-             mainAxisSize: MainAxisSize.min, // Take minimum space
+            mainAxisSize: MainAxisSize.min, // Take minimum space
             children: [
               // Form Title
               Text(
-                 isNewItem ? 'Add New Produce Item' : 'Edit "${product.produceName}"',
-                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: darkTeal),
+                isNewItem
+                    ? 'Add New Produce Item'
+                    : 'Edit "${product.produceName}"',
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.bold, color: darkTeal),
               ),
               const SizedBox(height: 16),
 
               // Name Field (Required)
               TextFormField(
                 controller: _produceNameController,
-                decoration: _inputDecoration('Produce Name *'), // Use helper for decoration
+                decoration: _inputDecoration(
+                    'Produce Name *'), // Use helper for decoration
                 style: const TextStyle(fontSize: 14, color: textOnWhite),
-                validator: (value) => (value == null || value.trim().isEmpty) ? 'Name is required' : null,
+                validator: (value) => (value == null || value.trim().isEmpty)
+                    ? 'Name is required'
+                    : null,
                 autovalidateMode: AutovalidateMode.onUserInteraction,
               ),
               const SizedBox(height: 12),
@@ -2920,69 +3232,74 @@ class _ProducerDash22State extends State<ProducerDash22> {
               Row(
                 children: [
                   Expanded(
-                     child: TextFormField(
-                       controller: _produceCaloriesController,
-                       decoration: _inputDecoration('Calories (kcal)'),
-                       style: const TextStyle(fontSize: 14, color: textOnWhite),
-                       keyboardType: TextInputType.number,
-                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                       validator: _validateOptionalNumber,
-                       autovalidateMode: AutovalidateMode.onUserInteraction,
-                     ),
+                    child: TextFormField(
+                      controller: _produceCaloriesController,
+                      decoration: _inputDecoration('Calories (kcal)'),
+                      style: const TextStyle(fontSize: 14, color: textOnWhite),
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      validator: _validateOptionalNumber,
+                      autovalidateMode: AutovalidateMode.onUserInteraction,
+                    ),
                   ),
                   const SizedBox(width: 10),
-                   Expanded(
-                     child: TextFormField(
-                       controller: _produceUnitGramsController,
-                       decoration: _inputDecoration('Unit (g)'),
-                       style: const TextStyle(fontSize: 14, color: textOnWhite),
-                       keyboardType: TextInputType.number,
-                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                       validator: _validateOptionalNumber,
-                       autovalidateMode: AutovalidateMode.onUserInteraction,
-                     ),
-                   ),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _produceUnitGramsController,
+                      decoration: _inputDecoration('Unit (g)'),
+                      style: const TextStyle(fontSize: 14, color: textOnWhite),
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      validator: _validateOptionalNumber,
+                      autovalidateMode: AutovalidateMode.onUserInteraction,
+                    ),
+                  ),
                 ],
               ),
-               const SizedBox(height: 12),
+              const SizedBox(height: 12),
               Row(
-                 children: [
-                   Expanded(
-                      child: TextFormField(
-                        controller: _produceProteinsController,
-                        decoration: _inputDecoration('Proteins (g)'),
-                        style: const TextStyle(fontSize: 14, color: textOnWhite),
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        inputFormatters: [_decimalInputFormatter(1)], // Allow 1 decimal place
-                        validator: _validateOptionalNumber,
-                         autovalidateMode: AutovalidateMode.onUserInteraction,
-                      ),
-                   ),
-                    const SizedBox(width: 10),
-                   Expanded(
-                      child: TextFormField(
-                        controller: _produceCarbsController,
-                        decoration: _inputDecoration('Carbs (g)'),
-                         style: const TextStyle(fontSize: 14, color: textOnWhite),
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                         inputFormatters: [_decimalInputFormatter(1)],
-                         validator: _validateOptionalNumber,
-                         autovalidateMode: AutovalidateMode.onUserInteraction,
-                      ),
-                   ),
-                    const SizedBox(width: 10),
-                   Expanded(
-                      child: TextFormField(
-                        controller: _produceFatsController,
-                        decoration: _inputDecoration('Fats (g)'),
-                         style: const TextStyle(fontSize: 14, color: textOnWhite),
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                         inputFormatters: [_decimalInputFormatter(1)],
-                         validator: _validateOptionalNumber,
-                         autovalidateMode: AutovalidateMode.onUserInteraction,
-                      ),
-                   ),
-                 ],
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _produceProteinsController,
+                      decoration: _inputDecoration('Proteins (g)'),
+                      style: const TextStyle(fontSize: 14, color: textOnWhite),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [
+                        _decimalInputFormatter(1)
+                      ], // Allow 1 decimal place
+                      validator: _validateOptionalNumber,
+                      autovalidateMode: AutovalidateMode.onUserInteraction,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _produceCarbsController,
+                      decoration: _inputDecoration('Carbs (g)'),
+                      style: const TextStyle(fontSize: 14, color: textOnWhite),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [_decimalInputFormatter(1)],
+                      validator: _validateOptionalNumber,
+                      autovalidateMode: AutovalidateMode.onUserInteraction,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _produceFatsController,
+                      decoration: _inputDecoration('Fats (g)'),
+                      style: const TextStyle(fontSize: 14, color: textOnWhite),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [_decimalInputFormatter(1)],
+                      validator: _validateOptionalNumber,
+                      autovalidateMode: AutovalidateMode.onUserInteraction,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 12),
 
@@ -2993,16 +3310,17 @@ class _ProducerDash22State extends State<ProducerDash22> {
                 style: const TextStyle(fontSize: 14, color: textOnWhite),
                 keyboardType: TextInputType.url,
                 maxLines: 1, // Keep URL field single line
-                 validator: (value) { // Optional URL validation
-                    if (value != null && value.isNotEmpty) {
-                       final parsedUri = Uri.tryParse(value);
-                       if (parsedUri == null || !parsedUri.isAbsolute) {
-                          return 'Invalid URL format';
-                       }
+                validator: (value) {
+                  // Optional URL validation
+                  if (value != null && value.isNotEmpty) {
+                    final parsedUri = Uri.tryParse(value);
+                    if (parsedUri == null || !parsedUri.isAbsolute) {
+                      return 'Invalid URL format';
                     }
-                    return null;
-                 },
-                 autovalidateMode: AutovalidateMode.onUserInteraction,
+                  }
+                  return null;
+                },
+                autovalidateMode: AutovalidateMode.onUserInteraction,
               ),
               const SizedBox(height: 20),
 
@@ -3012,18 +3330,25 @@ class _ProducerDash22State extends State<ProducerDash22> {
                 children: [
                   TextButton(
                     onPressed: _cancelProduceEdit, // Cancel edit action
-                    child: const Text('Cancel', style: TextStyle(color: subtleText)),
-                    style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8)),
+                    child: const Text('Cancel',
+                        style: TextStyle(color: subtleText)),
+                    style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 8)),
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton.icon(
                     icon: const Icon(Icons.save_outlined, size: 18),
-                    label: Text(isNewItem ? 'Add Item' : 'Save Changes'), // Dynamic button label
+                    label: Text(isNewItem
+                        ? 'Add Item'
+                        : 'Save Changes'), // Dynamic button label
                     style: ElevatedButton.styleFrom(
                       backgroundColor: primaryTeal,
                       foregroundColor: textOnTeal,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 10),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
                     ),
                     onPressed: _saveProduceChanges, // Save changes via API
                   ),
@@ -3038,47 +3363,47 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
   // Helper for consistent InputDecoration in forms
   InputDecoration _inputDecoration(String label) {
-     return InputDecoration(
-       labelText: label,
-       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0)),
-       contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
-       isDense: true,
-       labelStyle: const TextStyle(color: subtleText, fontSize: 13),
-        floatingLabelStyle: const TextStyle(color: primaryTeal),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.0),
-          borderSide: const BorderSide(color: primaryTeal, width: 1.5),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.0),
-          borderSide: BorderSide(color: dividerColor.withOpacity(0.8)),
-        ),
-     );
+    return InputDecoration(
+      labelText: label,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0)),
+      contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+      isDense: true,
+      labelStyle: const TextStyle(color: subtleText, fontSize: 13),
+      floatingLabelStyle: const TextStyle(color: primaryTeal),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8.0),
+        borderSide: const BorderSide(color: primaryTeal, width: 1.5),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8.0),
+        borderSide: BorderSide(color: dividerColor.withOpacity(0.8)),
+      ),
+    );
   }
 
   // Helper for validating optional number fields
-   String? _validateOptionalNumber(String? value) {
-     if (value != null && value.isNotEmpty) {
-        // Allow integers or decimals
-       if (double.tryParse(value) == null) {
-         return 'Invalid #'; // Short error message
-       }
-        if (double.parse(value) < 0) {
-           return '>= 0'; // Must be non-negative
-        }
-     }
-     return null; // Valid (empty or a valid non-negative number)
-   }
+  String? _validateOptionalNumber(String? value) {
+    if (value != null && value.isNotEmpty) {
+      // Allow integers or decimals
+      if (double.tryParse(value) == null) {
+        return 'Invalid #'; // Short error message
+      }
+      if (double.parse(value) < 0) {
+        return '>= 0'; // Must be non-negative
+      }
+    }
+    return null; // Valid (empty or a valid non-negative number)
+  }
 
-   // Helper to create a regex formatter for decimal numbers
-   TextInputFormatter _decimalInputFormatter(int decimalPlaces) {
-      String dp = decimalPlaces > 0 ? '{0,$decimalPlaces}' : '';
-      return FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d' + dp));
-   }
-
+  // Helper to create a regex formatter for decimal numbers
+  TextInputFormatter _decimalInputFormatter(int decimalPlaces) {
+    String dp = decimalPlaces > 0 ? '{0,$decimalPlaces}' : '';
+    return FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d' + dp));
+  }
 
   // Widget to display when a list (Orders, Produce) is empty
-  Widget _buildEmptyState(String title, String subtitle, {required IconData icon}) {
+  Widget _buildEmptyState(String title, String subtitle,
+      {required IconData icon}) {
     return Center(
       child: Padding(
         // Add padding to give space around the empty state message
@@ -3095,7 +3420,10 @@ class _ProducerDash22State extends State<ProducerDash22> {
             const SizedBox(height: 16),
             Text(
               title,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: textOnWhite),
+              style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: textOnWhite),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
@@ -3112,8 +3440,10 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
   // --- Order Item Card UI ---
   Widget _buildOrderItem(Order order) {
-    final DateFormat dateFormat = DateFormat('MMM d, hh:mm a'); // Consistent date format
-    final statusColor = _getStatusColor(order.orderStatus); // Get color based on status
+    final DateFormat dateFormat =
+        DateFormat('MMM d, hh:mm a'); // Consistent date format
+    final statusColor =
+        _getStatusColor(order.orderStatus); // Get color based on status
 
     // Use Card + ExpansionTile for a collapsible order item
     return Card(
@@ -3126,8 +3456,10 @@ class _ProducerDash22State extends State<ProducerDash22> {
         side: BorderSide(color: statusColor.withOpacity(0.4), width: 1),
       ),
       child: ExpansionTile(
-        tilePadding: const EdgeInsets.fromLTRB(12.0, 8.0, 12.0, 8.0), // Padding for the collapsed tile
-        childrenPadding: EdgeInsets.zero, // Padding will be added inside the children list
+        tilePadding: const EdgeInsets.fromLTRB(
+            12.0, 8.0, 12.0, 8.0), // Padding for the collapsed tile
+        childrenPadding:
+            EdgeInsets.zero, // Padding will be added inside the children list
         expandedAlignment: Alignment.topLeft,
         expandedCrossAxisAlignment: CrossAxisAlignment.start,
         iconColor: subtleText, // Color for expand/collapse icon
@@ -3137,7 +3469,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
           message: order.orderStatus, // Show status on hover/long-press
           child: CircleAvatar(
             radius: 18,
-            backgroundColor: statusColor.withOpacity(0.15), // Faint background color based on status
+            backgroundColor: statusColor
+                .withOpacity(0.15), // Faint background color based on status
             child: Icon(
               _getStatusIcon(order.orderStatus), // Get icon based on status
               color: statusColor, // Icon color based on status
@@ -3148,7 +3481,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
         // Title: Meal Name
         title: Text(
           order.mealName,
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: textOnWhite),
+          style: const TextStyle(
+              fontWeight: FontWeight.w600, fontSize: 15, color: textOnWhite),
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
@@ -3167,8 +3501,10 @@ class _ProducerDash22State extends State<ProducerDash22> {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
-              NumberFormat.currency(symbol: 'UGX ', decimalDigits: 2).format(order.totalPrice), // Format price as currency
-              style: const TextStyle(fontWeight: FontWeight.bold, color: darkTeal, fontSize: 13),
+              NumberFormat.currency(symbol: 'UGX ', decimalDigits: 2)
+                  .format(order.totalPrice), // Format price as currency
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold, color: darkTeal, fontSize: 13),
             ),
             const SizedBox(height: 2),
             Text(
@@ -3186,15 +3522,23 @@ class _ProducerDash22State extends State<ProducerDash22> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Display various order details using a helper
-                _buildOrderDetailItem('Producer', order.producerName ?? 'Unknown'), // Assuming producerName holds customer name here
-                _buildOrderDetailItem('Status', order.orderStatus, color: statusColor), // Show status with color
-                _buildOrderDetailItem('Payment', order.paymentStatus ?? 'Unknown'),
+                _buildOrderDetailItem(
+                    'Producer',
+                    order.producerName ??
+                        'Unknown'), // Assuming producerName holds customer name here
+                _buildOrderDetailItem('Status', order.orderStatus,
+                    color: statusColor), // Show status with color
+                _buildOrderDetailItem(
+                    'Payment', order.paymentStatus ?? 'Unknown'),
                 if (order.notes != null && order.notes!.isNotEmpty)
                   _buildOrderDetailItem('Notes', order.notes!),
-                if (order.deliveryAddress != null && order.deliveryAddress!.isNotEmpty)
+                if (order.deliveryAddress != null &&
+                    order.deliveryAddress!.isNotEmpty)
                   _buildOrderDetailItem('Delivery', order.deliveryAddress!),
-                 if (order.ingredients != null && order.ingredients!.isNotEmpty) // Example: Show ingredients if available
-                   _buildOrderDetailItem('Ingredients', order.ingredients!),
+                if (order.ingredients != null &&
+                    order.ingredients!
+                        .isNotEmpty) // Example: Show ingredients if available
+                  _buildOrderDetailItem('Ingredients', order.ingredients!),
                 const SizedBox(height: 12), // Spacing before actions
                 // Action Buttons
                 _buildOrderActions(order), // Build buttons based on status
@@ -3218,7 +3562,10 @@ class _ProducerDash22State extends State<ProducerDash22> {
             width: 80, // Adjust as needed
             child: Text(
               '$label:',
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: textOnWhite),
+              style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                  color: textOnWhite),
             ),
           ),
           // Expanded value that can wrap
@@ -3227,7 +3574,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
               value,
               style: TextStyle(
                 fontSize: 12,
-                color: color ?? subtleText, // Use provided color or default subtle text
+                color: color ??
+                    subtleText, // Use provided color or default subtle text
               ),
               softWrap: true,
             ),
@@ -3250,16 +3598,24 @@ class _ProducerDash22State extends State<ProducerDash22> {
       runSpacing: 8.0, // Vertical space between button rows
       alignment: WrapAlignment.end, // Align buttons to the right
       children: availableActions.map((action) {
-        bool isDestructive = action == 'Cancel'; // Style cancel button differently
+        bool isDestructive =
+            action == 'Cancel'; // Style cancel button differently
         return ElevatedButton(
-          onPressed: () => _handleOrderAction(order, action), // Trigger action handler
+          onPressed: () =>
+              _handleOrderAction(order, action), // Trigger action handler
           style: ElevatedButton.styleFrom(
-            backgroundColor: isDestructive ? destructiveButtonBackground : actionButtonBackground,
-            foregroundColor: isDestructive ? destructiveButtonForeground : actionButtonForeground,
+            backgroundColor: isDestructive
+                ? destructiveButtonBackground
+                : actionButtonBackground,
+            foregroundColor: isDestructive
+                ? destructiveButtonForeground
+                : actionButtonForeground,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             elevation: 0, // Flat button style
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            textStyle:
+                const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           ),
           child: Text(action),
         );
@@ -3290,25 +3646,39 @@ class _ProducerDash22State extends State<ProducerDash22> {
   // --- Status Color and Icon Helpers ---
   Color _getStatusColor(String status) {
     switch (status) {
-      case Order.STATUS_PENDING: return pendingColor;
-      case Order.STATUS_ACCEPTED: return acceptedColor;
-      case Order.STATUS_PREPARING: return preparingColor;
-      case Order.STATUS_DISPATCHED: return dispatchedColor;
-      case Order.STATUS_DELIVERED: return deliveredColor;
-      case Order.STATUS_CANCELLED: return cancelledColor;
-      default: return defaultStatusColor;
+      case Order.STATUS_PENDING:
+        return pendingColor;
+      case Order.STATUS_ACCEPTED:
+        return acceptedColor;
+      case Order.STATUS_PREPARING:
+        return preparingColor;
+      case Order.STATUS_DISPATCHED:
+        return dispatchedColor;
+      case Order.STATUS_DELIVERED:
+        return deliveredColor;
+      case Order.STATUS_CANCELLED:
+        return cancelledColor;
+      default:
+        return defaultStatusColor;
     }
   }
 
   IconData _getStatusIcon(String status) {
     switch (status) {
-      case Order.STATUS_PENDING: return Icons.pending_actions_outlined;
-      case Order.STATUS_ACCEPTED: return Icons.check_circle_outline_rounded;
-      case Order.STATUS_PREPARING: return Icons.kitchen_outlined; // Represents preparation
-      case Order.STATUS_DISPATCHED: return Icons.local_shipping_outlined;
-      case Order.STATUS_DELIVERED: return Icons.done_all_rounded;
-      case Order.STATUS_CANCELLED: return Icons.cancel_outlined;
-      default: return Icons.help_outline_rounded; // Icon for unknown status
+      case Order.STATUS_PENDING:
+        return Icons.pending_actions_outlined;
+      case Order.STATUS_ACCEPTED:
+        return Icons.check_circle_outline_rounded;
+      case Order.STATUS_PREPARING:
+        return Icons.kitchen_outlined; // Represents preparation
+      case Order.STATUS_DISPATCHED:
+        return Icons.local_shipping_outlined;
+      case Order.STATUS_DELIVERED:
+        return Icons.done_all_rounded;
+      case Order.STATUS_CANCELLED:
+        return Icons.cancel_outlined;
+      default:
+        return Icons.help_outline_rounded; // Icon for unknown status
     }
   }
 } // End of _ProducerDash22State class

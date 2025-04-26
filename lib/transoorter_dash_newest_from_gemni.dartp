@@ -22,8 +22,8 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' as mapbox; // Alia
 // --- Assumed Imports (Ensure these files exist) ---
 // Make sure these paths are correct for your project structure
 import 'package:zinzi2/Transporter_login.dart'; // For logout navigation
-import 'package:zinzi2/user_cache.dart'; // <<< IMPORT UserCache
-import 'package:zinzi2/cache_config.dart'; // <<< IMPORT CacheConfig
+import 'package:zinzi2/data_repository.dart'; // Refactored: Use DataRepository for caching and config // <<< IMPORT UserCache
+ // <<< IMPORT CacheConfig
 // import 'package:zinzi2/app_drawer.dart'; // If you reuse the drawer from old code
 
 // --- Environment Variables ---
@@ -1101,8 +1101,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   static const String _profileCacheTimestampKey =
       'transporter_profile_cache_timestamp_new_v2';
   Future<void> _loadProfileCacheFromPrefs() async {
-    final cachedData = await UserCache.getData(_profileCacheKey);
-    final timestampData = await UserCache.getData(_profileCacheTimestampKey);
+    final cachedData = await DataRepository().getTransporterProfileCache();
+    final timestampData = await DataRepository().getTransporterProfileCacheTimestamp();
     if (cachedData is Map<String, dynamic> && timestampData is String) {
       try {
         _profileCache = TransporterProfile.fromJson(cachedData);
@@ -1125,10 +1125,9 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   Future<void> _saveProfileCacheToPrefs(TransporterProfile profile) async {
     try {
       Map<String, dynamic> cacheableProfile = profile.toJson();
-      await UserCache.saveData(_profileCacheKey, cacheableProfile);
+      await DataRepository().saveTransporterProfileCache(profile);
       final now = DateTime.now();
-      await UserCache.saveData(
-          _profileCacheTimestampKey, now.toIso8601String());
+      await DataRepository().saveTransporterProfileCacheTimestamp(now);
       _profileCache = profile;
       _profileCacheTimestamp = now;
       print("Saved profile to cache. Timestamp: $_profileCacheTimestamp");
@@ -1235,8 +1234,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     if (_profileCache != null && mounted) {
       final now = DateTime.now();
       final bool cacheIsValid = _profileCacheTimestamp != null &&
-          now.difference(_profileCacheTimestamp!) <
-              CacheConfig.profileCacheDuration;
+          now.difference(_profileCacheTimestamp!) < DataRepository.profileCacheDuration;
       if (_transporterProfile == null || cacheIsValid) {
         if (cacheIsValid) {
           print("TransporterDashNew: Displaying valid cached profile.");

@@ -1,97 +1,162 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // For SystemNavigator
-import 'package:shared_preferences/shared_preferences.dart';
-import 'signup_or_Login.dart'; // Correct filename
-import 'signup_or_Login.dart' show SignUpOrLoginPage; // Import the specific class
+import 'package:zinzi2/onboard.dart';
+import 'package:zinzi2/chef_net.dart';
+import 'package:zinzi2/allmeals.dart' as allmeals;
+import 'package:zinzi2/nutri+.dart';
+import 'package:zinzi2/chef_net.dart' as chefnet;
+import 'package:zinzi2/cart.dart';
+import 'package:zinzi2/profile.dart' as profile;
+import 'package:zinzi2/useranalytics.dart' as useranalytics;
+import 'package:zinzi2/blogview.dart';
 
-import 'splash.dart';
-
-class AppDrawer extends StatelessWidget {
-  final String userType; // e.g., 'Chef', 'Transporter', 'Producer'
-  final String userIdKey; // The SharedPreferences key for the user ID (e.g., 'chef_id')
-
-  const AppDrawer({
-    Key? key,
-    required this.userType,
-    required this.userIdKey,
-  }) : super(key: key);
-
-  // --- Logout Function ---
-  Future<void> _logout(BuildContext context) async {
-    final scaffoldMessenger = ScaffoldMessenger.of(context); // Capture context
-    final navigator = Navigator.of(context); // Capture context
-
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      await prefs.remove(userIdKey); // Remove the specific user ID
-      print('User ID key "$userIdKey" removed from SharedPreferences.');
-
-      // Clear all routes and navigate to the initial route (which should lead to splash)
-      // Clear all routes and navigate to the initial route (which should lead to splash)
-      // Assuming the initial route is set up correctly in main.dart to go to the splash screen.
-      // Navigate directly to the SplashScreen and remove all previous routes
-      navigator.pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => const SplashScreen()),
-        (Route<dynamic> route) => false, // Remove all routes
-      );
-    } catch (e) {
-      print("Error during logout: $e");
-      // Show an error message if logout fails
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text('Logout failed: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  // --- Close App Function ---
-  void _closeApp() {
-    print("Closing application.");
-    SystemNavigator.pop(); // Closes the app but keeps SharedPreferences intact
-  }
+class AppDrawer extends StatefulWidget {
+  const AppDrawer({Key? key}) : super(key: key);
 
   @override
-  Widget build(BuildContext context) {
-    // Define a primary color, falling back if theme doesn't provide one
-    final Color primaryColor = Theme.of(context).colorScheme.primary ?? Colors.teal;
+  _AppDrawerState createState() => _AppDrawerState();
+}
 
+class _AppDrawerState extends State<AppDrawer> {
+  @override
+  Widget build(BuildContext context) {
     return Drawer(
       child: ListView(
         padding: EdgeInsets.zero,
-        children: <Widget>[
+        children: [
           DrawerHeader(
             decoration: BoxDecoration(
-              color: primaryColor, // Use primary color from theme
+              color: Colors.blue, // Replace with your desired color
             ),
-            child: Text(
-              '$userType Dashboard',
-              style: TextStyle(
-                color: Colors.white, // Ensure text is visible on primary color
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Zinzi',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  'Chef',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                  ),
+                ),
+              ],
             ),
           ),
           ListTile(
-            leading: const Icon(Icons.list_alt_outlined), // Icon for orders
-            title: const Text('View Orders'),
+            leading: const Icon(Icons.food_bank,
+                color:
+                    Colors.blue), // Replace Colors.blue with your desired color
+            title: const Text('Nutri+',
+                style: TextStyle(color: allmeals.kColorTextPrimary)),
             onTap: () {
-              // Simply close the drawer - assumes user is on the main dashboard
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const NutritionPage()),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.home, color: kColorPrimary),
+            title:
+                const Text('Home', style: TextStyle(color: kColorTextPrimary)),
+            onTap: () {
               Navigator.pop(context);
             },
           ),
-          const Divider(), // Visual separator
           ListTile(
-            leading: const Icon(Icons.logout_outlined),
-            title: const Text('Logout'),
-            onTap: () => _logout(context), // Call logout function
+            leading: const Icon(Icons.restaurant, color: kColorPrimary),
+            title:
+                const Text('Meals', style: TextStyle(color: kColorTextPrimary)),
+            onTap: () {
+              Navigator.pop(context);
+            },
           ),
           ListTile(
-            leading: const Icon(Icons.exit_to_app_outlined),
-            title: const Text('Close App'),
-            onTap: _closeApp, // Call close app function
+            leading: const Icon(Icons.shopping_cart, color: kColorPrimary),
+            title: const Text('Orders',
+                style: TextStyle(color: kColorTextPrimary)),
+            onTap: () {
+              Navigator.pop(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.person, color: kColorPrimary),
+            title: const Text('Profile',
+                style: TextStyle(color: kColorTextPrimary)),
+            onTap: () {
+              Navigator.pop(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.analytics, color: kColorPrimary),
+            title: const Text('Analytics',
+                style: TextStyle(color: kColorTextPrimary)),
+            onTap: () {
+              Navigator.pop(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.monetization_on, color: kColorPrimary),
+            title: const Text('Earnings',
+                style: TextStyle(color: kColorTextPrimary)),
+            onTap: () {
+              Navigator.pop(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.help_outline, color: kColorPrimary),
+            title:
+                const Text('Help', style: TextStyle(color: kColorTextPrimary)),
+            onTap: () {
+              Navigator.pop(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.settings, color: kColorPrimary),
+            title: const Text('Settings',
+                style: TextStyle(color: kColorTextPrimary)),
+            onTap: () {
+              Navigator.pop(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.info, color: kColorPrimary),
+            title:
+                const Text('About', style: TextStyle(color: kColorTextPrimary)),
+            onTap: () {
+              Navigator.pop(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.description, color: kColorPrimary),
+            title:
+                const Text('Terms', style: TextStyle(color: kColorTextPrimary)),
+            onTap: () {
+              Navigator.pop(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.lock, color: kColorPrimary),
+            title: const Text('Privacy',
+                style: TextStyle(color: kColorTextPrimary)),
+            onTap: () {
+              Navigator.pop(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.logout, color: kColorPrimary),
+            title: const Text('Logout',
+                style: TextStyle(color: kColorTextPrimary)),
+            onTap: () {
+              Navigator.pop(context);
+            },
           ),
         ],
       ),

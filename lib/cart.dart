@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:zinzi2/checkout.dart'; // Import your checkout screen
 import 'package:zinzi2/widgets/app_drawer.dart'; // Import the AppDrawer
+import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 
 // ***************************************************************
 // *          SINGLE SOURCE OF TRUTH FOR CART & FAVORITES        *
@@ -26,7 +28,7 @@ class ShoppingCart {
     // **** CLARIFICATION: 'bestservedwith' holds the list of *potential* COMPLEMENTARY items. ****
     // These items are associated with the main meal but are NOT added as separate cart items here.
     // The checkout process needs to handle which of these (if any) were actually selected by the user.
-    required List<Map<String, String>> bestservedwith,
+    required List<Map<String, dynamic>> bestservedwith,
   }) {
     const itemType = 'meal';
     final hasChef = selectedchef != null && selectedchef.isNotEmpty;
@@ -71,8 +73,7 @@ class ShoppingCart {
     return List.unmodifiable(items);
   }
 
-  static double getTotal() {
-    if (items.isEmpty) return 0.0;
+  static double get totalPrice {
     return items.fold(0.0, (sum, item) {
       if (item['type'] == 'meal') {
         final price = (item['price'] as num?)?.toDouble() ?? 0.0;
@@ -273,14 +274,15 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
   @override
   Widget build(BuildContext context) {
     final cartItems = ShoppingCart.getItems();
-    final totalAmount = ShoppingCart.getTotal();
+    final totalAmount = ShoppingCart.totalPrice;
 
     print("Building Cart Screen with ${cartItems.length} items.");
 
     return Scaffold(
       drawer: const AppDrawer(),
       appBar: AppBar(
-        title: Text('Shopping Cart (${cartItems.length})'),
+        title: Text('Shopping Cart (${cartItems.length})',
+            style: GoogleFonts.poppins()),
         backgroundColor: Colors.teal[800],
         foregroundColor: Colors.white,
         elevation: 4,
@@ -397,7 +399,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
   }
 
   Widget _buildCheckoutButton(List<Map<String, dynamic>> cartItems) {
-    final totalAmount = ShoppingCart.getTotal();
+    final totalAmount = ShoppingCart.totalPrice;
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
@@ -848,7 +850,10 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => CheckoutScreen(cartItems: cartItems),
+          builder: (context) => CheckoutScreen(
+            items: cartItems,
+            totalPrice: ShoppingCart.totalPrice,
+          ),
         ),
       ).then((_) => _refreshCart());
     }

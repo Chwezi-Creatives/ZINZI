@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:zinzi2/allmeals.dart'; // Assuming this screen exists
-import 'package:zinzi2/cart.dart'; // Import the SHARED cart and favorites
+import 'package:zinzi2/cart.dart'; // Imports the SHARED cart and favorites are also contined within
 import 'package:zinzi2/checkout.dart'; // Assuming this screen exists
 import 'package:zinzi2/useranalytics.dart'; // Assuming this screen exists if needed
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -12,6 +12,7 @@ import 'package:google_fonts/google_fonts.dart'; // For consistent font
 import 'package:zinzi2/widgets/app_drawer.dart'; // Import the AppDrawer
 import 'package:zinzi2/user_cache.dart'; // Import UserCache
 import 'package:zinzi2/cache_config.dart'; // Import CacheConfig
+import 'package:intl/intl.dart';
 
 // Assuming dotenv is initialized elsewhere in your main.dart or similar
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
@@ -88,7 +89,8 @@ class MealDetailScreen extends StatefulWidget {
   static const String _chefsCacheKey = 'chefs_list_cache';
   static const String _chefsCacheTimestampKey = 'chefs_list_cache_timestamp';
   static const String _producersCacheKey = 'producers_list_cache';
-  static const String _producersCacheTimestampKey = 'producers_list_cache_timestamp';
+  static const String _producersCacheTimestampKey =
+      'producers_list_cache_timestamp';
 
   // Load chef cache from UserCache
   static Future<void> loadChefsCacheFromUserCache() async {
@@ -136,12 +138,12 @@ class MealDetailScreen extends StatefulWidget {
   }
 
   // Save producer cache to UserCache
-  static Future<void> saveProducersCacheToUserCache(List<dynamic> producers) async {
+  static Future<void> saveProducersCacheToUserCache(
+      List<dynamic> producers) async {
     await UserCache.saveData(_producersCacheKey, producers);
     await UserCache.saveData(
         _producersCacheTimestampKey, DateTime.now().toIso8601String());
   }
-
 
   @override
   _MealDetailScreenState createState() => _MealDetailScreenState();
@@ -151,24 +153,19 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
   bool _ingredientsExpanded = false;
   bool isFavorite = false;
   bool isChefSelected = true; // Default view to 'Cooked' (Chefs)
-  // --- Caching ---
-  // Static cache variables are now in MealDetailScreen
-  // static List<dynamic> _chefsCache = [];
-  // static DateTime? _chefsCacheTimestamp;
-  // static List<dynamic> _producersCache = [];
-  // static DateTime? _producersCacheTimestamp;
-
-  // static const String _chefsCacheKey = 'chefs_list_cache';
-  // static const String _chefsCacheTimestampKey = 'chefs_list_cache_timestamp';
-  // static const String _producersCacheKey = 'producers_list_cache';
-  // static const String _producersCacheTimestampKey = 'producers_list_cache_timestamp';
-
+  bool _isInCart = false;
+  bool _isBulkOrder = false;
+  DateTime? _planStartDate;
+  DateTime? _planEndDate;
+  String _selectedFrequency = 'daily';
+  int _quantityPerDay = 1;
+  Set<String> _selectedDays = {};
+  Map<String, dynamic>? selectedChef;
+  Map<String, dynamic>? selectedProducer;
   List<dynamic> chefs = [];
   List<dynamic> producers = [];
   bool isLoadingChefs = true;
   bool isLoadingProducers = true;
-  Map<String, dynamic>? selectedChef;
-  Map<String, dynamic>? selectedProducer;
   bool isInCart = false;
   List<bool> complementaryInCartStatus = [];
   bool _isFetchingChefs = false; // Prevent overlapping chef fetches
@@ -204,6 +201,19 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
   @override
   void initState() {
     super.initState();
+    // Ensure bestservedwith is populated for cart logic
+    if (widget.meal['bestservedwith'] == null && widget.meal['Complementary_dishes'] != null) {
+      final dishes = _parseListFromString(widget.meal['Complementary_dishes']);
+      final images = _parseListFromString(widget.meal['complementary_images']);
+      widget.meal['bestservedwith'] = List.generate(
+        dishes.length,
+        (i) => {
+          'name': dishes[i],
+          'price': '0', // Default to 0 if absent
+          'image': images.length > i ? images[i] : '',
+        },
+      );
+    }
     _initializeData();
   }
 
@@ -212,7 +222,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
 
     // --- CRITICAL: Use the imported (shared) Favorites and ShoppingCart ---
     isFavorite = Favorites.isFavorite(mealTitle);
-    var currentItemInCart = ShoppingCart.getItems().firstWhere(
+    var currentItemInCart = ShoppingCart.items.firstWhere(
       (item) => item['title'] == mealTitle,
       orElse: () => {}, // Return an empty map if not found
     );
@@ -255,14 +265,16 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
     setState(() {
       if (MealDetailScreen._chefsCache.isNotEmpty) {
         chefs = MealDetailScreen._chefsCache;
-        isLoadingChefs = false; // Assume not loading initially if cache is present
+        isLoadingChefs =
+            false; // Assume not loading initially if cache is present
       } else {
         isLoadingChefs = true; // Show loading if no cache
       }
 
       if (MealDetailScreen._producersCache.isNotEmpty) {
         producers = MealDetailScreen._producersCache;
-        isLoadingProducers = false; // Assume not loading initially if cache is present
+        isLoadingProducers =
+            false; // Assume not loading initially if cache is present
       } else {
         isLoadingProducers = true; // Show loading if no cache
       }
@@ -297,7 +309,8 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
 
   // --- Fetch Chefs Logic ---
   Future<void> fetchChefs() async {
-    if (_isFetchingChefs || !mounted) return; // Prevent overlapping fetches or running if disposed
+    if (_isFetchingChefs || !mounted)
+      return; // Prevent overlapping fetches or running if disposed
 
     // Only show loading indicator if there's no cached data currently displayed
     if (chefs.isEmpty) {
@@ -347,7 +360,8 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
            setState(() {
              chefs = chefsList;
              MealDetailScreen._chefsCache = chefsList; // Update static cache
-             MealDetailScreen._chefsCacheTimestamp = DateTime.now(); // Update static timestamp
+            MealDetailScreen._chefsCacheTimestamp =
+                DateTime.now(); // Update static timestamp
            });
            // Save to persistent cache
            await MealDetailScreen.saveChefsCacheToUserCache(chefsList);
@@ -361,18 +375,17 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
               });
            }
         }
-
       } else {
         // Handle non-200 status codes
-        print(
-            'Failed to load chefs. Status code: ${response.statusCode}.');
+        print('Failed to load chefs. Status code: ${response.statusCode}.');
         // If no cache was present, show error and set chefs to empty
         if (chefs.isEmpty) {
            setState(() {
               chefs = [];
               isLoadingChefs = false;
            });
-           showCustomSnackBar(context, 'Failed to load chefs. Please try again.');
+          showCustomSnackBar(
+              context, 'Failed to load chefs. Please try again.');
         }
         // If cache was present, just log the error and keep showing cache.
       }
@@ -560,8 +573,10 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
         if (mappedProducers.isNotEmpty) {
            setState(() {
              producers = mappedProducers;
-             MealDetailScreen._producersCache = mappedProducers; // Update static cache
-             MealDetailScreen._producersCacheTimestamp = DateTime.now(); // Update static timestamp
+            MealDetailScreen._producersCache =
+                mappedProducers; // Update static cache
+            MealDetailScreen._producersCacheTimestamp =
+                DateTime.now(); // Update static timestamp
            });
            // Save to persistent cache
            await MealDetailScreen.saveProducersCacheToUserCache(mappedProducers);
@@ -575,18 +590,17 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
               });
            }
         }
-
       } else {
         // Handle non-200 status codes
-        print(
-            'Failed to load producers. Status code: ${response.statusCode}.');
+        print('Failed to load producers. Status code: ${response.statusCode}.');
         // If no cache was present, show error and set producers to empty
         if (producers.isEmpty) {
            setState(() {
               producers = [];
               isLoadingProducers = false;
            });
-           showCustomSnackBar(context, 'Failed to load producers. Please try again.');
+          showCustomSnackBar(
+              context, 'Failed to load producers. Please try again.');
         }
         // If cache was present, just log the error and keep showing cache.
       }
@@ -688,13 +702,28 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
       selectedChef = null; // Deselect chef
       isChefSelected = false; // Update the selection state for UI
 
+      // Collect selected complementaries
+      List<Map<String, String>> selectedComplementaries = [];
+      if (complementaryInCartStatus.isNotEmpty && widget.meal['bestservedwith'] != null) {
+        for (var i = 0; i < complementaryInCartStatus.length; i++) {
+          if (complementaryInCartStatus[i]) {
+            final complementary = widget.meal['bestservedwith'][i];
+            selectedComplementaries.add({
+              'name': complementary['name']?.toString() ?? '',
+              'price': complementary['price']?.toString() ?? '0',
+              'image': complementary['image']?.toString() ?? '',
+            });
+          }
+        }
+      }
       // Always add/update the item. The addItem method in cart.dart handles replacement.
       ShoppingCart.addItem(
         mealTitle,
         price,
         selectedchef: null, // Ensure chef is null
         selectedproducer: selectedProducer, // Pass the newly selected producer
-        meal: widget.meal, bestservedwith: [],
+        meal: widget.meal,
+        bestservedwith: selectedComplementaries, // always pass selected
       );
       isInCart = true; // Ensure cart status reflects the addition/update
     });
@@ -703,90 +732,177 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
     Navigator.pop(context); // Close the bottom sheet after selection
   }
 
-  void _toggleCart(String title) {
-    // Check if a chef or producer is selected *before* toggling cart status for the main item
-    if (selectedChef == null && selectedProducer == null && !isInCart) {
-      // Only prevent adding, allow removal
+  void _toggleCart() {
+    if (_isInCart) {
+      final index = ShoppingCart.getItems()
+          .indexWhere((item) => item['title'] == widget.meal['Meal_name']);
+      if (index != -1) {
+        ShoppingCart.removeItemByIndex(index);
+      }
       showCustomSnackBar(
-          context, 'Please select a Cooked or Fresh option first!');
-      return; // Prevent adding to cart without selection
+          context, '${widget.meal['Meal_name']} removed from cart');
+      } else {
+      if (_isBulkOrder) {
+        // Add bulk order to cart
+        final totalDays = _calculateTotalDays();
+        final totalMeals = _calculateTotalMeals();
+        final totalPrice = _parsePrice(widget.meal['Price']) * totalMeals;
+
+        // Collect selected complementaries
+      List<Map<String, String>> selectedComplementaries = [];
+      if (complementaryInCartStatus.isNotEmpty && widget.meal['bestservedwith'] != null) {
+        for (var i = 0; i < complementaryInCartStatus.length; i++) {
+          if (complementaryInCartStatus[i]) {
+            final complementary = widget.meal['bestservedwith'][i];
+            selectedComplementaries.add({
+              'name': complementary['name']?.toString() ?? '',
+              'price': complementary['price']?.toString() ?? '0',
+              'image': complementary['image']?.toString() ?? '',
+            });
+          }
+        }
+      }
+      ShoppingCart.addItem(
+        widget.meal['Meal_name'],
+        totalPrice,
+        quantity: totalMeals,
+        selectedchef: selectedChef,
+        meal: widget.meal,
+        bestservedwith: selectedComplementaries, // always pass selected
+      );
+
+        showCustomSnackBar(context, 'Bulk order added to cart');
+      } else {
+        // Add single order to cart
+        // Collect selected complementaries
+      List<Map<String, String>> selectedComplementaries = [];
+      if (complementaryInCartStatus.isNotEmpty && widget.meal['bestservedwith'] != null) {
+        for (var i = 0; i < complementaryInCartStatus.length; i++) {
+          if (complementaryInCartStatus[i]) {
+            final complementary = widget.meal['bestservedwith'][i];
+            selectedComplementaries.add({
+              'name': complementary['name']?.toString() ?? '',
+              'price': complementary['price']?.toString() ?? '0',
+              'image': complementary['image']?.toString() ?? '',
+            });
+          }
+        }
+      }
+      ShoppingCart.addItem(
+        widget.meal['Meal_name'],
+        _parsePrice(widget.meal['Price']),
+        quantity: 1,
+        selectedchef: selectedChef,
+        meal: widget.meal,
+        bestservedwith: selectedComplementaries, // always pass selected
+      );
+
+        showCustomSnackBar(
+            context, '${widget.meal['Meal_name']} added to cart');
+      }
+    }
+    setState(() {
+      _isInCart = !_isInCart;
+    });
+  }
+
+  void showCustomSnackBar(BuildContext context, String message) {
+    if (!Navigator.of(context).mounted) return;
+
+    final scaffoldMessenger = ScaffoldMessenger.maybeOf(context);
+    if (scaffoldMessenger == null) {
+      print("Warning: Could not find ScaffoldMessenger to show SnackBar.");
+      return;
     }
 
-    // --- Use the imported (shared) ShoppingCart ---
-    setState(() {
-      if (isInCart) {
-        // Find the index of the item to remove
-        final indexToRemove = ShoppingCart.items.indexWhere(
-            (item) => item['type'] == 'meal' && item['title'] == title);
-        if (indexToRemove != -1) {
-          ShoppingCart.removeItemByIndex(indexToRemove);
-        }
-        isInCart = false;
-        // Clear local selection when removing from cart
-        selectedChef = null;
-        selectedProducer = null;
-        // Optional: Reset isChefSelected to default (e.g., true) if desired
-        isChefSelected = true;
-        showCustomSnackBar(context, '$title removed from cart!');
-      } else {
-        // Add item (chef/producer MUST be selected due to check above)
-        double price = _parsePrice(widget.meal['Price']);
-
-        ShoppingCart.addItem(
-          title,
-          price,
-          selectedchef: selectedChef, // Will be null if producer is selected
-          selectedproducer:
-              selectedProducer, // Will be null if chef is selected
-          meal: widget.meal, bestservedwith: [],
-        );
-        isInCart = true;
-        showCustomSnackBar(context, '$title added to cart!');
-      }
-    });
-    // --- End ShoppingCart ---
+    scaffoldMessenger.hideCurrentSnackBar();
+    final snackBar = SnackBar(
+      content: Text(message, style: TextStyle(color: Color(0xFF212121))),
+      duration: Duration(seconds: 2),
+      behavior: SnackBarBehavior.floating,
+      margin: EdgeInsets.fromLTRB(15, 60, 15, 0),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      backgroundColor: Color(0xFFB2DFDB),
+      action: SnackBarAction(
+        label: 'OK',
+        textColor: Color(0xFF004D40),
+        onPressed: () {
+          scaffoldMessenger.hideCurrentSnackBar();
+        },
+      ),
+    );
+    scaffoldMessenger.showSnackBar(snackBar);
   }
 
   // Simplified complementary item handling - assumes they are added independently
   void _toggleComplementary(String title, int index, String imageUrl) {
-    double complementaryPrice = 2.00; // Example price
-
-    // --- Use the imported (shared) ShoppingCart ---
-    // Check if the complementary item is already in the cart
-    bool isComplementaryInCart =
-        ShoppingCart.getItems().any((item) => item['title'] == title);
-
     setState(() {
-      // Update local state for the checkmark icon
-      complementaryInCartStatus[index] = !isComplementaryInCart;
+      complementaryInCartStatus[index] = !complementaryInCartStatus[index];
 
-      if (isComplementaryInCart) {
-        // Find the index of the complementary item to remove
-        final indexToRemove = ShoppingCart.items.indexWhere(
-            (item) => item['type'] == 'meal' && item['title'] == title);
-        if (indexToRemove != -1) {
-          ShoppingCart.removeItemByIndex(
-              indexToRemove); // Remove from shared cart
+      // Safely get the bestservedwith list
+      final bestServedWithList = widget.meal['bestservedwith'];
+      if (bestServedWithList == null || bestServedWithList is! List) {
+        print('Error: bestservedwith is null or not a List. Value: '
+            '[31m${widget.meal['bestservedwith']}[0m');
+        return;
+      }
+      if (index >= bestServedWithList.length) {
+        print('Error: index $index out of range for bestservedwith length ${bestServedWithList.length}');
+        return;
+      }
+
+      // Create a list of selected complementary items with proper type
+      List<Map<String, dynamic>> selectedComplementaries = [];
+      for (var i = 0; i < complementaryInCartStatus.length; i++) {
+        if (complementaryInCartStatus[i]) {
+          if (i >= bestServedWithList.length) {
+            print('Warning: complementary index $i out of range for bestservedwith');
+            continue;
+          }
+          final complementary = bestServedWithList[i];
+          if (complementary != null) {
+            double price = 0.0;
+            if (complementary['price'] is double) {
+              price = complementary['price'];
+            } else if (complementary['price'] is int) {
+              price = (complementary['price'] as int).toDouble();
+            } else if (complementary['price'] is String) {
+              price = double.tryParse(complementary['price']) ?? 0.0;
+            }
+            selectedComplementaries.add({
+              'name': complementary['name']?.toString() ?? '',
+              'price': price,
+              'image': complementary['image']?.toString() ?? '',
+            });
+          } else {
+            print('Warning: complementary at index $i is null');
+          }
         }
-        showCustomSnackBar(context, '$title removed from cart!');
-      } else {
-        // Add the complementary item as a separate cart entry
-        ShoppingCart.addItem(
-          title,
-          complementaryPrice,
-          // Complementary items don't have chef/producer selected *in this context*
-          // Pass minimal required info, including image for the cart display
-          meal: {
-            'image_link': imageUrl,
-            'meal_name': title,
-            'price': complementaryPrice
-          },
-          bestservedwith: [],
-        ); // Add to shared cart
-        showCustomSnackBar(context, '$title added to cart!');
+      }
+
+      // If item is already in cart, update it with new complementary selections
+      if (isInCart) {
+        final mealTitle = widget.meal['Meal_name'] ?? 'Unknown Meal';
+        var currentItemInCart = ShoppingCart.items.firstWhere(
+          (item) => item['title'] == mealTitle,
+          orElse: () => {},
+        );
+
+        if (currentItemInCart != null && currentItemInCart.isNotEmpty) {
+           ShoppingCart.addItem(
+            mealTitle,
+            widget.meal['Price'] is double
+              ? widget.meal['Price']
+              : double.tryParse(widget.meal['Price'].toString()) ?? 0.0,
+            quantity: currentItemInCart['quantity'] ?? 1,
+             selectedchef: selectedChef,
+             selectedproducer: selectedProducer,
+             meal: widget.meal,
+            bestservedwith: selectedComplementaries,
+          );
+        }
       }
     });
-    // --- End ShoppingCart ---
   }
 
   // --- Utility Methods ---
@@ -842,7 +958,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
     // --- Use imported (shared) ShoppingCart ---
     complementaryInCartStatus = List.generate(complementaries.length, (index) {
       final title = complementaries[index];
-      return ShoppingCart.getItems().any((item) => item['title'] == title);
+      return ShoppingCart.items.any((item) => item['title'] == title);
     });
     // --- End ShoppingCart Check ---
 
@@ -893,7 +1009,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                                builder: (context) => ShoppingCartScreen()))
                       .then((_) => setState(() {
                             var currentItemInCart =
-                                ShoppingCart.getItems().firstWhere(
+                                ShoppingCart.items.firstWhere(
                               (item) => item['title'] == mealTitle,
                               orElse: () => {},
                             );
@@ -912,24 +1028,24 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                             complementaryInCartStatus =
                                 List.generate(complementaries.length, (index) {
                               final title = complementaries[index];
-                              return ShoppingCart.getItems()
+                              return ShoppingCart.items
                                   .any((item) => item['title'] == title);
                             });
                           })),
                 ),
-                if (ShoppingCart.getItems().isNotEmpty)
+                if (ShoppingCart.items.isNotEmpty)
                   Positioned(
                     right: 8,
                     top: 8,
                     child: Container(
-                      padding: EdgeInsets.all(2),
+                      padding: EdgeInsets.all(2.0),
                       decoration: BoxDecoration(
                         color: Colors.red,
                         borderRadius: BorderRadius.circular(10),
                       ),
                       constraints: BoxConstraints(minWidth: 16, minHeight: 16),
                       child: Text(
-                        '${ShoppingCart.getItems().length}',
+                        '${ShoppingCart.items.length}',
                         style: GoogleFonts.poppins(
                             color: Colors.white, fontSize: 10),
                         textAlign: TextAlign.center,
@@ -948,7 +1064,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
             child: SingleChildScrollView(
               physics:
                   const AlwaysScrollableScrollPhysics(), // Ensure scroll even when content fits
-              padding: EdgeInsets.all(_horizontalPadding),
+              padding: EdgeInsets.all(_horizontalPadding.toDouble()),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1071,7 +1187,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                                 iconSize: 30,
                                 padding: EdgeInsets.zero,
                                 constraints: BoxConstraints(),
-                                onPressed: () => _toggleCart(mealTitle),
+                                onPressed: () => _toggleCart(),
                               ),
                             ),
                           ]),
@@ -1185,6 +1301,9 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                   // --- Display Selected Chef/Producer Info ---
                   _buildSelectedOptionCard(),
                   SizedBox(height: _sectionSpacing),
+
+                  // Add meal planning section
+                  _buildMealPlanningSection(),
                 ],
               ),
             ),
@@ -1251,7 +1370,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                     _toggleComplementary(itemTitle, index, displayImageUrl);
                   },
                   child: Container(
-                    width: 110,
+                    width: 110.0,
                     margin: EdgeInsets.only(right: 12),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(_buttonCornerRadius),
@@ -1273,19 +1392,19 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                               top: Radius.circular(_buttonCornerRadius)),
                           child: CachedNetworkImage(
                             imageUrl: displayImageUrl,
-                            width: 110,
-                            height: 75,
+                            width: 110.0,
+                            height: 75.0,
                             fit: BoxFit.cover,
                             placeholder: (context, url) => Container(
-                              height: 75,
+                              height: 75.0,
                               child: Center(
                                   child: CircularProgressIndicator(
                                       strokeWidth: 2, color: kColorPrimary)),
                             ),
                             errorWidget: (context, url, error) => Image.asset(
                                 'assets/images/cover.png',
-                                height: 75,
-                                width: 110,
+                                height: 75.0,
+                                width: 110.0,
                                 fit: BoxFit.cover),
                           ),
                         ),
@@ -1611,225 +1730,491 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
 
    // --- Chef Selection Sheet ---
    Widget _buildChefSelectionSheet() {
-     return Container(
-       padding: EdgeInsets.only(
-         top: 12,
-         left: _horizontalPadding,
-         right: _horizontalPadding,
-         bottom: MediaQuery.of(context).viewInsets.bottom + _verticalPadding,
-       ),
-       constraints:
-           BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
-       decoration: BoxDecoration(
-         color: kBottomSheetBgColor,
-         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-       ),
-       child: Column(
-         mainAxisSize: MainAxisSize.min,
-         crossAxisAlignment: CrossAxisAlignment.start,
-         children: [
-           Row(
-             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+     return StatefulBuilder(
+       builder: (BuildContext context, StateSetter setModalState) {
+         // Filter chefs based on search query within the modal's state
+         final filteredChefs = _chefSearchQuery.isEmpty
+             ? chefs
+             : chefs.where((chef) {
+                 final name = (chef['name']?.toString().toLowerCase() ?? '');
+                final location =
+                    (chef['location']?.toString().toLowerCase() ?? '');
+                 return name.contains(_chefSearchQuery) ||
+                     location.contains(_chefSearchQuery);
+               }).toList();
+
+         return Container(
+           padding: EdgeInsets.only(
+             top: 12,
+             left: _horizontalPadding,
+             right: _horizontalPadding,
+             bottom: MediaQuery.of(context).viewInsets.bottom + _verticalPadding,
+           ),
+          constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.7),
+           decoration: BoxDecoration(
+             color: kBottomSheetBgColor,
+             borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+           ),
+           child: Column(
+             mainAxisSize: MainAxisSize.min,
+             crossAxisAlignment: CrossAxisAlignment.start,
              children: [
-               Text("Select a Chef",
-                   style: GoogleFonts.poppins(
-                       fontSize: 18,
-                       fontWeight: FontWeight.bold,
-                       color: kColorPrimaryDark)),
                Row(
+                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                  children: [
-                   IconButton(
-                     icon: Icon(Icons.search, color: kColorPrimary),
-                     onPressed: () {
-                       showDialog(
-                         context: context,
-                         builder: (context) => AlertDialog(
-                           title: Text('Search Chefs',
-                               style: GoogleFonts.poppins()),
-                           content: TextField(
-                             controller: _chefSearchController,
-                             decoration: InputDecoration(
-                               hintText: 'Search by name or location',
-                               prefixIcon: Icon(Icons.search),
+                   Text("Select a Chef",
+                       style: GoogleFonts.poppins(
+                           fontSize: 18,
+                           fontWeight: FontWeight.bold,
+                           color: kColorPrimaryDark)),
+                   Row(
+                     children: [
+                       IconButton(
+                         icon: Icon(Icons.search, color: kColorPrimary),
+                         onPressed: () {
+                           showDialog(
+                             context: context,
+                             builder: (context) => AlertDialog(
+                               title: Text('Search Chefs',
+                                   style: GoogleFonts.poppins()),
+                               content: TextField(
+                                 controller: _chefSearchController,
+                                 decoration: InputDecoration(
+                                   hintText: 'Search by name or location',
+                                   prefixIcon: Icon(Icons.search),
+                                 ),
+                                 onChanged: (value) {
+                                  setModalState(() {
+                                    // Use setModalState to update the modal's state
+                                     _chefSearchQuery = value.toLowerCase();
+                                   });
+                                 },
+                               ),
+                               actions: [
+                                 TextButton(
+                                   onPressed: () {
+                                     Navigator.pop(context);
+                                     _chefSearchController.clear();
+                                    setModalState(() {
+                                      // Use setModalState
+                                       _chefSearchQuery = '';
+                                     });
+                                   },
+                                   child: Text('Cancel'),
+                                 ),
+                                 TextButton(
+                                   onPressed: () {
+                                     Navigator.pop(context);
+                                   },
+                                   child: Text('Done'),
+                                 ),
+                               ],
                              ),
-                             onChanged: (value) {
-                               setState(() {
-                                 _chefSearchQuery = value.toLowerCase();
+                           );
+                         },
+                       ),
+                       IconButton(
+                         icon: Icon(Icons.refresh, color: kColorPrimary),
+                         onPressed: () {
+                          setModalState(() {
+                            // Use setModalState
+                             isLoadingChefs = true;
+                           });
+                           // Call fetchChefsWithRetry, which will call setState in the parent widget
+                           // and also potentially setModalState if needed within the fetch logic
+                           fetchChefsWithRetry().then((_) {
+                            if (mounted) {
+                              // Check if the parent widget is still mounted
+                              setModalState(() {
+                                // Update modal state after fetch
+                                 isLoadingChefs = false;
                                });
-                             },
-                           ),
-                           actions: [
-                             TextButton(
-                               onPressed: () {
-                                 Navigator.pop(context);
-                                 _chefSearchController.clear();
-                                 setState(() {
-                                   _chefSearchQuery = '';
-                                 });
-                               },
-                               child: Text('Cancel'),
-                             ),
-                             TextButton(
-                               onPressed: () {
-                                 Navigator.pop(context);
-                               },
-                               child: Text('Done'),
-                             ),
-                           ],
-                         ),
-                       );
-                     },
-                   ),
-                   IconButton(
-                     icon: Icon(Icons.refresh, color: kColorPrimary),
-                     onPressed: () {
-                       setState(() {
-                         isLoadingChefs = true;
-                       });
-                       fetchChefsWithRetry();
-                     },
+                             }
+                           });
+                         },
+                       ),
+                     ],
                    ),
                  ],
                ),
+               if (_chefSearchQuery.isNotEmpty)
+                 Padding(
+                   padding: const EdgeInsets.symmetric(vertical: 8.0),
+                   child: Text(
+                     'Searching for: $_chefSearchQuery',
+                     style: GoogleFonts.poppins(
+                         color: kColorTextSecondary, fontSize: 14),
+                   ),
+                 ),
+               Divider(color: kColorDivider),
+               Flexible(
+                 child: isLoadingChefs
+                     ? Center(
+                         key: ValueKey('chef_loading'),
+                         child: CircularProgressIndicator(color: kColorPrimary))
+                     : (filteredChefs.isEmpty // Use filteredChefs here
+                         ? Center(
+                             key: ValueKey('chef_empty'),
+                             child: Text("No chefs available.",
+                                 style: GoogleFonts.poppins(
+                                     color: kColorTextSecondary)))
+                        : _buildChefListWithData(
+                            filteredChefs)), // Pass filtered data
+               ),
              ],
            ),
-           if (_chefSearchQuery.isNotEmpty)
-             Padding(
-               padding: const EdgeInsets.symmetric(vertical: 8.0),
-               child: Text(
-                 'Searching for: $_chefSearchQuery',
-                 style: GoogleFonts.poppins(
-                     color: kColorTextSecondary, fontSize: 14),
+         );
+       },
+     );
+   }
+
+   // Helper method to build the chef list with provided data
+   Widget _buildChefListWithData(List<dynamic> chefsToDisplay) {
+     return ListView.builder(
+       itemCount: chefsToDisplay.length,
+       padding: EdgeInsets.zero,
+       itemBuilder: (context, index) {
+         final chef = chefsToDisplay[index];
+         final chefName = chef['name'] ?? 'Unknown Chef';
+         final chefImage = _formatImageUrl(
+             chef['image'] ?? 'assets/images/placeholderchef.jpeg');
+         final chefRating = (chef['rating'] as double?) ?? 0.0;
+         final chefLocation = chef['location'] ?? 'Unknown Location';
+         final chefId = chef['chefid'];
+
+         final bool isSelected =
+             selectedChef != null && selectedChef!['chefid'] == chefId;
+
+         return Card(
+           elevation: isSelected ? 3.0 : _cardElevation,
+           shape: RoundedRectangleBorder(
+             borderRadius: BorderRadius.circular(_buttonCornerRadius),
+             side: BorderSide(
+                 color: isSelected ? kColorPrimary : kColorDivider,
+                 width: isSelected ? 2.0 : 0.8),
+           ),
+           color: kColorSurface, // No overlay, always white
+           margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
+           child: InkWell(
+             onTap: () => _chooseChef(chef),
+             borderRadius: BorderRadius.circular(_buttonCornerRadius),
+             child: Padding(
+               padding: const EdgeInsets.all(10.0),
+               child: Row(
+                 children: [
+                   ClipOval(
+                     child: CachedNetworkImage(
+                       imageUrl: chefImage,
+                       width: 50,
+                       height: 50,
+                       fit: BoxFit.cover,
+                       placeholder: (context, url) => Container(
+                           width: 50,
+                           height: 50,
+                           child: Center(
+                               child: CircularProgressIndicator(
+                                   strokeWidth: 2, color: kColorPrimary))),
+                       errorWidget: (context, url, error) => Image.asset(
+                           'assets/images/placeholderchef.jpeg',
+                           width: 50,
+                           height: 50,
+                           fit: BoxFit.cover),
+                     ),
+                   ),
+                   const SizedBox(width: 12),
+                   Expanded(
+                     child: Column(
+                       crossAxisAlignment: CrossAxisAlignment.start,
+                       children: [
+                         Text(chefName,
+                             style: GoogleFonts.poppins(
+                                 fontSize: 15,
+                                 fontWeight: FontWeight.bold,
+                                 color: kColorPrimary)),
+                         SizedBox(height: 3),
+                         Row(
+                             children: List.generate(
+                                 5,
+                                 (i) => Icon(
+                                     i < chefRating.round()
+                                         ? Icons.star
+                                         : Icons.star_border,
+                                     color: kColorPrimary, // Always teal
+                                     size: 15))),
+                         SizedBox(height: 3),
+                         Row(
+                           children: [
+                             Icon(Icons.location_on_outlined,
+                                 color: kColorPrimary, size: 13),
+                             SizedBox(width: 4),
+                             Expanded(
+                                 child: Text(getShortLocation(chefLocation),
+                                     style: GoogleFonts.poppins(
+                                         fontSize: 12, color: kColorPrimary),
+                                     overflow: TextOverflow.ellipsis)),
+                           ],
+                         ),
+                       ],
+                     ),
+                   ),
+                   if (isSelected)
+                     Padding(
+                       padding: const EdgeInsets.only(left: 8.0),
+                       child: Icon(Icons.check_circle,
+                           color: Colors.green, size: 28),
+                     ),
+                 ],
                ),
              ),
-           Divider(color: kColorDivider),
-           Flexible(
-             child: isLoadingChefs
-                 ? Center(
-                     key: ValueKey('chef_loading'),
-                     child: CircularProgressIndicator(color: kColorPrimary))
-                 : (chefs.isEmpty
-                     ? Center(
-                         key: ValueKey('chef_empty'),
-                         child: Text("No chefs available.",
-                             style: GoogleFonts.poppins(
-                                 color: kColorTextSecondary)))
-                     : _buildChefList()),
            ),
-         ],
-       ),
+         );
+       },
      );
    }
 
    // --- Producer Selection Sheet ---
    Widget _buildProducerSelectionSheet() {
-     return Container(
-       padding: EdgeInsets.only(
-         top: 12,
-         left: _horizontalPadding,
-         right: _horizontalPadding,
-         bottom: MediaQuery.of(context).viewInsets.bottom + _verticalPadding,
-       ),
-       constraints:
-           BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
-       decoration: BoxDecoration(
-         color: kBottomSheetBgColor,
-         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-       ),
-       child: Column(
-         mainAxisSize: MainAxisSize.min,
-         crossAxisAlignment: CrossAxisAlignment.start,
-         children: [
-           Row(
-             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+     return StatefulBuilder(
+       builder: (BuildContext context, StateSetter setModalState) {
+         // Filter producers based on search query within the modal's state
+         final filteredProducers = _producerSearchQuery.isEmpty
+             ? producers
+             : producers.where((producer) {
+                 final name = (producer['name']?.toString().toLowerCase() ?? '');
+                 final location =
+                     (producer['Location']?.toString().toLowerCase() ?? '');
+                 return name.contains(_producerSearchQuery) ||
+                     location.contains(_producerSearchQuery);
+               }).toList();
+
+         return Container(
+           padding: EdgeInsets.only(
+             top: 12,
+             left: _horizontalPadding,
+             right: _horizontalPadding,
+             bottom: MediaQuery.of(context).viewInsets.bottom + _verticalPadding,
+           ),
+          constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.7),
+           decoration: BoxDecoration(
+             color: kBottomSheetBgColor,
+             borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+           ),
+           child: Column(
+             mainAxisSize: MainAxisSize.min,
+             crossAxisAlignment: CrossAxisAlignment.start,
              children: [
-               Text("Select a Producer",
-                   style: GoogleFonts.poppins(
-                       fontSize: 18,
-                       fontWeight: FontWeight.bold,
-                       color: kColorPrimaryDark)),
                Row(
+                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                  children: [
-                   IconButton(
-                     icon: Icon(Icons.search, color: kColorPrimary),
-                     onPressed: () {
-                       showDialog(
-                         context: context,
-                         builder: (context) => AlertDialog(
-                           title: Text('Search Producers',
-                               style: GoogleFonts.poppins()),
-                           content: TextField(
-                             controller: _producerSearchController,
-                             decoration: InputDecoration(
-                               hintText: 'Search by name or location',
-                               prefixIcon: Icon(Icons.search),
+                   Text("Select a Producer",
+                       style: GoogleFonts.poppins(
+                           fontSize: 18,
+                           fontWeight: FontWeight.bold,
+                           color: kColorPrimaryDark)),
+                   Row(
+                     children: [
+                       IconButton(
+                         icon: Icon(Icons.search, color: kColorPrimary),
+                         onPressed: () {
+                           showDialog(
+                             context: context,
+                             builder: (context) => AlertDialog(
+                               title: Text('Search Producers',
+                                   style: GoogleFonts.poppins()),
+                               content: TextField(
+                                 controller: _producerSearchController,
+                                 decoration: InputDecoration(
+                                   hintText: 'Search by name or location',
+                                   prefixIcon: Icon(Icons.search),
+                                 ),
+                                 onChanged: (value) {
+                                  setModalState(() {
+                                    // Use setModalState
+                                     _producerSearchQuery = value.toLowerCase();
+                                   });
+                                 },
+                               ),
+                               actions: [
+                                 TextButton(
+                                   onPressed: () {
+                                     Navigator.pop(context);
+                                     _producerSearchController.clear();
+                                    setModalState(() {
+                                      // Use setModalState
+                                       _producerSearchQuery = '';
+                                     });
+                                   },
+                                   child: Text('Cancel'),
+                                 ),
+                                 TextButton(
+                                   onPressed: () {
+                                     Navigator.pop(context);
+                                   },
+                                   child: Text('Done'),
+                                 ),
+                               ],
                              ),
-                             onChanged: (value) {
-                               setState(() {
-                                 _producerSearchQuery = value.toLowerCase();
+                           );
+                         },
+                       ),
+                       IconButton(
+                         icon: Icon(Icons.refresh, color: kColorPrimary),
+                         onPressed: () {
+                          setModalState(() {
+                            // Use setModalState
+                             isLoadingProducers = true;
+                           });
+                           // Call fetchProducers, which will call setState in the parent widget
+                           // and also potentially setModalState if needed within the fetch logic
+                           fetchProducers().then((_) {
+                            if (mounted) {
+                              // Check if the parent widget is still mounted
+                              setModalState(() {
+                                // Update modal state after fetch
+                                 isLoadingProducers = false;
                                });
-                             },
-                           ),
-                           actions: [
-                             TextButton(
-                               onPressed: () {
-                                 Navigator.pop(context);
-                                 _producerSearchController.clear();
-                                 setState(() {
-                                   _producerSearchQuery = '';
-                                 });
-                               },
-                               child: Text('Cancel'),
-                             ),
-                             TextButton(
-                               onPressed: () {
-                                 Navigator.pop(context);
-                               },
-                               child: Text('Done'),
-                             ),
-                           ],
-                         ),
-                       );
-                     },
-                   ),
-                   IconButton(
-                     icon: Icon(Icons.refresh, color: kColorPrimary),
-                     onPressed: () {
-                       setState(() {
-                         isLoadingProducers = true;
-                       });
-                       fetchProducers();
-                     },
+                             }
+                           });
+                         },
+                       ),
+                     ],
                    ),
                  ],
                ),
+               if (_producerSearchQuery.isNotEmpty)
+                 Padding(
+                   padding: const EdgeInsets.symmetric(vertical: 8.0),
+                   child: Text(
+                     'Searching for: $_producerSearchQuery',
+                     style: GoogleFonts.poppins(
+                         color: kColorTextSecondary, fontSize: 14),
+                   ),
+                 ),
+               Divider(color: kColorDivider),
+               Flexible(
+                 child: isLoadingProducers
+                     ? Center(
+                         key: ValueKey('producer_loading'),
+                         child: CircularProgressIndicator(color: kColorPrimary))
+                     : (filteredProducers.isEmpty // Use filteredProducers here
+                         ? Center(
+                             key: ValueKey('producer_empty'),
+                             child: Text("No producers available.",
+                                 style: GoogleFonts.poppins(
+                                     color: kColorTextSecondary)))
+                        : _buildProducerListWithData(
+                            filteredProducers)), // Pass filtered data
+               ),
              ],
            ),
-           if (_producerSearchQuery.isNotEmpty)
-             Padding(
-               padding: const EdgeInsets.symmetric(vertical: 8.0),
-               child: Text(
-                 'Searching for: $_producerSearchQuery',
-                 style: GoogleFonts.poppins(
-                     color: kColorTextSecondary, fontSize: 14),
+         );
+       },
+     );
+   }
+
+   // Helper method to build the producer list with provided data
+   Widget _buildProducerListWithData(List<dynamic> producersToDisplay) {
+     return ListView.builder(
+       itemCount: producersToDisplay.length,
+       padding: EdgeInsets.zero,
+       itemBuilder: (context, index) {
+         final producer = producersToDisplay[index];
+         final producerName = producer['name'] ?? 'Unknown Producer';
+         final producerImage = _formatImageUrl(
+             producer['image'] ?? 'assets/images/producerHolder.png');
+         final producerLocation = producer['Location'] ?? 'NA';
+         final producerRating = (producer['Rating'] as double?) ?? 0.0;
+         final producerId = producer['producer_id'];
+
+         final bool isSelected = selectedProducer != null &&
+             selectedProducer!['producer_id'] == producerId;
+
+         return Card(
+           elevation: isSelected ? 3.0 : _cardElevation,
+           shape: RoundedRectangleBorder(
+             borderRadius: BorderRadius.circular(_buttonCornerRadius),
+             side: BorderSide(
+                 color: isSelected ? kColorPrimary : kColorDivider,
+                 width: isSelected ? 2.0 : 0.8),
+           ),
+           color: kColorSurface, // No overlay, always white
+           margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
+           child: InkWell(
+             onTap: () => _chooseProducer(producer),
+             borderRadius: BorderRadius.circular(_buttonCornerRadius),
+             child: Padding(
+               padding: const EdgeInsets.all(10.0),
+               child: Row(
+                 children: [
+                   ClipOval(
+                     child: CachedNetworkImage(
+                       imageUrl: producerImage,
+                       width: 50,
+                       height: 50,
+                       fit: BoxFit.cover,
+                       placeholder: (context, url) => Container(
+                           width: 50,
+                           height: 50,
+                           child: Center(
+                               child: CircularProgressIndicator(
+                                   strokeWidth: 2, color: kColorPrimary))),
+                       errorWidget: (context, url, error) => Image.asset(
+                           'assets/images/producerHolder.png',
+                           width: 50,
+                           height: 50,
+                           fit: BoxFit.cover),
+                     ),
+                   ),
+                   const SizedBox(width: 12),
+                   Expanded(
+                     child: Column(
+                       crossAxisAlignment: CrossAxisAlignment.start,
+                       children: [
+                         Text(producerName,
+                             style: GoogleFonts.poppins(
+                                 fontSize: 15,
+                                 fontWeight: FontWeight.bold,
+                                 color: kColorPrimary)),
+                         SizedBox(height: 3),
+                         Row(
+                             children: List.generate(
+                                 5,
+                                 (i) => Icon(
+                                     i < producerRating.round()
+                                         ? Icons.star
+                                         : Icons.star_border,
+                                     color: kColorPrimary, // Always teal
+                                     size: 15))),
+                         SizedBox(height: 3),
+                         Row(
+                           children: [
+                             Icon(Icons.location_on_outlined,
+                                 color: kColorPrimary, size: 13),
+                             SizedBox(width: 4),
+                             Expanded(
+                                 child: Text(getShortLocation(producerLocation),
+                                     style: GoogleFonts.poppins(
+                                         fontSize: 12, color: kColorPrimary),
+                                     overflow: TextOverflow.ellipsis)),
+                           ],
+                         ),
+                       ],
+                     ),
+                   ),
+                   if (isSelected)
+                     Padding(
+                       padding: const EdgeInsets.only(left: 8.0),
+                       child: Icon(Icons.check_circle,
+                           color: Colors.green, size: 28),
+                     ),
+                 ],
                ),
              ),
-           Divider(color: kColorDivider),
-           Flexible(
-             child: isLoadingProducers
-                 ? Center(
-                     key: ValueKey('producer_loading'),
-                     child: CircularProgressIndicator(color: kColorPrimary))
-                 : (producers.isEmpty
-                     ? Center(
-                         key: ValueKey('producer_empty'),
-                         child: Text("No producers available.",
-                             style: GoogleFonts.poppins(
-                                 color: kColorTextSecondary)))
-                     : _buildProducerList()),
            ),
-         ],
-       ),
+         );
+       },
      );
    }
 
@@ -2174,8 +2559,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
    // --- Bottom Proceed Button ---
    Widget _buildProceedToCartButton(BuildContext context) {
      // --- Use imported (shared) ShoppingCart ---
-     int cartItemCount =
-         ShoppingCart.getItems().length; // Get total items for badge
+    int cartItemCount = ShoppingCart.items.length; // Get total items for badge
      // --- End ShoppingCart ---
 
      return Container(
@@ -2206,10 +2590,9 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                      MaterialPageRoute(
                          builder: (context) =>
                              ShoppingCartScreen())).then((_) => setState(() {
-                       var currentItemInCart =
-                           ShoppingCart.getItems().firstWhere(
+                      var currentItemInCart = ShoppingCart.items.firstWhere(
                          (item) =>
-                             item['title'] == (widget.meal['Meal_name'] ?? ''),
+                             item['title'] == widget.meal['Meal_name'],
                          orElse: () => {},
                        );
                        if (currentItemInCart != null) {
@@ -2229,7 +2612,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                        complementaryInCartStatus =
                            List.generate(complementaries.length, (index) {
                          final title = complementaries[index];
-                         return ShoppingCart.getItems()
+                        return ShoppingCart.items
                              .any((item) => item['title'] == title);
                        });
                      }));
@@ -2250,38 +2633,538 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
      );
    }
 
+  // Add meal planning section widget
+  Widget _buildMealPlanningSection() {
+    return ExpansionTile(
+      title: Text(
+        'Meal Planning',
+        style: GoogleFonts.poppins(
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      children: [
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Date Range Selector
+              ListTile(
+                title: Text(
+                  'Plan Duration',
+                  style: GoogleFonts.poppins(fontSize: 14),
+                ),
+                subtitle: Text(
+                  _planStartDate == null
+                      ? 'Select dates'
+                      : '${DateFormat('MMM d').format(_planStartDate!)} - ${DateFormat('MMM d').format(_planEndDate ?? _planStartDate!)}',
+                  style: GoogleFonts.poppins(fontSize: 12),
+                ),
+                trailing: Icon(Icons.calendar_today),
+                onTap: () async {
+                  final DateTimeRange? dateRange = await showDateRangePicker(
+                    context: context,
+                    firstDate: DateTime.now(),
+                    lastDate: DateTime.now().add(Duration(days: 30)),
+                    builder: (context, child) {
+                      return Theme(
+                        data: Theme.of(context).copyWith(
+                          colorScheme: ColorScheme.light(
+                            primary: kColorPrimary,
+                            onPrimary: Colors.white,
+                            surface: Colors.white,
+                            onSurface: kColorTextPrimary,
+                          ),
+                        ),
+                        child: child!,
+                      );
+                    },
+                  );
+                  if (dateRange != null) {
+                    setState(() {
+                      _planStartDate = dateRange.start;
+                      _planEndDate = dateRange.end;
+                    });
+                  }
+                },
+              ),
+
+              // Frequency Selection
+              ListTile(
+                title: Text(
+                  'Delivery Frequency',
+                  style: GoogleFonts.poppins(fontSize: 14),
+                ),
+                subtitle: DropdownButton<String>(
+                  value: _selectedFrequency,
+                  isExpanded: true,
+                  items: [
+                    DropdownMenuItem(value: 'daily', child: Text('Daily')),
+                    DropdownMenuItem(
+                        value: 'weekdays', child: Text('Weekdays Only')),
+                    DropdownMenuItem(
+                        value: 'custom', child: Text('Select Days')),
+                  ],
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedFrequency = value!;
+                    });
+                  },
+                ),
+              ),
+
+              // Custom Days Selection
+              if (_selectedFrequency == 'custom')
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Wrap(
+                    spacing: 8,
+                    children: [
+                      for (var day in [
+                        DateTime.monday,
+                        DateTime.tuesday,
+                        DateTime.wednesday,
+                        DateTime.thursday,
+                        DateTime.friday,
+                        DateTime.saturday,
+                        DateTime.sunday,
+                      ])
+                        FilterChip(
+                          label: Text(
+                            DateFormat('E').format(DateTime(2024, 1, day)),
+                            style: GoogleFonts.poppins(
+                              color: _selectedDays.contains(DateFormat('E')
+                                      .format(DateTime(2024, 1, day)))
+                                  ? Colors.white
+                                  : kColorTextPrimary,
+                            ),
+                          ),
+                          selected: _selectedDays.contains(
+                              DateFormat('E').format(DateTime(2024, 1, day))),
+                          onSelected: (bool selected) {
+                            setState(() {
+                              if (selected) {
+                                _selectedDays.add(DateFormat('E')
+                                    .format(DateTime(2024, 1, day)));
+                              } else {
+                                _selectedDays.remove(DateFormat('E')
+                                    .format(DateTime(2024, 1, day)));
+                              }
+                            });
+                          },
+                          backgroundColor: Colors.grey[200],
+                          selectedColor: kColorPrimary,
+                        ),
+                    ],
+                  ),
+                ),
+
+              // Quantity per day
+              ListTile(
+                title: Text(
+                  'Quantity per day',
+                  style: GoogleFonts.poppins(fontSize: 14),
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: Icon(Icons.remove_circle_outline),
+                      onPressed: () {
+                        if (_quantityPerDay > 1) {
+                          setState(() => _quantityPerDay--);
+                        }
+                      },
+                    ),
+                    Text('$_quantityPerDay',
+                        style: GoogleFonts.poppins(fontSize: 16)),
+                    IconButton(
+                      icon: Icon(Icons.add_circle_outline),
+                      onPressed: () {
+                        setState(() => _quantityPerDay++);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+
+              // Order Summary
+              if (_planStartDate != null)
+                Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Order Summary',
+                              style: GoogleFonts.poppins(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              )),
+                          SizedBox(height: 8),
+                          _buildSummaryRow(
+                              'Total Days:', _calculateTotalDays()),
+                          _buildSummaryRow(
+                              'Total Meals:', _calculateTotalMeals()),
+                          _buildSummaryRow('Total Cost:',
+                              '\$${(_calculateTotalMeals() * _parsePrice(widget.meal['Price'])).toStringAsFixed(2)}'),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSummaryRow(String label, dynamic value) {
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                color: kColorTextSecondary,
+              )),
+          Text(value.toString(),
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              )),
+        ],
+      ),
+    );
+  }
+
+  int _calculateTotalDays() {
+    if (_planStartDate == null || _planEndDate == null) return 0;
+
+    int days = 0;
+    DateTime current = _planStartDate!;
+
+    while (current.isBefore(_planEndDate!.add(Duration(days: 1)))) {
+      bool includeDay = false;
+
+      switch (_selectedFrequency) {
+        case 'daily':
+          includeDay = true;
+          break;
+        case 'weekdays':
+          includeDay = current.weekday <= 5;
+          break;
+        case 'custom':
+          includeDay = _selectedDays.contains(DateFormat('E')
+              .format(DateTime(2024, 1, current.weekday)));
+          break;
+      }
+
+      if (includeDay) days++;
+      current = current.add(Duration(days: 1));
+    }
+
+    return days;
+  }
+
+  int _calculateTotalMeals() {
+    return _calculateTotalDays() * _quantityPerDay;
+   }
+
    @override
    void dispose() {
      _chefSearchController.dispose();
      _producerSearchController.dispose();
      super.dispose();
    }
- }
 
- // --- Custom SnackBar Utility ---
- void showCustomSnackBar(BuildContext context, String message) {
-   // Check if the widget associated with the context is still mounted
-   if (!Navigator.of(context).mounted) return;
+  void _addToCart() {
+    if (selectedChef == null && selectedProducer == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content:
+              Text('Please select a chef or producer before adding to cart'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
 
-   // Ensure context is associated with a ScaffoldMessenger
-   final scaffoldMessenger = ScaffoldMessenger.maybeOf(context);
-   if (scaffoldMessenger == null) {
-     print("Warning: Could not find ScaffoldMessenger to show SnackBar.");
-     return;
-   }
+    // Create a list of selected complementary items with proper type
+    List<Map<String, dynamic>> selectedComplementaries = [];
+    if (complementaryInCartStatus.isNotEmpty && widget.meal['bestservedwith'] != null) {
+      for (var i = 0; i < complementaryInCartStatus.length; i++) {
+        if (complementaryInCartStatus[i]) {
+          final complementary = widget.meal['bestservedwith'][i];
+          double price = 0.0;
+          if (complementary['price'] is double) {
+            price = complementary['price'];
+          } else if (complementary['price'] is int) {
+            price = (complementary['price'] as int).toDouble();
+          } else if (complementary['price'] is String) {
+            price = double.tryParse(complementary['price']) ?? 0.0;
+          }
+          selectedComplementaries.add({
+            'name': complementary['name']?.toString() ?? '',
+            'price': price,
+            'image': complementary['image']?.toString() ?? '',
+          });
+        }
+      }
+    }
+    // Add main meal to cart with selected complementaries
+    double mainMealPrice = 0.0;
+    try {
+      mainMealPrice = widget.meal['Price'] is double
+          ? widget.meal['Price']
+          : double.tryParse(widget.meal['Price'].toString()) ?? 0.0;
+    } catch (_) {
+      mainMealPrice = 0.0;
+    }
 
-   scaffoldMessenger.hideCurrentSnackBar(); // Hide previous snackbar
+    // Ensure all complementary prices are double
+    for (final comp in selectedComplementaries) {
+      if (comp['price'] != null && comp['price'] is! double) {
+        if (comp['price'] is int) {
+          comp['price'] = (comp['price'] as int).toDouble();
+        } else if (comp['price'] is String) {
+          comp['price'] = double.tryParse(comp['price'].toString()) ?? 0.0;
+        }
+      }
+    }
+
+    ShoppingCart.addItem(
+      widget.meal['Meal_name'],
+      mainMealPrice,
+      quantity: _quantityPerDay,
+      selectedchef: selectedChef,
+      selectedproducer: selectedProducer,
+      meal: widget.meal,
+      bestservedwith: selectedComplementaries.map((e) => e as Map<String, dynamic>).toList(),
+    );
+
+    setState(() {
+      _isInCart = true;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Added to cart successfully'),
+        backgroundColor: Colors.teal[800],
+      ),
+    );
+  }
+
+  Widget _buildChefProducerSelection() {
+    return Card(
+      color: Colors.teal[50],
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(_cardCornerRadius),
+      ),
+      elevation: _cardElevation,
+      child: Padding(
+        padding: EdgeInsets.all(_horizontalPadding.toDouble()),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Select Preparation',
+              style: GoogleFonts.poppins(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: Colors.teal[800],
+              ),
+            ),
+            SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: RadioListTile<bool>(
+                    title: Text('Cooked by Chef', style: GoogleFonts.poppins()),
+                    value: true,
+                    groupValue: isChefSelected,
+                    onChanged: (value) {
+                      setState(() {
+                        isChefSelected = value!;
+                        selectedProducer =
+                            null; // Clear producer when switching to chef
+                      });
+                    },
+                    activeColor: Colors.teal[800],
+                  ),
+                ),
+                Expanded(
+                  child: RadioListTile<bool>(
+                    title: Text('Prepared by Producer',
+                        style: GoogleFonts.poppins()),
+                    value: false,
+                    groupValue: isChefSelected,
+                    onChanged: (value) {
+                      setState(() {
+                        isChefSelected = value!;
+                        selectedChef =
+                            null; // Clear chef when switching to producer
+                      });
+                    },
+                    activeColor: Colors.teal[800],
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 16),
+            if (isChefSelected) ...[
+              _buildChefSearch(),
+              _buildChefList(),
+            ] else ...[
+              _buildProducerSearch(),
+              _buildProducerList(),
+            ],
+            if ((isChefSelected && selectedChef == null) ||
+                (!isChefSelected && selectedProducer == null))
+              Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                  'Please select a ${isChefSelected ? 'chef' : 'producer'}',
+                  style: GoogleFonts.poppins(
+                    color: Colors.red,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildComplementaryMeals() {
+    if (widget.meal['bestservedwith'] == null ||
+        (widget.meal['bestservedwith'] as List).isEmpty) {
+      return SizedBox.shrink();
+    }
+
+    return Card(
+      color: Colors.teal[50],
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(_cardCornerRadius),
+      ),
+      elevation: _cardElevation,
+      child: Padding(
+        padding: EdgeInsets.all(_horizontalPadding.toDouble()),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Complementary Items',
+              style: GoogleFonts.poppins(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: Colors.teal[800],
+              ),
+            ),
+            SizedBox(height: 8),
+            ...List.generate(
+              widget.meal['bestservedwith'].length,
+              (index) {
+                final complementary = widget.meal['bestservedwith'][index];
+                if (complementary == null || complementary is! Map) {
+                  // Defensive: skip null/malformed items
+                  return SizedBox.shrink();
+                }
+                final name = complementary['name']?.toString() ?? 'Unknown';
+                final price = complementary['price']?.toString() ?? '0';
+                return CheckboxListTile(
+                  title: Text(
+                    name,
+                    style: GoogleFonts.poppins(),
+                  ),
+                  subtitle: Text(
+                    '\$${price}',
+                    style: GoogleFonts.poppins(
+                      color: Colors.teal[800],
+                    ),
+                  ),
+                  value: complementaryInCartStatus[index],
+                  onChanged: (value) {
+                    setState(() {
+                      complementaryInCartStatus[index] = value!;
+                    });
+                  },
+                  activeColor: Colors.teal[800],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Add search methods
+  Widget _buildChefSearch() {
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 8),
+      child: TextField(
+        controller: _chefSearchController,
+        decoration: InputDecoration(
+          hintText: 'Search chefs...',
+          prefixIcon: Icon(Icons.search),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+        onChanged: (value) {
+          setState(() {
+            _chefSearchQuery = value.toLowerCase();
+          });
+        },
+      ),
+    );
+  }
+
+  Widget _buildProducerSearch() {
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 8),
+      child: TextField(
+        controller: _producerSearchController,
+        decoration: InputDecoration(
+          hintText: 'Search producers...',
+          prefixIcon: Icon(Icons.search),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+        onChanged: (value) {
+          setState(() {
+            _producerSearchQuery = value.toLowerCase();
+          });
+        },
+      ),
+    );
+  }
+}
+
+// --- Custom SnackBar Utility ---
+void showCustomSnackBar(BuildContext context, String message) {
+  final scaffoldMessenger = ScaffoldMessenger.of(context);
    final snackBar = SnackBar(
-     content: Text(message,
-         style: TextStyle(color: Color(0xFF212121))), // Use explicit color
+    content: Text(message),
      duration: Duration(seconds: 2),
      behavior: SnackBarBehavior.floating,
-     margin: EdgeInsets.fromLTRB(15, 60, 15, 0),
-     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-     backgroundColor: Color(0xFFB2DFDB), // Lighter teal
+    margin: EdgeInsets.all(8),
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(8),
+    ),
+    backgroundColor: Colors.teal[700],
      action: SnackBarAction(
        label: 'OK',
-       textColor: Color(0xFF004D40), // Dark teal
+      textColor: Colors.white,
        onPressed: () {
          scaffoldMessenger.hideCurrentSnackBar();
        },
@@ -2289,6 +3172,3 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
    );
    scaffoldMessenger.showSnackBar(snackBar);
  }
-
- // --- *** DELETED THE DUPLICATE ShoppingCart and Favorites CLASSES *** ---
- // These are now correctly imported from cart.dart

@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:zinzi2/base_login_modular.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/chef_dash8888.dart'; // Ensure this path is correct // Make sure this points to the right dashboard class
-import 'package:zinzi2/chef__dash__latest__uses_mock_data.dart';
+import 'package:zinzi2/chef_dash8888.dart';// Ensure this path is correct // Make sure this points to the right dashboard class
 
 class ChefLoginPageModular extends StatelessWidget {
   const ChefLoginPageModular({Key? key}) : super(key: key);
@@ -35,7 +34,7 @@ class ChefLoginPageModular extends StatelessWidget {
             // Navigate to the Chef Dashboard after saving user details
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (context) => ChefDash88new()),
+              MaterialPageRoute(builder: (context) => ChefDashboardScreen()),
             );
        //   } else {
        //     print(

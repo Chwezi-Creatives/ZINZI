@@ -12,6 +12,10 @@ class CacheConfig {
   static const Duration chefProducerDetailCacheDuration =
       Duration(days: 2); // e.g., 2 days validity
 
+  // --- New for user profile and chef dashboard ---
+  static const Duration userProfileCacheDuration = Duration(days: 2);
+  static const Duration chefDashboardCacheDuration = Duration(days: 1);
+
   // Key prefixes for storing chef/producer data in SharedPreferences
   // We'll append the specific ID to these prefixes, e.g., 'chef_detail_123'
   static const String chefDetailCachePrefix = 'chef_detail_';

@@ -381,7 +381,7 @@ class _ChefSignUpPageBetterNewState extends State<ChefSignUpPageBetterNew> {
         }
 
         _showSnackBar('Chef registration successful!', isError: false);
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => ChefDash88new()));
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => ChefDashboardScreen()));
       } else {
         String errorMessage = 'Failed to submit data.';
         try {

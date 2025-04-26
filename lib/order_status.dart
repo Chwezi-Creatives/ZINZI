@@ -1,0 +1,260 @@
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+
+class OrderStatusScreen extends StatelessWidget {
+  final int userId;
+  final List<int> orderIdList;
+  final int orderId;
+
+  const OrderStatusScreen({
+    Key? key,
+    required this.userId,
+    required this.orderIdList,
+    required this.orderId,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Order Status', style: GoogleFonts.poppins()),
+        backgroundColor: Colors.teal[800],
+      ),
+      body: Padding(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Multiple Orders Section
+            if (orderIdList.length > 1) ...[
+              Text(
+                'Your Orders',
+                style: GoogleFonts.poppins(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              SizedBox(height: 8),
+              Card(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Column(
+                    children: orderIdList
+                        .map((id) => Padding(
+                              padding: EdgeInsets.only(bottom: 8),
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Order #$id',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 16,
+                                      color: id == orderId
+                                          ? Colors.teal[800]
+                                          : Colors.grey[600],
+                                      fontWeight: id == orderId
+                                          ? FontWeight.w600
+                                          : FontWeight.normal,
+                                    ),
+                                  ),
+                                  if (id == orderId)
+                                    Container(
+                                      padding: EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.teal[50],
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        'Current',
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 12,
+                                          color: Colors.teal[800],
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ))
+                        .toList(),
+                  ),
+                ),
+              ),
+              SizedBox(height: 24),
+            ],
+
+            // Current Order Status
+            Text(
+              'Current Order Status',
+              style: GoogleFonts.poppins(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Order ID',
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        Text(
+                          '#$orderId',
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            color: Colors.teal[800],
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 16),
+                    _buildStatusTimeline(),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 24),
+
+            // Estimated Delivery
+            Card(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Estimated Delivery',
+                      style: GoogleFonts.poppins(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      '30-45 minutes',
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 24),
+
+            // Support Button
+            ElevatedButton.icon(
+              onPressed: () {
+                // Implement support contact
+              },
+              icon: Icon(Icons.support_agent),
+              label: Text(
+                'Contact Support',
+                style: GoogleFonts.poppins(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal[800],
+                minimumSize: Size(double.infinity, 50),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusTimeline() {
+    final statuses = [
+      {
+        'id': 'confirmed',
+        'title': 'Order Confirmed',
+        'icon': Icons.check_circle
+      },
+      {'id': 'preparing', 'title': 'Preparing', 'icon': Icons.restaurant},
+      {
+        'id': 'ready',
+        'title': 'Ready for Delivery',
+        'icon': Icons.local_shipping
+      },
+      {'id': 'delivered', 'title': 'Delivered', 'icon': Icons.done_all},
+    ];
+
+    return Column(
+      children: statuses.asMap().entries.map((entry) {
+        final index = entry.key;
+        final statusData = entry.value;
+        final isCompleted = _isStatusCompleted(statusData['id'] as String);
+        final isCurrent =
+            statusData['id'] == 'confirmed'; // Default to confirmed status
+
+        return Column(
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: isCompleted ? Colors.teal[800] : Colors.grey[300],
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    statusData['icon'] as IconData,
+                    color: isCompleted ? Colors.white : Colors.grey[600],
+                  ),
+                ),
+                SizedBox(width: 16),
+                Expanded(
+                  child: Text(
+                    statusData['title'] as String,
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      fontWeight:
+                          isCurrent ? FontWeight.w600 : FontWeight.normal,
+                      color: isCurrent ? Colors.teal[800] : Colors.grey[600],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (index < statuses.length - 1)
+              Padding(
+                padding: EdgeInsets.only(left: 20),
+                child: Container(
+                  width: 2,
+                  height: 30,
+                  color: isCompleted ? Colors.teal[800] : Colors.grey[300],
+                ),
+              ),
+          ],
+        );
+      }).toList(),
+    );
+  }
+
+  bool _isStatusCompleted(String statusId) {
+    final statusOrder = ['confirmed', 'preparing', 'ready', 'delivered'];
+    final currentIndex =
+        statusOrder.indexOf('confirmed'); // Default to confirmed status
+    final statusIndex = statusOrder.indexOf(statusId);
+    return statusIndex <= currentIndex;
+  }
+}

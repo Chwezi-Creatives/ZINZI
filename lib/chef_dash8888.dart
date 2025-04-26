@@ -1295,10 +1295,7 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       // Add the standard drawer
-      drawer: const AppDrawer(
-        userType: 'Chef',
-        userIdKey: 'chef_user_id',
-      ),
+      drawer: const AppDrawer(), 
       appBar: AppBar(
         title: const Text('Chef Dashboard'),
         bottom: TabBar(
