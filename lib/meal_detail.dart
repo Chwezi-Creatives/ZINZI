@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:zinzi2/allmeals.dart'; // Assuming this screen exists
+import 'package:zinzi2/app_drawer_unified.dart'
+    as drawer; // Import unified AppDrawer with prefix
 import 'package:zinzi2/cart.dart'; // Imports the SHARED cart and favorites are also contined within
 import 'package:zinzi2/checkout.dart'; // Assuming this screen exists
 import 'package:zinzi2/useranalytics.dart'; // Assuming this screen exists if needed
@@ -9,7 +11,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'dart:async';
 import 'package:google_fonts/google_fonts.dart'; // For consistent font
-import 'package:zinzi2/widgets/app_drawer.dart'; // Import the AppDrawer
+
 import 'package:zinzi2/user_cache.dart'; // Import UserCache
 import 'package:zinzi2/cache_config.dart'; // Import CacheConfig
 import 'package:intl/intl.dart';
@@ -21,40 +23,13 @@ final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 class ChefData {
   static List<Map<String, dynamic>> chefs = [
     {
-      'image': 'assets/images/kharol.jpg',
-      'name': 'Kharol',
-      'price': 7.0,
-      'rating': 3.0,
-      'location': 'KATWE',
-    },
-    {
-      'image': 'assets/images/dani3.jpg',
-      'name': 'Edgar',
-      'price': 5.0,
-      'rating': 3.0,
-      'location': 'KAMPALA',
-    },
-    {
       'image': 'assets/images/abdul.jpg',
       'name': 'Abdul',
       'price': 5.0,
       'rating': 3.0,
       'location': 'KAMPALA',
     },
-    {
-      'image': 'assets/images/zay.jpg',
-      'name': 'Nick',
-      'price': 45.0,
-      'rating': 5.0,
-      'location': 'NEW YORK',
-    },
-    {
-      'image': 'assets/images/victor.jpg',
-      'name': 'Victor',
-      'price': 5.0,
-      'rating': 3.0,
-      'location': 'KAMPALA',
-    },
+
     {
       'image': 'assets/images/dante.jpg',
       'name': 'Dante',
@@ -106,8 +81,8 @@ class MealDetailScreen extends StatefulWidget {
         _chefsCacheTimestamp = null;
       }
     } else {
-       _chefsCache = [];
-       _chefsCacheTimestamp = null;
+      _chefsCache = [];
+      _chefsCacheTimestamp = null;
     }
   }
 
@@ -132,8 +107,8 @@ class MealDetailScreen extends StatefulWidget {
         _producersCacheTimestamp = null;
       }
     } else {
-       _producersCache = [];
-       _producersCacheTimestamp = null;
+      _producersCache = [];
+      _producersCacheTimestamp = null;
     }
   }
 
@@ -202,7 +177,8 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
   void initState() {
     super.initState();
     // Ensure bestservedwith is populated for cart logic
-    if (widget.meal['bestservedwith'] == null && widget.meal['Complementary_dishes'] != null) {
+    if (widget.meal['bestservedwith'] == null &&
+        widget.meal['Complementary_dishes'] != null) {
       final dishes = _parseListFromString(widget.meal['Complementary_dishes']);
       final images = _parseListFromString(widget.meal['complementary_images']);
       widget.meal['bestservedwith'] = List.generate(
@@ -213,6 +189,14 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
           'image': images.length > i ? images[i] : '',
         },
       );
+    }
+    // Initialize complementaryInCartStatus to match bestservedwith length
+    final bestServedWith = widget.meal['bestservedwith'];
+    if (bestServedWith != null && bestServedWith is List) {
+      complementaryInCartStatus =
+          List<bool>.filled(bestServedWith.length, false);
+    } else {
+      complementaryInCartStatus = [];
     }
     _initializeData();
   }
@@ -239,6 +223,14 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
     }
     // --- End Critical Section ---
 
+    // Ensure complementaryInCartStatus matches bestservedwith length
+    final bestServedWith = widget.meal['bestservedwith'];
+    if (bestServedWith != null && bestServedWith is List) {
+      complementaryInCartStatus =
+          List<bool>.filled(bestServedWith.length, false);
+    } else {
+      complementaryInCartStatus = [];
+    }
     // Load data (respecting cache)
     await _loadData();
   }
@@ -286,8 +278,8 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
       // Do not await, let it run in the background
       fetchChefsWithRetry();
     } else {
-       // If cache is valid and not forcing refresh, ensure loading is off
-       if (mounted) setState(() => isLoadingChefs = false);
+      // If cache is valid and not forcing refresh, ensure loading is off
+      if (mounted) setState(() => isLoadingChefs = false);
     }
 
     if (forceRefresh || !producersCacheValid) {
@@ -295,8 +287,8 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
       // Do not await, let it run in the background
       fetchProducers();
     } else {
-       // If cache is valid and not forcing refresh, ensure loading is off
-       if (mounted) setState(() => isLoadingProducers = false);
+      // If cache is valid and not forcing refresh, ensure loading is off
+      if (mounted) setState(() => isLoadingProducers = false);
     }
   }
 
@@ -357,33 +349,33 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
 
         // Update state and cache if new data is successfully fetched
         if (chefsList.isNotEmpty) {
-           setState(() {
-             chefs = chefsList;
-             MealDetailScreen._chefsCache = chefsList; // Update static cache
+          setState(() {
+            chefs = chefsList;
+            MealDetailScreen._chefsCache = chefsList; // Update static cache
             MealDetailScreen._chefsCacheTimestamp =
                 DateTime.now(); // Update static timestamp
-           });
-           // Save to persistent cache
-           await MealDetailScreen.saveChefsCacheToUserCache(chefsList);
+          });
+          // Save to persistent cache
+          await MealDetailScreen.saveChefsCacheToUserCache(chefsList);
         } else {
-           // If fetch was successful but returned empty list, and no cache was present,
-           // ensure the displayed list is empty and loading is off.
-           if (chefs.isEmpty) {
-              setState(() {
-                 chefs = [];
-                 isLoadingChefs = false;
-              });
-           }
+          // If fetch was successful but returned empty list, and no cache was present,
+          // ensure the displayed list is empty and loading is off.
+          if (chefs.isEmpty) {
+            setState(() {
+              chefs = [];
+              isLoadingChefs = false;
+            });
+          }
         }
       } else {
         // Handle non-200 status codes
         print('Failed to load chefs. Status code: ${response.statusCode}.');
         // If no cache was present, show error and set chefs to empty
         if (chefs.isEmpty) {
-           setState(() {
-              chefs = [];
-              isLoadingChefs = false;
-           });
+          setState(() {
+            chefs = [];
+            isLoadingChefs = false;
+          });
           showCustomSnackBar(
               context, 'Failed to load chefs. Please try again.');
         }
@@ -393,22 +385,22 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
       print('Chef fetch timed out.');
       // If no cache was present, show error and set chefs to empty
       if (chefs.isEmpty) {
-         setState(() {
-            chefs = [];
-            isLoadingChefs = false;
-         });
-         showCustomSnackBar(context, 'Chef request timed out.');
+        setState(() {
+          chefs = [];
+          isLoadingChefs = false;
+        });
+        showCustomSnackBar(context, 'Chef request timed out.');
       }
       // If cache was present, just log the error and keep showing cache.
     } on Exception catch (e) {
       print('Error fetching chefs: $e');
       // If no cache was present, show error and set chefs to empty
       if (chefs.isEmpty) {
-         setState(() {
-            chefs = [];
-            isLoadingChefs = false;
-         });
-         showCustomSnackBar(context, 'Unable to load chefs. An error occurred.');
+        setState(() {
+          chefs = [];
+          isLoadingChefs = false;
+        });
+        showCustomSnackBar(context, 'Unable to load chefs. An error occurred.');
       }
       // If cache was present, just log the error and keep showing cache.
     } finally {
@@ -571,34 +563,34 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
 
         // Update state and cache if new data is successfully fetched
         if (mappedProducers.isNotEmpty) {
-           setState(() {
-             producers = mappedProducers;
+          setState(() {
+            producers = mappedProducers;
             MealDetailScreen._producersCache =
                 mappedProducers; // Update static cache
             MealDetailScreen._producersCacheTimestamp =
                 DateTime.now(); // Update static timestamp
-           });
-           // Save to persistent cache
-           await MealDetailScreen.saveProducersCacheToUserCache(mappedProducers);
+          });
+          // Save to persistent cache
+          await MealDetailScreen.saveProducersCacheToUserCache(mappedProducers);
         } else {
-           // If fetch was successful but returned empty list, and no cache was present,
-           // ensure the displayed list is empty and loading is off.
-           if (producers.isEmpty) {
-              setState(() {
-                 producers = [];
-                 isLoadingProducers = false;
-              });
-           }
+          // If fetch was successful but returned empty list, and no cache was present,
+          // ensure the displayed list is empty and loading is off.
+          if (producers.isEmpty) {
+            setState(() {
+              producers = [];
+              isLoadingProducers = false;
+            });
+          }
         }
       } else {
         // Handle non-200 status codes
         print('Failed to load producers. Status code: ${response.statusCode}.');
         // If no cache was present, show error and set producers to empty
         if (producers.isEmpty) {
-           setState(() {
-              producers = [];
-              isLoadingProducers = false;
-           });
+          setState(() {
+            producers = [];
+            isLoadingProducers = false;
+          });
           showCustomSnackBar(
               context, 'Failed to load producers. Please try again.');
         }
@@ -608,23 +600,23 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
       print('Producer fetch timed out.');
       // If no cache was present, show error and set producers to empty
       if (producers.isEmpty) {
-         setState(() {
-            producers = [];
-            isLoadingProducers = false;
-         });
-         showCustomSnackBar(context, 'Producer request timed out.');
+        setState(() {
+          producers = [];
+          isLoadingProducers = false;
+        });
+        showCustomSnackBar(context, 'Producer request timed out.');
       }
       // If cache was present, just log the error and keep showing cache.
     } catch (e) {
       print('Error fetching producers: $e');
       // If no cache was present, show error and set producers to empty
       if (producers.isEmpty) {
-         setState(() {
-            producers = [];
-            isLoadingProducers = false;
-         });
-         showCustomSnackBar(
-             context, 'Unable to load producers. An error occurred.');
+        setState(() {
+          producers = [];
+          isLoadingProducers = false;
+        });
+        showCustomSnackBar(
+            context, 'Unable to load producers. An error occurred.');
       }
       // If cache was present, just log the error and keep showing cache.
     } finally {
@@ -704,7 +696,8 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
 
       // Collect selected complementaries
       List<Map<String, String>> selectedComplementaries = [];
-      if (complementaryInCartStatus.isNotEmpty && widget.meal['bestservedwith'] != null) {
+      if (complementaryInCartStatus.isNotEmpty &&
+          widget.meal['bestservedwith'] != null) {
         for (var i = 0; i < complementaryInCartStatus.length; i++) {
           if (complementaryInCartStatus[i]) {
             final complementary = widget.meal['bestservedwith'][i];
@@ -741,7 +734,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
       }
       showCustomSnackBar(
           context, '${widget.meal['Meal_name']} removed from cart');
-      } else {
+    } else {
       if (_isBulkOrder) {
         // Add bulk order to cart
         final totalDays = _calculateTotalDays();
@@ -749,53 +742,55 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
         final totalPrice = _parsePrice(widget.meal['Price']) * totalMeals;
 
         // Collect selected complementaries
-      List<Map<String, String>> selectedComplementaries = [];
-      if (complementaryInCartStatus.isNotEmpty && widget.meal['bestservedwith'] != null) {
-        for (var i = 0; i < complementaryInCartStatus.length; i++) {
-          if (complementaryInCartStatus[i]) {
-            final complementary = widget.meal['bestservedwith'][i];
-            selectedComplementaries.add({
-              'name': complementary['name']?.toString() ?? '',
-              'price': complementary['price']?.toString() ?? '0',
-              'image': complementary['image']?.toString() ?? '',
-            });
+        List<Map<String, String>> selectedComplementaries = [];
+        if (complementaryInCartStatus.isNotEmpty &&
+            widget.meal['bestservedwith'] != null) {
+          for (var i = 0; i < complementaryInCartStatus.length; i++) {
+            if (complementaryInCartStatus[i]) {
+              final complementary = widget.meal['bestservedwith'][i];
+              selectedComplementaries.add({
+                'name': complementary['name']?.toString() ?? '',
+                'price': complementary['price']?.toString() ?? '0',
+                'image': complementary['image']?.toString() ?? '',
+              });
+            }
           }
         }
-      }
-      ShoppingCart.addItem(
-        widget.meal['Meal_name'],
-        totalPrice,
-        quantity: totalMeals,
-        selectedchef: selectedChef,
-        meal: widget.meal,
-        bestservedwith: selectedComplementaries, // always pass selected
-      );
+        ShoppingCart.addItem(
+          widget.meal['Meal_name'],
+          totalPrice,
+          quantity: totalMeals,
+          selectedchef: selectedChef,
+          meal: widget.meal,
+          bestservedwith: selectedComplementaries, // always pass selected
+        );
 
         showCustomSnackBar(context, 'Bulk order added to cart');
       } else {
         // Add single order to cart
         // Collect selected complementaries
-      List<Map<String, String>> selectedComplementaries = [];
-      if (complementaryInCartStatus.isNotEmpty && widget.meal['bestservedwith'] != null) {
-        for (var i = 0; i < complementaryInCartStatus.length; i++) {
-          if (complementaryInCartStatus[i]) {
-            final complementary = widget.meal['bestservedwith'][i];
-            selectedComplementaries.add({
-              'name': complementary['name']?.toString() ?? '',
-              'price': complementary['price']?.toString() ?? '0',
-              'image': complementary['image']?.toString() ?? '',
-            });
+        List<Map<String, String>> selectedComplementaries = [];
+        if (complementaryInCartStatus.isNotEmpty &&
+            widget.meal['bestservedwith'] != null) {
+          for (var i = 0; i < complementaryInCartStatus.length; i++) {
+            if (complementaryInCartStatus[i]) {
+              final complementary = widget.meal['bestservedwith'][i];
+              selectedComplementaries.add({
+                'name': complementary['name']?.toString() ?? '',
+                'price': complementary['price']?.toString() ?? '0',
+                'image': complementary['image']?.toString() ?? '',
+              });
+            }
           }
         }
-      }
-      ShoppingCart.addItem(
-        widget.meal['Meal_name'],
-        _parsePrice(widget.meal['Price']),
-        quantity: 1,
-        selectedchef: selectedChef,
-        meal: widget.meal,
-        bestservedwith: selectedComplementaries, // always pass selected
-      );
+        ShoppingCart.addItem(
+          widget.meal['Meal_name'],
+          _parsePrice(widget.meal['Price']),
+          quantity: 1,
+          selectedchef: selectedChef,
+          meal: widget.meal,
+          bestservedwith: selectedComplementaries, // always pass selected
+        );
 
         showCustomSnackBar(
             context, '${widget.meal['Meal_name']} added to cart');
@@ -847,7 +842,8 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
         return;
       }
       if (index >= bestServedWithList.length) {
-        print('Error: index $index out of range for bestservedwith length ${bestServedWithList.length}');
+        print(
+            'Error: index $index out of range for bestservedwith length ${bestServedWithList.length}');
         return;
       }
 
@@ -856,7 +852,8 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
       for (var i = 0; i < complementaryInCartStatus.length; i++) {
         if (complementaryInCartStatus[i]) {
           if (i >= bestServedWithList.length) {
-            print('Warning: complementary index $i out of range for bestservedwith');
+            print(
+                'Warning: complementary index $i out of range for bestservedwith');
             continue;
           }
           final complementary = bestServedWithList[i];
@@ -889,15 +886,15 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
         );
 
         if (currentItemInCart != null && currentItemInCart.isNotEmpty) {
-           ShoppingCart.addItem(
+          ShoppingCart.addItem(
             mealTitle,
             widget.meal['Price'] is double
-              ? widget.meal['Price']
-              : double.tryParse(widget.meal['Price'].toString()) ?? 0.0,
+                ? widget.meal['Price']
+                : double.tryParse(widget.meal['Price'].toString()) ?? 0.0,
             quantity: currentItemInCart['quantity'] ?? 1,
-             selectedchef: selectedChef,
-             selectedproducer: selectedProducer,
-             meal: widget.meal,
+            selectedchef: selectedChef,
+            selectedproducer: selectedProducer,
+            meal: widget.meal,
             bestservedwith: selectedComplementaries,
           );
         }
@@ -956,10 +953,14 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
 
     // Initialize complementaryInCartStatus based on actual cart state (more reliable)
     // --- Use imported (shared) ShoppingCart ---
-    complementaryInCartStatus = List.generate(complementaries.length, (index) {
-      final title = complementaries[index];
-      return ShoppingCart.items.any((item) => item['title'] == title);
-    });
+    final bestServedWith = widget.meal['bestservedwith'] as List? ?? [];
+    complementaryInCartStatus = List.generate(
+      bestServedWith.length,
+      (index) {
+        final title = bestServedWith[index]['name']?.toString() ?? '';
+        return ShoppingCart.items.any((item) => item['title'] == title);
+      },
+    );
     // --- End ShoppingCart Check ---
 
     final String imageUrl = _formatImageUrl(widget.meal['Image_link']);
@@ -979,7 +980,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
     return Theme(
       data: Theme.of(context).copyWith(textTheme: textTheme),
       child: Scaffold(
-        drawer: const AppDrawer(), // Add the drawer here
+        drawer: const drawer.AppDrawer(), // Add the drawer here
         appBar: AppBar(
           title: Text(mealTitle, style: GoogleFonts.poppins()),
           foregroundColor: Colors.white,
@@ -1006,7 +1007,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                   onPressed: () => Navigator.push(
                           context,
                           MaterialPageRoute(
-                               builder: (context) => ShoppingCartScreen()))
+                              builder: (context) => ShoppingCartScreen()))
                       .then((_) => setState(() {
                             var currentItemInCart =
                                 ShoppingCart.items.firstWhere(
@@ -1140,7 +1141,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                                         height: 1.4,
                                         color: kColorTextSecondary)),
                                 SizedBox(height: 8),
-                                Text('Price: \$${price.toStringAsFixed(2)}',
+                                Text('Price: ugx ${price.toStringAsFixed(2)}',
                                     style: GoogleFonts.poppins(
                                         fontSize: 15,
                                         fontWeight: FontWeight.bold,
@@ -1484,1154 +1485,1158 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                 runSpacing: 4.0,
                 children:
                     (_ingredientsExpanded ? ingredients : ingredients.take(6))
-                         .map((ingredient) {
-                   return Chip(
-                     label: Text(ingredient,
-                         style: GoogleFonts.poppins(
-                             color: kColorPrimaryDark,
-                             fontWeight: FontWeight.w500)),
-                     backgroundColor: kColorPrimaryLight.withOpacity(0.2),
-                     padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                     shape: RoundedRectangleBorder(
-                       borderRadius: BorderRadius.circular(8),
-                       side: BorderSide(color: kColorPrimary.withOpacity(0.3)),
-                     ),
-                   );
-                 }).toList(),
-               ),
-               if (ingredients.length > 6) ...[
-                 SizedBox(height: 6),
-                 Center(
-                     child: Icon(
-                         _ingredientsExpanded
-                             ? Icons.expand_less
-                             : Icons.expand_more,
-                         color: kColorPrimary)),
-               ]
-             ],
-           ),
-         ),
-       ),
-     );
-   }
+                        .map((ingredient) {
+                  return Chip(
+                    label: Text(ingredient,
+                        style: GoogleFonts.poppins(
+                            color: kColorPrimaryDark,
+                            fontWeight: FontWeight.w500)),
+                    backgroundColor: kColorPrimaryLight.withOpacity(0.2),
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      side: BorderSide(color: kColorPrimary.withOpacity(0.3)),
+                    ),
+                  );
+                }).toList(),
+              ),
+              if (ingredients.length > 6) ...[
+                SizedBox(height: 6),
+                Center(
+                    child: Icon(
+                        _ingredientsExpanded
+                            ? Icons.expand_less
+                            : Icons.expand_more,
+                        color: kColorPrimary)),
+              ]
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
-   Widget _buildPropertiesSection() {
-     final healthGoal = widget.meal['Goal']?.toString() ?? 'General Health';
-     final List<String> allergens =
-         _parseListFromString(widget.meal['Allergies']);
-     final List<String> diseasesManaged =
-         _parseListFromString(widget.meal['Disease_management']);
+  Widget _buildPropertiesSection() {
+    final healthGoal = widget.meal['Goal']?.toString() ?? 'General Health';
+    final List<String> allergens =
+        _parseListFromString(widget.meal['Allergies']);
+    final List<String> diseasesManaged =
+        _parseListFromString(widget.meal['Disease_management']);
 
-     bool hasHealthGoal =
-         healthGoal != 'General Health' && healthGoal.isNotEmpty;
-     bool hasAllergens = allergens.isNotEmpty;
-     bool hasDiseases = diseasesManaged.isNotEmpty;
+    bool hasHealthGoal =
+        healthGoal != 'General Health' && healthGoal.isNotEmpty;
+    bool hasAllergens = allergens.isNotEmpty;
+    bool hasDiseases = diseasesManaged.isNotEmpty;
 
-     if (!hasHealthGoal && !hasAllergens && !hasDiseases)
-       return SizedBox.shrink();
+    if (!hasHealthGoal && !hasAllergens && !hasDiseases)
+      return SizedBox.shrink();
 
-     return Card(
-       elevation: _cardElevation,
-       margin: EdgeInsets.zero,
-       shape: RoundedRectangleBorder(
-           borderRadius: BorderRadius.circular(_cardCornerRadius)),
-       color: kColorSurface,
-       child: Padding(
-         padding: EdgeInsets.all(_verticalPadding * 0.8),
-         child: Column(
-           crossAxisAlignment: CrossAxisAlignment.start,
-           children: [
-             Text('Health Information',
-                 style: GoogleFonts.poppins(
-                     fontSize: 18,
-                     fontWeight: FontWeight.w600,
-                     color: kColorPrimaryDark)),
-             SizedBox(height: 12),
-             Wrap(
-               spacing: 8.0,
-               runSpacing: 8.0,
-               children: [
-                 if (hasHealthGoal)
-                   _buildPropertyChip(
-                       Icons.track_changes, 'Health Goal', healthGoal),
-                 if (hasAllergens)
-                   _buildPropertyChip(Icons.warning_amber_rounded, 'Allergens',
-                       allergens.join(', ')),
-                 if (hasDiseases)
-                   _buildPropertyChip(Icons.healing, 'Helps Manage',
-                       diseasesManaged.join(', ')),
-               ],
-             ),
-           ],
-         ),
-       ),
-     );
-   }
+    return Card(
+      elevation: _cardElevation,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(_cardCornerRadius)),
+      color: kColorSurface,
+      child: Padding(
+        padding: EdgeInsets.all(_verticalPadding * 0.8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Health Information',
+                style: GoogleFonts.poppins(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: kColorPrimaryDark)),
+            SizedBox(height: 12),
+            Wrap(
+              spacing: 8.0,
+              runSpacing: 8.0,
+              children: [
+                if (hasHealthGoal)
+                  _buildPropertyChip(
+                      Icons.track_changes, 'Health Goal', healthGoal),
+                if (hasAllergens)
+                  _buildPropertyChip(Icons.warning_amber_rounded, 'Allergens',
+                      allergens.join(', ')),
+                if (hasDiseases)
+                  _buildPropertyChip(Icons.healing, 'Helps Manage',
+                      diseasesManaged.join(', ')),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-   Widget _buildPropertyChip(IconData icon, String label, String data) {
-     return ActionChip(
-       avatar: CircleAvatar(
-         backgroundColor: kColorPrimaryLight.withOpacity(0.5),
-         child: Icon(icon, color: kColorPrimaryDark, size: 18),
-       ),
-       label: Text(label,
-           style: GoogleFonts.poppins(
-               color: kColorPrimaryDark, fontWeight: FontWeight.w500)),
-       backgroundColor: kColorPrimaryLight.withOpacity(0.2),
-       onPressed: () {
-         _showPopup(context, label, data);
-       },
-       tooltip: data,
-       shape: RoundedRectangleBorder(
-           borderRadius: BorderRadius.circular(16),
-           side: BorderSide(color: kColorPrimary.withOpacity(0.3))),
-       padding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-     );
-   }
+  Widget _buildPropertyChip(IconData icon, String label, String data) {
+    return ActionChip(
+      avatar: CircleAvatar(
+        backgroundColor: kColorPrimaryLight.withOpacity(0.5),
+        child: Icon(icon, color: kColorPrimaryDark, size: 18),
+      ),
+      label: Text(label,
+          style: GoogleFonts.poppins(
+              color: kColorPrimaryDark, fontWeight: FontWeight.w500)),
+      backgroundColor: kColorPrimaryLight.withOpacity(0.2),
+      onPressed: () {
+        _showPopup(context, label, data);
+      },
+      tooltip: data,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: kColorPrimary.withOpacity(0.3))),
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+  }
 
-   // --- Popup Dialog for Properties ---
-   void _showPopup(BuildContext context, String title, String content) {
-     showDialog(
-       context: context,
-       builder: (context) {
-         return AlertDialog(
-           backgroundColor: Colors.teal[50],
-           shape:
-               RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-           title: Text(title,
-               style: TextStyle(
-                   color: Colors.teal[900], fontWeight: FontWeight.bold)),
-           content: SingleChildScrollView(
-             child: ListBody(
-               children: content
-                   .split(',')
-                   .map((item) => Padding(
-                         padding: const EdgeInsets.symmetric(vertical: 4.0),
-                         child: Text(item.trim(),
-                             style: TextStyle(
-                                 color: Colors.teal[800], fontSize: 15)),
-                       ))
-                   .toList(),
-             ),
-           ),
-           actions: [
-             TextButton(
-               onPressed: () => Navigator.of(context).pop(),
-               child: Text('Close',
-                   style: TextStyle(
-                       color: Colors.teal[700], fontWeight: FontWeight.bold)),
-             ),
-           ],
-         );
-       },
-     );
-   }
+  // --- Popup Dialog for Properties ---
+  void _showPopup(BuildContext context, String title, String content) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: Colors.teal[50],
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          title: Text(title,
+              style: TextStyle(
+                  color: Colors.teal[900], fontWeight: FontWeight.bold)),
+          content: SingleChildScrollView(
+            child: ListBody(
+              children: content
+                  .split(',')
+                  .map((item) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Text(item.trim(),
+                            style: TextStyle(
+                                color: Colors.teal[800], fontSize: 15)),
+                      ))
+                  .toList(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('Close',
+                  style: TextStyle(
+                      color: Colors.teal[700], fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
-   // --- Skill Level & Prep Time Calculation ---
-   double _getSkillLevelValue(String? skillLevel) {
-     skillLevel ??= 'Intermediate';
-     switch (skillLevel.toLowerCase()) {
-       case 'beginner':
-         return 0.25;
-       case 'intermediate':
-         return 0.60;
-       case 'advanced':
-         return 1.0;
-       default:
-         return 0.60;
-     }
-   }
+  // --- Skill Level & Prep Time Calculation ---
+  double _getSkillLevelValue(String? skillLevel) {
+    skillLevel ??= 'Intermediate';
+    switch (skillLevel.toLowerCase()) {
+      case 'beginner':
+        return 0.25;
+      case 'intermediate':
+        return 0.60;
+      case 'advanced':
+        return 1.0;
+      default:
+        return 0.60;
+    }
+  }
 
-   double _getPrepTimeValue(String? prepTimeStr) {
-     prepTimeStr ??= '30';
-     const maxPrepTime = 90.0;
-     int prepMinutes = int.tryParse(prepTimeStr) ?? 30;
-     return (prepMinutes / maxPrepTime).clamp(0.0, 1.0);
-   }
+  double _getPrepTimeValue(String? prepTimeStr) {
+    prepTimeStr ??= '30';
+    const maxPrepTime = 90.0;
+    int prepMinutes = int.tryParse(prepTimeStr) ?? 30;
+    return (prepMinutes / maxPrepTime).clamp(0.0, 1.0);
+  }
 
-   // --- Skill Level & Prep Time Card ---
-   Widget _buildSkillLevelAndPrepTimeCard() {
-     // Use PascalCase keys
-     final skillLevel = widget.meal['Skill_level']?.toString();
-     final prepTime = widget.meal['Prep_time']?.toString();
+  // --- Skill Level & Prep Time Card ---
+  Widget _buildSkillLevelAndPrepTimeCard() {
+    // Use PascalCase keys
+    final skillLevel = widget.meal['Skill_level']?.toString();
+    final prepTime = widget.meal['Prep_time']?.toString();
 
-     if (skillLevel == null && prepTime == null) return SizedBox.shrink();
+    if (skillLevel == null && prepTime == null) return SizedBox.shrink();
 
-     return Card(
-       elevation: _cardElevation,
-       margin: EdgeInsets.zero,
-       shape: RoundedRectangleBorder(
-           borderRadius: BorderRadius.circular(_cardCornerRadius)),
-       color: kColorSurface,
-       child: Padding(
-         padding: EdgeInsets.all(_verticalPadding * 0.8),
-         child: Column(
-           crossAxisAlignment: CrossAxisAlignment.start,
-           children: [
-             Text('Cooking Info',
-                 style: GoogleFonts.poppins(
-                     fontSize: 18,
-                     fontWeight: FontWeight.w600,
-                     color: kColorPrimaryDark)),
-             SizedBox(height: 12),
-             if (skillLevel != null) ...[
-               Row(
-                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                 children: [
-                   Text('Skill Level:',
-                       style: GoogleFonts.poppins(
-                           color: kColorTextSecondary, fontSize: 14)),
-                   Text(skillLevel,
-                       style: GoogleFonts.poppins(
-                           color: kColorTextPrimary,
-                           fontSize: 14,
-                           fontWeight: FontWeight.w500)),
-                 ],
-               ),
-               SizedBox(height: 4),
-               LinearProgressIndicator(
-                 value: _getSkillLevelValue(skillLevel),
-                 color: kColorPrimary,
-                 backgroundColor: kColorDivider,
-                 minHeight: 6,
-                 borderRadius: BorderRadius.circular(3),
-               ),
-               if (prepTime != null) SizedBox(height: 12),
-             ],
-             if (prepTime != null) ...[
-               Row(
-                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                 children: [
-                   Text('Prep Time:',
-                       style: GoogleFonts.poppins(
-                           color: kColorTextSecondary, fontSize: 14)),
-                   Text('$prepTime',
-                       style: GoogleFonts.poppins(
-                           color: kColorTextPrimary,
-                           fontSize: 14,
-                           fontWeight: FontWeight.w500)),
-                 ],
-               ),
-               SizedBox(height: 4),
-               LinearProgressIndicator(
-                 value: _getPrepTimeValue(prepTime),
-                 color: kColorPrimary,
-                 backgroundColor: kColorDivider,
-                 minHeight: 6,
-                 borderRadius: BorderRadius.circular(3),
-               ),
-             ],
-           ],
-         ),
-       ),
-     );
-   }
+    return Card(
+      elevation: _cardElevation,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(_cardCornerRadius)),
+      color: kColorSurface,
+      child: Padding(
+        padding: EdgeInsets.all(_verticalPadding * 0.8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Cooking Info',
+                style: GoogleFonts.poppins(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: kColorPrimaryDark)),
+            SizedBox(height: 12),
+            if (skillLevel != null) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Skill Level:',
+                      style: GoogleFonts.poppins(
+                          color: kColorTextSecondary, fontSize: 14)),
+                  Text(skillLevel,
+                      style: GoogleFonts.poppins(
+                          color: kColorTextPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500)),
+                ],
+              ),
+              SizedBox(height: 4),
+              LinearProgressIndicator(
+                value: _getSkillLevelValue(skillLevel),
+                color: kColorPrimary,
+                backgroundColor: kColorDivider,
+                minHeight: 6,
+                borderRadius: BorderRadius.circular(3),
+              ),
+              if (prepTime != null) SizedBox(height: 12),
+            ],
+            if (prepTime != null) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Prep Time:',
+                      style: GoogleFonts.poppins(
+                          color: kColorTextSecondary, fontSize: 14)),
+                  Text('$prepTime',
+                      style: GoogleFonts.poppins(
+                          color: kColorTextPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500)),
+                ],
+              ),
+              SizedBox(height: 4),
+              LinearProgressIndicator(
+                value: _getPrepTimeValue(prepTime),
+                color: kColorPrimary,
+                backgroundColor: kColorDivider,
+                minHeight: 6,
+                borderRadius: BorderRadius.circular(3),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 
-   // --- Chef Selection Sheet ---
-   Widget _buildChefSelectionSheet() {
-     return StatefulBuilder(
-       builder: (BuildContext context, StateSetter setModalState) {
-         // Filter chefs based on search query within the modal's state
-         final filteredChefs = _chefSearchQuery.isEmpty
-             ? chefs
-             : chefs.where((chef) {
-                 final name = (chef['name']?.toString().toLowerCase() ?? '');
+  // --- Chef Selection Sheet ---
+  Widget _buildChefSelectionSheet() {
+    return StatefulBuilder(
+      builder: (BuildContext context, StateSetter setModalState) {
+        // Filter chefs based on search query within the modal's state
+        final filteredChefs = _chefSearchQuery.isEmpty
+            ? chefs
+            : chefs.where((chef) {
+                final name = (chef['name']?.toString().toLowerCase() ?? '');
                 final location =
                     (chef['location']?.toString().toLowerCase() ?? '');
-                 return name.contains(_chefSearchQuery) ||
-                     location.contains(_chefSearchQuery);
-               }).toList();
+                return name.contains(_chefSearchQuery) ||
+                    location.contains(_chefSearchQuery);
+              }).toList();
 
-         return Container(
-           padding: EdgeInsets.only(
-             top: 12,
-             left: _horizontalPadding,
-             right: _horizontalPadding,
-             bottom: MediaQuery.of(context).viewInsets.bottom + _verticalPadding,
-           ),
+        return Container(
+          padding: EdgeInsets.only(
+            top: 12,
+            left: _horizontalPadding,
+            right: _horizontalPadding,
+            bottom: MediaQuery.of(context).viewInsets.bottom + _verticalPadding,
+          ),
           constraints: BoxConstraints(
               maxHeight: MediaQuery.of(context).size.height * 0.7),
-           decoration: BoxDecoration(
-             color: kBottomSheetBgColor,
-             borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-           ),
-           child: Column(
-             mainAxisSize: MainAxisSize.min,
-             crossAxisAlignment: CrossAxisAlignment.start,
-             children: [
-               Row(
-                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                 children: [
-                   Text("Select a Chef",
-                       style: GoogleFonts.poppins(
-                           fontSize: 18,
-                           fontWeight: FontWeight.bold,
-                           color: kColorPrimaryDark)),
-                   Row(
-                     children: [
-                       IconButton(
-                         icon: Icon(Icons.search, color: kColorPrimary),
-                         onPressed: () {
-                           showDialog(
-                             context: context,
-                             builder: (context) => AlertDialog(
-                               title: Text('Search Chefs',
-                                   style: GoogleFonts.poppins()),
-                               content: TextField(
-                                 controller: _chefSearchController,
-                                 decoration: InputDecoration(
-                                   hintText: 'Search by name or location',
-                                   prefixIcon: Icon(Icons.search),
-                                 ),
-                                 onChanged: (value) {
+          decoration: BoxDecoration(
+            color: kBottomSheetBgColor,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text("Select a Chef",
+                      style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: kColorPrimaryDark)),
+                  Row(
+                    children: [
+                      IconButton(
+                        icon: Icon(Icons.search, color: kColorPrimary),
+                        onPressed: () {
+                          showDialog(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: Text('Search Chefs',
+                                  style: GoogleFonts.poppins()),
+                              content: TextField(
+                                controller: _chefSearchController,
+                                decoration: InputDecoration(
+                                  hintText: 'Search by name or location',
+                                  prefixIcon: Icon(Icons.search),
+                                ),
+                                onChanged: (value) {
                                   setModalState(() {
                                     // Use setModalState to update the modal's state
-                                     _chefSearchQuery = value.toLowerCase();
-                                   });
-                                 },
-                               ),
-                               actions: [
-                                 TextButton(
-                                   onPressed: () {
-                                     Navigator.pop(context);
-                                     _chefSearchController.clear();
+                                    _chefSearchQuery = value.toLowerCase();
+                                  });
+                                },
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                    _chefSearchController.clear();
                                     setModalState(() {
                                       // Use setModalState
-                                       _chefSearchQuery = '';
-                                     });
-                                   },
-                                   child: Text('Cancel'),
-                                 ),
-                                 TextButton(
-                                   onPressed: () {
-                                     Navigator.pop(context);
-                                   },
-                                   child: Text('Done'),
-                                 ),
-                               ],
-                             ),
-                           );
-                         },
-                       ),
-                       IconButton(
-                         icon: Icon(Icons.refresh, color: kColorPrimary),
-                         onPressed: () {
+                                      _chefSearchQuery = '';
+                                    });
+                                  },
+                                  child: Text('Cancel'),
+                                ),
+                                TextButton(
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                  },
+                                  child: Text('Done'),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.refresh, color: kColorPrimary),
+                        onPressed: () {
                           setModalState(() {
                             // Use setModalState
-                             isLoadingChefs = true;
-                           });
-                           // Call fetchChefsWithRetry, which will call setState in the parent widget
-                           // and also potentially setModalState if needed within the fetch logic
-                           fetchChefsWithRetry().then((_) {
+                            isLoadingChefs = true;
+                          });
+                          // Call fetchChefsWithRetry, which will call setState in the parent widget
+                          // and also potentially setModalState if needed within the fetch logic
+                          fetchChefsWithRetry().then((_) {
                             if (mounted) {
                               // Check if the parent widget is still mounted
                               setModalState(() {
                                 // Update modal state after fetch
-                                 isLoadingChefs = false;
-                               });
-                             }
-                           });
-                         },
-                       ),
-                     ],
-                   ),
-                 ],
-               ),
-               if (_chefSearchQuery.isNotEmpty)
-                 Padding(
-                   padding: const EdgeInsets.symmetric(vertical: 8.0),
-                   child: Text(
-                     'Searching for: $_chefSearchQuery',
-                     style: GoogleFonts.poppins(
-                         color: kColorTextSecondary, fontSize: 14),
-                   ),
-                 ),
-               Divider(color: kColorDivider),
-               Flexible(
-                 child: isLoadingChefs
-                     ? Center(
-                         key: ValueKey('chef_loading'),
-                         child: CircularProgressIndicator(color: kColorPrimary))
-                     : (filteredChefs.isEmpty // Use filteredChefs here
-                         ? Center(
-                             key: ValueKey('chef_empty'),
-                             child: Text("No chefs available.",
-                                 style: GoogleFonts.poppins(
-                                     color: kColorTextSecondary)))
+                                isLoadingChefs = false;
+                              });
+                            }
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              if (_chefSearchQuery.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Text(
+                    'Searching for: $_chefSearchQuery',
+                    style: GoogleFonts.poppins(
+                        color: kColorTextSecondary, fontSize: 14),
+                  ),
+                ),
+              Divider(color: kColorDivider),
+              Flexible(
+                child: isLoadingChefs
+                    ? Center(
+                        key: ValueKey('chef_loading'),
+                        child: CircularProgressIndicator(color: kColorPrimary))
+                    : (filteredChefs.isEmpty // Use filteredChefs here
+                        ? Center(
+                            key: ValueKey('chef_empty'),
+                            child: Text("No chefs available.",
+                                style: GoogleFonts.poppins(
+                                    color: kColorTextSecondary)))
                         : _buildChefListWithData(
                             filteredChefs)), // Pass filtered data
-               ),
-             ],
-           ),
-         );
-       },
-     );
-   }
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
-   // Helper method to build the chef list with provided data
-   Widget _buildChefListWithData(List<dynamic> chefsToDisplay) {
-     return ListView.builder(
-       itemCount: chefsToDisplay.length,
-       padding: EdgeInsets.zero,
-       itemBuilder: (context, index) {
-         final chef = chefsToDisplay[index];
-         final chefName = chef['name'] ?? 'Unknown Chef';
-         final chefImage = _formatImageUrl(
-             chef['image'] ?? 'assets/images/placeholderchef.jpeg');
-         final chefRating = (chef['rating'] as double?) ?? 0.0;
-         final chefLocation = chef['location'] ?? 'Unknown Location';
-         final chefId = chef['chefid'];
+  // Helper method to build the chef list with provided data
+  Widget _buildChefListWithData(List<dynamic> chefsToDisplay) {
+    return ListView.builder(
+      itemCount: chefsToDisplay.length,
+      padding: EdgeInsets.zero,
+      itemBuilder: (context, index) {
+        final chef = chefsToDisplay[index];
+        final chefName = chef['name'] ?? 'Unknown Chef';
+        final chefImage = _formatImageUrl(
+            chef['image'] ?? 'assets/images/placeholderchef.jpeg');
+        final chefRating = (chef['rating'] as double?) ?? 0.0;
+        final chefLocation = chef['location'] ?? 'Unknown Location';
+        final chefId = chef['chefid'];
 
-         final bool isSelected =
-             selectedChef != null && selectedChef!['chefid'] == chefId;
+        final bool isSelected =
+            selectedChef != null && selectedChef!['chefid'] == chefId;
 
-         return Card(
-           elevation: isSelected ? 3.0 : _cardElevation,
-           shape: RoundedRectangleBorder(
-             borderRadius: BorderRadius.circular(_buttonCornerRadius),
-             side: BorderSide(
-                 color: isSelected ? kColorPrimary : kColorDivider,
-                 width: isSelected ? 2.0 : 0.8),
-           ),
-           color: kColorSurface, // No overlay, always white
-           margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
-           child: InkWell(
-             onTap: () => _chooseChef(chef),
-             borderRadius: BorderRadius.circular(_buttonCornerRadius),
-             child: Padding(
-               padding: const EdgeInsets.all(10.0),
-               child: Row(
-                 children: [
-                   ClipOval(
-                     child: CachedNetworkImage(
-                       imageUrl: chefImage,
-                       width: 50,
-                       height: 50,
-                       fit: BoxFit.cover,
-                       placeholder: (context, url) => Container(
-                           width: 50,
-                           height: 50,
-                           child: Center(
-                               child: CircularProgressIndicator(
-                                   strokeWidth: 2, color: kColorPrimary))),
-                       errorWidget: (context, url, error) => Image.asset(
-                           'assets/images/placeholderchef.jpeg',
-                           width: 50,
-                           height: 50,
-                           fit: BoxFit.cover),
-                     ),
-                   ),
-                   const SizedBox(width: 12),
-                   Expanded(
-                     child: Column(
-                       crossAxisAlignment: CrossAxisAlignment.start,
-                       children: [
-                         Text(chefName,
-                             style: GoogleFonts.poppins(
-                                 fontSize: 15,
-                                 fontWeight: FontWeight.bold,
-                                 color: kColorPrimary)),
-                         SizedBox(height: 3),
-                         Row(
-                             children: List.generate(
-                                 5,
-                                 (i) => Icon(
-                                     i < chefRating.round()
-                                         ? Icons.star
-                                         : Icons.star_border,
-                                     color: kColorPrimary, // Always teal
-                                     size: 15))),
-                         SizedBox(height: 3),
-                         Row(
-                           children: [
-                             Icon(Icons.location_on_outlined,
-                                 color: kColorPrimary, size: 13),
-                             SizedBox(width: 4),
-                             Expanded(
-                                 child: Text(getShortLocation(chefLocation),
-                                     style: GoogleFonts.poppins(
-                                         fontSize: 12, color: kColorPrimary),
-                                     overflow: TextOverflow.ellipsis)),
-                           ],
-                         ),
-                       ],
-                     ),
-                   ),
-                   if (isSelected)
-                     Padding(
-                       padding: const EdgeInsets.only(left: 8.0),
-                       child: Icon(Icons.check_circle,
-                           color: Colors.green, size: 28),
-                     ),
-                 ],
-               ),
-             ),
-           ),
-         );
-       },
-     );
-   }
+        return Card(
+          elevation: isSelected ? 3.0 : _cardElevation,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(_buttonCornerRadius),
+            side: BorderSide(
+                color: isSelected ? kColorPrimary : kColorDivider,
+                width: isSelected ? 2.0 : 0.8),
+          ),
+          color: kColorSurface, // No overlay, always white
+          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
+          child: InkWell(
+            onTap: () => _chooseChef(chef),
+            borderRadius: BorderRadius.circular(_buttonCornerRadius),
+            child: Padding(
+              padding: const EdgeInsets.all(10.0),
+              child: Row(
+                children: [
+                  ClipOval(
+                    child: CachedNetworkImage(
+                      imageUrl: chefImage,
+                      width: 50,
+                      height: 50,
+                      fit: BoxFit.cover,
+                      placeholder: (context, url) => Container(
+                          width: 50,
+                          height: 50,
+                          child: Center(
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: kColorPrimary))),
+                      errorWidget: (context, url, error) => Image.asset(
+                          'assets/images/placeholderchef.jpeg',
+                          width: 50,
+                          height: 50,
+                          fit: BoxFit.cover),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(chefName,
+                            style: GoogleFonts.poppins(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: kColorPrimary)),
+                        SizedBox(height: 3),
+                        Row(
+                            children: List.generate(
+                                5,
+                                (i) => Icon(
+                                    i < chefRating.round()
+                                        ? Icons.star
+                                        : Icons.star_border,
+                                    color: kColorPrimary, // Always teal
+                                    size: 15))),
+                        SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Icon(Icons.location_on_outlined,
+                                color: kColorPrimary, size: 13),
+                            SizedBox(width: 4),
+                            Expanded(
+                                child: Text(getShortLocation(chefLocation),
+                                    style: GoogleFonts.poppins(
+                                        fontSize: 12, color: kColorPrimary),
+                                    overflow: TextOverflow.ellipsis)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (isSelected)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8.0),
+                      child: Icon(Icons.check_circle,
+                          color: Colors.green, size: 28),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
-   // --- Producer Selection Sheet ---
-   Widget _buildProducerSelectionSheet() {
-     return StatefulBuilder(
-       builder: (BuildContext context, StateSetter setModalState) {
-         // Filter producers based on search query within the modal's state
-         final filteredProducers = _producerSearchQuery.isEmpty
-             ? producers
-             : producers.where((producer) {
-                 final name = (producer['name']?.toString().toLowerCase() ?? '');
-                 final location =
-                     (producer['Location']?.toString().toLowerCase() ?? '');
-                 return name.contains(_producerSearchQuery) ||
-                     location.contains(_producerSearchQuery);
-               }).toList();
+  // --- Producer Selection Sheet ---
+  Widget _buildProducerSelectionSheet() {
+    return StatefulBuilder(
+      builder: (BuildContext context, StateSetter setModalState) {
+        // Filter producers based on search query within the modal's state
+        final filteredProducers = _producerSearchQuery.isEmpty
+            ? producers
+            : producers.where((producer) {
+                final name = (producer['name']?.toString().toLowerCase() ?? '');
+                final location =
+                    (producer['Location']?.toString().toLowerCase() ?? '');
+                return name.contains(_producerSearchQuery) ||
+                    location.contains(_producerSearchQuery);
+              }).toList();
 
-         return Container(
-           padding: EdgeInsets.only(
-             top: 12,
-             left: _horizontalPadding,
-             right: _horizontalPadding,
-             bottom: MediaQuery.of(context).viewInsets.bottom + _verticalPadding,
-           ),
+        return Container(
+          padding: EdgeInsets.only(
+            top: 12,
+            left: _horizontalPadding,
+            right: _horizontalPadding,
+            bottom: MediaQuery.of(context).viewInsets.bottom + _verticalPadding,
+          ),
           constraints: BoxConstraints(
               maxHeight: MediaQuery.of(context).size.height * 0.7),
-           decoration: BoxDecoration(
-             color: kBottomSheetBgColor,
-             borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-           ),
-           child: Column(
-             mainAxisSize: MainAxisSize.min,
-             crossAxisAlignment: CrossAxisAlignment.start,
-             children: [
-               Row(
-                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                 children: [
-                   Text("Select a Producer",
-                       style: GoogleFonts.poppins(
-                           fontSize: 18,
-                           fontWeight: FontWeight.bold,
-                           color: kColorPrimaryDark)),
-                   Row(
-                     children: [
-                       IconButton(
-                         icon: Icon(Icons.search, color: kColorPrimary),
-                         onPressed: () {
-                           showDialog(
-                             context: context,
-                             builder: (context) => AlertDialog(
-                               title: Text('Search Producers',
-                                   style: GoogleFonts.poppins()),
-                               content: TextField(
-                                 controller: _producerSearchController,
-                                 decoration: InputDecoration(
-                                   hintText: 'Search by name or location',
-                                   prefixIcon: Icon(Icons.search),
-                                 ),
-                                 onChanged: (value) {
+          decoration: BoxDecoration(
+            color: kBottomSheetBgColor,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text("Select a Producer",
+                      style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: kColorPrimaryDark)),
+                  Row(
+                    children: [
+                      IconButton(
+                        icon: Icon(Icons.search, color: kColorPrimary),
+                        onPressed: () {
+                          showDialog(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: Text('Search Producers',
+                                  style: GoogleFonts.poppins()),
+                              content: TextField(
+                                controller: _producerSearchController,
+                                decoration: InputDecoration(
+                                  hintText: 'Search by name or location',
+                                  prefixIcon: Icon(Icons.search),
+                                ),
+                                onChanged: (value) {
                                   setModalState(() {
                                     // Use setModalState
-                                     _producerSearchQuery = value.toLowerCase();
-                                   });
-                                 },
-                               ),
-                               actions: [
-                                 TextButton(
-                                   onPressed: () {
-                                     Navigator.pop(context);
-                                     _producerSearchController.clear();
+                                    _producerSearchQuery = value.toLowerCase();
+                                  });
+                                },
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                    _producerSearchController.clear();
                                     setModalState(() {
                                       // Use setModalState
-                                       _producerSearchQuery = '';
-                                     });
-                                   },
-                                   child: Text('Cancel'),
-                                 ),
-                                 TextButton(
-                                   onPressed: () {
-                                     Navigator.pop(context);
-                                   },
-                                   child: Text('Done'),
-                                 ),
-                               ],
-                             ),
-                           );
-                         },
-                       ),
-                       IconButton(
-                         icon: Icon(Icons.refresh, color: kColorPrimary),
-                         onPressed: () {
+                                      _producerSearchQuery = '';
+                                    });
+                                  },
+                                  child: Text('Cancel'),
+                                ),
+                                TextButton(
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                  },
+                                  child: Text('Done'),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.refresh, color: kColorPrimary),
+                        onPressed: () {
                           setModalState(() {
                             // Use setModalState
-                             isLoadingProducers = true;
-                           });
-                           // Call fetchProducers, which will call setState in the parent widget
-                           // and also potentially setModalState if needed within the fetch logic
-                           fetchProducers().then((_) {
+                            isLoadingProducers = true;
+                          });
+                          // Call fetchProducers, which will call setState in the parent widget
+                          // and also potentially setModalState if needed within the fetch logic
+                          fetchProducers().then((_) {
                             if (mounted) {
                               // Check if the parent widget is still mounted
                               setModalState(() {
                                 // Update modal state after fetch
-                                 isLoadingProducers = false;
-                               });
-                             }
-                           });
-                         },
-                       ),
-                     ],
-                   ),
-                 ],
-               ),
-               if (_producerSearchQuery.isNotEmpty)
-                 Padding(
-                   padding: const EdgeInsets.symmetric(vertical: 8.0),
-                   child: Text(
-                     'Searching for: $_producerSearchQuery',
-                     style: GoogleFonts.poppins(
-                         color: kColorTextSecondary, fontSize: 14),
-                   ),
-                 ),
-               Divider(color: kColorDivider),
-               Flexible(
-                 child: isLoadingProducers
-                     ? Center(
-                         key: ValueKey('producer_loading'),
-                         child: CircularProgressIndicator(color: kColorPrimary))
-                     : (filteredProducers.isEmpty // Use filteredProducers here
-                         ? Center(
-                             key: ValueKey('producer_empty'),
-                             child: Text("No producers available.",
-                                 style: GoogleFonts.poppins(
-                                     color: kColorTextSecondary)))
+                                isLoadingProducers = false;
+                              });
+                            }
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              if (_producerSearchQuery.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Text(
+                    'Searching for: $_producerSearchQuery',
+                    style: GoogleFonts.poppins(
+                        color: kColorTextSecondary, fontSize: 14),
+                  ),
+                ),
+              Divider(color: kColorDivider),
+              Flexible(
+                child: isLoadingProducers
+                    ? Center(
+                        key: ValueKey('producer_loading'),
+                        child: CircularProgressIndicator(color: kColorPrimary))
+                    : (filteredProducers.isEmpty // Use filteredProducers here
+                        ? Center(
+                            key: ValueKey('producer_empty'),
+                            child: Text("No producers available.",
+                                style: GoogleFonts.poppins(
+                                    color: kColorTextSecondary)))
                         : _buildProducerListWithData(
                             filteredProducers)), // Pass filtered data
-               ),
-             ],
-           ),
-         );
-       },
-     );
-   }
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
-   // Helper method to build the producer list with provided data
-   Widget _buildProducerListWithData(List<dynamic> producersToDisplay) {
-     return ListView.builder(
-       itemCount: producersToDisplay.length,
-       padding: EdgeInsets.zero,
-       itemBuilder: (context, index) {
-         final producer = producersToDisplay[index];
-         final producerName = producer['name'] ?? 'Unknown Producer';
-         final producerImage = _formatImageUrl(
-             producer['image'] ?? 'assets/images/producerHolder.png');
-         final producerLocation = producer['Location'] ?? 'NA';
-         final producerRating = (producer['Rating'] as double?) ?? 0.0;
-         final producerId = producer['producer_id'];
+  // Helper method to build the producer list with provided data
+  Widget _buildProducerListWithData(List<dynamic> producersToDisplay) {
+    return ListView.builder(
+      itemCount: producersToDisplay.length,
+      padding: EdgeInsets.zero,
+      itemBuilder: (context, index) {
+        final producer = producersToDisplay[index];
+        final producerName = producer['name'] ?? 'Unknown Producer';
+        final producerImage = _formatImageUrl(
+            producer['image'] ?? 'assets/images/producerHolder.png');
+        final producerLocation = producer['Location'] ?? 'NA';
+        final producerRating = (producer['Rating'] as double?) ?? 0.0;
+        final producerId = producer['producer_id'];
 
-         final bool isSelected = selectedProducer != null &&
-             selectedProducer!['producer_id'] == producerId;
+        final bool isSelected = selectedProducer != null &&
+            selectedProducer!['producer_id'] == producerId;
 
-         return Card(
-           elevation: isSelected ? 3.0 : _cardElevation,
-           shape: RoundedRectangleBorder(
-             borderRadius: BorderRadius.circular(_buttonCornerRadius),
-             side: BorderSide(
-                 color: isSelected ? kColorPrimary : kColorDivider,
-                 width: isSelected ? 2.0 : 0.8),
-           ),
-           color: kColorSurface, // No overlay, always white
-           margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
-           child: InkWell(
-             onTap: () => _chooseProducer(producer),
-             borderRadius: BorderRadius.circular(_buttonCornerRadius),
-             child: Padding(
-               padding: const EdgeInsets.all(10.0),
-               child: Row(
-                 children: [
-                   ClipOval(
-                     child: CachedNetworkImage(
-                       imageUrl: producerImage,
-                       width: 50,
-                       height: 50,
-                       fit: BoxFit.cover,
-                       placeholder: (context, url) => Container(
-                           width: 50,
-                           height: 50,
-                           child: Center(
-                               child: CircularProgressIndicator(
-                                   strokeWidth: 2, color: kColorPrimary))),
-                       errorWidget: (context, url, error) => Image.asset(
-                           'assets/images/producerHolder.png',
-                           width: 50,
-                           height: 50,
-                           fit: BoxFit.cover),
-                     ),
-                   ),
-                   const SizedBox(width: 12),
-                   Expanded(
-                     child: Column(
-                       crossAxisAlignment: CrossAxisAlignment.start,
-                       children: [
-                         Text(producerName,
-                             style: GoogleFonts.poppins(
-                                 fontSize: 15,
-                                 fontWeight: FontWeight.bold,
-                                 color: kColorPrimary)),
-                         SizedBox(height: 3),
-                         Row(
-                             children: List.generate(
-                                 5,
-                                 (i) => Icon(
-                                     i < producerRating.round()
-                                         ? Icons.star
-                                         : Icons.star_border,
-                                     color: kColorPrimary, // Always teal
-                                     size: 15))),
-                         SizedBox(height: 3),
-                         Row(
-                           children: [
-                             Icon(Icons.location_on_outlined,
-                                 color: kColorPrimary, size: 13),
-                             SizedBox(width: 4),
-                             Expanded(
-                                 child: Text(getShortLocation(producerLocation),
-                                     style: GoogleFonts.poppins(
-                                         fontSize: 12, color: kColorPrimary),
-                                     overflow: TextOverflow.ellipsis)),
-                           ],
-                         ),
-                       ],
-                     ),
-                   ),
-                   if (isSelected)
-                     Padding(
-                       padding: const EdgeInsets.only(left: 8.0),
-                       child: Icon(Icons.check_circle,
-                           color: Colors.green, size: 28),
-                     ),
-                 ],
-               ),
-             ),
-           ),
-         );
-       },
-     );
-   }
+        return Card(
+          elevation: isSelected ? 3.0 : _cardElevation,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(_buttonCornerRadius),
+            side: BorderSide(
+                color: isSelected ? kColorPrimary : kColorDivider,
+                width: isSelected ? 2.0 : 0.8),
+          ),
+          color: kColorSurface, // No overlay, always white
+          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
+          child: InkWell(
+            onTap: () => _chooseProducer(producer),
+            borderRadius: BorderRadius.circular(_buttonCornerRadius),
+            child: Padding(
+              padding: const EdgeInsets.all(10.0),
+              child: Row(
+                children: [
+                  ClipOval(
+                    child: CachedNetworkImage(
+                      imageUrl: producerImage,
+                      width: 50,
+                      height: 50,
+                      fit: BoxFit.cover,
+                      placeholder: (context, url) => Container(
+                          width: 50,
+                          height: 50,
+                          child: Center(
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: kColorPrimary))),
+                      errorWidget: (context, url, error) => Image.asset(
+                          'assets/images/producerHolder.png',
+                          width: 50,
+                          height: 50,
+                          fit: BoxFit.cover),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(producerName,
+                            style: GoogleFonts.poppins(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: kColorPrimary)),
+                        SizedBox(height: 3),
+                        Row(
+                            children: List.generate(
+                                5,
+                                (i) => Icon(
+                                    i < producerRating.round()
+                                        ? Icons.star
+                                        : Icons.star_border,
+                                    color: kColorPrimary, // Always teal
+                                    size: 15))),
+                        SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Icon(Icons.location_on_outlined,
+                                color: kColorPrimary, size: 13),
+                            SizedBox(width: 4),
+                            Expanded(
+                                child: Text(getShortLocation(producerLocation),
+                                    style: GoogleFonts.poppins(
+                                        fontSize: 12, color: kColorPrimary),
+                                    overflow: TextOverflow.ellipsis)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (isSelected)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8.0),
+                      child: Icon(Icons.check_circle,
+                          color: Colors.green, size: 28),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
-   // --- Chef List Builder (for Bottom Sheet) ---
-   Widget _buildChefList() {
-     // Filter chefs based on search query
-     final filteredChefs = _chefSearchQuery.isEmpty
-         ? chefs
-         : chefs.where((chef) {
-             final name = (chef['name']?.toString().toLowerCase() ?? '');
-             final location = (chef['location']?.toString().toLowerCase() ?? '');
-             return name.contains(_chefSearchQuery) ||
-                 location.contains(_chefSearchQuery);
-           }).toList();
+  // --- Chef List Builder (for Bottom Sheet) ---
+  Widget _buildChefList() {
+    // Filter chefs based on search query
+    final filteredChefs = _chefSearchQuery.isEmpty
+        ? chefs
+        : chefs.where((chef) {
+            final name = (chef['name']?.toString().toLowerCase() ?? '');
+            final location = (chef['location']?.toString().toLowerCase() ?? '');
+            return name.contains(_chefSearchQuery) ||
+                location.contains(_chefSearchQuery);
+          }).toList();
 
-     return ListView.builder(
-       itemCount: filteredChefs.length,
-       padding: EdgeInsets.zero,
-       itemBuilder: (context, index) {
-         final chef = filteredChefs[index];
-         final chefName = chef['name'] ?? 'Unknown Chef';
-         final chefImage = _formatImageUrl(
-             chef['image'] ?? 'assets/images/placeholderchef.jpeg');
-         final chefRating = (chef['rating'] as double?) ?? 0.0;
-         final chefLocation = chef['location'] ?? 'Unknown Location';
-         final chefId = chef['chefid'];
+    return ListView.builder(
+      itemCount: filteredChefs.length,
+      padding: EdgeInsets.zero,
+      itemBuilder: (context, index) {
+        final chef = filteredChefs[index];
+        final chefName = chef['name'] ?? 'Unknown Chef';
+        final chefImage = _formatImageUrl(
+            chef['image'] ?? 'assets/images/placeholderchef.jpeg');
+        final chefRating = (chef['rating'] as double?) ?? 0.0;
+        final chefLocation = chef['location'] ?? 'Unknown Location';
+        final chefId = chef['chefid'];
 
-         final bool isSelected =
-             selectedChef != null && selectedChef!['chefid'] == chefId;
+        final bool isSelected =
+            selectedChef != null && selectedChef!['chefid'] == chefId;
 
-         return Card(
-           elevation: isSelected ? 3.0 : _cardElevation,
-           shape: RoundedRectangleBorder(
-             borderRadius: BorderRadius.circular(_buttonCornerRadius),
-             side: BorderSide(
-                 color: isSelected ? kColorPrimary : kColorDivider,
-                 width: isSelected ? 2.0 : 0.8),
-           ),
-           color: kColorSurface, // No overlay, always white
-           margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
-           child: InkWell(
-             onTap: () => _chooseChef(chef),
-             borderRadius: BorderRadius.circular(_buttonCornerRadius),
-             child: Padding(
-               padding: const EdgeInsets.all(10.0),
-               child: Row(
-                 children: [
-                   ClipOval(
-                     child: CachedNetworkImage(
-                       imageUrl: chefImage,
-                       width: 50,
-                       height: 50,
-                       fit: BoxFit.cover,
-                       placeholder: (context, url) => Container(
-                           width: 50,
-                           height: 50,
-                           child: Center(
-                               child: CircularProgressIndicator(
-                                   strokeWidth: 2, color: kColorPrimary))),
-                       errorWidget: (context, url, error) => Image.asset(
-                           'assets/images/placeholderchef.jpeg',
-                           width: 50,
-                           height: 50,
-                           fit: BoxFit.cover),
-                     ),
-                   ),
-                   const SizedBox(width: 12),
-                   Expanded(
-                     child: Column(
-                       crossAxisAlignment: CrossAxisAlignment.start,
-                       children: [
-                         Text(chefName,
-                             style: GoogleFonts.poppins(
-                                 fontSize: 15,
-                                 fontWeight: FontWeight.bold,
-                                 color: kColorPrimary)),
-                         SizedBox(height: 3),
-                         Row(
-                             children: List.generate(
-                                 5,
-                                 (i) => Icon(
-                                     i < chefRating.round()
-                                         ? Icons.star
-                                         : Icons.star_border,
-                                     color: kColorPrimary, // Always teal
-                                     size: 15))),
-                         SizedBox(height: 3),
-                         Row(
-                           children: [
-                             Icon(Icons.location_on_outlined,
-                                 color: kColorPrimary, size: 13),
-                             SizedBox(width: 4),
-                             Expanded(
-                                 child: Text(getShortLocation(chefLocation),
-                                     style: GoogleFonts.poppins(
-                                         fontSize: 12, color: kColorPrimary),
-                                     overflow: TextOverflow.ellipsis)),
-                           ],
-                         ),
-                       ],
-                     ),
-                   ),
-                   if (isSelected)
-                     Padding(
-                       padding: const EdgeInsets.only(left: 8.0),
-                       child: Icon(Icons.check_circle,
-                           color: Colors.green, size: 28),
-                     ),
-                 ],
-               ),
-             ),
-           ),
-         );
-       },
-     );
-   }
+        return Card(
+          elevation: isSelected ? 3.0 : _cardElevation,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(_buttonCornerRadius),
+            side: BorderSide(
+                color: isSelected ? kColorPrimary : kColorDivider,
+                width: isSelected ? 2.0 : 0.8),
+          ),
+          color: kColorSurface, // No overlay, always white
+          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
+          child: InkWell(
+            onTap: () => _chooseChef(chef),
+            borderRadius: BorderRadius.circular(_buttonCornerRadius),
+            child: Padding(
+              padding: const EdgeInsets.all(10.0),
+              child: Row(
+                children: [
+                  ClipOval(
+                    child: CachedNetworkImage(
+                      imageUrl: chefImage,
+                      width: 50,
+                      height: 50,
+                      fit: BoxFit.cover,
+                      placeholder: (context, url) => Container(
+                          width: 50,
+                          height: 50,
+                          child: Center(
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: kColorPrimary))),
+                      errorWidget: (context, url, error) => Image.asset(
+                          'assets/images/placeholderchef.jpeg',
+                          width: 50,
+                          height: 50,
+                          fit: BoxFit.cover),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(chefName,
+                            style: GoogleFonts.poppins(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: kColorPrimary)),
+                        SizedBox(height: 3),
+                        Row(
+                            children: List.generate(
+                                5,
+                                (i) => Icon(
+                                    i < chefRating.round()
+                                        ? Icons.star
+                                        : Icons.star_border,
+                                    color: kColorPrimary, // Always teal
+                                    size: 15))),
+                        SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Icon(Icons.location_on_outlined,
+                                color: kColorPrimary, size: 13),
+                            SizedBox(width: 4),
+                            Expanded(
+                                child: Text(getShortLocation(chefLocation),
+                                    style: GoogleFonts.poppins(
+                                        fontSize: 12, color: kColorPrimary),
+                                    overflow: TextOverflow.ellipsis)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (isSelected)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8.0),
+                      child: Icon(Icons.check_circle,
+                          color: Colors.green, size: 28),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
-   // --- Producer List Builder (for Bottom Sheet) ---
-   Widget _buildProducerList() {
-     // Filter producers based on search query
-     final filteredProducers = _producerSearchQuery.isEmpty
-         ? producers
-         : producers.where((producer) {
-             final name = (producer['name']?.toString().toLowerCase() ?? '');
-             final location =
-                 (producer['Location']?.toString().toLowerCase() ?? '');
-             return name.contains(_producerSearchQuery) ||
-                 location.contains(_producerSearchQuery);
-           }).toList();
+  // --- Producer List Builder (for Bottom Sheet) ---
+  Widget _buildProducerList() {
+    // Filter producers based on search query
+    final filteredProducers = _producerSearchQuery.isEmpty
+        ? producers
+        : producers.where((producer) {
+            final name = (producer['name']?.toString().toLowerCase() ?? '');
+            final location =
+                (producer['Location']?.toString().toLowerCase() ?? '');
+            return name.contains(_producerSearchQuery) ||
+                location.contains(_producerSearchQuery);
+          }).toList();
 
-     return ListView.builder(
-       itemCount: filteredProducers.length,
-       padding: EdgeInsets.zero,
-       itemBuilder: (context, index) {
-         final producer = filteredProducers[index];
-         final producerName = producer['name'] ?? 'Unknown Producer';
-         final producerImage = _formatImageUrl(
-             producer['image'] ?? 'assets/images/producerHolder.png');
-         final producerLocation = producer['Location'] ?? 'NA';
-         final producerRating = (producer['Rating'] as double?) ?? 0.0;
-         final producerId = producer['producer_id'];
+    return ListView.builder(
+      itemCount: filteredProducers.length,
+      padding: EdgeInsets.zero,
+      itemBuilder: (context, index) {
+        final producer = filteredProducers[index];
+        final producerName = producer['name'] ?? 'Unknown Producer';
+        final producerImage = _formatImageUrl(
+            producer['image'] ?? 'assets/images/producerHolder.png');
+        final producerLocation = producer['Location'] ?? 'NA';
+        final producerRating = (producer['Rating'] as double?) ?? 0.0;
+        final producerId = producer['producer_id'];
 
-         final bool isSelected = selectedProducer != null &&
-             selectedProducer!['producer_id'] == producerId;
+        final bool isSelected = selectedProducer != null &&
+            selectedProducer!['producer_id'] == producerId;
 
-         return Card(
-           elevation: isSelected ? 3.0 : _cardElevation,
-           shape: RoundedRectangleBorder(
-             borderRadius: BorderRadius.circular(_buttonCornerRadius),
-             side: BorderSide(
-                 color: isSelected ? kColorPrimary : kColorDivider,
-                 width: isSelected ? 2.0 : 0.8),
-           ),
-           color: kColorSurface, // No overlay, always white
-           margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
-           child: InkWell(
-             onTap: () => _chooseProducer(producer),
-             borderRadius: BorderRadius.circular(_buttonCornerRadius),
-             child: Padding(
-               padding: const EdgeInsets.all(10.0),
-               child: Row(
-                 children: [
-                   ClipOval(
-                     child: CachedNetworkImage(
-                       imageUrl: producerImage,
-                       width: 50,
-                       height: 50,
-                       fit: BoxFit.cover,
-                       placeholder: (context, url) => Container(
-                           width: 50,
-                           height: 50,
-                           child: Center(
-                               child: CircularProgressIndicator(
-                                   strokeWidth: 2, color: kColorPrimary))),
-                       errorWidget: (context, url, error) => Image.asset(
-                           'assets/images/producerHolder.png',
-                           width: 50,
-                           height: 50,
-                           fit: BoxFit.cover),
-                     ),
-                   ),
-                   const SizedBox(width: 12),
-                   Expanded(
-                     child: Column(
-                       crossAxisAlignment: CrossAxisAlignment.start,
-                       children: [
-                         Text(producerName,
-                             style: GoogleFonts.poppins(
-                                 fontSize: 15,
-                                 fontWeight: FontWeight.bold,
-                                 color: kColorPrimary)),
-                         SizedBox(height: 3),
-                         Row(
-                             children: List.generate(
-                                 5,
-                                 (i) => Icon(
-                                     i < producerRating.round()
-                                         ? Icons.star
-                                         : Icons.star_border,
-                                     color: kColorPrimary, // Always teal
-                                     size: 15))),
-                         SizedBox(height: 3),
-                         Row(
-                           children: [
-                             Icon(Icons.location_on_outlined,
-                                 color: kColorPrimary, size: 13),
-                             SizedBox(width: 4),
-                             Expanded(
-                                 child: Text(getShortLocation(producerLocation),
-                                     style: GoogleFonts.poppins(
-                                         fontSize: 12, color: kColorPrimary),
-                                     overflow: TextOverflow.ellipsis)),
-                           ],
-                         ),
-                       ],
-                     ),
-                   ),
-                   if (isSelected)
-                     Padding(
-                       padding: const EdgeInsets.only(left: 8.0),
-                       child: Icon(Icons.check_circle,
-                           color: Colors.green, size: 28),
-                     ),
-                 ],
-               ),
-             ),
-           ),
-         );
-       },
-     );
-   }
+        return Card(
+          elevation: isSelected ? 3.0 : _cardElevation,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(_buttonCornerRadius),
+            side: BorderSide(
+                color: isSelected ? kColorPrimary : kColorDivider,
+                width: isSelected ? 2.0 : 0.8),
+          ),
+          color: kColorSurface, // No overlay, always white
+          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
+          child: InkWell(
+            onTap: () => _chooseProducer(producer),
+            borderRadius: BorderRadius.circular(_buttonCornerRadius),
+            child: Padding(
+              padding: const EdgeInsets.all(10.0),
+              child: Row(
+                children: [
+                  ClipOval(
+                    child: CachedNetworkImage(
+                      imageUrl: producerImage,
+                      width: 50,
+                      height: 50,
+                      fit: BoxFit.cover,
+                      placeholder: (context, url) => Container(
+                          width: 50,
+                          height: 50,
+                          child: Center(
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: kColorPrimary))),
+                      errorWidget: (context, url, error) => Image.asset(
+                          'assets/images/producerHolder.png',
+                          width: 50,
+                          height: 50,
+                          fit: BoxFit.cover),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(producerName,
+                            style: GoogleFonts.poppins(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: kColorPrimary)),
+                        SizedBox(height: 3),
+                        Row(
+                            children: List.generate(
+                                5,
+                                (i) => Icon(
+                                    i < producerRating.round()
+                                        ? Icons.star
+                                        : Icons.star_border,
+                                    color: kColorPrimary, // Always teal
+                                    size: 15))),
+                        SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Icon(Icons.location_on_outlined,
+                                color: kColorPrimary, size: 13),
+                            SizedBox(width: 4),
+                            Expanded(
+                                child: Text(getShortLocation(producerLocation),
+                                    style: GoogleFonts.poppins(
+                                        fontSize: 12, color: kColorPrimary),
+                                    overflow: TextOverflow.ellipsis)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (isSelected)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8.0),
+                      child: Icon(Icons.check_circle,
+                          color: Colors.green, size: 28),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
-   // --- Widget to display currently selected Chef/Producer ---
-   Widget _buildSelectedOptionCard() {
-     if (selectedChef == null && selectedProducer == null) {
-       return SizedBox.shrink(); // Don't show anything if nothing is selected
-     }
+  // --- Widget to display currently selected Chef/Producer ---
+  Widget _buildSelectedOptionCard() {
+    if (selectedChef == null && selectedProducer == null) {
+      return SizedBox.shrink(); // Don't show anything if nothing is selected
+    }
 
-     final bool isChef = selectedChef != null;
-     final data = isChef ? selectedChef! : selectedProducer!;
-     final name = data['name'] ?? 'Unknown';
-     final image = _formatImageUrl(data['image'] ??
-         (isChef
-             ? 'assets/images/placeholderchef.jpeg'
-             : 'assets/images/producerHolder.png'));
-     final location = getShortLocation(data[isChef ? 'location' : 'Location'] ??
-         'Unknown Location'); // Use correct location key
-     final rating = (data[isChef ? 'rating' : 'Rating'] as double?) ??
-         0.0; // Use correct rating key
-     final typeLabel = isChef ? 'Selected Chef' : 'Selected Producer';
+    final bool isChef = selectedChef != null;
+    final data = isChef ? selectedChef! : selectedProducer!;
+    final name = data['name'] ?? 'Unknown';
+    final image = _formatImageUrl(data['image'] ??
+        (isChef
+            ? 'assets/images/placeholderchef.jpeg'
+            : 'assets/images/producerHolder.png'));
+    final location = getShortLocation(data[isChef ? 'location' : 'Location'] ??
+        'Unknown Location'); // Use correct location key
+    final rating = (data[isChef ? 'rating' : 'Rating'] as double?) ??
+        0.0; // Use correct rating key
+    final typeLabel = isChef ? 'Selected Chef' : 'Selected Producer';
 
-     return Card(
-       elevation: 2,
-       margin: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-       shape: RoundedRectangleBorder(
-         borderRadius: BorderRadius.circular(12),
-         side: BorderSide(color: Colors.teal.withOpacity(0.5), width: 1),
-       ),
-       color: Colors.teal[50], // Light teal background
-       child: Padding(
-         padding: const EdgeInsets.all(12.0),
-         child: Column(
-           crossAxisAlignment: CrossAxisAlignment.start,
-           children: [
-             Text(typeLabel,
-                 style: TextStyle(
-                     fontSize: 14,
-                     color: Colors.grey[600],
-                     fontWeight: FontWeight.w500)),
-             SizedBox(height: 8),
-             Row(
-               children: [
-                 ClipOval(
-                   child: CachedNetworkImage(
-                     imageUrl: image,
-                     width: 45,
-                     height: 45,
-                     fit: BoxFit.cover,
-                     placeholder: (context, url) => Container(
-                         width: 45,
-                         height: 45,
-                         child: Center(
-                             child: CircularProgressIndicator(
-                                 strokeWidth: 2, color: Colors.teal))),
-                     errorWidget: (context, url, error) => Image.asset(
-                         isChef
-                             ? 'assets/images/placeholderchef.jpeg'
-                             : 'assets/images/producerHolder.png',
-                         width: 45,
-                         height: 45,
-                         fit: BoxFit.cover),
-                   ),
-                 ),
-                 const SizedBox(width: 10),
-                 Expanded(
-                   child: Column(
-                     crossAxisAlignment: CrossAxisAlignment.start,
-                     children: [
-                       Text(name,
-                           style: TextStyle(
-                               fontSize: 16,
-                               fontWeight: FontWeight.bold,
-                               color: Colors.teal[900])),
-                       SizedBox(height: 2),
-                       Row(
-                           children: List.generate(
-                               5,
-                               (i) => Icon(
-                                   i < rating.round()
-                                       ? Icons.star
-                                       : Icons.star_border,
-                                   color: i < rating.round()
-                                       ? Colors.teal
-                                       : Colors.grey,
-                                   size: 14))),
-                       SizedBox(height: 2),
-                       Row(
-                         children: [
-                           Icon(Icons.location_on,
-                               color: Colors.grey[600], size: 12),
-                           SizedBox(width: 3),
-                           Expanded(
-                               child: Text(location,
-                                   style: TextStyle(
-                                       fontSize: 12, color: Colors.grey[700]),
-                                   overflow: TextOverflow.ellipsis)),
-                         ],
-                       ),
-                     ],
-                   ),
-                 ),
-                 // Optional: Add a 'Change' button? Or rely on the main buttons.
-                 // TextButton(onPressed: () { /* show sheet again */ }, child: Text("Change"))
-               ],
-             ),
-           ],
-         ),
-       ),
-     );
-   }
+    return Card(
+      elevation: 2,
+      margin: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.teal.withOpacity(0.5), width: 1),
+      ),
+      color: Colors.teal[50], // Light teal background
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(typeLabel,
+                style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500)),
+            SizedBox(height: 8),
+            Row(
+              children: [
+                ClipOval(
+                  child: CachedNetworkImage(
+                    imageUrl: image,
+                    width: 45,
+                    height: 45,
+                    fit: BoxFit.cover,
+                    placeholder: (context, url) => Container(
+                        width: 45,
+                        height: 45,
+                        child: Center(
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.teal))),
+                    errorWidget: (context, url, error) => Image.asset(
+                        isChef
+                            ? 'assets/images/placeholderchef.jpeg'
+                            : 'assets/images/producerHolder.png',
+                        width: 45,
+                        height: 45,
+                        fit: BoxFit.cover),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(name,
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.teal[900])),
+                      SizedBox(height: 2),
+                      Row(
+                          children: List.generate(
+                              5,
+                              (i) => Icon(
+                                  i < rating.round()
+                                      ? Icons.star
+                                      : Icons.star_border,
+                                  color: i < rating.round()
+                                      ? Colors.teal
+                                      : Colors.grey,
+                                  size: 14))),
+                      SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Icon(Icons.location_on,
+                              color: Colors.grey[600], size: 12),
+                          SizedBox(width: 3),
+                          Expanded(
+                              child: Text(location,
+                                  style: TextStyle(
+                                      fontSize: 12, color: Colors.grey[700]),
+                                  overflow: TextOverflow.ellipsis)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                // Optional: Add a 'Change' button? Or rely on the main buttons.
+                // TextButton(onPressed: () { /* show sheet again */ }, child: Text("Change"))
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-   // --- Bottom Proceed Button ---
-   Widget _buildProceedToCartButton(BuildContext context) {
-     // --- Use imported (shared) ShoppingCart ---
+  // --- Bottom Proceed Button ---
+  Widget _buildProceedToCartButton(BuildContext context) {
+    // --- Use imported (shared) ShoppingCart ---
     int cartItemCount = ShoppingCart.items.length; // Get total items for badge
-     // --- End ShoppingCart ---
+    // --- End ShoppingCart ---
 
-     return Container(
-       padding: EdgeInsets.fromLTRB(
-           _horizontalPadding, 10.0, _horizontalPadding, _verticalPadding),
-       decoration: BoxDecoration(
-         color: kColorSurface,
-         boxShadow: [
-           BoxShadow(
-               color: Colors.black.withOpacity(0.08),
-               spreadRadius: 0,
-               blurRadius: 4,
-               offset: Offset(0, -1))
-         ],
-       ),
-       child: ElevatedButton.icon(
-         icon: Badge(
-           label: Text('$cartItemCount'),
-           isLabelVisible: cartItemCount > 0,
-           backgroundColor: Colors.red,
-           child: Icon(Icons.shopping_cart_checkout),
-         ),
-         label: Text('Proceed to Cart', style: GoogleFonts.poppins()),
-         onPressed: cartItemCount > 0
-             ? () {
-                 Navigator.push(
-                     context,
-                     MaterialPageRoute(
-                         builder: (context) =>
-                             ShoppingCartScreen())).then((_) => setState(() {
-                      var currentItemInCart = ShoppingCart.items.firstWhere(
-                         (item) =>
-                             item['title'] == widget.meal['Meal_name'],
-                         orElse: () => {},
-                       );
-                       if (currentItemInCart != null) {
-                         isInCart = true;
-                         selectedChef = currentItemInCart['selectedchef'];
-                         selectedProducer =
-                             currentItemInCart['selectedproducer'];
-                         isChefSelected = selectedProducer == null;
-                       } else {
-                         isInCart = false;
-                         selectedChef = null;
-                         selectedProducer = null;
-                         isChefSelected = true;
-                       }
-                       final complementaries = _parseListFromString(
-                           widget.meal['Complementary_dishes']);
-                       complementaryInCartStatus =
-                           List.generate(complementaries.length, (index) {
-                         final title = complementaries[index];
-                        return ShoppingCart.items
-                             .any((item) => item['title'] == title);
-                       });
-                     }));
-               }
-             : null,
-         style: ElevatedButton.styleFrom(
-           backgroundColor:
-               cartItemCount > 0 ? kColorPrimaryDark : Colors.grey.shade400,
-           foregroundColor: kColorSurface,
-           padding: EdgeInsets.symmetric(vertical: 14),
-           textStyle:
-               GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold),
-           shape: RoundedRectangleBorder(
-               borderRadius: BorderRadius.circular(_buttonCornerRadius)),
-           minimumSize: Size(double.infinity, 50),
-         ),
-       ),
-     );
-   }
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+          _horizontalPadding, 10.0, _horizontalPadding, _verticalPadding),
+      decoration: BoxDecoration(
+        color: kColorSurface,
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              spreadRadius: 0,
+              blurRadius: 4,
+              offset: Offset(0, -1))
+        ],
+      ),
+      child: ElevatedButton.icon(
+        icon: Badge(
+          label: Text('$cartItemCount'),
+          isLabelVisible: cartItemCount > 0,
+          backgroundColor: Colors.red,
+          child: Icon(Icons.shopping_cart_checkout),
+        ),
+        label: Text('Proceed to Cart', style: GoogleFonts.poppins()),
+        onPressed: cartItemCount > 0
+            ? () {
+                Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (context) => ShoppingCartScreen()))
+                    .then((_) => setState(() {
+                          var currentItemInCart = ShoppingCart.items.firstWhere(
+                            (item) => item['title'] == widget.meal['Meal_name'],
+                            orElse: () => {},
+                          );
+                          if (currentItemInCart != null) {
+                            isInCart = true;
+                            selectedChef = currentItemInCart['selectedchef'];
+                            selectedProducer =
+                                currentItemInCart['selectedproducer'];
+                            isChefSelected = selectedProducer == null;
+                          } else {
+                            isInCart = false;
+                            selectedChef = null;
+                            selectedProducer = null;
+                            isChefSelected = true;
+                          }
+                          complementaryInCartStatus = List.generate(
+                              widget.meal['Complementary_dishes'] != null
+                                  ? _parseListFromString(
+                                          widget.meal['Complementary_dishes'])
+                                      .length
+                                  : 0, (index) {
+                            final title = widget.meal['bestservedwith'][index]
+                                        ['name']
+                                    ?.toString() ??
+                                '';
+                            return ShoppingCart.items
+                                .any((item) => item['title'] == title);
+                          });
+                        }));
+              }
+            : null,
+        style: ElevatedButton.styleFrom(
+          backgroundColor:
+              cartItemCount > 0 ? kColorPrimaryDark : Colors.grey.shade400,
+          foregroundColor: kColorSurface,
+          padding: EdgeInsets.symmetric(vertical: 14),
+          textStyle:
+              GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(_buttonCornerRadius)),
+          minimumSize: Size(double.infinity, 50),
+        ),
+      ),
+    );
+  }
 
   // Add meal planning section widget
   Widget _buildMealPlanningSection() {
@@ -2810,7 +2815,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                           _buildSummaryRow(
                               'Total Meals:', _calculateTotalMeals()),
                           _buildSummaryRow('Total Cost:',
-                              '\$${(_calculateTotalMeals() * _parsePrice(widget.meal['Price'])).toStringAsFixed(2)}'),
+                              'ugx ${(_calculateTotalMeals() * _parsePrice(widget.meal['Price'])).toStringAsFixed(2)}'),
                         ],
                       ),
                     ),
@@ -2861,8 +2866,8 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
           includeDay = current.weekday <= 5;
           break;
         case 'custom':
-          includeDay = _selectedDays.contains(DateFormat('E')
-              .format(DateTime(2024, 1, current.weekday)));
+          includeDay = _selectedDays.contains(
+              DateFormat('E').format(DateTime(2024, 1, current.weekday)));
           break;
       }
 
@@ -2875,14 +2880,14 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
 
   int _calculateTotalMeals() {
     return _calculateTotalDays() * _quantityPerDay;
-   }
+  }
 
-   @override
-   void dispose() {
-     _chefSearchController.dispose();
-     _producerSearchController.dispose();
-     super.dispose();
-   }
+  @override
+  void dispose() {
+    _chefSearchController.dispose();
+    _producerSearchController.dispose();
+    super.dispose();
+  }
 
   void _addToCart() {
     if (selectedChef == null && selectedProducer == null) {
@@ -2898,23 +2903,11 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
 
     // Create a list of selected complementary items with proper type
     List<Map<String, dynamic>> selectedComplementaries = [];
-    if (complementaryInCartStatus.isNotEmpty && widget.meal['bestservedwith'] != null) {
+    if (complementaryInCartStatus.isNotEmpty &&
+        widget.meal['bestservedwith'] != null) {
       for (var i = 0; i < complementaryInCartStatus.length; i++) {
         if (complementaryInCartStatus[i]) {
-          final complementary = widget.meal['bestservedwith'][i];
-          double price = 0.0;
-          if (complementary['price'] is double) {
-            price = complementary['price'];
-          } else if (complementary['price'] is int) {
-            price = (complementary['price'] as int).toDouble();
-          } else if (complementary['price'] is String) {
-            price = double.tryParse(complementary['price']) ?? 0.0;
-          }
-          selectedComplementaries.add({
-            'name': complementary['name']?.toString() ?? '',
-            'price': price,
-            'image': complementary['image']?.toString() ?? '',
-          });
+          selectedComplementaries.add(widget.meal['bestservedwith'][i]);
         }
       }
     }
@@ -2946,7 +2939,9 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
       selectedchef: selectedChef,
       selectedproducer: selectedProducer,
       meal: widget.meal,
-      bestservedwith: selectedComplementaries.map((e) => e as Map<String, dynamic>).toList(),
+      bestservedwith: selectedComplementaries
+          .map((e) => e as Map<String, dynamic>)
+          .toList(),
     );
 
     setState(() {
@@ -3085,7 +3080,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                     style: GoogleFonts.poppins(),
                   ),
                   subtitle: Text(
-                    '\$${price}',
+                    'ugx ${price}',
                     style: GoogleFonts.poppins(
                       color: Colors.teal[800],
                     ),
@@ -3153,22 +3148,22 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
 // --- Custom SnackBar Utility ---
 void showCustomSnackBar(BuildContext context, String message) {
   final scaffoldMessenger = ScaffoldMessenger.of(context);
-   final snackBar = SnackBar(
+  final snackBar = SnackBar(
     content: Text(message),
-     duration: Duration(seconds: 2),
-     behavior: SnackBarBehavior.floating,
+    duration: Duration(seconds: 2),
+    behavior: SnackBarBehavior.floating,
     margin: EdgeInsets.all(8),
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(8),
     ),
     backgroundColor: Colors.teal[700],
-     action: SnackBarAction(
-       label: 'OK',
+    action: SnackBarAction(
+      label: 'OK',
       textColor: Colors.white,
-       onPressed: () {
-         scaffoldMessenger.hideCurrentSnackBar();
-       },
-     ),
-   );
-   scaffoldMessenger.showSnackBar(snackBar);
- }
+      onPressed: () {
+        scaffoldMessenger.hideCurrentSnackBar();
+      },
+    ),
+  );
+  scaffoldMessenger.showSnackBar(snackBar);
+}

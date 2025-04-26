@@ -1,14 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:intl/intl.dart';
-import 'package:lottie/lottie.dart'; // Although not used in the provided snippet, kept for potential future use
+import 'package:zinzi2/app_drawer_unified.dart';
+
 import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_animate/flutter_animate.dart'; // Although not used in the provided snippet, kept for potential future use
+
 import 'package:audioplayers/audioplayers.dart';
 
 // --- Environment & API ---
@@ -47,8 +48,41 @@ class OrderStatusScreen extends StatefulWidget {
 }
 
 class _OrderStatusScreenState extends State<OrderStatusScreen> {
+  // Helper to build the complementary meals row
+  Widget _buildComplementaryMealsRow(dynamic complementaryMealsRaw) {
+    if (complementaryMealsRaw == null || complementaryMealsRaw.toString().trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
+    List<dynamic> mealsList;
+    try {
+      if (complementaryMealsRaw is String) {
+        // Try to decode JSON string
+        final decoded = json.decode(complementaryMealsRaw);
+        if (decoded is List) {
+          mealsList = decoded;
+        } else {
+          return const SizedBox.shrink();
+        }
+      } else if (complementaryMealsRaw is List) {
+        mealsList = complementaryMealsRaw;
+      } else {
+        return const SizedBox.shrink();
+      }
+      // Extract names, strip extra slashes/spaces
+      final names = mealsList
+        .map((item) => (item is Map && item['name'] != null) ? item['name'].toString().replaceAll(RegExp(r'[\\/]+'), '').trim() : null)
+        .where((name) => name != null && name.isNotEmpty)
+        .toList();
+      if (names.isEmpty) return const SizedBox.shrink();
+      return _buildInfoRow('Best served with', names.join(', '));
+    } catch (e) {
+      // If any error in decoding/parsing, just hide the row
+      return const SizedBox.shrink();
+    }
+  }
+
   final Map<int, Map<String, dynamic>> _ordersMap = {};
-  final Map<int, String> _previousOrderStatuses = {};
+  
   final AudioPlayer _audioPlayer = AudioPlayer();
   Timer? _pollingTimer;
   int? _selectedOrderId;
@@ -184,38 +218,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: kColorBackground,
-      drawer: Drawer( // Optional Drawer
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            DrawerHeader(
-              decoration: BoxDecoration(
-                color: kColorPrimary,
-              ),
-              child: Text(
-                'Order Menu',
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontSize: 24,
-                ),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.history),
-              title: Text(
-                'View Past Orders',
-                style: GoogleFonts.poppins(),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                // Add navigation to order history screen here
-                // Example: Navigator.push(context, MaterialPageRoute(builder: (context) => OrderHistoryScreen()));
-              },
-            ),
-             // Add more drawer items if needed
-          ],
-        ),
-      ),
+      drawer: const AppDrawer(), // Unified drawer,
       appBar: AppBar(
         title: Text(
           'ORDER TRACKING',
@@ -604,6 +607,9 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                       _buildInfoRow('Total Price', '$totalPrice UGX'),
                       _buildInfoRow('Order Status', orderStatus),
 
+                      // Display complementary meals if present
+                      _buildComplementaryMealsRow(order['complementary_meals']),
+
                       // Display Chef or Producer only if they have a value
                       if (chefName != null && chefName.isNotEmpty)
                         _buildInfoRow('Chef', chefName),
@@ -643,7 +649,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                 padding: const EdgeInsets.only(bottom: 12.0, top: 0), // Adjusted padding
                 child: Center(
                   child: Text(
-                    'Tap header for more details', // Changed text
+                    'Tap here for more details', // Changed text
                     style: GoogleFonts.poppins(
                       fontSize: 12,
                       color: kColorTextSecondary,
@@ -733,26 +739,26 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 110, // Slightly wider label column
-            child: Text(
-              label,
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                color: kColorTextSecondary,
-              ),
+          width: 105, // Slightly reduced label width to give more space to value
+          child: Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 13,
+              color: kColorTextSecondary,
             ),
           ),
-          const SizedBox(width: 8), // Add spacing
-          Expanded(
-            child: Text(
-              value.isEmpty ? 'N/A' : value, // Handle empty strings
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: kColorTextPrimary,
-              ),
+        ),
+        const SizedBox(width: 20), // Increased spacing between label and value
+        Expanded(
+          child: Text(
+            value.isEmpty ? 'N/A' : value, // Handle empty strings
+            style: GoogleFonts.poppins(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: kColorTextPrimary,
             ),
           ),
+        ),
         ],
       ),
     );

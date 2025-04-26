@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:zinzi2/checkout.dart'; // Import your checkout screen
-import 'package:zinzi2/widgets/app_drawer.dart'; // Import the AppDrawer
+import 'package:zinzi2/app_drawer_unified.dart' as drawer; // Import the unified AppDrawer widget with prefix
+
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
+import 'app_drawer_unified.dart';
+import 'package:zinzi2/checkout.dart';
 
 // ***************************************************************
 // *          SINGLE SOURCE OF TRUTH FOR CART & FAVORITES        *
@@ -78,7 +79,27 @@ class ShoppingCart {
       if (item['type'] == 'meal') {
         final price = (item['price'] as num?)?.toDouble() ?? 0.0;
         final quantity = (item['quantity'] as num?)?.toInt() ?? 0;
-        return sum + (price * quantity);
+        // Sum price of main meal
+        double itemTotal = price * quantity;
+        // Add selected complementary meals (bestservedwith)
+        final List<Map<String, dynamic>> bestServedWith =
+            (item['bestservedwith'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+        for (final comp in bestServedWith) {
+          final compPrice = (comp['price'] is num)
+              ? (comp['price'] as num).toDouble()
+              : 5.0;
+          itemTotal += compPrice;
+        }
+        // Add chef/producer price if present
+        final chef = item['selectedchef'] as Map<String, dynamic>?;
+        final producer = item['selectedproducer'] as Map<String, dynamic>?;
+        if (chef != null && chef['price'] != null && chef['price'] is num) {
+          itemTotal += (chef['price'] as num).toDouble();
+        }
+        if (producer != null && producer['price'] != null && producer['price'] is num) {
+          itemTotal += (producer['price'] as num).toDouble();
+        }
+        return sum + itemTotal;
       } else if (item['type'] == 'gig') {
         final gigDetails = item['gigDetails'] as Map<String, dynamic>? ?? {};
         final price = (gigDetails['price'] as num?)?.toDouble() ?? 0.0;
@@ -387,7 +408,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
           Text('Estimated Total:',
               style: TextStyle(fontSize: 16, color: Colors.grey[700])),
           Text(
-            '\$${totalAmount.toStringAsFixed(2)}',
+            'ugx ${totalAmount.toStringAsFixed(2)}',
             style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
@@ -414,7 +435,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       ),
       child: ElevatedButton.icon(
         icon: Icon(Icons.lock_outline, size: 20),
-        label: Text('Checkout (\$${totalAmount.toStringAsFixed(2)})'),
+        label: Text('Checkout (ugx ${totalAmount.toStringAsFixed(2)})'),
         style: ElevatedButton.styleFrom(
             backgroundColor:
                 cartItems.isNotEmpty ? Colors.teal[700] : Colors.grey,
@@ -445,9 +466,63 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
           item['selectedchef'] as Map<String, dynamic>?; // Explicit cast
       final Map<String, dynamic>? producer =
           item['selectedproducer'] as Map<String, dynamic>?; // Explicit cast
-      final Map<String, dynamic> mealData =
-          (item['meal'] is Map<String, dynamic>) ? item['meal'] : {};
-      final String imageUrl = _formatImageUrl(mealData['image_link']);
+      final Map<String, dynamic> meal =
+          item['meal'] as Map<String, dynamic>? ?? {};
+      final List<Map<String, dynamic>> bestServedWith =
+          (item['bestservedwith'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+      // --- Show selected complementary meals visually ---
+      Widget complementaryWidget = SizedBox.shrink();
+      if (bestServedWith.isNotEmpty) {
+        complementaryWidget = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 8.0, left: 2.0, bottom: 4.0),
+              child: Text(
+                'Selected Complementary Meals:',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.teal[700],
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            SizedBox(
+              height: 40,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: bestServedWith.map((comp) {
+                  final compName = comp['name']?.toString() ?? comp['title']?.toString() ?? '';
+                  final compPrice = (comp['price'] is num)
+                      ? (comp['price'] as num).toDouble()
+                      : 5.0;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8.0),
+                    child: Chip(
+                      label: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            compName,
+                            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal[900]),
+                          ),
+                          SizedBox(width: 6),
+                          Text(
+                            'ugx ${compPrice.toStringAsFixed(2)}',
+                            style: TextStyle(color: Colors.teal[700], fontWeight: FontWeight.w500, fontSize: 13),
+                          ),
+                        ],
+                      ),
+                      backgroundColor: Colors.teal[50],
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+        );
+      }
+      final String imageUrl = _formatImageUrl(meal['image_link']);
       final double itemTotal = price * quantity;
       // Note: item['bestservedwith'] (complementary items list) is available here but not displayed.
 
@@ -463,14 +538,14 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
         sourceInfo = 'Cooked by: Chef ID ${chef['id']}';
       } else if (producer != null && producer['id'] != null) {
         sourceInfo = 'Fresh from: Producer ID ${producer['id']}';
-      } else if (mealData['meal_name'] != null &&
-          title != mealData['meal_name']) {
+      } else if (meal['meal_name'] != null &&
+          title != meal['meal_name']) {
         // Basic check if it might be a complementary item added to cart
         sourceInfo = 'Complementary Item';
       }
 
       return _buildMealItemCardContent(context, index, title, quantity, price,
-          itemTotal, imageUrl, sourceInfo, item);
+          itemTotal, imageUrl, sourceInfo, item, complementaryWidget);
     } else if (itemType == 'gig') {
       // --- Render Gig Item ---
       final Map<String, dynamic> gigDetails =
@@ -530,7 +605,8 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       double itemTotal,
       String imageUrl,
       String sourceInfo,
-      Map<String, dynamic> item) {
+      Map<String, dynamic> item,
+      Widget complementaryWidget) {
     return Dismissible(
       key: Key('meal_$index'),
       direction: DismissDirection.endToStart,
@@ -569,9 +645,8 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
                       width: 65,
                       height: 65,
                       color: Colors.grey[200],
-                      child: Center(
-                          child: Icon(Icons.broken_image,
-                              color: Colors.grey[400]))),
+                      child: Icon(Icons.broken_image,
+                          color: Colors.grey[400])),
                 ),
               ),
               SizedBox(width: 12),
@@ -597,7 +672,8 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                    ]
+                    ],
+                    complementaryWidget,
                   ],
                 ),
               ),
@@ -607,7 +683,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    '\$${itemTotal.toStringAsFixed(2)}',
+                    'ugx ${itemTotal.toStringAsFixed(2)}',
                     style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -751,7 +827,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
               ),
               SizedBox(width: 8),
               Text(
-                '\$${gigPrice.toStringAsFixed(2)}',
+                'ugx ${gigPrice.toStringAsFixed(2)}',
                 style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -850,10 +926,12 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => CheckoutScreen(
-            items: cartItems,
-            totalPrice: ShoppingCart.totalPrice,
-          ),
+          builder: (context) {
+            return CheckoutScreen(
+              items: cartItems,
+              totalPrice: ShoppingCart.totalPrice,
+            );
+          },
         ),
       ).then((_) => _refreshCart());
     }
@@ -993,7 +1071,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                       ),
                       title: Text(title,
                           style: TextStyle(fontWeight: FontWeight.w500)),
-                      subtitle: Text('\$${price.toStringAsFixed(2)}',
+                      subtitle: Text('ugx ${price.toStringAsFixed(2)}',
                           style: TextStyle(color: Colors.teal[700])),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,

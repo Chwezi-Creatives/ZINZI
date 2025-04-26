@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:zinzi2/app_drawer.dart'; // Import the AppDrawer widget
+import 'package:zinzi2/app_drawer_unified.dart' as drawer; // Import the AppDrawer widget with prefix
 import 'package:flutter/services.dart'; // For SystemUiOverlayStyle
 import 'package:intl/intl.dart';
 import 'dart:convert'; // For jsonDecode, jsonEncode
@@ -1295,7 +1295,7 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       // Add the standard drawer
-      drawer: const AppDrawer(), 
+      drawer: const drawer.AppDrawer(), 
       appBar: AppBar(
         title: const Text('Chef Dashboard'),
         bottom: TabBar(

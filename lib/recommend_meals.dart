@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:zinzi2/meal_detail.dart';
+import 'package:zinzi2/app_drawer_unified.dart';
 import 'package:zinzi2/profile.dart';
 import 'package:zinzi2/useranalytics.dart';
 import 'package:zinzi2/cart.dart';
@@ -146,7 +147,7 @@ class _Recommend_Meals_ScreenState extends State<Recommend_Meals_Screen> {
           ),
         ],
       ),
-      drawer: _buildDrawer(context),
+      drawer: const AppDrawer(),
       body: isLoading
           ? Center(child: CircularProgressIndicator())
           : Container(
@@ -280,7 +281,7 @@ class _Recommend_Meals_ScreenState extends State<Recommend_Meals_Screen> {
                       ),
                     ),
                     Text(
-                      'UGX ${price.toStringAsFixed(2)}',
+                      'Ugx ${price.toStringAsFixed(2)}',
                       style: TextStyle(color: Colors.white, fontSize: 14),
                     ),
                   ],

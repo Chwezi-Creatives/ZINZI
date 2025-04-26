@@ -290,7 +290,7 @@ class _ChatScreenState extends State<ChatScreen> {
         if (!didPop) {
           // Navigate back to LandingPage when back is pressed
            Navigator.of(context).pushReplacement(
-             MaterialPageRoute(builder: (context) => const LandingPage()), // Ensure LandingPage exists
+             MaterialPageRoute(builder: (context) =>  LandingPage()), // Ensure LandingPage exists
            );
         }
       },
@@ -303,7 +303,7 @@ class _ChatScreenState extends State<ChatScreen> {
             icon: const Icon(Icons.arrow_back),
             onPressed: () {
               Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (context) => const LandingPage()), // Ensure LandingPage exists
+                MaterialPageRoute(builder: (context) =>  LandingPage()), // Ensure LandingPage exists
               );
             },
             tooltip: 'Go Back',
@@ -766,26 +766,3 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
   }
 }
 
-
-// Placeholder for LandingPage - Replace with your actual LandingPage import/definition
-class LandingPage extends StatelessWidget {
-  const LandingPage({Key? key}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Landing Page')),
-      body: Center(
-        child: ElevatedButton(
-          onPressed: () {
-            // Navigate back to the Chat App (Example navigation)
-             Navigator.of(context).pushReplacement(
-               MaterialPageRoute(builder: (context) => const NutritionChatApp()),
-             );
-          },
-          child: const Text('Go to Chat App'),
-        ),
-      ),
-    );
-  }
-}

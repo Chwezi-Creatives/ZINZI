@@ -18,6 +18,7 @@ import 'social.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:zinzi2/user_cache.dart'; // Import UserCache
+import 'package:zinzi2/app_drawer_unified.dart';
 import 'package:zinzi2/cache_config.dart'; // Import CacheConfig
 import 'package:shimmer/shimmer.dart'; // For loading effect
 import 'package:intl/intl.dart'; // For date formatting
@@ -589,7 +590,7 @@ class _ProfilePageState extends State<ProfilePage> {
         elevation: 1.0, // Subtle elevation
         centerTitle: true, // Center title for a balanced look
       ),
-      drawer: _buildDrawer(context), // Reuse drawer logic
+      drawer: const AppDrawer(), // Unified drawer
       body: RefreshIndicator(
         // Allow pull-to-refresh
         onRefresh: _fetchData,

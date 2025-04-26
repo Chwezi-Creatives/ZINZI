@@ -19,7 +19,7 @@ import '../social.dart';
 import '../chef_net.dart';
 import '../producer_network_testing.dart';
 import '../onboard.dart';
-import '../Nutri+.dart';
+import '../nutrition+.dart';
 
 // --- Color Constants (Should be moved to a shared file ideally) ---
 const Color kColorPrimaryDark = Color(0xFF004D40);

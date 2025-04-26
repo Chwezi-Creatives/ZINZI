@@ -12,7 +12,7 @@ import 'package:shimmer/shimmer.dart';
 import 'package:shared_preferences/shared_preferences.dart'; // Needed for caching & user_id check
 import 'dart:async';
 import 'dart:math'; // Added for max used in _extractHumanReadableLocation (from target)
-import 'package:zinzi2/widgets/app_drawer.dart'; // Import the AppDrawer
+import 'package:zinzi2/app_drawer_unified.dart'; // Import the AppDrawer
 
 // Import your actual Gig Creation Screen
 import 'package:zinzi2/create_gig_screen.dart'; // <-- MAKE SURE THIS PATH IS CORRECT

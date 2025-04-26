@@ -1,17 +1,15 @@
 import 'dart:async';
+import 'package:zinzi2/app_drawer_unified.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:zinzi2/orderstatus polls.dart'
-    as order_status; // Import with prefix
-import 'cart.dart' as cart; // Import cart library with prefix
-import 'package:zinzi2/widgets/app_drawer.dart'; // Import the AppDrawer
+
 import 'package:google_fonts/google_fonts.dart';
-import 'package:zinzi2/cart.dart';
-import 'package:zinzi2/order_status.dart';
+import 'orderstatus polls.dart' as order_status; // Import with prefix for OrderStatusScreen
+
 
 final String apibaseurl =
     dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
@@ -31,6 +29,13 @@ class CheckoutScreen extends StatefulWidget {
 }
 
 class _CheckoutScreenState extends State<CheckoutScreen> {
+  String _extractGuests(dynamic numberOfPeople) {
+    if (numberOfPeople == null) return 'Ugx';
+    final str = numberOfPeople.toString();
+    final match = RegExp(r'\d+').firstMatch(str);
+    return match != null ? match.group(0)! : 'Ugx';
+  }
+
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -152,6 +157,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Future<void> _submitOrder() async {
     if (!_formKey.currentState!.validate()) return;
 
+    if (_location.trim().isEmpty) {
+      _showSnackBar('Please acquire your delivery location before placing the order.');
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -164,40 +174,74 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         return;
       }
 
-      final orderPayload = {
-        'order_type': 'meal',
+      // Determine order_type based on items in the cart
+      String orderType = widget.items.any((item) => item['type'] == 'gig') ? 'gig' : 'meal';
+
+      // Support multiple gigs and multiple meals in a single order
+      List<Map<String, dynamic>> itemsPayload = widget.items.map((item) {
+        if (item['type'] == 'gig') {
+          final gigDetails = item['gigDetails'] as Map<String, dynamic>? ?? {};
+          return {
+            'user_id': userId.toString(),
+            'chef_id': gigDetails['chef_id'],
+            'producer_id': gigDetails['producer_id'],
+            'gig_details': {
+              'gig_type': gigDetails['gig_type'],
+              'location': gigDetails['location'],
+              'scheduled_date': gigDetails['scheduled_date'],
+              'time': gigDetails['time'],
+              'estimated_duration': gigDetails['estimated_duration'],
+              'number_of_people': gigDetails['number_of_people'],
+              'price': gigDetails['price'],
+              'detailed_description': gigDetails['detailed_description'],
+            }
+          };
+        } else {
+          // Assume meal type
+          return {
+            'product_id': item['meal']?['Meal_id']?.toString(),
+            'quantity': (item['quantity'] as num?)?.toInt(),
+            'price': (item['price'] as num?)?.toDouble(),
+            'chef_id': item['selectedchef']?['chefid']?.toString(),
+            'producer_id': item['selectedproducer']?['producer_id']?.toString(),
+            'bestservedwith': item['bestservedwith'] ?? [],
+          };
+        }
+      }).toList();
+
+
+      // Find the first chef_id and producer_id for summary fields
+      String? firstChefId;
+      String? firstProducerId;
+      for (final item in widget.items) {
+        if (item['type'] == 'gig') {
+          final gigDetails = item['gigDetails'] as Map<String, dynamic>? ?? {};
+          if (gigDetails['chef_id'] != null && firstChefId == null) {
+            firstChefId = gigDetails['chef_id']?.toString();
+          }
+          if (gigDetails['producer_id'] != null && firstProducerId == null) {
+            firstProducerId = gigDetails['producer_id']?.toString();
+          }
+        } else {
+          if (item['selectedchef']?['chefid'] != null && firstChefId == null) {
+            firstChefId = item['selectedchef']?['chefid']?.toString();
+          }
+          if (item['selectedproducer']?['producer_id'] != null && firstProducerId == null) {
+            firstProducerId = item['selectedproducer']?['producer_id']?.toString();
+          }
+        }
+      }
+
+      Map<String, dynamic> orderPayload = {
+        'order_type': orderType,
         'user_id': userId.toString(),
-        'items': widget.items
-            .map((item) {
-              if (item['type'] == 'gig') {
-                final gigDetails = item['gigDetails'] as Map<String, dynamic>? ?? {};
-                return {
-                  'product_id': null, // Gigs don't have a product_id like meals
-                  'quantity': null, // Gigs don't have a quantity in the same way as meals
-                  'price': (gigDetails['price'] as num?)?.toDouble(),
-                  'chef_id': gigDetails['chef_id']?.toString(),
-                  'producer_id': gigDetails['producer_id']?.toString(),
-                };
-              } else { // Assume 'meal' type or handle other types if necessary
-                return {
-  'product_id': item['meal']?['Meal_id']?.toString(),
-  'quantity': (item['quantity'] as num?)?.toInt(),
-  'price': (item['price'] as num?)?.toDouble(),
-  'chef_id': item['selectedchef']?['chefid']?.toString(),
-  'producer_id': item['selectedproducer']?['producer_id']?.toString(),
-  // Pass selected complementary meals (bestservedwith) if present
-  'bestservedwith': item['bestservedwith'] ?? [],
-};
-              }
-            }).toList(),
-        'delivery_address':
-            _location.isNotEmpty ? _location : _addressController.text,
+        'items': itemsPayload,
+        'delivery_address': _location.isNotEmpty ? _location : _addressController.text,
         'notes': _notesController.text,
         'payment_mode': _selectedPaymentMethod.toLowerCase(),
         'total_price': widget.totalPrice,
-        'chef_id': widget.items.first['selectedchef']?['chefid']?.toString(),
-        'producer_id':
-            widget.items.first['selectedproducer']?['producer_id']?.toString(),
+        'chef_id': firstChefId,
+        'producer_id': firstProducerId,
       };
 
       print('Order Payload: ' + orderPayload.toString());
@@ -289,27 +333,106 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           ),
                         ),
                         SizedBox(height: 16),
-                        ...widget.items.map((item) => Padding(
-                              padding: EdgeInsets.only(bottom: 8),
-                              child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    '${item['title']} x${item['quantity']}',
-                                    style: GoogleFonts.poppins(
-                                      color: Colors.teal[700],
+                        ...List.generate(widget.items.length, (i) {
+                          final item = widget.items[i];
+                          final bestServedWith = (item['bestservedwith'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+                          final chef = item['selectedchef'] as Map<String, dynamic>?;
+                          final chefHasPrice = chef != null && chef['price'] != null && chef['price'] is num;
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (i != 0) Divider(height: 18, color: Colors.teal[100]),
+                              if ((item['type'] ?? 'meal') == 'gig') ...[
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '${item['gigDetails']?['gig_type'] ?? 'Gig'}',
+                                          style: GoogleFonts.poppins(
+                                            color: Colors.teal[700],
+                                          ),
+                                        ),
+                                        SizedBox(height: 2),
+                                        Text(
+                                          'Guests (${_extractGuests(item['gigDetails']?['number_of_people'])})',
+                                          style: GoogleFonts.poppins(
+                                            color: Colors.teal[700],
+                                            fontSize: 13,
+                                          ),
+                                        ),
+
+                                      ],
                                     ),
+                                    Text(
+                                       () {
+                                         final gigPrice = (item['gigDetails']?['price'] is num)
+                                             ? (item['gigDetails']['price'] as num)
+                                             : (item['price'] ?? 0.0);
+                                         return 'ugx ${gigPrice.toStringAsFixed(2)}';
+                                       }(),
+                                       style: GoogleFonts.poppins(
+                                         color: Colors.teal[700],
+                                       ),
+                                     ),
+                                  ],
+                                ),
+                                if (item['gigDetails'] != null && item['gigDetails']['chef_name'] != null && item['gigDetails']['chef_name'].toString().isNotEmpty)
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text('Chef: ${item['gigDetails']['chef_name']}', style: GoogleFonts.poppins(fontSize: 13, color: Colors.teal[800])),
+                                    ],
                                   ),
-                                  Text(
-                                    '\$${((item['price'] ?? 0.0) * (item['quantity'] ?? 0)).toStringAsFixed(2)}',
-                                    style: GoogleFonts.poppins(
-                                      color: Colors.teal[700],
+                              ] else ...[
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      '${item['title']} x${item['quantity']}',
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.teal[700],
+                                      ),
                                     ),
+                                    Text(
+                                      'ugx ${((item['price'] ?? 0.0) * (item['quantity'] ?? 0)).toStringAsFixed(2)}',
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.teal[700],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (chef != null && chef['name'] != null && chef['name'].toString().isNotEmpty)
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text('Chef: ${chef['name']}', style: GoogleFonts.poppins(fontSize: 13, color: Colors.teal[800])),
+                                    ],
                                   ),
-                                ],
-                              ),
-                            )),
+                                if (bestServedWith.isNotEmpty)
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('Best Served With:', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black)),
+                                      ...bestServedWith.map((comp) {
+                                        final compName = comp['name']?.toString() ?? comp['title']?.toString() ?? '';
+                                        final compPrice = (comp['price'] is num) ? (comp['price'] as num).toDouble() : 5.0;
+                                        return Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Text(compName, style: GoogleFonts.poppins(fontSize: 12, color: Colors.teal[800])),
+                                            Text('₤${compPrice.toStringAsFixed(2)}', style: GoogleFonts.poppins(fontSize: 12, color: Colors.teal[800])),
+                                          ],
+                                        );
+                                      }).toList(),
+                                    ],
+                                  ),
+                              ],
+                            ],
+                          );
+                        }).toList(),
                         Divider(),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -322,7 +445,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                               ),
                             ),
                             Text(
-                              '\$${widget.totalPrice.toStringAsFixed(2)}',
+                              'ugx ${widget.totalPrice.toStringAsFixed(2)}',
                               style: GoogleFonts.poppins(
                                 fontWeight: FontWeight.w600,
                                 color: Colors.teal[900],
@@ -336,52 +459,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 ),
                 SizedBox(height: 16),
 
-                // Payment Method Card
-                Card(
-                  color: Colors.teal[50],
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  elevation: 1,
-                  child: Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Payment Method',
-                          style: GoogleFonts.poppins(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.teal[800],
-                          ),
-                        ),
-                        SizedBox(height: 16),
-                        RadioListTile<String>(
-                          title: Text('Momo', style: GoogleFonts.poppins()),
-                          value: 'Momo',
-                          groupValue: _selectedPaymentMethod,
-                          onChanged: (value) {
-                            setState(() => _selectedPaymentMethod = value!);
-                          },
-                          activeColor: Colors.teal[800],
-                        ),
-                        RadioListTile<String>(
-                          title: Text('Card', style: GoogleFonts.poppins()),
-                          value: 'Card',
-                          groupValue: _selectedPaymentMethod,
-                          onChanged: (value) {
-                            setState(() => _selectedPaymentMethod = value!);
-                          },
-                          activeColor: Colors.teal[800],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                SizedBox(height: 16),
-
-                // Location Card
+                // Delivery Location
                 Card(
                   color: Colors.teal[50],
                   shape: RoundedRectangleBorder(

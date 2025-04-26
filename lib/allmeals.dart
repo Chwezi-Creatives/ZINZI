@@ -5,20 +5,16 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:zinzi2/meal_detail.dart' as meal_detail;
-import 'package:zinzi2/onboard.dart'; // Ensure you have this import for onboarding
-import 'package:zinzi2/profile.dart';
-import 'package:zinzi2/signup_or_Login.dart';
-import 'package:zinzi2/useranalytics.dart';
 import 'package:zinzi2/cart.dart' as cart;
-import 'package:zinzi2/blogview.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:google_fonts/google_fonts.dart'; // Import Google Fonts
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/app_drawer.dart';
+import 'package:zinzi2/app_drawer_unified.dart';
 import 'package:zinzi2/user_cache.dart'; // Import UserCache
-import 'package:zinzi2/cache_config.dart'; // Import CacheConfig
+ // Import CacheConfig
 
 // --- Re-add Color Constants (or import from a shared file) ---
 const Color kColorPrimaryDark = Color(0xFF004D40);
@@ -373,9 +369,7 @@ class _AllMealsScreenState extends State<AllMealsScreen> {
         ],
       ),
       // Replace with the standardized AppDrawer
-      drawer: AppDrawer(
-        // Standard key for user ID in SharedPreferences
-      ),
+      drawer: const AppDrawer(),
       body: RefreshIndicator(
         // Add pull-to-refresh
         onRefresh: _fetchMealsAndPreprocess,

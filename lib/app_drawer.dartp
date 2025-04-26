@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:zinzi2/onboard.dart';
 import 'package:zinzi2/chef_net.dart';
 import 'package:zinzi2/allmeals.dart' as allmeals;
-import 'package:zinzi2/nutri+.dart';
+import 'package:zinzi2/nutrition+.dart';
 import 'package:zinzi2/chef_net.dart' as chefnet;
 import 'package:zinzi2/cart.dart';
 import 'package:zinzi2/profile.dart' as profile;

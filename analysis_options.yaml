@@ -7,7 +7,7 @@
 
 # The following line activates a set of recommended lints for Flutter apps,
 # packages, and plugins designed to encourage good coding practices.
-include: package:flutter_lints/flutter.yaml
+# include: package:flutter_lints/flutter.yaml (commented out, check if package exists or fix path)
 
 linter:
   # The lint rules applied to this project can be customized in the
@@ -23,7 +23,7 @@ linter:
 
   # Option to disable spell checking
   # Set this to true to disable spell checking for all lints
-  disable_spell_checking: true # Set to true to disable spell checking
+   # Set to true to disable spell checking
   rules:
     # avoid_print: false  # Uncomment to disable the `avoid_print` rule
     # prefer_single_quotes: true  # Uncomment to enable the `prefer_single_quotes` rule

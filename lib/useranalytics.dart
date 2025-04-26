@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:visibility_detector/visibility_detector.dart';
-import 'package:zinzi2/widgets/app_drawer.dart'; // Import the AppDrawer
+import 'package:zinzi2/app_drawer_unified.dart';
 
 // --- Constants ---
 const Duration kAnimationDuration = Duration(milliseconds: 1200);

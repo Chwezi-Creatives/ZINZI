@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'dart:math' as math; // For random duration (used in animation example)
-
+import 'package:http/http.dart' as http;
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:shimmer/shimmer.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'dart:convert';
 // --- Detail Page Import Placeholder ---
 // You MUST replace this with the actual import for your detail page
-import 'package:zinzi2/nutri_item_detail.dart'; // Ensure this file exists and is correct
+import 'nutri_detail.dart'; // Ensure this file exists and is correct
 
 // --- Color Constants ---
 const Color primaryTeal = Color(0xFF00796B); // Teal 700
@@ -19,22 +23,29 @@ const Color errorIconColor = Colors.grey;
 // --- Nutrition Item Model ---
 class NutritionItem {
   final String name;
-  final String imagePath;
-  final String description;
-  final double price;
+  final String? imagePath;
+  final String? description;
+  final double? price;
 
   NutritionItem({
     required this.name,
-    required this.imagePath,
-    required this.description,
-    required this.price,
+    this.imagePath,
+    this.description,
+    this.price,
   });
 
-  // Generate a potentially unique tag for Hero animation
-  // If imagePath isn't guaranteed unique per item, use this:
-  // String get heroTag => '$name-$imagePath';
-  // If imagePath IS unique per item, this is simpler:
-  String get heroTag => imagePath;
+  factory NutritionItem.fromApi(Map<String, dynamic> json) {
+    return NutritionItem(
+      name: json['spice_name'] ?? 'Unknown',
+      imagePath: json['image_url'],
+      description: json['description'],
+      price: (json['price'] is num)
+          ? (json['price'] as num).toDouble()
+          : null,
+    );
+  }
+
+  String get heroTag => imagePath ?? name;
 }
 
 // --- Main Page Widget ---
@@ -47,12 +58,15 @@ class NutritionPage extends StatefulWidget {
 
 class _NutritionPageState extends State<NutritionPage>
     with SingleTickerProviderStateMixin {
-  // Add TickerProvider
-  TabController? _tabController;
-  int _previousTabIndex = 0; // To store the previous index for slide direction
-  // --- Data Lists (Consider moving to a separate data service/provider) ---
-  // (Data lists remain exactly as provided in your request)
-  final List<NutritionItem> spices = [
+  late TabController _tabController;
+  int _previousTabIndex = 0;
+  List<NutritionItem> fetchedSpices = [];
+  bool spicesLoading = false;
+  String? spicesError;
+
+  // (Keep hardcoded lists for other categories)
+  final List<NutritionItem> spices = [ // legacy, will not be used
+
     NutritionItem(
         name: 'Turmeric',
         imagePath: 'assets/images/Tumeric powder.jpg',
@@ -268,263 +282,80 @@ class _NutritionPageState extends State<NutritionPage>
 
   final int _tabCount = 4; // Define number of tabs
 
-  @override
-  void initState() {
-    super.initState();
-    // Initialize the TabController explicitly
-    _tabController = TabController(length: _tabCount, vsync: this);
-    // Add listener to trigger rebuilds for AnimatedSwitcher
-    _tabController!.addListener(() {
-      // Store previous index before updating state for the animation
-      final newIndex = _tabController!.index;
-      if (mounted &&
-          !_tabController!.indexIsChanging &&
-          newIndex != _previousTabIndex) {
-        setState(() {
-          // Update previous index *after* the build triggered by setState
-          _previousTabIndex = newIndex;
-        });
-      }
-    });
-  }
-
-  @override
-  @override
-  void dispose() {
-    // Dispose the explicitly created controller
-    _tabController?.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
-    // Remove DefaultTabController wrapper
     return Scaffold(
-      backgroundColor: lightBackgroundColor, // Clean background
       appBar: AppBar(
-        title: const Text(
-          'Nutrition +',
-          style: TextStyle(fontWeight: FontWeight.w600),
-        ),
-        backgroundColor: primaryTeal,
-        foregroundColor: Colors.white,
-        elevation: 1.0,
+        title: const Text('Nutrition+'),
         bottom: TabBar(
-          controller: _tabController, // Pass the explicit controller
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white.withOpacity(0.7),
-          indicatorColor: Colors.white,
-          indicatorWeight: 3.0,
-          labelPadding: const EdgeInsets.symmetric(horizontal: 8.0),
-          labelStyle:
-              const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w500),
-          unselectedLabelStyle: const TextStyle(fontSize: 14.0),
+          controller: _tabController,
           tabs: const [
             Tab(text: 'Spices'),
+            Tab(text: 'Herbs'),
             Tab(text: 'Supplements'),
-            Tab(text: 'Herbals'),
-            Tab(text: 'Gadgets'),
+            Tab(text: 'All'),
           ],
         ),
       ),
-      // Use AnimatedSwitcher for fade effect
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 300), // Fade duration
-        transitionBuilder: (Widget child, Animation<double> animation) {
-          // Combine Scale and Fade
-          return FadeTransition(
-            opacity: animation,
-            child: ScaleTransition(
-              scale: Tween<double>(begin: 0.7, end: 1.0)
-                  .animate(animation), // Scale from 90% to 100%
-              child: child,
-            ),
-          );
-        },
-        child: _buildCurrentTabContent(), // Build content based on index
-      ), // End AnimatedSwitcher
-    ); // End Scaffold
-// Removed extra closing parenthesis and semicolon
-  }
-
-// Removed the original _buildCategoryGrid definition here.
-// The new definition below (which accepts a Key) will be used.
-
-  // Builds a single item card with Hero animation and optional default image
-  Widget _buildItemCard(NutritionItem item, BuildContext context,
-      {String? defaultImagePath}) {
-    final borderRadius = BorderRadius.circular(15.0);
-    final heroTag = item.heroTag; // Get tag from the model getter
-
-    return Card(
-      elevation: 3.0,
-      shadowColor: Colors.grey.withOpacity(0.3),
-      shape: RoundedRectangleBorder(borderRadius: borderRadius),
-      color: cardBackgroundColor,
-      child: Material(
-        // Needed for InkWell clipping
-        color: Colors.transparent,
-        borderRadius: borderRadius,
-        child: InkWell(
-          borderRadius: borderRadius,
-          splashColor: lightTeal.withOpacity(0.3), // Add splash feedback
-          highlightColor: lightTeal.withOpacity(0.1), // Add highlight feedback
-          onTap: () {
-            Navigator.push(
-              context,
-              // Use standard MaterialPageRoute for potentially more robust navigation
-              MaterialPageRoute(
-                builder: (context) => NutritionItemDetailPage(),
-              ),
-            );
-          },
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // --- Image Section with Hero ---
-              Expanded(
-                flex: 3, // Give image more visual weight
-                child: Hero(
-                  tag: heroTag, // Unique tag for the animation
-                  // Custom flight shuttle for smoother scaling/fading
-                  flightShuttleBuilder: (
-                    BuildContext flightContext,
-                    Animation<double> animation,
-                    HeroFlightDirection flightDirection,
-                    BuildContext fromHeroContext,
-                    BuildContext toHeroContext,
-                  ) {
-                    final Hero toHero = toHeroContext.widget as Hero;
-                    // Fade slightly during transition
-                    return FadeTransition(
-                      opacity: animation.drive(
-                          Tween<double>(begin: 0.85, end: 1.0)
-                              .chain(// Start slightly less transparent
-                                  CurveTween(curve: Curves.easeInOut))),
-                      child:
-                          toHero.child, // Animate the destination Hero's child
-                    );
-                  },
-                  child: Material(
-                    type: MaterialType
-                        .transparency, // Avoid double background issues
-                    child: ClipRRect(
-                      borderRadius:
-                          BorderRadius.vertical(top: Radius.circular(15.0)),
-                      child: Image.asset(
-                        item.imagePath,
-                        fit: BoxFit.cover,
-                        errorBuilder: (BuildContext context, Object error,
-                            StackTrace? stackTrace) {
-                          // Use defaultImagePath if provided, otherwise show icon
-                          if (defaultImagePath != null &&
-                              defaultImagePath.isNotEmpty) {
-                            return Image.asset(
-                              defaultImagePath,
-                              fit: BoxFit
-                                  .cover, // Or adjust fit as needed for default
-                              // Optional: Add another error builder for the default image itself
-                              errorBuilder: (ctx, err, st) => Container(
-                                color: Colors.grey[200],
-                                child: const Center(
-                                    child: Icon(Icons.error_outline,
-                                        color: errorIconColor, size: 40.0)),
-                              ),
-                            );
-                          } else {
-                            // Fallback to generic icon if no default path
-                            return Container(
-                              color: Colors.grey[200],
-                              child: const Center(
-                                child: Icon(
-                                  Icons.broken_image_outlined,
-                                  color: errorIconColor,
-                                  size: 40.0,
-                                ),
-                              ),
-                            );
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              // --- Text Section ---
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10.0, 8.0, 10.0, 10.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item.name,
-                      style: const TextStyle(
-                        fontSize: 15.0,
-                        fontWeight: FontWeight.w600, // Slightly bolder
-                        color: primaryTextColor,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4.0), // Consistent spacing
-                    Text(
-                      '\$${item.price.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        color: priceColor,
-                        fontSize: 14.0,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildCategoryGrid(fetchedSpices, context),
+          _buildCategoryGrid(supplements, context),
+          _buildCategoryGrid(herbals, context),
+          _buildCategoryGrid(healthGadgets, context),
+        ],
       ),
     );
   }
 
-  // Helper to get the content for the currently selected tab
-  Widget _buildCurrentTabContent() {
-    // Ensure controller is not null before accessing index
-    final index = _tabController?.index ?? 0;
-    // Use ValueKey to ensure AnimatedSwitcher detects child change
-    switch (index) {
-      case 0:
-        return _buildCategoryGrid(spices, context,
-            key: const ValueKey('spices'));
-      case 1:
-        return _buildCategoryGrid(supplements, context,
-            key: const ValueKey('supplements'));
-      case 2:
-        // Pass the default image path for herbals
-        return _buildCategoryGrid(herbals, context,
-            key: const ValueKey('herbals'),
-            defaultItemImagePath: 'assets/images/DrugRG.png');
-      case 3:
-        return _buildCategoryGrid(healthGadgets, context,
-            key: const ValueKey('gadgets'));
-      default:
-        return Container(); // Should not happen
+  Future<void> _fetchSpices() async {
+    setState(() {
+      spicesLoading = true;
+      spicesError = null;
+    });
+    try {
+      final String baseUrl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
+      final response = await http.get(Uri.parse('$baseUrl/rr/spices'));
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = Map<String, dynamic>.from(jsonDecode(response.body));
+        final List<dynamic> spicesList = data['data'] ?? [];
+        setState(() {
+          fetchedSpices = spicesList.map((json) => NutritionItem.fromApi(json)).toList();
+          spicesLoading = false;
+        });
+      } else {
+        setState(() {
+          spicesError = 'Failed to load spices (${response.statusCode})';
+          spicesLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        spicesError = 'Error loading spices: $e';
+        spicesLoading = false;
+      });
     }
   }
 
-  // Modify _buildCategoryGrid to accept an optional Key and defaultItemImagePath
-  Widget _buildCategoryGrid(List<NutritionItem> items, BuildContext context,
-      {Key? key, String? defaultItemImagePath}) {
-    final String categoryKey = items.isNotEmpty
-        ? items[0].name
-        : math.Random().nextDouble().toString();
+  String? getDisplayImageUrl(String? url) {
+    if (url == null) return null;
+    final RegExp driveShare = RegExp(r'^https://drive.google.com/file/d/(.*?)/');
+    final RegExp driveShare2 = RegExp(r'^https://drive.google.com/open\?id=(.*?)(&|#|\\s|\n|\r|\s|$)');
+    final match = driveShare.firstMatch(url) ?? driveShare2.firstMatch(url);
+    if (match != null && match.groupCount >= 1) {
+      final id = match.group(1);
+      return 'https://drive.google.com/uc?export=view&id=$id';
+    }
+    return url;
+  }
 
+  Widget _buildCategoryGrid(List<NutritionItem> items, BuildContext context, {String? defaultItemImagePath}) {
     return Padding(
-      key: key, // Assign the key here
       padding: const EdgeInsets.fromLTRB(12.0, 12.0, 12.0, 0),
       child: GridView.builder(
-        key: PageStorageKey<String>(
-            categoryKey), // Keep key for scroll position preservation
-        physics:
-            const ClampingScrollPhysics(), // Change to ClampingScrollPhysics
+        physics: const ClampingScrollPhysics(),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 2,
           crossAxisSpacing: 12.0,
@@ -537,11 +368,145 @@ class _NutritionPageState extends State<NutritionPage>
             opacity: 1.0,
             duration: Duration(milliseconds: 400 + (index % 5 * 100)),
             curve: Curves.easeOut,
-            // Pass the default image path down to the item card
-            child: _buildItemCard(items[index], context,
-                defaultImagePath: defaultItemImagePath),
+            child: _buildItemCard(items[index], context, defaultItemImagePath: defaultItemImagePath),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildItemCard(NutritionItem item, BuildContext context, {String? defaultItemImagePath}) {
+    final imageUrl = getDisplayImageUrl(item.imagePath);
+    final borderRadius = BorderRadius.circular(15.0);
+    final heroTag = item.heroTag;
+
+    return Card(
+      elevation: 3.0,
+      shadowColor: Colors.grey.withAlpha(50),
+      shape: RoundedRectangleBorder(borderRadius: borderRadius),
+      color: cardBackgroundColor,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: borderRadius,
+        child: InkWell(
+          borderRadius: borderRadius,
+          splashColor: lightTeal.withAlpha(50),
+          highlightColor: lightTeal.withAlpha(25),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => Nutri_DetailPage(item: item),
+              ),
+            );
+          },
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                flex: 3,
+                child: Hero(
+                  tag: heroTag,
+                  flightShuttleBuilder: (
+                    BuildContext flightContext,
+                    Animation<double> animation,
+                    HeroFlightDirection flightDirection,
+                    BuildContext fromHeroContext,
+                    BuildContext toHeroContext,
+                  ) {
+                    final Hero toHero = toHeroContext.widget as Hero;
+                    return FadeTransition(
+                      opacity: animation.drive(
+                        Tween<double>(begin: 0.85, end: 1.0).chain(
+                          CurveTween(curve: Curves.easeInOut),
+                        ),
+                      ),
+                      child: toHero.child,
+                    );
+                  },
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.vertical(top: Radius.circular(15.0)),
+                      child: imageUrl != null && imageUrl.startsWith('http')
+                          ? CachedNetworkImage(
+                              imageUrl: imageUrl,
+                              fit: BoxFit.cover,
+                              width: double.infinity,
+                              height: 110,
+                              placeholder: (context, url) => Shimmer.fromColors(
+                                baseColor: Colors.grey[300]!,
+                                highlightColor: Colors.grey[100]!,
+                                child: Container(
+                                  width: double.infinity,
+                                  height: 110,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              errorWidget: (context, url, error) => Container(
+                                color: Colors.grey[200],
+                                child: const Center(
+                                  child: Icon(
+                                    Icons.broken_image_outlined,
+                                    color: errorIconColor,
+                                    size: 40.0,
+                                  ),
+                                ),
+                              ),
+                            )
+                          : (defaultItemImagePath != null
+                              ? Image.asset(
+                                  defaultItemImagePath,
+                                  fit: BoxFit.cover,
+                                  width: double.infinity,
+                                  height: 110,
+                                )
+                              : Container(
+                                  color: Colors.grey[200],
+                                  width: double.infinity,
+                                  height: 110,
+                                  child: const Center(
+                                    child: Icon(
+                                      Icons.broken_image_outlined,
+                                      color: errorIconColor,
+                                      size: 40.0,
+                                    ),
+                                  ),
+                                )),
+                    ),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10.0, 8.0, 10.0, 10.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.name,
+                      style: const TextStyle(
+                        fontSize: 15.0,
+                        fontWeight: FontWeight.w600,
+                        color: primaryTextColor,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4.0),
+                    Text(
+                      item.price != null ? 'ugx ${item.price!.toStringAsFixed(2)}' : 'Price: N/A',
+                      style: const TextStyle(
+                        color: priceColor,
+                        fontSize: 14.0,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

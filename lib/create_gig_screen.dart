@@ -1,6 +1,7 @@
 // create_gig_screen.dart
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'create_gig_screen_helpers.dart';
 import 'package:intl/intl.dart'; // For date/time formatting
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi2/cart.dart' as cart; // Use prefix
@@ -104,11 +105,13 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
     }
   }
 
-  // --- Time Picker --- (Keep existing _selectTime logic - unchanged)
+  // --- Time Picker --- 
  Future<void> _selectTime(BuildContext context) async {
     final TimeOfDay? picked = await showTimePicker( context: context, initialTime: _selectedTime ?? TimeOfDay.now(),
        builder: (context, child) { return Theme( data: Theme.of(context).copyWith( colorScheme: const ColorScheme.light( primary: kColorPrimary, onPrimary: kColorTextOnPrimary, onSurface: kColorTextPrimary, ),
-              timePickerTheme: TimePickerThemeData( dialHandColor: kColorPrimaryLight, hourMinuteTextColor: MaterialStateColor.resolveWith((states) => states.contains(MaterialState.selected) ? kColorPrimaryDark : kColorTextSecondary), hourMinuteColor: MaterialStateColor.resolveWith((states) => states.contains(MaterialState.selected) ? kColorPrimaryLightest : Colors.grey.shade200),),), child: child!,);},);
+              timePickerTheme: TimePickerThemeData( dialHandColor: kColorPrimaryLight, hourMinuteTextColor: WidgetStateColor.resolveWith((states) =>
+          states.contains(WidgetState.disabled) ? kColorPrimary.withAlpha(128) : kColorPrimaryDark), hourMinuteColor: WidgetStateColor.resolveWith((states) =>
+          states.contains(WidgetState.disabled) ? kColorPrimaryLightest.withAlpha(128) : kColorPrimaryLightest),),), child: child!,);},);
     if (picked != null && picked != _selectedTime) {
       setState(() { _selectedTime = picked;
         // Reset time error when a new time is picked
@@ -268,12 +271,12 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
               // --- Gig Type ---
               DropdownButtonFormField<String>( value: _selectedGigType, items: _gigTypes.map((String type) => DropdownMenuItem<String>( value: type, child: Text(type), )).toList(),
                 onChanged: (String? newValue) { setState(() { _selectedGigType = newValue; }); },
-                decoration: _inputDecoration('Gig Type / Occasion', Icons.celebration_outlined),
+                decoration: inputDecorationHelper('Gig Type / Occasion', Icons.celebration_outlined),
                 validator: (value) => value == null ? 'Please select a gig type' : null, ),
               const SizedBox(height: 16),
 
               // --- Location ---
-              TextFormField( controller: _locationController, decoration: _inputDecoration('Event Location Address', Icons.location_on_outlined),
+              TextFormField( controller: _locationController, decoration: inputDecorationHelper('Event Location Address', Icons.location_on_outlined),
                 validator: (value) => (value == null || value.trim().isEmpty) ? 'Please enter the event location' : null, textCapitalization: TextCapitalization.words,),
               const SizedBox(height: 16),
 
@@ -282,7 +285,7 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
                   // Date Picker
                   Expanded( child: InkWell( onTap: () => _selectDate(context),
                       child: InputDecorator(
-                        decoration: _inputDecoration('Date', Icons.calendar_today_outlined).copyWith(
+                        decoration: inputDecorationHelper('Date', Icons.calendar_today_outlined).copyWith(
                           // **** NEW: Show red border if _showDateError is true ****
                           enabledBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: BorderSide(color: _showDateError ? Colors.red.shade700 : kColorDivider, width: _showDateError ? 1.5 : 1.0),),
                           focusedBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: BorderSide(color: _showDateError ? Colors.red.shade700 : kColorPrimary, width: 1.5),),
@@ -293,7 +296,7 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
                    // Time Picker
                   Expanded( child: InkWell( onTap: () => _selectTime(context),
                        child: InputDecorator(
-                        decoration: _inputDecoration('Time', Icons.access_time_outlined).copyWith(
+                        decoration: inputDecorationHelper('Time', Icons.access_time_outlined).copyWith(
                           // **** NEW: Show red border if _showTimeError is true ****
                            enabledBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: BorderSide(color: _showTimeError ? Colors.red.shade700 : kColorDivider, width: _showTimeError ? 1.5 : 1.0),),
                            focusedBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: BorderSide(color: _showTimeError ? Colors.red.shade700 : kColorPrimary, width: 1.5),),
@@ -316,70 +319,62 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
               if (_numberOfPeopleOptions.isNotEmpty) ...[
                 DropdownButtonFormField<String>( value: _selectedNumPeopleKey, items: _numberOfPeopleOptions.map((String key) => DropdownMenuItem<String>( value: key, child: Text(_formatPeopleOption(key)), )).toList(),
                   onChanged: (String? newValue) { setState(() { _selectedNumPeopleKey = newValue; _calculateAndUpdatePrice(newValue); }); },
-                  decoration: _inputDecoration('Number of Guests', Icons.people_outline),
+                  decoration: inputDecorationHelper('Number of Guests', Icons.people_outline),
                   validator: (value) => value == null ? 'Please select the number of guests' : null, ),
               ] else ...[ // Show message if pricing options are unavailable
                  Container( padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
                    decoration: BoxDecoration( border: Border.all(color: Colors.orange.shade200), borderRadius: BorderRadius.circular(kRadiusMedium), color: Colors.orange.shade50,),
                    child: Row( children: [ Icon(Icons.warning_amber_rounded, color: Colors.orange.shade800, size: 18), const SizedBox(width: 8),
-                       Expanded( child: Text( "Guest pricing options are not available for this chef.", style: TextStyle(color: Colors.orange.shade900, fontStyle: FontStyle.italic),),),], ), ), ],
-              const SizedBox(height: 16),
+                        Expanded( child: Text( "Guest pricing options are not available for this chef.", style: TextStyle(color: Colors.orange.shade900, fontStyle: FontStyle.italic),),),], ), ), ],
+               const SizedBox(height: 16),
 
               // --- Calculated Price Display ---
-               Container( padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration( color: kColorPrimaryLightest.withOpacity(0.3), borderRadius: BorderRadius.circular(kRadiusSmall), border: Border.all(color: kColorPrimaryLight.withOpacity(0.5))),
-                child: Row( mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    Text( "Estimated Price:", style: GoogleFonts.poppins(fontSize: 16, color: kColorTextSecondary),),
-                    Text( _calculatedPrice == null ? "Select Guests" : '\$${_calculatedPrice!.toStringAsFixed(2)}',
-                      style: GoogleFonts.poppins( fontSize: 20, fontWeight: FontWeight.bold, color: _calculatedPrice == null ? kColorTextSecondary : kColorPrimaryDark),),],),),
+              Container( padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: kColorPrimaryLightest.withAlpha((0.3 * 255).toInt()),
+                  borderRadius: BorderRadius.circular(kRadiusSmall),
+                  border: Border.all(color: kColorPrimaryLight.withAlpha((0.5 * 255).toInt())),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      "Estimated Price:",
+                      style: GoogleFonts.poppins(fontSize: 16, color: kColorTextSecondary),
+                    ),
+                    Text(
+                      _calculatedPrice == null ? "Select Guests" : 'ugx ${_calculatedPrice!.toStringAsFixed(2)}',
+                      style: GoogleFonts.poppins(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: _calculatedPrice == null ? kColorTextSecondary : kColorPrimaryDark,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 20),
 
-               // --- Detailed Description ---
-               TextFormField( controller: _descriptionController,
-                decoration: _inputDecoration( 'Additional Details (Optional)', Icons.notes_outlined, isDense: false,).copyWith( hintText: 'Any specific requests, dietary needs, or event notes...'),
-                maxLines: 4, minLines: 2, textCapitalization: TextCapitalization.sentences, ),
+              // --- Detailed Description ---
+              TextFormField(
+                controller: _descriptionController,
+                decoration: inputDecorationHelper('Additional Details (Optional)', Icons.notes_outlined, isDense: false).copyWith(
+                  hintText: 'Any specific requests, dietary needs, or event notes...',
+                ),
+                maxLines: 4,
+                minLines: 2,
+                textCapitalization: TextCapitalization.sentences,
+              ),
               const SizedBox(height: 30), // Extra space
             ],
           ),
         ),
       ),
-      bottomNavigationBar: SafeArea( child: _buildConfirmButton(), ),
-    );
-  }
-
-   // Helper for consistent InputDecoration
-  InputDecoration _inputDecoration(String label, IconData icon, {bool isDense = true}) {
-    // This remains unchanged from the previous correct version
-    return InputDecoration(
-      labelText: label, labelStyle: const TextStyle(color: kColorTextSecondary),
-      hintText: 'Enter $label', hintStyle: const TextStyle(color: Colors.grey),
-      prefixIcon: Icon(icon, color: kColorPrimary, size: 20),
-      border: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: BorderSide(color: kColorDivider, width: 1.0),),
-      enabledBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: BorderSide(color: kColorDivider, width: 1.0),),
-      focusedBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: const BorderSide(color: kColorPrimary, width: 1.5),),
-      errorBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: BorderSide(color: Colors.red.shade700, width: 1.0),),
-      focusedErrorBorder: OutlineInputBorder( borderRadius: BorderRadius.circular(kRadiusMedium), borderSide: BorderSide(color: Colors.red.shade700, width: 1.5),),
-       isDense: isDense,
-       contentPadding: isDense ? const EdgeInsets.symmetric(horizontal: 12, vertical: 14) : const EdgeInsets.symmetric(horizontal: 12, vertical: 16) ,
-    );
-  }
-
-   // Bottom Confirmation Button
-  Widget _buildConfirmButton() {
-    // This remains unchanged from the previous correct version
-    bool canSubmit = !_isLoading && _calculatedPrice != null && _calculatedPrice! > 0;
-    return Container( padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 16.0),
-      decoration: BoxDecoration( color: kColorSurface, boxShadow: [ BoxShadow( color: Colors.black.withOpacity(0.08), blurRadius: 10, offset: const Offset(0, -3)) ], ),
-      child: ElevatedButton.icon(
-        icon: _isLoading ? Container( width: 20, height: 20, child: const CircularProgressIndicator( color: kColorTextOnPrimary, strokeWidth: 2,),) : const Icon(Icons.check_circle_outline_rounded, size: 20),
-        label: Text(_isLoading ? 'Booking...' : 'Confirm Gig Booking'),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: canSubmit ? kColorPrimaryDark : Colors.grey.shade500, foregroundColor: kColorTextOnPrimary,
-          padding: const EdgeInsets.symmetric(vertical: 16), minimumSize: const Size(double.infinity, 50),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusMedium)),
-          textStyle: GoogleFonts.poppins(fontSize: 17, fontWeight: FontWeight.w600), elevation: canSubmit ? 2 : 0, ),
-        onPressed: canSubmit ? _submitGig : null,
-      ),
+      bottomNavigationBar: SafeArea( child: buildConfirmButton(
+        isLoading: _isLoading,
+        calculatedPrice: _calculatedPrice,
+        onSubmit: _submitGig,
+      ), ),
     );
   }
 }
