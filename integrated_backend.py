@@ -92,7 +92,7 @@ async def lifespan(app: FastAPI):
             max_size=int(os.getenv("DB_POOL_MAX_SIZE", "10")),# Configurable max size
             timeout=30, # Connection acquisition timeout
             command_timeout=60, # Default timeout for commands
-            # statement_cache_size=0 # Uncomment ONLY if needed for pgbouncer transaction/statement mode
+            statement_cache_size=0 # Uncomment ONLY if needed for pgbouncer transaction/statement mode
         )
         logger.info(f"Database connection pool created successfully (Min: {db_pool.get_min_size()}, Max: {db_pool.get_max_size()}).")
         yield # Application runs here
@@ -1135,7 +1135,98 @@ class Spices(BaseRepository):
         else: logger.warning(f"Attempt delete non-existent spice ID: {spice_id}"); return False
 
 
-# --- Orders Class (Working Version - Adjusted for asyncpg pool) ---
+import json
+import logging
+from typing import Union, Optional, List, Dict, Any
+from datetime import datetime, date
+import asyncpg
+from fastapi import HTTPException, status
+
+# Configure logging (adjust as needed for your application)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Assume BaseRepository provides _execute_query and connection handling
+class BaseRepository:
+    async def _execute_query(self, conn: asyncpg.Connection, sql: str, params: tuple = (), fetch_val: bool = False, fetch_all: bool = False, returning_id_column: Optional[str] = None):
+        # This is a placeholder implementation. Replace with your actual one.
+        try:
+            if returning_id_column:
+                # fetchval is often used for RETURNING clauses
+                result = await conn.fetchval(sql, *params)
+                logger.debug(f"Executed query (fetchval): {sql} with params: {params}, Result: {result}")
+                return result
+            elif fetch_val:
+                result = await conn.fetchval(sql, *params)
+                logger.debug(f"Executed query (fetchval): {sql} with params: {params}, Result: {result}")
+                return result
+            elif fetch_all:
+                result = await conn.fetch(sql, *params)
+                logger.debug(f"Executed query (fetchall): {sql} with params: {params}, Fetched {len(result)} rows.")
+                return result  # Returns list of asyncpg.Record
+            else:
+                # Execute for INSERT/UPDATE/DELETE without returning specific values beyond command status
+                status_result = await conn.execute(sql, *params)
+                logger.debug(f"Executed query (execute): {sql} with params: {params}, Status: {status_result}")
+                # You might want to return True or the status string if needed
+                return status_result # e.g., "INSERT 0 1"
+        except asyncpg.PostgresError as e:
+            logger.error(f"Database Query Error: {e}\nSQL: {sql}\nParams: {params}")
+            # Decide if you want to raise a generic HTTP exception or a specific one
+            # based on the error code (e.g., unique violation, foreign key violation)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database operation failed: {e}") from e
+        except Exception as e:
+             logger.error(f"Unexpected Error during query execution: {e}\nSQL: {sql}\nParams: {params}")
+             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred during database operation.") from e
+
+
+
+#orders class starts here, base repo alreay imlemented up there
+import json
+import logging
+from typing import Union, Optional, List, Dict, Any, Tuple
+from datetime import datetime, date
+import asyncpg
+from fastapi import HTTPException, status
+
+# Configure logging (adjust as needed for your application)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# --- Placeholder BaseRepository ---
+# Replace this with your actual BaseRepository implementation
+class BaseRepository:
+    async def _execute_query(self, conn: asyncpg.Connection, sql: str, params: tuple = (), fetch_val: bool = False, fetch_all: bool = False, returning_id_column: Optional[str] = None) -> Any:
+        log_params = tuple(str(p) if isinstance(p, (list, dict)) else p for p in params)
+        try:
+            if returning_id_column:
+                result = await conn.fetchval(sql, *params)
+                logger.debug(f"Executed query (fetchval, returning '{returning_id_column}'): {sql} with params: {log_params}, Result: {result}")
+                return result
+            elif fetch_val:
+                result = await conn.fetchval(sql, *params)
+                logger.debug(f"Executed query (fetchval): {sql} with params: {log_params}, Result: {result}")
+                return result
+            elif fetch_all:
+                result = await conn.fetch(sql, *params)
+                logger.debug(f"Executed query (fetchall): {sql} with params: {log_params}, Fetched {len(result)} rows.")
+                return result
+            else:
+                status_result = await conn.execute(sql, *params)
+                logger.debug(f"Executed query (execute): {sql} with params: {log_params}, Status: {status_result}")
+                return status_result
+        except asyncpg.PostgresError as e:
+            logger.error(f"Database Query Error: {e}\nSQL: {sql}\nParams: {log_params}", exc_info=True)
+            # Specific check for column does not exist error (code '42703')
+            if e.sqlstate == '42703':
+                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database schema error: A required column is missing. Error: {e}") from e
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database operation failed: {e}") from e
+        except Exception as e:
+             logger.error(f"Unexpected Error during query execution: {e}\nSQL: {sql}\nParams: {log_params}", exc_info=True)
+             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred during database operation.") from e
+# --- End Placeholder BaseRepository ---
+
+
 class Orders(BaseRepository):
     ALLOWED_ORDER_TYPES = {'meal', 'supplement', 'gig', 'herbal', 'gadget', 'spice', 'produce'}
     ALLOWED_ORDER_STATUSES = {'cancelled', 'assigned','anyrider', 'rider_accepted','rider_rejected','delivered', 'shipped', 'preparing', 'confirmed', 'pending', 'accepted', 'dispatched', 'picked up', 'delivering'}
@@ -1143,207 +1234,188 @@ class Orders(BaseRepository):
     ALLOWED_PAYMENT_MODES = {'cash', 'momo', 'mobile money', 'Airtel Card', 'paypal', 'stripe', 'debit card', 'credit card'}
 
     async def _validate_product_id(self, conn: asyncpg.Connection, product_id: Union[str, int], order_type: str):
-        """Validates product_id asynchronously using provided connection."""
-        # ... (implementation unchanged, uses passed 'conn') ...
-        if not product_id: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"product_id required for {order_type} orders.")
+        if not product_id:
+            if order_type != 'gig':
+                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"product_id required for {order_type} orders.")
+            else: return
         order_type_l = order_type.lower().strip()
-        table_map = {'meal':('meals','meal_id'),'supplement':('supplements','supplement_id'),'herbal':('herbals','herbal_id'),'gadget':('gadgets','gadget_id'),'spice':('spices','spice_id'),'produce':('produce','produce_id')}
+        table_map = {'meal': ('meals', 'meal_id'), 'supplement': ('supplements', 'supplement_id'), 'herbal': ('herbals', 'herbal_id'), 'gadget': ('gadgets', 'gadget_id'), 'spice': ('spices', 'spice_id'), 'produce': ('produce', 'produce_id')}
         if order_type_l == 'gig': return
         if order_type_l not in table_map: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid order_type: '{order_type}'.")
-        table_name, id_column = table_map[order_type_l]; sql = f"SELECT {id_column} FROM {table_name} WHERE {id_column} = $1"
+        table_name, id_column = table_map[order_type_l]
+        sql = f"SELECT {id_column} FROM {table_name} WHERE {id_column}::text = $1::text"
         try:
-            result = await conn.fetchval(sql, product_id) # Use conn
-            if result is None and isinstance(product_id, int): result = await conn.fetchval(sql, str(product_id)) # Use conn
-            if result is None: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid product_id: '{product_id}' for type '{order_type}'.")
-        except (ValueError, TypeError) as e: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid product_id format: '{product_id}'.") from e
-        except asyncpg.PostgresError as e: raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"DB error during validation: {e}") from e
+            result = await conn.fetchval(sql, str(product_id))
+            if result is None: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid product_id: '{product_id}' for type '{order_type}'. Product not found.")
+        except (ValueError, TypeError) as e: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid product_id format: '{product_id}'. Error: {e}") from e
 
-    async def create_order(self, conn: asyncpg.Connection, user_id: int, order_type: str, order_status: str = "pending", payment_status: str = "pending", payment_mode: str = "cash",
-                           delivery_address: Optional[str] = None, notes: Optional[str] = None, total_price: float = 0.0, amount_paid: float = 0.0, quantity: int = 1,
-                           product_id: Optional[Union[str, int]] = None, chef_id: Optional[int] = None, producer_id: Optional[int] = None, transporter_id: Optional[int] = None, transaction_id: Optional[str] = None,
-                           items: Optional[List[Dict]] = None):
-        # ... (implementation unchanged, but calls _validate_product_id and _execute_query with 'conn') ...
-        order_type_l = str(order_type).lower().strip(); gig_details_json = None
+    async def create_order(self, conn: asyncpg.Connection, user_id: int, order_type: str,
+                           items: Optional[List[Dict]] = None,
+                           order_status: str = "pending", payment_status: str = "pending", payment_mode: str = "cash",
+                           delivery_address: Optional[str] = None, notes: Optional[str] = None,
+                           total_price: Optional[float] = None, amount_paid: float = 0.0,
+                           product_id: Optional[Union[str, int]] = None,
+                           chef_id: Optional[int] = None, producer_id: Optional[int] = None,
+                           quantity: Optional[int] = None,
+                           transporter_id: Optional[int] = None, transaction_id: Optional[str] = None
+                           ) -> Dict[str, Any]:
+        order_type_l = str(order_type).lower().strip()
+        gig_details_json: Optional[str] = None
+        complementary_meals_data: Optional[List[Dict]] = None
+        complementary_meals_serialized_json: Optional[str] = None
+        derived_product_id = product_id
+        derived_chef_id = chef_id
+        derived_producer_id = producer_id
+        calculated_quantity = 0
+        calculated_total_price = 0.0
+        if not user_id: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id is required.")
+        if order_type_l not in self.ALLOWED_ORDER_TYPES: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid order_type: '{order_type}'.")
+        if not items or not isinstance(items, list) or len(items) == 0: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="items list cannot be empty.")
+        first_item = items[0]
         try:
             if order_type_l == 'gig':
-                if not items or not isinstance(items, list) or len(items)==0: raise ValueError("items required for gig orders.")
-                gig_details = items[0].get('gig_details',{})
-                if not gig_details or not isinstance(gig_details, dict): raise ValueError("Valid gig_details required.")
-                gig_details_json = json.dumps(gig_details); product_id = None
-            else: await self._validate_product_id(conn, product_id, order_type_l) # Pass conn
-
-            order_status_l=str(order_status).lower().strip(); payment_status_l=str(payment_status).lower().strip(); payment_mode_l=str(payment_mode).lower().strip()
-            if order_type_l not in self.ALLOWED_ORDER_TYPES: raise ValueError(f"Invalid order_type: '{order_type}'.")
+                gig_details = first_item.get('gig_details', {})
+                if not gig_details or not isinstance(gig_details, dict): raise ValueError("Valid gig_details dictionary required within items for gig orders.")
+                gig_details_json = json.dumps(gig_details)
+                derived_product_id = None
+                derived_chef_id = first_item.get('chef_id', chef_id)
+                derived_producer_id = first_item.get('producer_id', producer_id)
+                calculated_quantity = first_item.get('quantity', 1)
+                calculated_total_price = float(first_item.get('price', 0.0)) * calculated_quantity
+            else:
+                item_product_id = first_item.get('product_id')
+                if not derived_product_id and item_product_id: derived_product_id = item_product_id
+                if not derived_product_id: raise ValueError(f"product_id is required for order_type '{order_type_l}', either directly or in items.")
+                await self._validate_product_id(conn, derived_product_id, order_type_l)
+                derived_chef_id = first_item.get('chef_id', derived_chef_id)
+                derived_producer_id = first_item.get('producer_id', derived_producer_id)
+                calculated_quantity = int(first_item.get('quantity', 1))
+                item_price = float(first_item.get('price', 0.0))
+                calculated_total_price = item_price * calculated_quantity
+                complementary_meals_data = first_item.get('bestservedwith')
+                if complementary_meals_data:
+                    if not isinstance(complementary_meals_data, list): raise ValueError("'bestservedwith' must be a list of objects.")
+                    try:
+                        complementary_meals_serialized_json = json.dumps(complementary_meals_data)
+                        logger.debug(f"Serialized complementary_meals: {complementary_meals_serialized_json}")
+                    except TypeError as e:
+                        logger.error(f"Failed to serialize complementary_meals data: {complementary_meals_data}", exc_info=True)
+                        raise ValueError(f"Invalid data in 'bestservedwith', cannot serialize to JSON: {e}")
+            final_total_price = total_price if total_price is not None else calculated_total_price
+            final_quantity = quantity if quantity is not None else calculated_quantity
+            order_status_l = str(order_status).lower().strip()
+            payment_status_l = str(payment_status).lower().strip()
+            payment_mode_l = str(payment_mode).lower().strip()
             if order_status_l not in self.ALLOWED_ORDER_STATUSES: raise ValueError(f"Invalid order_status: '{order_status}'.")
             if payment_status_l not in self.ALLOWED_PAYMENT_STATUSES: raise ValueError(f"Invalid payment_status: '{payment_status}'.")
-            is_airtel = str(payment_mode).strip().lower() == 'airtel card'
+            is_airtel = payment_mode_l == 'airtel card'
             if not is_airtel and payment_mode_l not in self.ALLOWED_PAYMENT_MODES: raise ValueError(f"Invalid payment_mode: '{payment_mode}'.")
             if is_airtel: payment_mode_l = 'Airtel Card'
-            delivery_address_s=delivery_address or "Not specified"; notes_s=notes or "No special instructions"
-            price_f=float(total_price); paid_f=float(amount_paid); qty_i=int(quantity); user_id_i=int(user_id)
-            prod_id_s=str(product_id) if product_id is not None else None; chef_id_i=int(chef_id) if chef_id is not None else None; producer_id_i=int(producer_id) if producer_id is not None else None; transporter_id_i=int(transporter_id) if transporter_id is not None else None
-        except (ValueError, TypeError) as e: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid order data: {e}") from e
-        except json.JSONDecodeError as e: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid gig_details: {e}") from e
-
-        sql = "INSERT INTO orders (user_id, order_type, product_id, chef_id, producer_id, transporter_id, order_date, delivery_address, order_status, total_price, notes, payment_status, payment_mode, amount_paid, transaction_id, quantity, gig_details) VALUES ($1,$2,$3,$4,$5,$6,NOW(),$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING order_id"
-        params = (user_id_i, order_type_l, prod_id_s, chef_id_i, producer_id_i, transporter_id_i, delivery_address_s, order_status_l, price_f, notes_s, payment_status_l, payment_mode_l, paid_f, transaction_id, qty_i, gig_details_json)
-        order_id = await self._execute_query(conn, sql, params, returning_id_column='order_id') # Pass conn
-        if order_id: return {"message": "Order created", "order_id": order_id, "success": True}
-        else: raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order creation failed (no ID).")
-
-    # --- Ensure this is inside your Orders class ---
-
-    ## reading orders (Corrected SQL - No '...')
-    async def read_orders(self, conn: asyncpg.Connection, order_id=None, chef_id=None, producer_id=None, user_id=None, transporter_id=None):
-        # --- Logging added ---
-        logger.info(f"Reading orders with criteria: order_id={order_id}, chef_id={chef_id}, producer_id={producer_id}, user_id={user_id}, transporter_id={transporter_id}")
-
-        # *** CORRECTED FULL SQL QUERY ***
+            delivery_address_s = delivery_address or "Not specified"
+            notes_s = notes or "No special instructions"
+            price_f = float(final_total_price)
+            paid_f = float(amount_paid)
+            qty_i = int(final_quantity)
+            user_id_i = int(user_id)
+            prod_id_s = str(derived_product_id) if derived_product_id is not None else None
+            chef_id_i = int(derived_chef_id) if derived_chef_id is not None else None
+            producer_id_i = int(derived_producer_id) if derived_producer_id is not None else None
+            transporter_id_i = int(transporter_id) if transporter_id is not None else None
+        except (ValueError, TypeError, KeyError) as e: logger.warning(f"Invalid order data provided: {e}. Payload: {items}", exc_info=True); raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid order data: {e}") from e
+        except json.JSONDecodeError as e: logger.warning(f"Invalid JSON in gig_details: {e}. Payload: {items}", exc_info=True); raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid JSON format in gig_details: {e}") from e
+        except HTTPException as e: raise e
+        except Exception as e: logger.error(f"Unexpected error processing order data: {e}", exc_info=True); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Server error processing order data: {e}") from e
         sql = """
-            WITH MealDetails AS (
-                SELECT
-                    m.meal_id,
-                    m.meal_name,
-                    COALESCE(STRING_AGG(DISTINCT p.produce_name, ', ' ORDER BY p.produce_name), '') AS ingredients
-                FROM meals m
-                LEFT JOIN meal_ingredients mi ON m.meal_id = mi.meal_id
-                LEFT JOIN produce p ON mi.produce_id = p.produce_id
-                GROUP BY m.meal_id, m.meal_name
-            ),
-            SupplementDetails AS (
-                SELECT supplement_id, supplement_name AS product_name FROM supplements
-            ),
-            HerbalDetails AS (
-                SELECT herbal_id, herbal_name AS product_name FROM herbals
-            ),
-            GadgetDetails AS (
-                SELECT gadget_id, gadget_name AS product_name FROM gadgets
-            ),
-            SpiceDetails AS (
-                SELECT spice_id, spice_name AS product_name FROM spices
-            ),
-            ProduceDetails AS (
-                SELECT produce_id, produce_name AS product_name FROM produce
-            )
+            INSERT INTO orders ( user_id, order_type, product_id, chef_id, producer_id, transporter_id, order_date, delivery_address, order_status, total_price, notes, payment_status, payment_mode, amount_paid, transaction_id, quantity, gig_details, complementary_meals )
+            VALUES ($1,$2,$3,$4,$5,$6, NOW(), $7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING order_id """
+        params: Tuple[Any, ...] = ( user_id_i, order_type_l, prod_id_s, chef_id_i, producer_id_i, transporter_id_i, delivery_address_s, order_status_l, price_f, notes_s, payment_status_l, payment_mode_l, paid_f, transaction_id, qty_i, gig_details_json, complementary_meals_serialized_json )
+        order_id = await self._execute_query(conn, sql, params, returning_id_column='order_id')
+        if order_id: logger.info(f"Order created successfully for user {user_id_i} with order_id {order_id}"); return {"message": "Order created", "order_id": order_id, "success": True}
+        else: logger.error(f"Order creation attempt failed for user {user_id_i} (no ID returned, but no DB exception caught). Check query logic and DB triggers."); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order creation failed unexpectedly (no ID returned).")
+
+    # *** CORRECTED read_orders method ***
+    async def read_orders(self, conn: asyncpg.Connection, order_id=None, chef_id=None, producer_id=None, user_id=None, transporter_id=None) -> List[Dict[str, Any]]:
+        logger.info(f"Reading orders with criteria: order_id={order_id}, chef_id={chef_id}, producer_id={producer_id}, user_id={user_id}, transporter_id={transporter_id}")
+        sql = """
+            WITH MealDetails AS ( SELECT m.meal_id::text, m.meal_name, COALESCE(STRING_AGG(DISTINCT p.produce_name, ', ' ORDER BY p.produce_name), '') AS ingredients FROM meals m LEFT JOIN meal_ingredients mi ON m.meal_id = mi.meal_id LEFT JOIN produce p ON mi.produce_id = p.produce_id GROUP BY m.meal_id, m.meal_name ),
+                 SupplementDetails AS ( SELECT supplement_id::text, supplement_name AS product_name FROM supplements ), HerbalDetails AS ( SELECT herbal_id::text, herbal_name AS product_name FROM herbals ), GadgetDetails AS ( SELECT gadget_id::text, gadget_name AS product_name FROM gadgets ), SpiceDetails AS ( SELECT spice_id::text, spice_name AS product_name FROM spices ), ProduceDetails AS ( SELECT produce_id::text, produce_name AS product_name FROM produce )
             SELECT
                 o.order_id, o.user_id, o.order_type, o.product_id, o.chef_id, o.producer_id, o.transporter_id,
                 o.order_date, o.delivery_address, o.order_status, o.total_price, o.notes,
                 o.payment_status, o.payment_mode, o.amount_paid, o.transaction_id, o.quantity,
-                md.meal_name, md.ingredients,
-                producer.name AS producer_name, producer.location AS producer_address,
-                chef.name AS chef_name, chef.location AS chef_address,
-                transporter.name AS transporter_name,
-                o.gig_details, -- Selecting the TEXT column
-                COALESCE(
-                    CASE WHEN o.order_type = 'meal' THEN md.meal_name END,
-                    CASE WHEN o.order_type = 'supplement' THEN supd.product_name END,
-                    CASE WHEN o.order_type = 'herbal' THEN hd.product_name END,
-                    CASE WHEN o.order_type = 'gadget' THEN gd.product_name END,
-                    CASE WHEN o.order_type = 'spice' THEN sd.product_name END,
-                    CASE WHEN o.order_type = 'produce' THEN prod.product_name END,
-                    CASE WHEN o.order_type = 'gig' THEN 'Gig Order' END,
-                    'Unknown'
-                ) AS product_name,
-                COALESCE(chef.location, producer.location, '') AS pickup_location
+                o.gig_details, o.complementary_meals,
+                -- o.created_at, -- REMOVED
+                o.updated_at,      -- KEPT (VERIFY this column exists!)
+                COALESCE( md.meal_name, supd.product_name, hd.product_name, gd.product_name, sd.product_name, prod.product_name, CASE WHEN o.order_type = 'gig' THEN 'Gig Order' ELSE 'Unknown Product' END ) AS product_name,
+                md.ingredients, producer.name AS producer_name, producer.location AS producer_address, chef.name AS chef_name, chef.location AS chef_address, transporter.name AS transporter_name, COALESCE(chef.location, producer.location, '') AS pickup_location
             FROM orders o
-            LEFT JOIN MealDetails md ON o.product_id::varchar = md.meal_id::varchar AND o.order_type = 'meal'
-            LEFT JOIN SupplementDetails supd ON o.product_id::varchar = supd.supplement_id::varchar AND o.order_type = 'supplement'
-            LEFT JOIN HerbalDetails hd ON o.product_id::varchar = hd.herbal_id::varchar AND o.order_type = 'herbal'
-            LEFT JOIN GadgetDetails gd ON o.product_id::varchar = gd.gadget_id::varchar AND o.order_type = 'gadget'
-            LEFT JOIN SpiceDetails sd ON o.product_id::varchar = sd.spice_id::varchar AND o.order_type = 'spice'
-            LEFT JOIN ProduceDetails prod ON o.product_id::varchar = prod.produce_id::varchar AND o.order_type = 'produce'
-            LEFT JOIN producers producer ON o.producer_id = producer.producer_id
-            LEFT JOIN chefs chef ON o.chef_id = chef.chefid
-            LEFT JOIN transporters transporter ON o.transporter_id = transporter.transporter_id
-            WHERE 1=1
-        """
-        params = []
+            LEFT JOIN MealDetails md ON o.product_id = md.meal_id AND o.order_type = 'meal' LEFT JOIN SupplementDetails supd ON o.product_id = supd.supplement_id AND o.order_type = 'supplement' LEFT JOIN HerbalDetails hd ON o.product_id = hd.herbal_id AND o.order_type = 'herbal' LEFT JOIN GadgetDetails gd ON o.product_id = gd.gadget_id AND o.order_type = 'gadget' LEFT JOIN SpiceDetails sd ON o.product_id = sd.spice_id AND o.order_type = 'spice' LEFT JOIN ProduceDetails prod ON o.product_id = prod.produce_id AND o.order_type = 'produce'
+            LEFT JOIN producers producer ON o.producer_id = producer.producer_id LEFT JOIN chefs chef ON o.chef_id = chef.chefid LEFT JOIN transporters transporter ON o.transporter_id = transporter.transporter_id
+            WHERE 1=1 """
+        params_list: List[Any] = []
         param_index = 1
-
         def _safe_int(val, field_name="ID"):
             if val is None: return None
             try: return int(val)
-            except (ValueError, TypeError): raise ValueError(f"Invalid format for {field_name}: '{val}'. Expected an integer.")
-
+            except (ValueError, TypeError): logger.warning(f"Invalid integer format for filter '{field_name}': '{val}'."); raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid format for {field_name}: '{val}'. Expected an integer.")
         try:
-            # Add filters based on input parameters
-            if order_id is not None: sql += f" AND o.order_id = ${param_index}"; params.append(_safe_int(order_id, "order_id")); param_index += 1
-            if chef_id is not None: sql += f" AND o.chef_id = ${param_index}"; params.append(_safe_int(chef_id, "chef_id")); param_index += 1
-            if producer_id is not None: sql += f" AND o.producer_id = ${param_index}"; params.append(_safe_int(producer_id, "producer_id")); param_index += 1
-            if user_id is not None: sql += f" AND o.user_id = ${param_index}"; params.append(_safe_int(user_id, "user_id")); param_index += 1
-            if transporter_id is not None: sql += f" AND o.transporter_id = ${param_index}"; params.append(_safe_int(transporter_id, "transporter_id")); param_index += 1
-        except ValueError as e:
-            # Catch errors from _safe_int
-            logger.warning(f"Invalid filter value provided for reading orders: {e}")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
+            if order_id is not None: sql += f" AND o.order_id = ${param_index}"; params_list.append(_safe_int(order_id, "order_id")); param_index += 1
+            if chef_id is not None: sql += f" AND o.chef_id = ${param_index}"; params_list.append(_safe_int(chef_id, "chef_id")); param_index += 1
+            if producer_id is not None: sql += f" AND o.producer_id = ${param_index}"; params_list.append(_safe_int(producer_id, "producer_id")); param_index += 1
+            if user_id is not None: sql += f" AND o.user_id = ${param_index}"; params_list.append(_safe_int(user_id, "user_id")); param_index += 1
+            if transporter_id is not None: sql += f" AND o.transporter_id = ${param_index}"; params_list.append(_safe_int(transporter_id, "transporter_id")); param_index += 1
+        except HTTPException: raise
         sql += " ORDER BY o.order_date DESC"
-
-        # Use the _execute_query helper which now gets 'conn' passed to it
-        results = await self._execute_query(conn, sql, tuple(params), fetch_all=True)
-        if results is None: # Should likely be caught by _execute_query, but check defensively
-             logger.info("No orders found matching criteria.")
-             return []
-
-        processed_results = []
+        params_tuple = tuple(params_list)
+        results = await self._execute_query(conn, sql, params_tuple, fetch_all=True)
+        if not results: logger.info("No orders found matching criteria."); return []
+        processed_results: List[Dict[str, Any]] = []
         for order_record in results:
-            processed_order = dict(order_record) # Convert record to dict
-
-            # Format datetime objects
+            processed_order = dict(order_record)
             for key, value in processed_order.items():
                 if isinstance(value, (datetime, date)):
-                    processed_order[key] = value.isoformat()
-
-            # *** Conditional JSON Parsing for TEXT column ***
-            gig_details_value = processed_order.get('gig_details')
-            if isinstance(gig_details_value, str): # Check if it's a string
-                if gig_details_value.strip(): # Check if string is not empty/whitespace
-                    # --- Logging added (Optional) ---
-                    # logger.debug(f"Attempting to parse gig_details string for order {processed_order.get('order_id')}")
-                    try:
-                        # Parse the string into a Python dictionary
-                        processed_order['gig_details'] = json.loads(gig_details_value)
-                    except (json.JSONDecodeError, TypeError):
-                        # If parsing fails, set to None for consistency (or handle as error)
-                        logger.warning(f"Failed to parse gig_details string for order_id {processed_order.get('order_id')}. String: '{gig_details_value}'")
-                        processed_order['gig_details'] = None
-                else:
-                    # If string is empty/whitespace, treat as None
-                    processed_order['gig_details'] = None
-            # If it's already None or not a string, leave it as is.
-
+                    if key in processed_order and value is not None: processed_order[key] = value.isoformat()
+                    elif value is None: processed_order[key] = None
             processed_results.append(processed_order)
+        logger.info(f"Retrieved and processed {len(processed_results)} orders.")
+        return processed_results
 
-        logger.info(f"Retrieved and processed {len(processed_results)} orders matching criteria.")
-        return processed_results # Return the list of processed order dicts
-
-    async def update_order_status(self, conn: asyncpg.Connection, order_id: int, new_status: str, transporter_id: int = None):
-        # ... (implementation unchanged, but calls _execute_query with 'conn') ...
+    async def update_order_status(self, conn: asyncpg.Connection, order_id: int, new_status: str, transporter_id: Optional[int] = None) -> Dict[str, Any]:
         new_status_l = str(new_status).lower().strip()
-        if new_status_l not in self.ALLOWED_ORDER_STATUSES: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid status: {new_status}")
+        if new_status_l not in self.ALLOWED_ORDER_STATUSES: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid status: '{new_status}'. Allowed: {', '.join(self.ALLOWED_ORDER_STATUSES)}")
         try: order_id_i = int(order_id)
-        except: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid order_id.")
-        params = [];
-        if new_status_l == 'assigned':
-            if transporter_id is None: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='transporter_id required.')
-            try: t_id = int(transporter_id)
-            except: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid transporter_id.")
-            sql = "UPDATE orders SET order_status=$1, transporter_id=$2, updated_at=NOW() WHERE order_id=$3 RETURNING order_id"
-            params = (new_status_l, t_id, order_id_i)
-        else: sql = "UPDATE orders SET order_status=$1, updated_at=NOW() WHERE order_id=$2 RETURNING order_id"; params = (new_status_l, order_id_i)
-        updated_id = await self._execute_query(conn, sql, tuple(params), fetch_val=True) # Pass conn
-        if updated_id == order_id_i: return {"message": f"Order {order_id_i} status updated", "success": True}
-        elif updated_id is None: raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Order {order_id_i} not found.")
-        else: raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Update failed.")
+        except (ValueError, TypeError): raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid order_id format: '{order_id}'. Must be an integer.")
+        params: List[Any] = []
+        # *** ASSUMPTION: 'updated_at' column exists for status updates ***
+        # If it doesn't exist, remove 'updated_at = NOW()' part too.
+        sql_update_parts = ["order_status = $1", "updated_at = NOW()"]
+        params.append(new_status_l)
+        param_counter = 2
+        if new_status_l in ['assigned', 'picked up', 'delivering'] and transporter_id is not None:
+             try:
+                 t_id = int(transporter_id)
+                 sql_update_parts.append(f"transporter_id = ${param_counter}")
+                 params.append(t_id); param_counter += 1
+             except (ValueError, TypeError): raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid transporter_id format: '{transporter_id}'. Must be an integer.")
+        elif new_status_l in ['assigned'] and transporter_id is None: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"transporter_id is required when setting status to 'assigned'.")
+        params.append(order_id_i)
+        sql = f"UPDATE orders SET {', '.join(sql_update_parts)} WHERE order_id = ${param_counter} RETURNING order_id"
+        updated_id = await self._execute_query(conn, sql, tuple(params), fetch_val=True)
+        if updated_id == order_id_i:
+            log_msg = f"Order {order_id_i} status updated to '{new_status_l}'"
+            if transporter_id is not None and new_status_l in ['assigned', 'picked up', 'delivering']: log_msg += f" with transporter {transporter_id}"
+            logger.info(log_msg); return {"message": f"Order {order_id_i} status updated", "success": True}
+        elif updated_id is None: logger.warning(f"Attempted to update status for non-existent order_id: {order_id_i}"); raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Order {order_id_i} not found.")
+        else: logger.error(f"Order status update for {order_id_i} returned unexpected ID: {updated_id}"); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order status update failed unexpectedly.")
 
-    async def delete_order(self, conn: asyncpg.Connection, order_id: int):
-        # ... (implementation unchanged, but calls _execute_query with 'conn') ...
+    async def delete_order(self, conn: asyncpg.Connection, order_id: int) -> Dict[str, Any]:
         try: order_id_i = int(order_id)
-        except: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid order_id.")
-        sql = "DELETE FROM orders WHERE order_id = $1 RETURNING order_id"; params = (order_id_i,)
-        deleted_id = await self._execute_query(conn, sql, params, fetch_val=True) # Pass conn
-        if deleted_id == order_id_i: return {"message": f"Order {order_id_i} deleted", "success": True}
-        else: raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Order {order_id_i} not found.")
+        except (ValueError, TypeError): raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid order_id format: '{order_id}'. Must be an integer.")
+        sql = "DELETE FROM orders WHERE order_id = $1 RETURNING order_id"
+        params = (order_id_i,)
+        deleted_id = await self._execute_query(conn, sql, params, fetch_val=True)
+        if deleted_id == order_id_i: logger.info(f"Order {order_id_i} deleted successfully."); return {"message": f"Order {order_id_i} deleted", "success": True}
+        else: logger.warning(f"Attempted to delete non-existent order_id: {order_id_i}"); raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Order {order_id_i} not found.")
 
 # --- Disbursements Class ---
 class Disbursements(BaseRepository):
