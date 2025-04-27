@@ -350,6 +350,7 @@ class _ProducerSignUpPageState extends State<ProducerSignUpPage> {
           SharedPreferences prefs = await SharedPreferences.getInstance();
           await prefs.setString(
               'producer_id', responseData['producer_id'].toString()); // Example
+          await prefs.setString('user_type', 'producer');
 
           _showSnackBar('Sign up successful!', isError: false);
 

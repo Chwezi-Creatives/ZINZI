@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:zinzi2/produ_dash22.dart';
-import 'package:zinzi2/producer_dash.dart'; // Ensure this path is correct
+// Ensure this path is correct
 //import 'package:zinzi2/producer_dash_redesign.dartp';
 import 'base_login_modular.dart'; // Ensure you have the base_login_modular.dart file
 import 'package:shared_preferences/shared_preferences.dart';
@@ -31,15 +31,16 @@ class ProducerLoginPageModular extends StatelessWidget {
         // Extract data from the loginData map
         final String userId = loginData['userId'];
         final String userType = loginData['userType'];
-        final bool verified = loginData['verified'] ?? false; // Default to false if null
-
-            // Save user ID and user type to shared preferences
-            saveUserDetails(int.parse(userId), userType);
-            // Navigate to the Producer Dashboard after saving user details
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => ProducerDash22()), // Ensure this class is defined and imported
-            );
+        // Save user ID and user type to shared preferences
+        SharedPreferences.getInstance().then((prefs) {
+          prefs.setString('user_type', 'producer');
+          saveUserDetails(int.parse(userId), userType);
+          // Navigate to the Producer Dashboard after saving user details
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => ProducerDash22()), // Ensure this class is defined and imported
+          );
+        });
        //   } else {
        //     print('Data does not contain required keys: "producer_id" or "user_type".');
        //     ScaffoldMessenger.of(context).showSnackBar(

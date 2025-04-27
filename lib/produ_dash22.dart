@@ -1930,7 +1930,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
     return Scaffold(
       // Add the standard drawer
-      drawer: const AppDrawer(),
+      drawer: AppDrawer(invokedBy: 'producer_dashboard'),
       backgroundColor: whiteColor, // Solid white background
       appBar: AppBar(
         backgroundColor: primaryTeal,
