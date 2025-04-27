@@ -193,7 +193,7 @@ class BaseRepository:
     # REMOVED DB Connection initialization here
     # Methods now take 'conn' as the first argument
 
-    async def _execute_query(self, conn: asyncpg.Connection, sql: str, params: Optional[tuple] = None, fetch_one: bool = False, fetch_all: bool = False, returning_id_column: Optional[str] = None) -> Any:
+    async def _execute_query(self, conn: asyncpg.Connection, sql: str, params: Optional[tuple] = None, fetch_one: bool = False, fetch_val=False, fetch_all: bool = False, returning_id_column: Optional[str] = None) -> Any:
         """Executes SQL query asynchronously using the provided asyncpg connection."""
         results = None
         returned_id = None
@@ -1133,103 +1133,53 @@ class Spices(BaseRepository):
         deleted_id = await self._execute_query(conn, sql, (spice_id,), returning_id_column='spice_id')
         if deleted_id == spice_id: logger.info(f"Deleted spice ID: {spice_id}"); return True
         else: logger.warning(f"Attempt delete non-existent spice ID: {spice_id}"); return False
+        
+        # --- Supplements Class ---
+class Supplements(BaseRepository):
+    async def create_supplement(self, conn: asyncpg.Connection, supplement_data: dict):
+        data_lower=lowercase_keys(supplement_data); check_required_fields(data_lower,['supplement_name','description','price'])
+        user_type=data_lower.get('user_type','supplement')
+        sql="INSERT INTO supplements (supplement_name,description,unit,price,image_url,date_added,added_by,added_by_type,user_type) VALUES ($1,$2,$3,$4,$5,NOW(),$6,$7,$8) RETURNING supplement_id"
+        try: price_f=float(data_lower['price']);
+        except (ValueError, TypeError): raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid price.")
+        params=(data_lower['supplement_name'],data_lower['description'],data_lower.get('unit'), price_f,data_lower.get('image_url'),data_lower.get('added_by'), data_lower.get('added_by_type',user_type),user_type)
+        supplement_id=await self._execute_query(conn, sql, params, returning_id_column='supplement_id')
+        if supplement_id: logger.info(f"Created supplement ID: {supplement_id}"); return {"supplement_id": supplement_id, "UserType": user_type}
+        else: raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Supplement creation failed.")
 
+    async def update_supplement(self, conn: asyncpg.Connection, supplement_id: int, updates: dict):
+        updates_lower=lowercase_keys(updates); set_clauses=[]; params=[]; idx=1; allowed=['supplement_name','description','unit','price','image_url']
+        if not updates_lower: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No updates.")
+        for k,v in updates_lower.items():
+             if k in allowed:
+                 if k=='price':
+                     try: v=float(v)
+                     except (ValueError, TypeError): raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid price.")
+                 set_clauses.append(f"{k}=${idx}"); params.append(v); idx+=1
+        if not set_clauses: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields.")
+        sql=f"UPDATE supplements SET {','.join(set_clauses)} WHERE supplement_id=${idx}"; params.append(supplement_id)
+        await self._execute_query(conn, sql, tuple(params)); logger.info(f"Updated supplement ID: {supplement_id}")
 
-import json
-import logging
-from typing import Union, Optional, List, Dict, Any
-from datetime import datetime, date
-import asyncpg
-from fastapi import HTTPException, status
+    async def list_supplements(self, conn: asyncpg.Connection):
+        results = await self._execute_query(conn, "SELECT * FROM supplements ORDER BY supplement_id", fetch_all=True) # Added order
+        return results or []
 
-# Configure logging (adjust as needed for your application)
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+    async def get_supplement_by_id(self, conn: asyncpg.Connection, supplement_id: int):
+        sql = "SELECT * FROM supplements WHERE supplement_id = $1"
+        return await self._execute_query(conn, sql, (supplement_id,), fetch_one=True)
 
-# Assume BaseRepository provides _execute_query and connection handling
-class BaseRepository:
-    async def _execute_query(self, conn: asyncpg.Connection, sql: str, params: tuple = (), fetch_val: bool = False, fetch_all: bool = False, returning_id_column: Optional[str] = None):
-        # This is a placeholder implementation. Replace with your actual one.
-        try:
-            if returning_id_column:
-                # fetchval is often used for RETURNING clauses
-                result = await conn.fetchval(sql, *params)
-                logger.debug(f"Executed query (fetchval): {sql} with params: {params}, Result: {result}")
-                return result
-            elif fetch_val:
-                result = await conn.fetchval(sql, *params)
-                logger.debug(f"Executed query (fetchval): {sql} with params: {params}, Result: {result}")
-                return result
-            elif fetch_all:
-                result = await conn.fetch(sql, *params)
-                logger.debug(f"Executed query (fetchall): {sql} with params: {params}, Fetched {len(result)} rows.")
-                return result  # Returns list of asyncpg.Record
-            else:
-                # Execute for INSERT/UPDATE/DELETE without returning specific values beyond command status
-                status_result = await conn.execute(sql, *params)
-                logger.debug(f"Executed query (execute): {sql} with params: {params}, Status: {status_result}")
-                # You might want to return True or the status string if needed
-                return status_result # e.g., "INSERT 0 1"
-        except asyncpg.PostgresError as e:
-            logger.error(f"Database Query Error: {e}\nSQL: {sql}\nParams: {params}")
-            # Decide if you want to raise a generic HTTP exception or a specific one
-            # based on the error code (e.g., unique violation, foreign key violation)
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database operation failed: {e}") from e
-        except Exception as e:
-             logger.error(f"Unexpected Error during query execution: {e}\nSQL: {sql}\nParams: {params}")
-             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred during database operation.") from e
-
+    async def delete_supplement(self, conn: asyncpg.Connection, supplement_id: int):
+        logger.warning(f"Attempting delete supplement ID: {supplement_id}")
+        sql = "DELETE FROM supplements WHERE supplement_id = $1 RETURNING supplement_id"
+        deleted_id = await self._execute_query(conn, sql, (supplement_id,), returning_id_column='supplement_id')
+        if deleted_id == supplement_id: logger.info(f"Deleted supplement ID: {supplement_id}"); return True
+        else: logger.warning(f"Attempt delete non-existent supplement ID: {supplement_id}"); return False
 
 
 #orders class starts here, base repo alreay imlemented up there
-import json
-import logging
-from typing import Union, Optional, List, Dict, Any, Tuple
-from datetime import datetime, date
-import asyncpg
-from fastapi import HTTPException, status
-
-# Configure logging (adjust as needed for your application)
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# --- Placeholder BaseRepository ---
-# Replace this with your actual BaseRepository implementation
-class BaseRepository:
-    async def _execute_query(self, conn: asyncpg.Connection, sql: str, params: tuple = (), fetch_val: bool = False, fetch_all: bool = False, returning_id_column: Optional[str] = None) -> Any:
-        log_params = tuple(str(p) if isinstance(p, (list, dict)) else p for p in params)
-        try:
-            if returning_id_column:
-                result = await conn.fetchval(sql, *params)
-                logger.debug(f"Executed query (fetchval, returning '{returning_id_column}'): {sql} with params: {log_params}, Result: {result}")
-                return result
-            elif fetch_val:
-                result = await conn.fetchval(sql, *params)
-                logger.debug(f"Executed query (fetchval): {sql} with params: {log_params}, Result: {result}")
-                return result
-            elif fetch_all:
-                result = await conn.fetch(sql, *params)
-                logger.debug(f"Executed query (fetchall): {sql} with params: {log_params}, Fetched {len(result)} rows.")
-                return result
-            else:
-                status_result = await conn.execute(sql, *params)
-                logger.debug(f"Executed query (execute): {sql} with params: {log_params}, Status: {status_result}")
-                return status_result
-        except asyncpg.PostgresError as e:
-            logger.error(f"Database Query Error: {e}\nSQL: {sql}\nParams: {log_params}", exc_info=True)
-            # Specific check for column does not exist error (code '42703')
-            if e.sqlstate == '42703':
-                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database schema error: A required column is missing. Error: {e}") from e
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database operation failed: {e}") from e
-        except Exception as e:
-             logger.error(f"Unexpected Error during query execution: {e}\nSQL: {sql}\nParams: {log_params}", exc_info=True)
-             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred during database operation.") from e
-# --- End Placeholder BaseRepository ---
-
-
 class Orders(BaseRepository):
     ALLOWED_ORDER_TYPES = {'meal', 'supplement', 'gig', 'herbal', 'gadget', 'spice', 'produce'}
-    ALLOWED_ORDER_STATUSES = {'cancelled', 'assigned','anyrider', 'rider_accepted','rider_rejected','delivered', 'shipped', 'preparing', 'confirmed', 'pending', 'accepted', 'dispatched', 'picked up', 'delivering'}
+    ALLOWED_ORDER_STATUSES = {'cancelled', 'assigned','anyrider', 'rider_accepted','rider_rejected','delivered', 'shipped', 'preparing', 'confirmed','completed', 'pending', 'accepted', 'dispatched', 'picked up', 'delivering'}
     ALLOWED_PAYMENT_STATUSES = {'failed', 'refunded', 'paid', 'pending', 'completed'}
     ALLOWED_PAYMENT_MODES = {'cash', 'momo', 'mobile money', 'Airtel Card', 'paypal', 'stripe', 'debit card', 'credit card'}
 
@@ -1380,6 +1330,7 @@ class Orders(BaseRepository):
         logger.info(f"Retrieved and processed {len(processed_results)} orders.")
         return processed_results
 
+
     async def update_order_status(self, conn: asyncpg.Connection, order_id: int, new_status: str, transporter_id: Optional[int] = None) -> Dict[str, Any]:
         new_status_l = str(new_status).lower().strip()
         if new_status_l not in self.ALLOWED_ORDER_STATUSES: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid status: '{new_status}'. Allowed: {', '.join(self.ALLOWED_ORDER_STATUSES)}")
@@ -1400,7 +1351,7 @@ class Orders(BaseRepository):
         elif new_status_l in ['assigned'] and transporter_id is None: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"transporter_id is required when setting status to 'assigned'.")
         params.append(order_id_i)
         sql = f"UPDATE orders SET {', '.join(sql_update_parts)} WHERE order_id = ${param_counter} RETURNING order_id"
-        updated_id = await self._execute_query(conn, sql, tuple(params), fetch_val=True)
+        updated_id = await self._execute_query(conn, sql, tuple(params), returning_id_column='order_id')
         if updated_id == order_id_i:
             log_msg = f"Order {order_id_i} status updated to '{new_status_l}'"
             if transporter_id is not None and new_status_l in ['assigned', 'picked up', 'delivering']: log_msg += f" with transporter {transporter_id}"
@@ -1962,6 +1913,7 @@ transporters_crud = Transporters()
 calc_logic = CalculationLogic() # Doesn't need DB
 meal_fetcher = GetAllMeals()
 disbursement_handler = Disbursements()
+supplements_crud = Supplements()
 
 
 # --- FastAPI Endpoints (Updated to use Depends(get_db)) ---
@@ -2340,6 +2292,39 @@ async def delete_spice_endpoint(spice_id: int, conn: asyncpg.Connection = Depend
     success = await spices_crud.delete_spice(conn, spice_id) # Pass conn
     if success: return {'message': f'Spice {spice_id} deleted'}
     else: raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'Spice {spice_id} not found.')
+    
+
+# --- Supplements endpoints ---
+@app.get('/rr/supplements')
+async def list_all_supplements_endpoint(conn: asyncpg.Connection = Depends(get_db)):
+    data = await supplements_crud.list_supplements(conn) # Pass conn
+    return {'message': 'Supplements retrieved.', 'data': data or []}
+
+@app.get('/rr/supplements/{supplement_id}')
+async def get_supplement_by_id_endpoint(supplement_id: int = Path(..., gt=0), conn: asyncpg.Connection = Depends(get_db)):
+    data = await supplements_crud.get_supplement_by_id(conn, supplement_id) # Pass conn
+    if data is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Supplement not found')
+    return {'message': 'Supplement retrieved.', 'data': data}
+
+@app.post('/rr/supplements', status_code=status.HTTP_201_CREATED)
+async def create_supplement_endpoint(supplement_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
+    return await supplements_crud.create_supplement(conn, supplement_data) # Pass conn
+
+@app.put('/rr/supplements/{supplement_id}')
+@app.patch('/rr/supplements/{supplement_id}')
+async def update_supplement_endpoint(supplement_id: int, updates: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
+    await supplements_crud.update_supplement(conn, supplement_id, updates) # Pass conn
+    updated = await supplements_crud.get_supplement_by_id(conn, supplement_id) # Pass conn
+    return {'message': 'Supplement updated successfully', 'data': updated or f"Supplement {supplement_id} not found after update"}
+
+@app.delete('/rr/supplements/{supplement_id}', status_code=status.HTTP_200_OK)
+async def delete_supplement_endpoint(supplement_id: int, conn: asyncpg.Connection = Depends(get_db)):
+    success = await supplements_crud.delete_supplement(conn, supplement_id) # Pass conn
+    if success:
+        return {'message': f'Supplement {supplement_id} deleted'}
+    else:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'Supplement {supplement_id} not found.')
 
 # --- Order Endpoints ---
 @app.post('/rr/Aorders', status_code=status.HTTP_201_CREATED)

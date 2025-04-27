@@ -1,3 +1,4 @@
+#CSPELL:DISABLE
 import requests
 import json
 import uuid
