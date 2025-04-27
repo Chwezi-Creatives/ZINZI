@@ -1,14 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.example.zinzi2">
 
-    <!-- Internet permission -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- Location permissions -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    
-    <!-- For background location updates (required for Android 10 and above) -->
+
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
     <application
@@ -16,7 +13,8 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:theme="@style/NormalTheme"> <!-- Updated to use NormalTheme -->
+        android:theme="@style/NormalTheme"> <meta-data android:name="com.google.android.geo.API_KEY"
+            android:value="AIzaSyDqbiGKI-dtc6QZV9VSgXRp1Viqu5a3A1w"/>
 
         <activity
             android:name=".MainActivity"
@@ -28,7 +26,6 @@
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
 
-            <!-- Specifies an Android theme for this Activity during initialization -->
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
                 android:resource="@style/NormalTheme" />
@@ -39,13 +36,11 @@
             </intent-filter>
         </activity>
 
-        <!-- Flutter tool's meta-data -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
     </application>
 
-    <!-- Intent query for PROCESS_TEXT -->
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />

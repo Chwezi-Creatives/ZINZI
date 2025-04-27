@@ -55,7 +55,8 @@ class ProfilePage extends StatefulWidget {
   _ProfilePageState createState() => _ProfilePageState();
 }
 
-class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStateMixin {
+class _ProfilePageState extends State<ProfilePage>
+    with SingleTickerProviderStateMixin {
   // --- Caching ---
   static Map<String, dynamic> _userDetailsCache = {};
   static DateTime? _userDetailsCacheTimestamp;
@@ -78,7 +79,99 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
   bool _isEditingWeight = false;
   String _originalWeight = ''; // Store original weight before editing
 
+  // --- Section editing state ---
+  bool _isEditingUserDetails = false;
+  bool _isEditingMetrics = false;
+  bool _isEditingPreferences = false;
+
+  // Section edit buffers
+  Map<String, dynamic> _userDetailsEdit = {};
+  Map<String, dynamic> _metricsEdit = {};
+  Map<String, dynamic> _preferencesEdit = {};
+
+  // Controllers for user details
+  final TextEditingController _userDetailsEmailController =
+      TextEditingController();
+  final TextEditingController _userDetailsPhoneController =
+      TextEditingController();
+  final TextEditingController _userDetailsLocationController =
+      TextEditingController();
+  // Controllers for metrics
+  final TextEditingController _metricsHeightController =
+      TextEditingController();
+  final TextEditingController _metricsWeightController =
+      TextEditingController();
+  // Controllers for preferences
+  final TextEditingController _preferencesGoalsController =
+      TextEditingController();
+  final TextEditingController _preferencesDietTypeController =
+      TextEditingController();
+  final TextEditingController _preferencesRestrictionsController =
+      TextEditingController();
+
   late final AnimationController _refreshIconController;
+
+  @override
+  void dispose() {
+    _refreshIconController.dispose();
+    _weightController.dispose();
+    _userDetailsEmailController.dispose();
+    _userDetailsPhoneController.dispose();
+    _userDetailsLocationController.dispose();
+    _metricsHeightController.dispose();
+    _metricsWeightController.dispose();
+    _preferencesGoalsController.dispose();
+    _preferencesDietTypeController.dispose();
+    _preferencesRestrictionsController.dispose();
+    super.dispose();
+  }
+
+  // --- Section editing logic ---
+  void _saveUserDetailsEdit() {
+    setState(() {
+      _userDetails['Email'] = _userDetailsEmailController.text.trim();
+      _userDetails['Phone_Number'] = _userDetailsPhoneController.text.trim();
+      _userDetails['Location'] = _userDetailsLocationController.text.trim();
+      _isEditingUserDetails = false;
+    });
+  }
+
+  void _cancelUserDetailsEdit() {
+    setState(() {
+      _isEditingUserDetails = false;
+    });
+  }
+
+  void _saveMetricsEdit() {
+    setState(() {
+      _userMetrics['height'] = _metricsHeightController.text.trim();
+      _userMetrics['weight'] = _metricsWeightController.text.trim();
+      _isEditingMetrics = false;
+    });
+  }
+
+  void _cancelMetricsEdit() {
+    setState(() {
+      _isEditingMetrics = false;
+    });
+  }
+
+  void _savePreferencesEdit() {
+    setState(() {
+      _userPreferences['goals'] = _preferencesGoalsController.text.trim();
+      _userPreferences['diet_type'] =
+          _preferencesDietTypeController.text.trim();
+      _userPreferences['food_restrictions'] =
+          _preferencesRestrictionsController.text.trim();
+      _isEditingPreferences = false;
+    });
+  }
+
+  void _cancelPreferencesEdit() {
+    setState(() {
+      _isEditingPreferences = false;
+    });
+  }
 
   @override
   void initState() {
@@ -88,13 +181,6 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
       duration: const Duration(seconds: 1),
     );
     _initializeProfile();
-  }
-
-  @override
-  void dispose() {
-    _refreshIconController.dispose();
-    _weightController.dispose();
-    super.dispose();
   }
 
   void _startRefreshAnimation() {
@@ -849,16 +935,20 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
 
   // --- Refined Card Builders ---
 
-  Widget _buildStyledCard(
-      {required String title, required List<Widget> children}) {
+  Widget _buildStyledCard({
+    required String title,
+    required List<Widget> children,
+    VoidCallback? onEdit,
+    bool isEditing = false,
+    VoidCallback? onSave,
+    VoidCallback? onCancel,
+  }) {
     return Card(
       elevation: 2.0, // Softer elevation
       shadowColor: kColorPrimaryLighter.withOpacity(0.5),
       margin: EdgeInsets.zero, // Margin handled by SizedBox outside
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12), // Consistent rounding
-        // Optional: Add subtle border
-        // side: BorderSide(color: kColorBorder.withOpacity(0.7), width: 1),
       ),
       color: kColorSurface,
       child: Padding(
@@ -866,12 +956,38 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: GoogleFonts.poppins(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: kColorPrimaryDark),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: GoogleFonts.poppins(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: kColorPrimaryDark),
+                  ),
+                ),
+                if (onEdit != null && !isEditing)
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined,
+                        size: 20, color: kColorPrimaryDark),
+                    tooltip: "Edit $title",
+                    onPressed: onEdit,
+                  ),
+                if (isEditing) ...[
+                  IconButton(
+                    icon: const Icon(Icons.check_circle_outline,
+                        color: Colors.green),
+                    tooltip: "Save",
+                    onPressed: onSave,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.cancel_outlined, color: Colors.red),
+                    tooltip: "Cancel",
+                    onPressed: onCancel,
+                  ),
+                ],
+              ],
             ),
             const Divider(
                 color: kColorDivider,
@@ -902,28 +1018,54 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
   Widget _buildUserDetailsCard() {
     return _buildStyledCard(
       title: 'User Details',
+      onEdit: () {
+        setState(() {
+          _isEditingUserDetails = true;
+          _userDetailsEdit['Email'] = _userDetails['Email'] ?? '';
+          _userDetailsEdit['Phone_Number'] = _userDetails['Phone_Number'] ?? '';
+          _userDetailsEdit['Location'] = _userDetails['Location'] ?? '';
+        });
+      },
+      isEditing: _isEditingUserDetails,
+      onSave: _saveUserDetailsEdit,
+      onCancel: _cancelUserDetailsEdit,
       children: [
         _buildInfoRow(
-            icon: Icons.badge_outlined,
-            label: 'User ID',
-            value: _userDetails['User_Id']?.toString() ?? 'N/A'),
+          icon: Icons.badge_outlined,
+          label: 'User ID',
+          value: _userDetails['User_Id']?.toString() ?? 'N/A',
+        ),
         _buildInfoRow(
-            icon: Icons.email_outlined,
-            label: 'Email',
-            value: _userDetails['Email'] ?? 'N/A'),
+          icon: Icons.email_outlined,
+          label: 'Email',
+          value: _isEditingUserDetails ? null : _userDetails['Email'] ?? 'N/A',
+          isEditing: _isEditingUserDetails,
+          controller: _userDetailsEmailController,
+          keyboardType: TextInputType.emailAddress,
+        ),
         _buildInfoRow(
-            icon: Icons.phone_outlined,
-            label: 'Phone',
-            value: _userDetails['Phone_Number'] ?? 'N/A'),
+          icon: Icons.phone_outlined,
+          label: 'Phone',
+          value: _isEditingUserDetails
+              ? null
+              : _userDetails['Phone_Number'] ?? 'N/A',
+          isEditing: _isEditingUserDetails,
+          controller: _userDetailsPhoneController,
+          keyboardType: TextInputType.phone,
+        ),
         _buildInfoRow(
-            icon: Icons.location_on_outlined,
-            label: 'Location',
-            value: _userDetails['Location'] ?? 'N/A'),
+          icon: Icons.location_on_outlined,
+          label: 'Location',
+          value:
+              _isEditingUserDetails ? null : _userDetails['Location'] ?? 'N/A',
+          isEditing: _isEditingUserDetails,
+          controller: _userDetailsLocationController,
+        ),
         _buildInfoRow(
-            icon: Icons.calendar_today_outlined,
-            label: 'Joined',
-            // Format the date here before passing
-            value: _formatJoinedDate(_userDetails['Registration_Date'])),
+          icon: Icons.calendar_today_outlined,
+          label: 'Joined',
+          value: _formatJoinedDate(_userDetails['Registration_Date']),
+        ),
       ],
     );
   }
@@ -931,32 +1073,45 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
   Widget _buildMetricsCard() {
     return _buildStyledCard(
       title: 'Health Metrics',
+      onEdit: () {
+        setState(() {
+          _isEditingMetrics = true;
+          _metricsEdit['height'] = _userMetrics['height']?.toString() ?? '';
+          _metricsEdit['weight'] = _userMetrics['weight']?.toString() ?? '';
+        });
+      },
+      isEditing: _isEditingMetrics,
+      onSave: _saveMetricsEdit,
+      onCancel: _cancelMetricsEdit,
       children: [
         _buildInfoRow(
-            icon: Icons.height_outlined,
-            label: 'Height',
-            value: '${_userMetrics['height'] ?? 'N/A'} cm'),
+          icon: Icons.height_outlined,
+          label: 'Height',
+          value: _isEditingMetrics
+              ? null
+              : (_userMetrics['height']?.toString() ?? 'N/A') + ' cm',
+          isEditing: _isEditingMetrics,
+          controller: _metricsHeightController,
+          keyboardType: TextInputType.numberWithOptions(decimal: true),
+        ),
         _buildInfoRow(
           icon: Icons.fitness_center_outlined,
           label: 'Weight',
-          value: _isEditingWeight
+          value: _isEditingMetrics
               ? null
-              : '${_userMetrics['weight'] ?? 'N/A'} kg', // Show value only when not editing
-          isEditing: _isEditingWeight,
-          controller: _weightController,
-          keyboardType:
-              TextInputType.numberWithOptions(decimal: true), // Allow decimals
-          onEdit: _startEditingWeight,
-          onSave: _saveWeight,
-          onCancel: _cancelEditingWeight,
+              : (_userMetrics['weight']?.toString() ?? 'N/A') + ' kg',
+          isEditing: _isEditingMetrics,
+          controller: _metricsWeightController,
+          keyboardType: TextInputType.numberWithOptions(decimal: true),
         ),
         _buildInfoRow(
-            icon: Icons.monitor_weight_outlined,
-            label: 'BMI',
-            value: _userMetrics['bmi'] ?? 'N/A'),
-        const SizedBox(height: 8), // Add space before BMI indicator if desired
+          icon: Icons.monitor_weight_outlined,
+          label: 'BMI',
+          value: _userMetrics['bmi'] ?? 'N/A',
+        ),
+        const SizedBox(height: 8),
         if (_userMetrics['bmi'] != null && _userMetrics['bmi'] != 'N/A')
-          _buildBmiVisualIndicator(), // Show indicator only if BMI available
+          _buildBmiVisualIndicator(),
       ],
     );
   }
@@ -964,21 +1119,47 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
   Widget _buildPreferencesCard() {
     return _buildStyledCard(
       title: 'Preferences',
+      onEdit: () {
+        setState(() {
+          _isEditingPreferences = true;
+          _preferencesEdit['goals'] = _userPreferences['goals'] ?? '';
+          _preferencesEdit['diet_type'] = _userPreferences['diet_type'] ?? '';
+          _preferencesEdit['food_restrictions'] =
+              _userPreferences['food_restrictions'] ?? '';
+        });
+      },
+      isEditing: _isEditingPreferences,
+      onSave: _savePreferencesEdit,
+      onCancel: _cancelPreferencesEdit,
       children: [
         _buildInfoRow(
-            icon: Icons.flag_outlined,
-            label: 'Goals',
-            value: _userPreferences['goals'] ?? 'Not Set'),
+          icon: Icons.flag_outlined,
+          label: 'Goals',
+          value: _isEditingPreferences
+              ? null
+              : _userPreferences['goals'] ?? 'Not Set',
+          isEditing: _isEditingPreferences,
+          controller: _preferencesGoalsController,
+        ),
         _buildInfoRow(
-            icon: Icons.restaurant_menu_outlined,
-            label: 'Diet Type',
-            value: _userPreferences['diet_type'] ?? 'Not Set'),
+          icon: Icons.restaurant_menu_outlined,
+          label: 'Diet Type',
+          value: _isEditingPreferences
+              ? null
+              : _userPreferences['diet_type'] ?? 'Not Set',
+          isEditing: _isEditingPreferences,
+          controller: _preferencesDietTypeController,
+        ),
         _buildInfoRow(
-            icon: Icons.no_food_outlined,
-            label: 'Restrictions',
-            value: _userPreferences['food_restrictions'] ??
-                'None'), // Use 'None' if empty/N/A
-        const SizedBox(height: 16), // Space before button
+          icon: Icons.no_food_outlined,
+          label: 'Restrictions',
+          value: _isEditingPreferences
+              ? null
+              : _userPreferences['food_restrictions'] ?? 'None',
+          isEditing: _isEditingPreferences,
+          controller: _preferencesRestrictionsController,
+        ),
+        const SizedBox(height: 16),
         Center(
           child: ElevatedButton.icon(
             onPressed: () {
