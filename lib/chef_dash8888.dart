@@ -991,13 +991,13 @@ class ApiService {
                   return null;
                 }
               })
-              .whereType<Rider>() // Filters out nulls (from skipped non-map items)
+              .whereType<
+                  Rider>() // Filters out nulls (from skipped non-map items)
               .toList();
         } else {
           print(
               "Riders API response format unexpected: Expected a List after handling. Got: ${riderList?.runtimeType}");
-          if (riderList == null ||
-              (riderList is Map && riderList.isEmpty)) {
+          if (riderList == null || (riderList is Map && riderList.isEmpty)) {
             return []; // No riders found or error in parsing
           }
           throw Exception(
