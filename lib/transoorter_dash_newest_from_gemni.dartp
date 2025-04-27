@@ -1899,7 +1899,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   Widget _buildEarningsCard(double earnings) {
     return _buildInfoCard(
         title: 'Today\'s Earnings',
-        value: '\$${earnings.toStringAsFixed(2)}',
+        value: 'ugx ${earnings.toStringAsFixed(2)}',
         icon: Icons.attach_money,
         iconBgColor: _green.withOpacity(0.1),
         iconColor: _green,
@@ -2321,7 +2321,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
               children: [
                 Text('Dist: ${order.estimatedDistance}', style: TextStyle(color: _grey, fontSize: 13)),
                 Text(
-                    '\$${order.earnings.toStringAsFixed(2)}',
+                    'ugx ${order.earnings.toStringAsFixed(2)}',
                     style: TextStyle(color: _green, fontWeight: FontWeight.bold, fontSize: 14)
                 ),
               ]
@@ -2950,7 +2950,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
                   _buildStatItem(Icons.thumb_up_alt_outlined, '${acceptanceRate.toStringAsFixed(0)}%', 'Acceptance', color: _primaryTeal), // Example stat
-                 _buildStatItem(Icons.account_balance_wallet_outlined, '\$${totalEarnings.toStringAsFixed(0)}', 'Total Earned', color: _green),
+                 _buildStatItem(Icons.account_balance_wallet_outlined, 'ugx ${totalEarnings.toStringAsFixed(0)}', 'Total Earned', color: _green),
                ]
              ),
            ]
@@ -4519,7 +4519,7 @@ class EarningsHistoryScreen extends StatelessWidget {
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
                                       Text(formattedDate, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkTeal)),
-                                      Text('\$${dailyTotal.toStringAsFixed(2)}', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _green)),
+                                      Text('ugx ${dailyTotal.toStringAsFixed(2)}', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _green)),
                                     ]),
                                 Divider(height: 20, color: _lightTeal.withOpacity(0.6)),
                                 // List of payments for that day
@@ -4577,7 +4577,7 @@ class EarningsHistoryScreen extends StatelessWidget {
               Column( // Amount and Status
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text('\$${payment.amount.toStringAsFixed(2)}', style: TextStyle(fontWeight: FontWeight.bold, color: _darkTeal)),
+                    Text('ugx ${payment.amount.toStringAsFixed(2)}', style: TextStyle(fontWeight: FontWeight.bold, color: _darkTeal)),
                     Row(children: [
                       Icon(statusIcon, size: 12, color: statusColor),
                       SizedBox(width: 4),

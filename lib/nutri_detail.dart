@@ -1,482 +1,592 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:http/http.dart' as http;
+import 'user_cache.dart';
+import 'cache_config.dart';
+import 'dart:convert';
 import 'nutrition+.dart'; // Ensure this file contains your NutritionItem model definition
 import 'cart.dart' as cart;
 import 'package:cached_network_image/cached_network_image.dart';
+import 'producer_selector_bottom_sheet.dart';
+
+const Color primaryColor = Color(0xFF0B5345); // Dark teal
+const Color accentColor = Color(0xFF1A7968); // Medium teal
+const Color backgroundColor = Color(0xFFF5F5F5); // Light grey background
+const Color primaryTextColor = Color(0xFF333333); // Dark text
+const Color secondaryTextColor = Color(0xFF666666); // Medium grey text
+const Color priceColor = Color(0xFF0B5345); // Price in dark teal
+const Color errorIconColor = Colors.redAccent;
 
 class Nutri_DetailPage extends StatefulWidget {
   final NutritionItem item;
+  final Widget? decodedImage; // Widget holding the already-decoded image
 
-  Nutri_DetailPage({required this.item});
+  Nutri_DetailPage({required this.item, this.decodedImage});
 
   @override
   _Nutri_DetailPageState createState() => _Nutri_DetailPageState();
 }
 
-class _Nutri_DetailPageState extends State<Nutri_DetailPage> {
-  Map<String, dynamic>? selectedChef;
+class _Nutri_DetailPageState extends State<Nutri_DetailPage>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _refreshIconController;
+  Map<String, dynamic>? selectedProducer;
   bool isFavorite = false;
   bool isInCart = false;
+
+  List<Map<String, dynamic>>? _cachedProducers;
+  bool _isLoadingProducers = false;
+  bool _isFirstLoad = true; // Track if this is the first time loading data
 
   @override
   void initState() {
     super.initState();
+    _refreshIconController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    );
     // Use prefix for classes from cart.dart
     isFavorite = cart.Favorites.isFavorite(widget.item.name);
     isInCart = cart.ShoppingCart.getItems()
         .any((item) => item['title'] == widget.item.name);
+
+    // Pre-load the producer data when the page is first opened
+    _loadProducersFromCache();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        // Use actual constants from nutri+.dart or material.dart
-        title: Text(widget.item.name, style: TextStyle(color: Colors.white)),
-        backgroundColor: primaryTeal, // Defined in nutri+.dart
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: Icon(Icons.favorite),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (context) => cart.FavoritesScreen()), // Use prefix
-              );
-            },
-          ),
-          IconButton(
-            icon: Icon(Icons.shopping_cart),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (context) =>
-                        cart.ShoppingCartScreen()), // Use prefix
-              );
-            },
-          ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: Image.asset('assets/images/soft.jpg', fit: BoxFit.cover),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Item Image wrapped in Hero
-                  Hero(
-                    tag: widget.item.heroTag, // Use the same tag as in the grid
-                    child: Container(
-                      height: 250,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(15),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.grey.withOpacity(0.3),
-                            spreadRadius: 2,
-                            blurRadius: 8,
-                            offset: Offset(0, 3),
-                          ),
-                        ],
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(15),
-                        child: (widget.item.imagePath?.startsWith('http') ??
-                                false)
-                            ? CachedNetworkImage(
-                                imageUrl: widget.item.imagePath ?? '',
-                                fit: BoxFit.cover,
-                                placeholder: (context, url) =>
-                                    Center(child: CircularProgressIndicator()),
-                                errorWidget: (context, url, error) {
-                                  print(
-                                      "Error loading network image: $url, $error"); // Add logging
-                                  return Image.asset(
-                                    // Use default image on error
-                                    'assets/images/DrugRG.png',
-                                    fit: BoxFit.cover,
-                                    // Optional: Error builder for the default image itself
-                                    errorBuilder: (ctx, err, st) =>
-                                        const Center(
-                                            child: Icon(Icons.error_outline,
-                                                color: errorIconColor,
-                                                size: 60)),
-                                  );
-                                },
-                              )
-                            : Image.asset(
-                                widget.item.imagePath ?? '',
-                                fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) {
-                                  print(
-                                      "Error loading asset image: ${widget.item.imagePath}, $error"); // Add logging
-                                  return Image.asset(
-                                    // Use default image on error
-                                    'assets/images/DrugRG.png',
-                                    fit: BoxFit.cover,
-                                    // Optional: Error builder for the default image itself
-                                    errorBuilder: (ctx, err, st) =>
-                                        const Center(
-                                            child: Icon(Icons.error_outline,
-                                                color: errorIconColor,
-                                                size: 60)),
-                                  );
-                                },
-                              ),
-                      ),
-                    ), // End Container
-                  ), // End Hero
-                  SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              widget.item.name,
-                              style: TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.bold,
-                                  color:
-                                      primaryTextColor), // Use defined constant
-                            ),
-                            Text(
-                              '\$${widget.item.price != null ? widget.item.price!.toStringAsFixed(2) : '0.00'}',
-                              style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                  color: priceColor), // Use defined constant
-                            ),
-                          ],
-                        ),
-                      ),
-                      _buildFavoriteButton(),
-                      _buildCartButton(),
-                    ],
-                  ),
-                  SizedBox(height: 10),
-                  Text(
-                    widget.item.description ?? '',
-                    style: TextStyle(
-                        fontSize: 16,
-                        color: secondaryTextColor ??
-                            Colors.grey), // Use defined constant
-                  ),
-                  SizedBox(height: 20),
-                  Text(
-                    'Producers:',
-                    style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: primaryTextColor), // Use defined constant
-                  ),
-                  _buildProducersSection(),
-                  SizedBox(height: 30),
-                ],
-              ),
-            ),
-          ),
-          _buildProceedToCartButton(),
-        ],
-      ),
-    );
+  // Load producers from cache when page initializes
+  Future<void> _loadProducersFromCache() async {
+    if (_isFirstLoad) {
+      setState(() {
+        _isLoadingProducers = true;
+      });
+
+      // Try to get cached data first
+      final String cacheKey =
+          'producers_for_item_${widget.item.productIdKey}_${widget.item.productIdValue}';
+      final cachedData = await UserCache.getData(cacheKey);
+
+      if (cachedData != null) {
+        setState(() {
+          _cachedProducers = List<Map<String, dynamic>>.from(cachedData);
+          _isLoadingProducers = false;
+          _isFirstLoad = false;
+        });
+        print('[NutriDetail] Loaded producers from cache on init');
+      } else {
+        // No cache available, load from network but only once on init
+        _cachedProducers = await _fetchProducersForItem();
+        setState(() {
+          _isLoadingProducers = false;
+          _isFirstLoad = false;
+        });
+      }
+    }
   }
 
-  Widget _buildFavoriteButton() {
-    return Tooltip(
-      message: isFavorite ? 'Remove from Favorites' : 'Add to Favorites',
-      child: IconButton(
-        icon: Icon(
-          isFavorite
-              ? Icons.favorite
-              : Icons.favorite_outline, // Icon logic is fine
-          color: isFavorite
-              ? primaryTeal
-              : primaryTextColor, // Use defined constants
-        ),
-        onPressed: () {
-          setState(() {
-            if (isFavorite) {
-              cart.Favorites.removeItem(widget.item.name);
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text('${widget.item.name} removed from favorites!'),
-              ));
-            } else {
-              cart.Favorites.addItem(widget.item.name ?? '',
-                  widget.item.price ?? 0.0, widget.item.imagePath ?? '');
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text('${widget.item.name} added to favorites!'),
-              ));
-            }
-            isFavorite = !isFavorite;
-          });
-        },
-      ),
-    );
-  }
+  Future<void> _showProducerSelector() async {
+    // If we don't have producers yet and aren't currently loading, start loading
+    if (_cachedProducers == null && !_isLoadingProducers) {
+      setState(() {
+        _isLoadingProducers = true;
+      });
+      _cachedProducers = await _fetchProducersForItem();
+      setState(() {
+        _isLoadingProducers = false;
+      });
+    }
 
-  Widget _buildCartButton() {
-    return Tooltip(
-      message: isInCart ? 'Already in Cart' : 'Add to Cart',
-      child: IconButton(
-        icon: Icon(
-          isInCart
-              ? Icons.shopping_cart
-              : Icons.shopping_cart_outlined, // Icon logic is fine
-          color: isInCart
-              ? primaryTeal
-              : primaryTextColor, // Use defined constants
-        ),
-        onPressed: () {
-          if (selectedChef != null) {
+    // Show bottom sheet with cached data immediately
+    if (!mounted) return;
+
+    await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (context) {
+        if (_cachedProducers == null || _isLoadingProducers) {
+          return Container(
+            height: 200,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        return ProducerSelectorBottomSheet(
+          producers: _cachedProducers!,
+          onSelected: (producer) {
             setState(() {
-              if (!isInCart) {
-                // Use prefix for ShoppingCart and pass meal object correctly
-                cart.ShoppingCart.addItem(
-                  widget.item.name,
-                  widget.item.price ?? 0.0,
-                  quantity: 1,
-                  selectedchef: selectedChef!,
-                  // Pass the actual item object or relevant fields if needed by cart logic
-                  meal: {
-                    'name': widget.item.name,
-                    'image_link': widget.item.imagePath,
-                    'description': widget.item.description,
-                    'price': widget.item.price
-                  },
-                  bestservedwith: [], // Assuming this is still required by addItem signature
-                );
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text('${widget.item.name} added to cart!')));
-                isInCart = true;
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content:
-                        Text('${widget.item.name} is already in your cart!')));
-              }
+              selectedProducer = producer;
             });
-          } else {
+            Navigator.pop(context);
             ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Please select a producer first!')));
-          }
-        },
-      ),
-    );
-  }
-
-  Widget _buildProducersSection() {
-    final List<Map<String, dynamic>> producers = [
-      {
-        'image': 'assets/images/producerHolder.png',
-        'name': 'Msafiri Poa',
-        'location': 'KAMPALA',
-        'type': 'Individual',
-        'isVerified': true,
-      },
-      {
-        'image': 'assets/images/producerHolder.png',
-        'name': 'Organic Farms Inc.',
-        'location': 'KATWE',
-        'type': 'Company',
-        'isVerified': false,
-      },
-      {
-        'image': 'assets/images/producerHolder.png',
-        'name': 'Fresh Produce Co.',
-        'location': 'KAMPALA',
-        'type': 'Company',
-        'isVerified': true,
-      },
-      {
-        'image': 'assets/images/producerHolder.png',
-        'name': "Nature's Bounty",
-        'location': 'KAMPALA',
-        'type': 'Individual',
-        'isVerified': true,
-      },
-      {
-        'image': 'assets/images/producerHolder.png',
-        'name': 'Super Chef Nick',
-        'location': 'MUYENGA',
-        'type': 'Individual',
-        'isVerified': false,
-      },
-    ];
-
-    return ListView.builder(
-      shrinkWrap: true,
-      physics: NeverScrollableScrollPhysics(),
-      itemCount: producers.length,
-      itemBuilder: (context, index) {
-        final producer = producers[index];
-        return GestureDetector(
-          onTap: () {
-            setState(() {
-              selectedChef = producer;
-            });
-          },
-          child: Card(
-            margin: EdgeInsets.only(bottom: 4), // Reduced space between cards
-            color: selectedChef != null &&
-                    selectedChef!['name'] == producer['name']
-                ? lightTeal // Use defined constant
-                : Colors.teal[50], // Revert lighterTeal to original color
-            child: Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.start,
-                children: [
-                  ClipOval(
-                    child: Image.asset(
-                      producer['image'],
-                      width: 50,
-                      height: 50,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                producer['name'],
-                                style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color:
-                                        primaryTextColor), // Use defined constant
-                              ),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.only(left: 4.0),
-                              child: Icon(
-                                producer['isVerified']
-                                    ? Icons.check_circle
-                                    : Icons
-                                        .check_circle_outline, // Icon logic fine
-                                color: producer['isVerified']
-                                    ? primaryTextColor
-                                    : Colors.grey, // Use defined constant
-                                size: 16,
-                              ),
-                            ),
-                          ],
-                        ),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(
-                                  Icons.location_on,
-                                  size: 16,
-                                  color:
-                                      primaryTextColor, // Use defined constant
-                                ),
-                                SizedBox(width: 4),
-                                Text(
-                                  producer['location'],
-                                  style: TextStyle(
-                                      fontSize: 14,
-                                      color:
-                                          primaryTextColor), // Use defined constant
-                                ),
-                              ],
-                            ),
-                            Row(
-                              children: [
-                                Icon(
-                                  producer['type'] == 'Company'
-                                      ? Icons.business
-                                      : Icons.person,
-                                  size: 16,
-                                  color:
-                                      primaryTextColor, // Use defined constant
-                                ),
-                                SizedBox(width: 4),
-                                Text(
-                                  producer['type'],
-                                  style: TextStyle(
-                                      fontSize: 14,
-                                      fontStyle: FontStyle.italic,
-                                      color:
-                                          primaryTeal), // Use defined constant
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+              SnackBar(
+                content: Text('Producer selected: ${producer['name'] ?? ''}'),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
   }
 
-  Widget _buildProceedToCartButton() {
-    return Positioned(
-      bottom: 16,
-      left: 16,
-      right: 16,
-      child: Visibility(
-        visible: selectedChef != null,
-        child: ElevatedButton(
-          onPressed: () {
-            if (selectedChef != null) {
-              if (!isInCart) {
-                // Use prefix for ShoppingCart
-                cart.ShoppingCart.addItem(
-                  widget.item.name,
-                  widget.item.price ?? 0.0,
-                  quantity: 1,
-                  selectedchef: selectedChef!,
-                  meal: {
-                    'name': widget.item.name,
-                    'image_link':
-                        widget.item.imagePath, // Match key used elsewhere
-                    'description': widget.item.description,
-                    'price': widget.item.price
-                  },
-                  bestservedwith: [], // Assuming this is still required by addItem signature
-                );
-                setState(() {
-                  isInCart = true;
-                });
-              }
+  Future<List<Map<String, dynamic>>> _fetchProducersForItem(
+      {bool forceRefresh = false}) async {
+    final String cacheKey =
+        'producers_for_item_${widget.item.productIdKey}_${widget.item.productIdValue}';
+    final String cacheTsKey =
+        'producers_for_item_ts_${widget.item.productIdKey}_${widget.item.productIdValue}';
+
+    try {
+      // Always try the cache first unless forced refresh
+      if (!forceRefresh) {
+        final cachedData = await UserCache.getData(cacheKey);
+        final cachedTs = await UserCache.getData(cacheTsKey);
+        final now = DateTime.now();
+
+        if (cachedData != null && cachedTs != null) {
+          final cacheTime = DateTime.tryParse(cachedTs.toString());
+          if (cacheTime != null &&
+              now.difference(cacheTime) <
+                  CacheConfig.chefProducerDetailCacheDuration) {
+            print(
+                '[NutriDetail] Loaded producers from cache for ${widget.item.productIdKey}:${widget.item.productIdValue}');
+            return List<Map<String, dynamic>>.from(cachedData);
+          }
+        }
+      }
+
+      // Cache miss or forced refresh - fetch from API
+      print('[NutriDetail] Fetching producers from API');
+      final String baseUrl =
+          dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
+      final response = await http.get(Uri.parse('$baseUrl/rr/rproducers'));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        List<Map<String, dynamic>> producersList;
+
+        if (data is List) {
+          producersList = List<Map<String, dynamic>>.from(data);
+        } else if (data is Map && data['data'] is List) {
+          producersList = List<Map<String, dynamic>>.from(data['data']);
+        } else {
+          producersList = [];
+        }
+
+        // Update cache with fresh data
+        final now = DateTime.now();
+        await UserCache.saveData(cacheKey, producersList);
+        await UserCache.saveData(cacheTsKey, now.toIso8601String());
+
+        return producersList;
+      } else {
+        // API error - try to use cache even if expired
+        final cachedData = await UserCache.getData(cacheKey);
+        if (cachedData != null) {
+          print('[NutriDetail] API error, using cached data');
+          return List<Map<String, dynamic>>.from(cachedData);
+        }
+      }
+    } catch (e) {
+      print('[NutriDetail] Error fetching producers: $e');
+      // Error fetching - try to use cache even if expired
+      final cachedData = await UserCache.getData(cacheKey);
+      if (cachedData != null) {
+        print('[NutriDetail] Using cached data after error');
+        return List<Map<String, dynamic>>.from(cachedData);
+      }
+    }
+
+    return [];
+  }
+
+  void _addToCartWithProducer(Map<String, dynamic> producer) {
+    cart.ShoppingCart.addItem(
+      widget.item.name,
+      widget.item.price ?? 0.0,
+      quantity: 1,
+      selectedproducer: producer,
+      meal: {
+        'name': widget.item.name,
+        'image_link': widget.item.imagePath,
+        'description': widget.item.description,
+        'price': widget.item.price,
+        'order_type': widget.item.orderType, // e.g., 'spice', 'gadget', etc.
+        widget.item.productIdKey:
+            widget.item.productIdValue, // e.g., 'spice_id': '12'
+      },
+      bestservedwith: [], // No complementary section for these items
+    );
+  }
+
+  @override
+  void dispose() {
+    _refreshIconController.dispose();
+    super.dispose();
+  }
+
+  // Method for refreshing producers with animation - only called when user manually refreshes
+  Future<void> _refreshProducersWithAnimation() async {
+    _refreshIconController.repeat();
+    setState(() {
+      _isLoadingProducers = true;
+    });
+
+    // Force refresh from API
+    _cachedProducers = await _fetchProducersForItem(forceRefresh: true);
+
+    setState(() {
+      _isLoadingProducers = false;
+    });
+    _refreshIconController.stop();
+    _refreshIconController.reset();
+
+    // Show feedback to user
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Producer list has been refreshed')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: primaryColor,
+        elevation: 0,
+        leading: BackButton(color: Colors.white),
+        title: Text(
+          widget.item.name,
+          style: TextStyle(color: Colors.white),
+        ),
+        actions: [
+          // Animated refresh button
+          RotationTransition(
+            turns: _refreshIconController,
+            child: IconButton(
+              icon: Icon(Icons.refresh, color: Colors.white),
+              onPressed:
+                  _refreshProducersWithAnimation, // Only refresh when user explicitly requests it
+            ),
+          ),
+          IconButton(
+            icon: Icon(
+              Icons.favorite_border,
+              color: Colors.white,
+            ),
+            onPressed: () {},
+          ),
+          IconButton(
+            icon: Icon(
+              Icons.shopping_cart,
+              color: Colors.white,
+            ),
+            onPressed: () {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                    builder: (context) =>
-                        cart.ShoppingCartScreen()), // Use prefix
+                    builder: (context) => cart.ShoppingCartScreen()),
               );
-            }
-          },
-          child: Text('Proceed to Cart'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor:
-                accentTeal, // Use defined constant from nutri+.dart
-            foregroundColor: Colors.white, // Standard white is fine here
-            padding: EdgeInsets.symmetric(vertical: 16),
-            textStyle: TextStyle(fontSize: 18),
+            },
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Image only with no overlay text
+            _buildHeroImage(),
+
+            // Title and description section moved below image
+            Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Title and description on the left
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.item.name,
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: primaryTextColor,
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          widget.item.description ?? '',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: secondaryTextColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Action buttons on the right
+                  Row(
+                    children: [
+                      _buildFavoriteButton(),
+                      SizedBox(width: 8),
+                      IconButton(
+                        icon: Icon(
+                          isInCart
+                              ? Icons.shopping_cart
+                              : Icons.add_shopping_cart,
+                          color: primaryColor,
+                          size: 26,
+                        ),
+                        onPressed: () {
+                          if (isInCart) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                  content: Text(
+                                      '${widget.item.name} is already in your cart!')),
+                            );
+                            return;
+                          }
+                          _showProducerSelector();
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            // Price section
+            Padding(
+              padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Text(
+                'Price: ugx ${widget.item.price != null ? widget.item.price!.toStringAsFixed(0) : '0'}',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: priceColor,
+                ),
+              ),
+            ),
+
+            Divider(height: 1, thickness: 1, color: Colors.grey.shade200),
+
+            // Producer selection section
+            Padding(
+              padding: EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Selected Producer',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: primaryTextColor,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  _buildSelectedProducerCard(),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      bottomNavigationBar: _buildProceedToCartButton(),
+    );
+  }
+
+  Widget _buildHeroImage() {
+    return Container(
+      height: 240,
+      width: double.infinity,
+      child: widget.decodedImage != null
+          ? widget.decodedImage!
+          : (widget.item.imagePath?.startsWith('http') ?? false)
+              ? CachedNetworkImage(
+                  imageUrl: widget.item.imagePath ?? '',
+                  fit: BoxFit.cover,
+                  placeholder: (context, url) =>
+                      Center(child: CircularProgressIndicator()),
+                  errorWidget: (context, url, error) {
+                    return Image.asset(
+                      'assets/images/DrugRG.png',
+                      fit: BoxFit.cover,
+                    );
+                  },
+                )
+              : Image.asset(
+                  widget.item.imagePath ?? 'assets/images/DrugRG.png',
+                  fit: BoxFit.cover,
+                  errorBuilder: (ctx, err, st) => const Center(
+                    child: Icon(Icons.error_outline,
+                        color: errorIconColor, size: 60),
+                  ),
+                ),
+    );
+  }
+
+  Widget _buildFavoriteButton() {
+    return IconButton(
+      icon: Icon(
+        isFavorite ? Icons.favorite : Icons.favorite_border,
+        color: Colors.red,
+        size: 26,
+      ),
+      onPressed: () {
+        setState(() {
+          if (isFavorite) {
+            cart.Favorites.removeItem(widget.item.name);
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('${widget.item.name} removed from favorites!'),
+            ));
+          } else {
+            cart.Favorites.addItem(widget.item.name ?? '',
+                widget.item.price ?? 0.0, widget.item.imagePath ?? '');
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('${widget.item.name} added to favorites!'),
+            ));
+          }
+          isFavorite = !isFavorite;
+        });
+      },
+    );
+  }
+
+  Widget _buildSelectedProducerCard() {
+    if (selectedProducer != null) {
+      return Container(
+        margin: EdgeInsets.only(top: 8),
+        decoration: BoxDecoration(
+          color: Colors.green.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.green.withOpacity(0.3)),
+        ),
+        child: ListTile(
+          leading: CircleAvatar(
+            backgroundColor: Colors.green.shade50,
+            child: Icon(Icons.person, color: Colors.green),
+          ),
+          title: Text(
+            selectedProducer!['name'] ?? 'Producer Name',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+          subtitle: Row(
+            children: [
+              Icon(Icons.location_on, size: 14, color: Colors.grey),
+              SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  selectedProducer!['location'] ?? 'Unknown Location',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          trailing: TextButton(
+            onPressed: _showProducerSelector,
+            child: Text(
+              'Change',
+              style: TextStyle(
+                color: accentColor,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
+      );
+    } else {
+      return Container(
+        margin: EdgeInsets.only(top: 8),
+        width: double.infinity,
+        padding: EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+        decoration: BoxDecoration(
+          color: Colors.grey.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.withOpacity(0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon(Icons.person_add, size: 40, color: Colors.grey),
+            SizedBox(height: 12),
+            Text(
+              'No Producer Selected',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade700,
+              ),
+            ),
+            SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _showProducerSelector,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: accentColor,
+                foregroundColor: Colors.white,
+                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text('Select Producer'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  Widget _buildProceedToCartButton() {
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            offset: Offset(0, -2),
+            blurRadius: 6,
+          ),
+        ],
+      ),
+      child: ElevatedButton.icon(
+        icon: Icon(Icons.shopping_cart),
+        label: Text(
+          'Proceed to Cart',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        onPressed: selectedProducer != null
+            ? () {
+                if (!isInCart) {
+                  _addToCartWithProducer(selectedProducer!);
+                  setState(() {
+                    isInCart = true;
+                  });
+                }
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (context) => cart.ShoppingCartScreen()),
+                );
+              }
+            : null,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: primaryColor,
+          disabledBackgroundColor: Colors.grey.shade400,
+          padding: EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
           ),
         ),
       ),

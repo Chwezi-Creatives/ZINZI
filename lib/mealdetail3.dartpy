@@ -282,7 +282,7 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
                                     padding: const EdgeInsets.all(4),
                                     child: Text(item['title'], style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                                   ),
-                                  Text('\$${item['price'].toStringAsFixed(2)}', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                                  Text('ugx ${item['price'].toStringAsFixed(2)}', style: TextStyle(fontSize: 12, color: Colors.grey)),
                                 ],
                               ),
                             ),
@@ -616,7 +616,7 @@ class _MealDetailScreen3State extends State<MealDetailScreen3> {
               ),
             ),
             Text(
-              '\$${chef['price']}',
+              'ugx ${chef['price']}',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
@@ -708,7 +708,7 @@ class ChooseChef extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      '\$${chef['price']}', 
+                      'ugx ${chef['price']}', 
                       style: const TextStyle(fontSize: 16),
                     ),
                   ],

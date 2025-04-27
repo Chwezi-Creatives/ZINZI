@@ -30,10 +30,10 @@ class CheckoutScreen extends StatefulWidget {
 
 class _CheckoutScreenState extends State<CheckoutScreen> {
   String _extractGuests(dynamic numberOfPeople) {
-    if (numberOfPeople == null) return 'Ugx';
+    if (numberOfPeople == null) return 'ugx';
     final str = numberOfPeople.toString();
     final match = RegExp(r'\d+').firstMatch(str);
-    return match != null ? match.group(0)! : 'Ugx';
+    return match != null ? match.group(0)! : 'ugx';
   }
 
   final _formKey = GlobalKey<FormState>();
@@ -175,7 +175,19 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       }
 
       // Determine order_type based on items in the cart
-      String orderType = widget.items.any((item) => item['type'] == 'gig') ? 'gig' : 'meal';
+      // Set orderType to the actual product type (e.g., spice, gadget, etc.)
+      String orderType = (() {
+        if (widget.items.isNotEmpty) {
+          final first = widget.items.first;
+          if (first.containsKey('meal') && first['meal'] is Map && first['meal']['order_type'] != null) {
+            return first['meal']['order_type'].toString();
+          }
+          if (first['type'] != null) {
+            return first['type'].toString();
+          }
+        }
+        return 'meal';
+      })();
 
       // Support multiple gigs and multiple meals in a single order
       List<Map<String, dynamic>> itemsPayload = widget.items.map((item) {
@@ -198,8 +210,19 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           };
         } else {
           // Assume meal type
+          // Dynamically extract the product_id key (e.g., spice_id, gadget_id, etc.) and order_type
+          final meal = item['meal'] as Map<String, dynamic>? ?? {};
+          final orderType = meal['order_type']?.toString() ?? 'meal';
+          final productIdEntry = meal.entries.firstWhere(
+            (e) => e.key.endsWith('_id') && e.key != 'chef_id' && e.key != 'producer_id',
+            orElse: () => const MapEntry('product_id', null),
+          );
           return {
-            'product_id': item['meal']?['Meal_id']?.toString(),
+            'order_type': orderType,
+            'type': orderType, // Map order_type to type as requested
+            // Use the actual id key and value (e.g., 'spice_id': '12')
+            productIdEntry.key: productIdEntry.value?.toString(),
+            'product_id': productIdEntry.value?.toString(), // Always copy to 'product_id' for backend
             'quantity': (item['quantity'] as num?)?.toInt(),
             'price': (item['price'] as num?)?.toDouble(),
             'chef_id': item['selectedchef']?['chefid']?.toString(),
@@ -423,7 +446,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                           children: [
                                             Text(compName, style: GoogleFonts.poppins(fontSize: 12, color: Colors.teal[800])),
-                                            Text('₤${compPrice.toStringAsFixed(2)}', style: GoogleFonts.poppins(fontSize: 12, color: Colors.teal[800])),
+                                            Text('ugx ${compPrice.toStringAsFixed(2)}', style: GoogleFonts.poppins(fontSize: 12, color: Colors.teal[800])),
                                           ],
                                         );
                                       }).toList(),

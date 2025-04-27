@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:zinzi2/app_drawer_unified.dart' as drawer; // Import the unified AppDrawer widget with prefix
+import 'package:zinzi2/allmeals.dart';
+import 'package:zinzi2/app_drawer_unified.dart'
+    as drawer; // Import the unified AppDrawer widget with prefix
 
 import 'package:google_fonts/google_fonts.dart';
-import 'app_drawer_unified.dart';
+import 'app_drawer_unified.dart'; // May be redundant if drawer.AppDrawer is used
 import 'package:zinzi2/checkout.dart';
 
 // ***************************************************************
@@ -16,102 +18,168 @@ class ShoppingCart {
   // Items can be meals ('type': 'meal') or gigs ('type': 'gig')
   static List<Map<String, dynamic>> items = [];
 
-  // Adds a MEAL item to the cart
+  // --- NEW: ValueNotifier for reactivity ---
+  static final ValueNotifier<List<Map<String, dynamic>>> itemsNotifier =
+      ValueNotifier(items);
+
+  // --- NEW: Helper to find item index ---
+  static int findItemIndex(String title) {
+    return items
+        .indexWhere((item) => item['type'] == 'meal' && item['title'] == title);
+  }
+
+  // Adds or Updates a MEAL item in the cart
   static void addItem(
     String title,
-    double price, {
+    double pricePerUnit, {
+    // Renamed for clarity (price includes meal + complementaries)
     int quantity = 1,
-    Map<String, dynamic>?
-        selectedchef, // EXPECTS { 'id': ..., 'name': 'Chef Name', ... }
-    Map<String, dynamic>?
-        selectedproducer, // EXPECTS { 'id': ..., 'name': 'Producer Name', ... }
+    Map<String, dynamic>? selectedchef,
+    Map<String, dynamic>? selectedproducer,
     required Map<String, dynamic> meal,
-    // **** CLARIFICATION: 'bestservedwith' holds the list of *potential* COMPLEMENTARY items. ****
-    // These items are associated with the main meal but are NOT added as separate cart items here.
-    // The checkout process needs to handle which of these (if any) were actually selected by the user.
-    required List<Map<String, dynamic>> bestservedwith,
+    required List<Map<String, dynamic>>
+        bestservedwith, // Currently selected complementaries
+    // --- NEW: Bulk order fields ---
+    bool isBulkOrder = false,
+    DateTime? planStartDate,
+    DateTime? planEndDate,
+    String? planFrequency,
+    Set<String>? planSelectedDays,
   }) {
     const itemType = 'meal';
     final hasChef = selectedchef != null && selectedchef.isNotEmpty;
     final hasProducer = selectedproducer != null && selectedproducer.isNotEmpty;
 
-    final existingItemIndex = items
-        .indexWhere((item) => item['type'] == 'meal' && item['title'] == title);
+    // Use the helper method
+    final existingItemIndex = findItemIndex(title);
+
+    final Map<String, dynamic> newItemData = {
+      'title': title,
+      'price':
+          pricePerUnit, // Store price per unit (meal + its complementaries)
+      'quantity': quantity,
+      'selectedchef': hasChef ? selectedchef : null,
+      'selectedproducer': hasProducer ? selectedproducer : null,
+      'meal': meal, // Store base meal info
+      'bestservedwith':
+          bestservedwith, // Store ONLY the selected complementaries
+      'type': itemType,
+      // Store bulk order details
+      'isBulkOrder': isBulkOrder,
+      'planStartDate': planStartDate?.toIso8601String(), // Store as ISO string
+      'planEndDate': planEndDate?.toIso8601String(), // Store as ISO string
+      'planFrequency': planFrequency,
+      'planSelectedDays': planSelectedDays?.toList(), // Store Set as List
+    };
 
     if (existingItemIndex != -1) {
-      // Item exists - Update it
-      items[existingItemIndex]['quantity'] = quantity;
-      items[existingItemIndex]['price'] = price;
-      items[existingItemIndex]['selectedchef'] =
-          hasChef ? selectedchef : null; // Store map {id, name}
-      items[existingItemIndex]['selectedproducer'] =
-          hasProducer ? selectedproducer : null; // Store map {id, name}
-      items[existingItemIndex]['meal'] = meal;
-      // Store the list of complementary items data with the meal
-      items[existingItemIndex]['bestservedwith'] = bestservedwith;
+      // Item exists - Update it completely
+      items[existingItemIndex] = newItemData;
       print("Updated item in cart: $title");
     } else {
       // Item is new - Add it
-      items.add({
-        'title': title,
-        'price': price,
-        'quantity': quantity,
-        'selectedchef': hasChef ? selectedchef : null, // Store map {id, name}
-        'selectedproducer':
-            hasProducer ? selectedproducer : null, // Store map {id, name}
-        'meal': meal,
-        // Store the list of complementary items data with the meal
-        'bestservedwith': bestservedwith,
-        'type': itemType,
-      });
+      items.add(newItemData);
       print("Added new item to cart: $title");
     }
-    print(
-        "Current Cart Titles: ${items.map((e) => e['title'] ?? e['gigDetails']?['gig_type'] ?? 'Unknown')} ");
+
+    // --- Notify listeners ---
+    itemsNotifier.value = List.from(items);
+
+    // Debug log
+    // print("Current Cart Titles: ${items.map((e) => e['title'] ?? e['gigDetails']?['gig_type'] ?? 'Unknown')} ");
   }
 
   static List<Map<String, dynamic>> getItems() {
+    // Return a modifiable list? No, keep it unmodifiable for safety.
+    // If UI needs modification, it should use ValueNotifier.
     return List.unmodifiable(items);
   }
 
+  // --- UPDATED: totalPrice calculation ---
+  // Assumes item['price'] is the price per unit (meal + selected complementaries)
   static double get totalPrice {
     return items.fold(0.0, (sum, item) {
+      double itemTotal = 0.0;
       if (item['type'] == 'meal') {
-        final price = (item['price'] as num?)?.toDouble() ?? 0.0;
-        final quantity = (item['quantity'] as num?)?.toInt() ?? 0;
-        // Sum price of main meal
-        double itemTotal = price * quantity;
-        // Add selected complementary meals (bestservedwith)
-        final List<Map<String, dynamic>> bestServedWith =
-            (item['bestservedwith'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-        for (final comp in bestServedWith) {
-          final compPrice = (comp['price'] is num)
-              ? (comp['price'] as num).toDouble()
-              : 5.0;
-          itemTotal += compPrice;
-        }
-        // Add chef/producer price if present
-        final chef = item['selectedchef'] as Map<String, dynamic>?;
-        final producer = item['selectedproducer'] as Map<String, dynamic>?;
-        if (chef != null && chef['price'] != null && chef['price'] is num) {
-          itemTotal += (chef['price'] as num).toDouble();
-        }
-        if (producer != null && producer['price'] != null && producer['price'] is num) {
-          itemTotal += (producer['price'] as num).toDouble();
-        }
-        return sum + itemTotal;
+        final pricePerUnit = (item['price'] as num?)?.toDouble() ?? 0.0;
+        final quantity = (item['quantity'] as num?)?.toInt() ?? 1;
+        itemTotal = pricePerUnit * quantity;
+
+        // Optional: Add separate chef/producer costs if they are NOT included in pricePerUnit
+        // final chef = item['selectedchef'] as Map<String, dynamic>?;
+        // final producer = item['selectedproducer'] as Map<String, dynamic>?;
+        // final chefPrice = _parsePrice(chef?['price']) * quantity; // Per item?
+        // final producerPrice = _parsePrice(producer?['price']) * quantity; // Per item?
+        // itemTotal += chefPrice + producerPrice;
       } else if (item['type'] == 'gig') {
         final gigDetails = item['gigDetails'] as Map<String, dynamic>? ?? {};
-        final price = (gigDetails['price'] as num?)?.toDouble() ?? 0.0;
-        return sum + price;
+        itemTotal = (gigDetails['price'] as num?)?.toDouble() ?? 0.0;
       }
-      return sum;
+      return sum + itemTotal;
     });
   }
+
+  // --- NEW: Get specific item quantity ---
+  static int getItemQuantity(String title) {
+    final index = findItemIndex(title);
+    if (index != -1) {
+      return (items[index]['quantity'] as num?)?.toInt() ?? 1;
+    }
+    return 0; // Return 0 if item not in cart
+  }
+
+  // --- NEW: Check if item is bulk order ---
+  static bool isBulkOrder(String title) {
+    final index = findItemIndex(title);
+    if (index != -1) {
+      return items[index]['isBulkOrder'] as bool? ?? false;
+    }
+    return false;
+  }
+
+  // --- NEW: Get plan details ---
+  static DateTime? getPlanStartDate(String title) {
+    final index = findItemIndex(title);
+    if (index != -1) {
+      final dateString = items[index]['planStartDate'] as String?;
+      return dateString != null ? DateTime.tryParse(dateString) : null;
+    }
+    return null;
+  }
+
+  static DateTime? getPlanEndDate(String title) {
+    final index = findItemIndex(title);
+    if (index != -1) {
+      final dateString = items[index]['planEndDate'] as String?;
+      return dateString != null ? DateTime.tryParse(dateString) : null;
+    }
+    return null;
+  }
+
+  static String? getPlanFrequency(String title) {
+    final index = findItemIndex(title);
+    if (index != -1) {
+      return items[index]['planFrequency'] as String?;
+    }
+    return null;
+  }
+
+  static Set<String>? getPlanSelectedDays(String title) {
+    final index = findItemIndex(title);
+    if (index != -1) {
+      final daysList = items[index]['planSelectedDays'] as List?;
+      // Safely convert list elements to string before creating the set
+      return daysList?.map((e) => e.toString()).toSet();
+    }
+    return null;
+  }
+  // --- End NEW Getters ---
 
   static void clearCart() {
     items.clear();
     print("Cart Cleared");
+    // --- Notify listeners ---
+    itemsNotifier.value = List.from(items);
   }
 
   static void removeItemByIndex(int index) {
@@ -124,7 +192,6 @@ class ShoppingCart {
         final details =
             removedItem['gigDetails'] as Map<String, dynamic>? ?? {};
         final type = details['gig_type'] ?? 'Unknown Gig';
-        // Log with name if possible
         final chefName = details['chef_name'];
         final producerName = details['producer_name'];
         if (chefName != null && chefName.isNotEmpty)
@@ -132,42 +199,44 @@ class ShoppingCart {
         else if (producerName != null && producerName.isNotEmpty)
           itemIdentifier = '$type (Producer: $producerName)';
         else
-          itemIdentifier = type; // Fallback to just type
+          itemIdentifier = type;
       } else {
         itemIdentifier = 'Unknown Item';
       }
       print("Removed item from cart at index $index: $itemIdentifier");
-      print(
-          "Current Cart Titles: ${items.map((e) => e['title'] ?? e['gigDetails']?['gig_type'] ?? 'Unknown')} ");
+      // --- Notify listeners ---
+      itemsNotifier.value = List.from(items);
+      // print("Current Cart Titles: ${items.map((e) => e['title'] ?? e['gigDetails']?['gig_type'] ?? 'Unknown')} ");
     } else {
       print("Attempted to remove item at invalid index: $index");
     }
   }
 
   static void updateMealQuantity(String title, int newQuantity) {
-    final existingItemIndex = items
-        .indexWhere((item) => item['type'] == 'meal' && item['title'] == title);
+    // Use the helper method
+    final existingItemIndex = findItemIndex(title);
     if (existingItemIndex != -1) {
       if (newQuantity > 0) {
         items[existingItemIndex]['quantity'] = newQuantity;
         print("Updated quantity for meal '$title' to $newQuantity");
+        // --- Notify listeners ---
+        itemsNotifier.value = List.from(items);
       } else {
-        removeItemByIndex(existingItemIndex); // Remove if quantity <= 0
+        removeItemByIndex(
+            existingItemIndex); // Remove if quantity <= 0 (removeItemByIndex notifies)
       }
     }
   }
 
   // Method to add a Gig
-  // Expects 'gigDetails' to contain 'chef_id'/'producer_id' AND optionally 'chef_name'/'producer_name'
   static void addGig(Map<String, dynamic> gigDetails) {
-    // Basic Validation
+    // Basic Validation... (remains the same)
     final userId = gigDetails['user_id'];
     final chefId = gigDetails['chef_id'];
     final producerId = gigDetails['producer_id'];
     final price = gigDetails['price'];
     final chefName = gigDetails['chef_name']; // Name is expected here now
-    final producerName = gigDetails[
-        'producer_name']; // Name is expected here now (if applicable)
+    final producerName = gigDetails['producer_name'];
 
     if (userId == null) {
       print("Error adding gig: User ID is missing.");
@@ -186,56 +255,109 @@ class ShoppingCart {
 
     items.add({
       'type': 'gig',
-      'gigDetails': gigDetails, // Store the map which now contains ID and Name
+      'gigDetails': gigDetails,
     });
     print(
         "Added new gig to cart: ${gigDetails['gig_type']} with Chef: $chefName, Producer: $producerName");
-    print(
-        "Current Cart Titles: ${items.map((e) => e['title'] ?? e['gigDetails']?['gig_type'] ?? 'Unknown')} ");
+    // --- Notify listeners ---
+    itemsNotifier.value = List.from(items);
+    // print("Current Cart Titles: ${items.map((e) => e['title'] ?? e['gigDetails']?['gig_type'] ?? 'Unknown')} ");
   }
 
   // Method to remove a specific list of items
   static void removeItems(List<Map<String, dynamic>> itemsToRemove) {
     if (itemsToRemove.isEmpty) return;
     int initialLength = items.length;
-    final Set<Map<String, dynamic>> removalSet = Set.identity()
-      ..addAll(itemsToRemove);
-    items.removeWhere((item) => removalSet.contains(item));
-    if (items.length < initialLength) {
-      print(
-          "Removed ${initialLength - items.length} item(s) from cart based on provided list.");
-      print(
-          "Current Cart Titles: ${items.map((e) => e['title'] ?? e['gigDetails']?['gig_type'] ?? 'Unknown')} ");
+    // Use Set for efficient lookup if list is large, otherwise simple loop is fine
+    int removedCount = 0;
+    items.removeWhere((item) {
+      // Check if the current item exists in the itemsToRemove list
+      // This requires a reliable way to compare items (e.g., based on title or a unique ID)
+      // Using identity check assumes the exact same map objects are passed.
+      // A more robust check might be needed depending on how itemsToRemove is generated.
+      bool shouldRemove = itemsToRemove.any((removeItem) =>
+              item['type'] == removeItem['type'] &&
+                  (item['type'] == 'meal' &&
+                      item['title'] == removeItem['title']) ||
+              (item['type'] == 'gig' && /* Compare relevant gig details */
+                  item['gigDetails']?['booking_id'] ==
+                      removeItem['gigDetails']?[
+                          'booking_id']) // Example: Compare by a unique booking ID if available
+          );
+      if (shouldRemove) removedCount++;
+      return shouldRemove;
+    });
+
+    if (removedCount > 0) {
+      print("Removed $removedCount item(s) from cart based on provided list.");
+      // --- Notify listeners ---
+      itemsNotifier.value = List.from(items);
+      // print("Current Cart Titles: ${items.map((e) => e['title'] ?? e['gigDetails']?['gig_type'] ?? 'Unknown')} ");
     } else {
       print(
           "No items removed. Items to remove might not have been found in the cart.");
     }
   }
-}
+
+  // Helper to parse price safely (could be used internally)
+  static double _parsePrice(dynamic rawPrice) {
+    double price = 0.0;
+    if (rawPrice is int)
+      price = rawPrice.toDouble();
+    else if (rawPrice is double)
+      price = rawPrice;
+    else if (rawPrice is String) {
+      String cleanedPrice = rawPrice.replaceAll(RegExp(r'[^\d.]'), '');
+      price = double.tryParse(cleanedPrice) ?? 0.0;
+    }
+    return price;
+  }
+} // End ShoppingCart Class
+
+// ***************************************************************
+// *                 FAVORITES MANAGEMENT                        *
+// ***************************************************************
 
 // Favorites Management - Defined ONCE here
 class Favorites {
   static List<Map<String, dynamic>> items = [];
+  // --- NEW: ValueNotifier for reactivity (Optional but good practice) ---
+  static final ValueNotifier<List<Map<String, dynamic>>> favoritesNotifier =
+      ValueNotifier(items);
 
   static void addItem(String title, double price, String image) {
     if (!items.any((item) => item['title'] == title)) {
       items.add({'title': title, 'price': price, 'image': image});
       print("Added item to favorites: $title");
+      // --- Notify listeners ---
+      favoritesNotifier.value = List.from(items);
     }
   }
 
+  // Adds favorite item to the cart. NOTE: Requires a chef/producer selection later.
   static void addToCart(
       BuildContext context, String title, double price, String image) {
-    // Adding from favorites - pass empty list for complementary items ('bestservedwith')
-    ShoppingCart.addItem(title, price,
-        selectedchef: null,
-        selectedproducer: null,
-        meal: {'meal_name': title, 'price': price, 'image_link': image},
-        bestservedwith: []);
+    // Adding from favorites - pass empty list for selected complementaries initially.
+    // Chef/producer needs to be selected on the detail screen or cart screen.
+    ShoppingCart.addItem(
+      title,
+      price, // Base price only
+      selectedchef: null, // Not selected yet
+      selectedproducer: null, // Not selected yet
+      meal: {
+        'Meal_name': title,
+        'Price': price,
+        'Image_link': image
+      }, // Basic meal data
+      bestservedwith: [], // No complementaries selected yet
+    );
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('$title added to cart from favorites!'),
-      duration: Duration(seconds: 2),
+      content: Text(
+          '$title added to cart! Select provider & options in cart or detail screen.'),
+      duration: Duration(seconds: 3),
+      backgroundColor: Colors.teal[700],
     ));
+    // No need to call _refreshFavorites here, cart notifier handles cart UI updates.
   }
 
   static List<Map<String, dynamic>> getItems() {
@@ -245,6 +367,8 @@ class Favorites {
   static void clearFavorites() {
     items.clear();
     print("Favorites Cleared");
+    // --- Notify listeners ---
+    favoritesNotifier.value = List.from(items);
   }
 
   static void removeItem(String title) {
@@ -252,13 +376,15 @@ class Favorites {
     items.removeWhere((item) => item['title'] == title);
     if (items.length < initialLength) {
       print("Removed item from favorites: $title");
+      // --- Notify listeners ---
+      favoritesNotifier.value = List.from(items);
     }
   }
 
   static bool isFavorite(String title) {
     return items.any((meal) => meal['title'] == title);
   }
-}
+} // End Favorites Class
 
 // ***************************************************************
 // *                      UI SCREENS                             *
@@ -271,91 +397,103 @@ class ShoppingCartScreen extends StatefulWidget {
 }
 
 class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
-  void _refreshCart() {
-    if (mounted) {
-      setState(() {});
-      print("Cart Screen refreshed");
-    }
-  }
+  // Use ValueListenableBuilder in build method instead of manual refresh
 
   String _formatImageUrl(String? imageUrl) {
     imageUrl ??= 'assets/images/cover.png';
+    if (imageUrl.startsWith('assets/')) return imageUrl;
     if (imageUrl.contains('drive.google.com/uc?export=view&id='))
       return imageUrl;
     if (imageUrl.contains('drive.google.com') && imageUrl.contains('/d/')) {
       final parts = imageUrl.split('/d/');
       if (parts.length > 1) {
         final idPart = parts[1].split('/')[0];
-        return 'https://drive.google.com/uc?export=view&id=$idPart';
+        if (idPart.isNotEmpty)
+          return 'https://drive.google.com/uc?export=view&id=$idPart';
       }
+    }
+    if (imageUrl.startsWith('http://'))
+      return 'https://${imageUrl.substring(7)}';
+    if (!imageUrl.startsWith('https://')) {
+      print(
+          "Warning: Formatting potentially invalid image URL in cart: $imageUrl");
+      return 'assets/images/cover.png'; // Fallback
     }
     return imageUrl;
   }
 
   @override
   Widget build(BuildContext context) {
-    final cartItems = ShoppingCart.getItems();
-    final totalAmount = ShoppingCart.totalPrice;
+    // Use ValueListenableBuilder to react to cart changes
+    return ValueListenableBuilder<List<Map<String, dynamic>>>(
+      valueListenable: ShoppingCart.itemsNotifier,
+      builder: (context, cartItems, child) {
+        final totalAmount =
+            ShoppingCart.totalPrice; // Recalculate based on current items
+        print("Building Cart Screen with ${cartItems.length} items.");
 
-    print("Building Cart Screen with ${cartItems.length} items.");
-
-    return Scaffold(
-      drawer: const AppDrawer(),
-      appBar: AppBar(
-        title: Text('Shopping Cart (${cartItems.length})',
-            style: GoogleFonts.poppins()),
-        backgroundColor: Colors.teal[800],
-        foregroundColor: Colors.white,
-        elevation: 4,
-        actions: [
-          IconButton(
-            icon: Icon(Icons.delete_sweep, size: 24),
-            tooltip: 'Clear Cart',
-            onPressed:
-                cartItems.isNotEmpty ? () => _confirmClearCart(context) : null,
+        return Scaffold(
+          drawer: const drawer.AppDrawer(), // Use prefixed import
+          appBar: AppBar(
+            title: Text('Shopping Cart (${cartItems.length})',
+                style: GoogleFonts.poppins()),
+            backgroundColor: Colors.teal[800],
+            foregroundColor: Colors.white,
+            elevation: 4,
+            actions: [
+              IconButton(
+                icon: Icon(Icons.delete_sweep, size: 24),
+                tooltip: 'Clear Cart',
+                onPressed: cartItems.isNotEmpty
+                    ? () => _confirmClearCart(context)
+                    : null,
+              ),
+              IconButton(
+                icon: Icon(Icons.help_outline, size: 24),
+                tooltip: 'Cart Help',
+                onPressed: () => _showHelpDialog(context),
+              ),
+            ],
           ),
-          IconButton(
-            icon: Icon(Icons.help_outline, size: 24),
-            tooltip: 'Cart Help',
-            onPressed: () => _showHelpDialog(context),
-          ),
-        ],
-      ),
-      body: Container(
-        decoration: BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage('assets/images/soft.jpg'),
-            fit: BoxFit.cover,
-            colorFilter: ColorFilter.mode(
-              Colors.white.withOpacity(0.95),
-              BlendMode.dstATop,
+          body: Container(
+            decoration: BoxDecoration(
+              image: DecorationImage(
+                image: AssetImage(
+                    'assets/images/soft.jpg'), // Ensure this asset exists
+                fit: BoxFit.cover,
+                colorFilter: ColorFilter.mode(
+                  Colors.white.withOpacity(0.95),
+                  BlendMode.dstATop,
+                ),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildCartHeader(cartItems, totalAmount),
+                Expanded(
+                  child: cartItems.isEmpty
+                      ? _buildEmptyCart()
+                      : ListView.separated(
+                          padding:
+                              EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                          itemCount: cartItems.length,
+                          separatorBuilder: (context, index) =>
+                              SizedBox(height: 8),
+                          itemBuilder: (context, index) {
+                            // Pass the specific item from the builder's snapshot
+                            return _buildCartItemCard(
+                                cartItems[index], index, context);
+                          },
+                        ),
+                ),
+              ],
             ),
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildCartHeader(cartItems, totalAmount),
-            // **** CLARIFICATION: Complementary items ('bestservedwith') data is stored ****
-            // **** within each meal item but not displayed separately here. Checkout uses it. ****
-            Expanded(
-              child: cartItems.isEmpty
-                  ? _buildEmptyCart()
-                  : ListView.separated(
-                      padding:
-                          EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                      itemCount: cartItems.length,
-                      separatorBuilder: (context, index) => SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        return _buildCartItemCard(
-                            cartItems[index], index, context);
-                      },
-                    ),
-            ),
-          ],
-        ),
-      ),
-      bottomNavigationBar: _buildCheckoutButton(cartItems),
+          bottomNavigationBar:
+              _buildCheckoutButton(cartItems, totalAmount), // Pass totalAmount
+        );
+      },
     );
   }
 
@@ -384,9 +522,9 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
             icon: Icon(Icons.restaurant_menu),
             label: Text("Browse Menu"),
             onPressed: () {
-              if (Navigator.canPop(context)) {
-                Navigator.pop(context);
-              }
+              // Navigate to the AllMealsScreen or equivalent
+              Navigator.pushReplacement(
+                  context, MaterialPageRoute(builder: (_) => AllMealsScreen()));
             },
             style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.teal,
@@ -408,7 +546,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
           Text('Estimated Total:',
               style: TextStyle(fontSize: 16, color: Colors.grey[700])),
           Text(
-            'ugx ${totalAmount.toStringAsFixed(2)}',
+            'ugx ${totalAmount.toStringAsFixed(0)}', // Format without decimals
             style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
@@ -419,10 +557,13 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
     );
   }
 
-  Widget _buildCheckoutButton(List<Map<String, dynamic>> cartItems) {
-    final totalAmount = ShoppingCart.totalPrice;
+  Widget _buildCheckoutButton(
+      List<Map<String, dynamic>> cartItems, double totalAmount) {
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12) +
+          EdgeInsets.only(
+              bottom: MediaQuery.of(context).padding.bottom *
+                  0.5), // Adjust for safe area
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border(top: BorderSide(color: Colors.grey[300]!, width: 0.5)),
@@ -435,7 +576,8 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       ),
       child: ElevatedButton.icon(
         icon: Icon(Icons.lock_outline, size: 20),
-        label: Text('Checkout (ugx ${totalAmount.toStringAsFixed(2)})'),
+        label: Text(
+            'Checkout (ugx ${totalAmount.toStringAsFixed(0)})'), // Format without decimals
         style: ElevatedButton.styleFrom(
             backgroundColor:
                 cartItems.isNotEmpty ? Colors.teal[700] : Colors.grey,
@@ -445,7 +587,9 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             textStyle: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        onPressed: cartItems.isNotEmpty ? () => _handleCheckout(context) : null,
+        onPressed: cartItems.isNotEmpty
+            ? () => _handleCheckout(context, cartItems, totalAmount)
+            : null, // Pass necessary data
       ),
     );
   }
@@ -453,145 +597,101 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
   // Builds the card for EITHER a meal or a gig
   Widget _buildCartItemCard(
       Map<String, dynamic> item, int index, BuildContext context) {
+    // Use a unique key based on item type and identifier
+    Key itemKey;
     final String itemType = item['type'] ?? 'meal';
 
     if (itemType == 'meal') {
-      // --- Render Meal Item ---
-      final String title = item['title'] ?? 'Unknown Item';
-      final int quantity =
-          (item['quantity'] as num?)?.toInt() ?? 0; // Safer casting
-      final double price =
-          (item['price'] as num?)?.toDouble() ?? 0.0; // Safer casting
+      final String title = item['title'] ?? 'unknown_meal_$index';
+      itemKey = Key('meal_$title'); // Key based on meal title
+
+      final int quantity = (item['quantity'] as num?)?.toInt() ?? 1;
+      final double pricePerUnit =
+          (item['price'] as num?)?.toDouble() ?? 0.0; // Price per unit
       final Map<String, dynamic>? chef =
-          item['selectedchef'] as Map<String, dynamic>?; // Explicit cast
+          item['selectedchef'] as Map<String, dynamic>?;
       final Map<String, dynamic>? producer =
-          item['selectedproducer'] as Map<String, dynamic>?; // Explicit cast
+          item['selectedproducer'] as Map<String, dynamic>?;
       final Map<String, dynamic> meal =
           item['meal'] as Map<String, dynamic>? ?? {};
-      final List<Map<String, dynamic>> bestServedWith =
+      // Use 'bestservedwith' from the cart item (these are the *selected* ones)
+      final List<Map<String, dynamic>> selectedComplementaries =
           (item['bestservedwith'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-      // --- Show selected complementary meals visually ---
-      Widget complementaryWidget = SizedBox.shrink();
-      if (bestServedWith.isNotEmpty) {
-        complementaryWidget = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 8.0, left: 2.0, bottom: 4.0),
-              child: Text(
-                'Selected Complementary Meals:',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Colors.teal[700],
-                  fontSize: 14,
-                ),
-              ),
-            ),
-            SizedBox(
-              height: 40,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: bestServedWith.map((comp) {
-                  final compName = comp['name']?.toString() ?? comp['title']?.toString() ?? '';
-                  final compPrice = (comp['price'] is num)
-                      ? (comp['price'] as num).toDouble()
-                      : 5.0;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8.0),
-                    child: Chip(
-                      label: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            compName,
-                            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal[900]),
-                          ),
-                          SizedBox(width: 6),
-                          Text(
-                            'ugx ${compPrice.toStringAsFixed(2)}',
-                            style: TextStyle(color: Colors.teal[700], fontWeight: FontWeight.w500, fontSize: 13),
-                          ),
-                        ],
-                      ),
-                      backgroundColor: Colors.teal[50],
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-          ],
-        );
-      }
-      final String imageUrl = _formatImageUrl(meal['image_link']);
-      final double itemTotal = price * quantity;
-      // Note: item['bestservedwith'] (complementary items list) is available here but not displayed.
+
+      final String imageUrl = _formatImageUrl(
+          meal['Image_link'] ?? meal['image_link']); // Check both keys
+      final double itemTotal =
+          pricePerUnit * quantity; // Total for this line item
 
       String sourceInfo = '';
-      // Prioritize Name, fallback to ID
-      if (chef != null && chef['name'] != null && chef['name'].isNotEmpty) {
+      if (chef != null && chef['name'] != null && chef['name'].isNotEmpty)
         sourceInfo = 'Cooked by: ${chef['name']}';
-      } else if (producer != null &&
+      else if (producer != null &&
           producer['name'] != null &&
-          producer['name'].isNotEmpty) {
+          producer['name'].isNotEmpty)
         sourceInfo = 'Fresh from: ${producer['name']}';
-      } else if (chef != null && chef['id'] != null) {
-        sourceInfo = 'Cooked by: Chef ID ${chef['id']}';
-      } else if (producer != null && producer['id'] != null) {
-        sourceInfo = 'Fresh from: Producer ID ${producer['id']}';
-      } else if (meal['meal_name'] != null &&
-          title != meal['meal_name']) {
-        // Basic check if it might be a complementary item added to cart
-        sourceInfo = 'Complementary Item';
-      }
+      else if (chef != null && chef['chefid'] != null)
+        sourceInfo = 'Cooked by: Chef ID ${chef['chefid']}'; // Use chefid
+      else if (producer != null && producer['producer_id'] != null)
+        sourceInfo =
+            'Fresh from: Producer ID ${producer['producer_id']}'; // Use producer_id
 
-      return _buildMealItemCardContent(context, index, title, quantity, price,
-          itemTotal, imageUrl, sourceInfo, item, complementaryWidget);
+      return _buildMealItemCardContent(
+          context,
+          index,
+          title,
+          quantity,
+          pricePerUnit,
+          itemTotal,
+          imageUrl,
+          sourceInfo,
+          item,
+          selectedComplementaries,
+          itemKey // Pass the key
+          );
     } else if (itemType == 'gig') {
-      // --- Render Gig Item ---
       final Map<String, dynamic> gigDetails =
           item['gigDetails'] as Map<String, dynamic>? ?? {};
       final String gigType = gigDetails['gig_type'] ?? 'Unknown Gig';
-      final double gigPrice =
-          (gigDetails['price'] as num?)?.toDouble() ?? 0.0; // Safer casting
-      final String? chefId =
-          gigDetails['chef_id']?.toString(); // ID is still stored
-      final String? producerId =
-          gigDetails['producer_id']?.toString(); // ID is still stored
+      // Try to get a unique ID for the gig key
+      final gigKeyIdentifier = gigDetails['booking_id']?.toString() ??
+          gigDetails['chef_id']?.toString() ??
+          gigDetails['producer_id']?.toString() ??
+          'unknown_gig_$index';
+      itemKey = Key('gig_$gigKeyIdentifier'); // Key based on gig identifier
 
-      // **** Logic to Display Name or ID ****
+      final double gigPrice = (gigDetails['price'] as num?)?.toDouble() ?? 0.0;
+      final String? chefId = gigDetails['chef_id']?.toString();
+      final String? producerId = gigDetails['producer_id']?.toString();
       final String? chefName = gigDetails['chef_name']?.toString();
       final String? producerName = gigDetails['producer_name']?.toString();
 
       String hiredParty = 'Unknown Provider';
-      if (chefId != null) {
-        // Prioritize Chef
+      if (chefId != null)
         hiredParty = chefName != null && chefName.isNotEmpty
-            ? 'Chef: $chefName' // Use Name if available
-            : 'Chef ID: $chefId'; // Fallback to ID
-      } else if (producerId != null) {
-        // Then Producer
+            ? 'Chef: $chefName'
+            : 'Chef ID: $chefId';
+      else if (producerId != null)
         hiredParty = producerName != null && producerName.isNotEmpty
-            ? 'Producer: $producerName' // Use Name if available
-            : 'Producer ID: $producerId'; // Fallback to ID
-      }
-      // **** End Logic ****
+            ? 'Producer: $producerName'
+            : 'Producer ID: $producerId';
 
       final String location = gigDetails['location'] ?? 'Not specified';
       final String date = gigDetails['scheduled_date'] ?? 'Not set';
       final String time = gigDetails['time'] ?? 'Not set';
-
-      final String numPeopleKey =
-          gigDetails['number_of_people']?.toString() ?? '';
-      int numPeople = 0;
-      if (numPeopleKey.isNotEmpty) {
-        final parts = numPeopleKey.split('_');
-        numPeople = int.tryParse(parts.first) ?? 0;
-      }
+      final int numPeople = int.tryParse(
+              gigDetails['number_of_people']?.toString().split('_').first ??
+                  '0') ??
+          0;
 
       return _buildGigItemCardContent(context, index, gigType, gigPrice,
-          hiredParty, location, date, time, numPeople);
+          hiredParty, location, date, time, numPeople, itemKey // Pass the key
+          );
     } else {
-      return Card(child: ListTile(title: Text('Unknown Item Type')));
+      // Fallback for unknown item type
+      itemKey = Key('unknown_$index');
+      return Card(
+          key: itemKey, child: ListTile(title: Text('Unknown Item Type')));
     }
   }
 
@@ -601,14 +701,48 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       int index,
       String title,
       int quantity,
-      double price,
-      double itemTotal,
+      double pricePerUnit, // Price per unit (meal + complementaries)
+      double itemTotal, // Total for the line (pricePerUnit * quantity)
       String imageUrl,
       String sourceInfo,
-      Map<String, dynamic> item,
-      Widget complementaryWidget) {
+      Map<String, dynamic> item, // Pass the full item map
+      List<Map<String, dynamic>>
+          selectedComplementaries, // Pass selected complementaries
+      Key dismissibleKey // Pass the key
+      ) {
+    Widget complementaryWidget = SizedBox.shrink();
+    if (selectedComplementaries.isNotEmpty) {
+      complementaryWidget = Padding(
+        padding:
+            const EdgeInsets.only(top: 6.0), // Spacing above complementaries
+        child: Wrap(
+          // Use Wrap for better layout if many items
+          spacing: 6.0, // Horizontal space between chips
+          runSpacing: 4.0, // Vertical space between lines of chips
+          children: selectedComplementaries.map((comp) {
+            final compName = comp['name']?.toString() ?? '';
+            // Price is already included in the main item price, so maybe don't show it again?
+            // final compPrice = (comp['price'] as double?) ?? 0.0;
+            return Chip(
+              label: Text(
+                compName,
+                style:
+                    GoogleFonts.poppins(fontSize: 11, color: Colors.teal[800]),
+              ),
+              avatar: Icon(Icons.add,
+                  size: 12, color: Colors.teal[700]), // Simple indicator
+              backgroundColor: Colors.teal[50],
+              padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+            );
+          }).toList(),
+        ),
+      );
+    }
+
     return Dismissible(
-      key: Key('meal_$index'),
+      key: dismissibleKey, // Use the generated key
       direction: DismissDirection.endToStart,
       background: Container(
         alignment: Alignment.centerRight,
@@ -618,7 +752,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
         child: Icon(Icons.delete_outline, color: Colors.red[700], size: 28),
       ),
       confirmDismiss: (direction) => _confirmItemRemoval(context, index, title),
-      onDismissed: (direction) {/* Handled in confirmDismiss */},
+      onDismissed: (direction) {/* Removal is handled in confirmDismiss */},
       child: Card(
         elevation: 1.5,
         margin: EdgeInsets.symmetric(vertical: 6),
@@ -627,11 +761,13 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start, // Align top
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: CachedNetworkImage(
                   imageUrl: imageUrl,
+                  key: ValueKey(imageUrl), // Add key
                   width: 65,
                   height: 65,
                   fit: BoxFit.cover,
@@ -645,19 +781,18 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
                       width: 65,
                       height: 65,
                       color: Colors.grey[200],
-                      child: Icon(Icons.broken_image,
-                          color: Colors.grey[400])),
+                      child: Icon(Icons.broken_image, color: Colors.grey[400])),
                 ),
               ),
               SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisAlignment: MainAxisAlignment.start, // Align text top
                   children: [
                     Text(
                       title,
-                      style: TextStyle(
+                      style: GoogleFonts.poppins(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
                           color: Colors.teal[900]),
@@ -668,29 +803,41 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
                       SizedBox(height: 4),
                       Text(
                         sourceInfo,
-                        style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                        style: GoogleFonts.poppins(
+                            color: Colors.grey[600], fontSize: 13),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
+                    SizedBox(height: 4),
+                    Text(
+                      // Show price per item
+                      'ugx ${pricePerUnit.toStringAsFixed(0)}',
+                      style: GoogleFonts.poppins(
+                          color: Colors.grey[500], fontSize: 12),
+                    ),
+                    // Show complementaries below price
                     complementaryWidget,
                   ],
                 ),
               ),
               SizedBox(width: 8),
               Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment
+                    .spaceBetween, // Space total and controls vertically
+                mainAxisSize: MainAxisSize.max, // Take full height of row
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    'ugx ${itemTotal.toStringAsFixed(2)}',
-                    style: TextStyle(
+                    // Total for this line item
+                    'ugx ${itemTotal.toStringAsFixed(0)}',
+                    style: GoogleFonts.poppins(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                         color: Colors.teal[800]),
                   ),
-                  SizedBox(height: 6),
-                  _buildQuantityControls(item),
+                  SizedBox(height: 8), // Add space
+                  _buildQuantityControls(item), // Pass full item map
                 ],
               ),
             ],
@@ -703,7 +850,22 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
   // Builds Quantity Controls ONLY for MEAL items
   Widget _buildQuantityControls(Map<String, dynamic> mealItem) {
     final String title = mealItem['title'] ?? '';
-    final int quantity = (mealItem['quantity'] as num?)?.toInt() ?? 0;
+    // Get quantity directly from the item map passed in
+    final int quantity =
+        (mealItem['quantity'] as num?)?.toInt() ?? 1; // Default to 1
+
+    // Prevent modification if it's a bulk order item
+    final bool isBulk = mealItem['isBulkOrder'] as bool? ?? false;
+    if (isBulk) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 8.0), // Add some spacing
+        child: Text('$quantity meals (Plan)',
+            style: GoogleFonts.poppins(
+                fontSize: 13,
+                color: Colors.grey[600],
+                fontStyle: FontStyle.italic)),
+      );
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -718,29 +880,32 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
             onPressed: quantity > 1
                 ? () {
                     ShoppingCart.updateMealQuantity(title, quantity - 1);
-                    _refreshCart();
+                    // No need for _refreshCart(), ValueListenableBuilder handles it
                   }
-                : null,
+                : null, // Disable remove if quantity is 1
             padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
             constraints: BoxConstraints(),
             splashRadius: 18,
+            tooltip: 'Decrease quantity',
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6.0),
             child: Text(
               '$quantity',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+              style: GoogleFonts.poppins(
+                  fontSize: 15, fontWeight: FontWeight.w500),
             ),
           ),
           IconButton(
             icon: Icon(Icons.add, size: 18, color: Colors.green[700]),
             onPressed: () {
               ShoppingCart.updateMealQuantity(title, quantity + 1);
-              _refreshCart();
+              // No need for _refreshCart(), ValueListenableBuilder handles it
             },
             padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
             constraints: BoxConstraints(),
             splashRadius: 18,
+            tooltip: 'Increase quantity',
           ),
         ],
       ),
@@ -757,9 +922,11 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       String location,
       String date,
       String time,
-      int numPeople) {
+      int numPeople,
+      Key dismissibleKey // Pass the key
+      ) {
     return Dismissible(
-      key: Key('gig_$index'),
+      key: dismissibleKey, // Use the generated key
       direction: DismissDirection.endToStart,
       background: Container(
         alignment: Alignment.centerRight,
@@ -770,7 +937,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       ),
       confirmDismiss: (direction) =>
           _confirmItemRemoval(context, index, gigType),
-      onDismissed: (direction) {/* Handled in confirmDismiss */},
+      onDismissed: (direction) {/* Removal handled in confirmDismiss */},
       child: Card(
         elevation: 1.5,
         margin: EdgeInsets.symmetric(vertical: 6),
@@ -788,7 +955,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
                   children: [
                     Text(
                       gigType,
-                      style: TextStyle(
+                      style: GoogleFonts.poppins(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
                           color: Colors.teal[900]),
@@ -798,20 +965,23 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
                     SizedBox(height: 4),
                     Text(
                       hiredParty, // Displays Name or ID fallback
-                      style: TextStyle(color: Colors.grey[700], fontSize: 13),
+                      style: GoogleFonts.poppins(
+                          color: Colors.grey[700], fontSize: 13),
                       maxLines: 1, overflow: TextOverflow.ellipsis,
                     ),
                     SizedBox(height: 4),
                     Text(
                       'Location: $location',
-                      style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                      style: GoogleFonts.poppins(
+                          color: Colors.grey[600], fontSize: 13),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     SizedBox(height: 4),
                     Text(
                       'When: $date at $time',
-                      style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                      style: GoogleFonts.poppins(
+                          color: Colors.grey[600], fontSize: 13),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -819,7 +989,8 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
                       SizedBox(height: 4),
                       Text(
                         'Guests: $numPeople',
-                        style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                        style: GoogleFonts.poppins(
+                            color: Colors.grey[600], fontSize: 13),
                       ),
                     ],
                   ],
@@ -827,8 +998,8 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
               ),
               SizedBox(width: 8),
               Text(
-                'ugx ${gigPrice.toStringAsFixed(2)}',
-                style: TextStyle(
+                'ugx ${gigPrice.toStringAsFixed(0)}', // Format without decimals
+                style: GoogleFonts.poppins(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                     color: Colors.teal[800]),
@@ -843,6 +1014,9 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
   // Confirmation Dialog for removing an item by index
   Future<bool?> _confirmItemRemoval(
       BuildContext context, int index, String itemIdentifier) async {
+    // Check mounted status before showing dialog
+    if (!mounted) return false;
+
     return await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -857,14 +1031,8 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
           ),
           TextButton(
             onPressed: () {
-              ShoppingCart.removeItemByIndex(index);
+              // We don't remove here, just pop true
               Navigator.of(context).pop(true);
-              _refreshCart();
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text('"$itemIdentifier" removed from cart.'),
-                duration: Duration(seconds: 2),
-                backgroundColor: Colors.red[600],
-              ));
             },
             child: Text('Remove',
                 style: TextStyle(
@@ -872,7 +1040,20 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
           ),
         ],
       ),
-    );
+    ).then((confirmed) {
+      // Perform removal AFTER dialog closes if confirmed
+      if (confirmed == true && mounted) {
+        // Check mounted again
+        ShoppingCart.removeItemByIndex(index); // This notifies listeners
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('"$itemIdentifier" removed from cart.'),
+          duration: Duration(seconds: 2),
+          backgroundColor: Colors.red[600],
+        ));
+        return true; // Return true for Dismissible
+      }
+      return false; // Return false for Dismissible
+    });
   }
 
   // Confirmation Dialog for clearing the entire cart
@@ -900,8 +1081,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       ),
     );
     if (mounted && confirm == true) {
-      ShoppingCart.clearCart();
-      _refreshCart();
+      ShoppingCart.clearCart(); // This notifies listeners
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Cart cleared successfully.'),
         duration: Duration(seconds: 2),
@@ -910,9 +1090,10 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
     }
   }
 
-  void _handleCheckout(BuildContext context) {
+  void _handleCheckout(BuildContext context,
+      List<Map<String, dynamic>> cartItems, double totalAmount) {
     if (!mounted) return;
-    final cartItems = ShoppingCart.getItems();
+
     if (cartItems.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -922,18 +1103,18 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       );
     } else {
       print("Proceeding to checkout with ${cartItems.length} items.");
-      // Pass cart items (including complementary item data within meals) to checkout
+      // Pass the current cart items and total price to the CheckoutScreen
       Navigator.pushReplacement(
+        // Use pushReplacement if you don't want users going back to the cart easily
         context,
         MaterialPageRoute(
-          builder: (context) {
-            return CheckoutScreen(
-              items: cartItems,
-              totalPrice: ShoppingCart.totalPrice,
-            );
-          },
+          builder: (context) => CheckoutScreen(
+            items: cartItems, // Pass the current snapshot of items
+            totalPrice: totalAmount, // Pass the current total
+          ),
         ),
-      ).then((_) => _refreshCart());
+      );
+      // No need for .then(_refreshCart) because ValueListenableBuilder handles UI updates
     }
   }
 
@@ -944,7 +1125,9 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       builder: (context) => AlertDialog(
         title: Text('Cart Help'),
         content: Text(
-            'Swipe left on an item to remove it.\nUse +/- buttons for meal quantity.\nChef/Producer details (Name or ID) are shown below item name.\nComplementary items for meals are handled during checkout.\nContact support@zinzi.app for assistance.'), // Updated help
+            '• Swipe left on an item to remove it.\n• Use +/- buttons for meal quantity (not available for meal plans).\n• Chef/Producer details are shown below the item name.\n• Complementary items selected are listed below the meal.\n• Contact support@zinzi.app for assistance.', // Updated help
+            style: GoogleFonts.poppins(height: 1.5) // Improve readability
+            ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         actions: [
           TextButton(
@@ -957,7 +1140,11 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       ),
     );
   }
-}
+} // End _ShoppingCartScreenState
+
+// ***************************************************************
+// *                   FAVORITES UI SCREEN                       *
+// ***************************************************************
 
 // Favorites UI Screen
 class FavoritesScreen extends StatefulWidget {
@@ -966,145 +1153,163 @@ class FavoritesScreen extends StatefulWidget {
 }
 
 class _FavoritesScreenState extends State<FavoritesScreen> {
-  void _refreshFavorites() {
-    if (mounted) setState(() {});
-  }
+  // Use ValueListenableBuilder for reactive UI
 
   String _formatImageUrl(String? imageUrl) {
+    // Same formatting logic as in cart screen
     imageUrl ??= 'assets/images/cover.png';
+    if (imageUrl.startsWith('assets/')) return imageUrl;
     if (imageUrl.contains('drive.google.com/uc?export=view&id='))
       return imageUrl;
     if (imageUrl.contains('drive.google.com') && imageUrl.contains('/d/')) {
       final parts = imageUrl.split('/d/');
       if (parts.length > 1) {
         final idPart = parts[1].split('/')[0];
-        return 'https://drive.google.com/uc?export=view&id=$idPart';
+        if (idPart.isNotEmpty)
+          return 'https://drive.google.com/uc?export=view&id=$idPart';
       }
+    }
+    if (imageUrl.startsWith('http://'))
+      return 'https://${imageUrl.substring(7)}';
+    if (!imageUrl.startsWith('https://')) {
+      print(
+          "Warning: Formatting potentially invalid image URL in favorites: $imageUrl");
+      return 'assets/images/cover.png'; // Fallback
     }
     return imageUrl;
   }
 
   @override
   Widget build(BuildContext context) {
-    final favoriteItems = Favorites.getItems();
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Favorites (${favoriteItems.length})'),
-        backgroundColor: Colors.teal[800],
-        foregroundColor: Colors.white,
-        elevation: 4,
-        actions: [
-          IconButton(
-            icon: Icon(Icons.delete_sweep),
-            tooltip: 'Clear Favorites',
-            onPressed: favoriteItems.isNotEmpty
-                ? () => _confirmClearFavorites(context)
-                : null,
-          ),
-        ],
-      ),
-      body: Container(
-        decoration: BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage('assets/images/soft.jpg'),
-            fit: BoxFit.cover,
-            colorFilter: ColorFilter.mode(
-              Colors.white.withOpacity(0.95),
-              BlendMode.dstATop,
-            ),
-          ),
-        ),
-        child: favoriteItems.isEmpty
-            ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.favorite_border,
-                        size: 64, color: Colors.red[200]),
-                    SizedBox(height: 24),
-                    Text('No Favorites Yet',
-                        style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.teal[800])),
-                    SizedBox(height: 12),
-                    Text('Tap the ❤️ icon on meals to add them here!',
-                        textAlign: TextAlign.center,
-                        style:
-                            TextStyle(fontSize: 16, color: Colors.grey[600])),
-                  ],
+    // Use ValueListenableBuilder to react to favorite changes
+    return ValueListenableBuilder<List<Map<String, dynamic>>>(
+        valueListenable: Favorites.favoritesNotifier,
+        builder: (context, favoriteItems, child) {
+          return Scaffold(
+            appBar: AppBar(
+              title: Text('Favorites (${favoriteItems.length})',
+                  style: GoogleFonts.poppins()),
+              backgroundColor: Colors.teal[800],
+              foregroundColor: Colors.white,
+              elevation: 4,
+              actions: [
+                IconButton(
+                  icon: Icon(Icons.delete_sweep),
+                  tooltip: 'Clear Favorites',
+                  onPressed: favoriteItems.isNotEmpty
+                      ? () => _confirmClearFavorites(context)
+                      : null,
                 ),
-              )
-            : ListView.separated(
-                padding: EdgeInsets.all(12),
-                itemCount: favoriteItems.length,
-                separatorBuilder: (context, index) => SizedBox(height: 8),
-                itemBuilder: (context, index) {
-                  final item = favoriteItems[index];
-                  final String title = item['title'] ?? 'Unknown Item';
-                  final double price =
-                      (item['price'] as num?)?.toDouble() ?? 0.0;
-                  final String imageUrl = _formatImageUrl(item['image']);
-                  return Card(
-                    elevation: 1.5,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    child: ListTile(
-                      contentPadding:
-                          EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      leading: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: CachedNetworkImage(
-                          imageUrl: imageUrl,
-                          width: 55,
-                          height: 55,
-                          fit: BoxFit.cover,
-                          placeholder: (c, u) => Container(
-                              width: 55, height: 55, color: Colors.grey[200]),
-                          errorWidget: (c, u, e) => Container(
-                              width: 55,
-                              height: 55,
-                              color: Colors.grey[200],
-                              child: Icon(Icons.broken_image,
-                                  color: Colors.grey[400])),
-                        ),
-                      ),
-                      title: Text(title,
-                          style: TextStyle(fontWeight: FontWeight.w500)),
-                      subtitle: Text('ugx ${price.toStringAsFixed(2)}',
-                          style: TextStyle(color: Colors.teal[700])),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
+              ],
+            ),
+            body: Container(
+              decoration: BoxDecoration(
+                image: DecorationImage(
+                  image: AssetImage(
+                      'assets/images/soft.jpg'), // Ensure this asset exists
+                  fit: BoxFit.cover,
+                  colorFilter: ColorFilter.mode(
+                    Colors.white.withOpacity(0.95),
+                    BlendMode.dstATop,
+                  ),
+                ),
+              ),
+              child: favoriteItems.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Tooltip(
-                            message: 'Add to Cart',
-                            child: IconButton(
-                              icon: Icon(Icons.add_shopping_cart,
-                                  color: Colors.teal),
-                              onPressed: () {
-                                Favorites.addToCart(
-                                    context, title, price, imageUrl);
-                                _refreshFavorites();
-                              },
-                            ),
-                          ),
-                          Tooltip(
-                            message: 'Remove Favorite',
-                            child: IconButton(
-                              icon: Icon(Icons.favorite, color: Colors.red),
-                              onPressed: () {
-                                _confirmRemoveFavorite(context, title);
-                              },
-                            ),
-                          ),
+                          Icon(Icons.favorite_border,
+                              size: 64, color: Colors.teal[200]),
+                          SizedBox(height: 24),
+                          Text('No Favorites Yet',
+                              style: GoogleFonts.poppins(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.teal[800])),
+                          SizedBox(height: 12),
+                          Text('Tap the heart icon on meals to add them here!',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.poppins(
+                                  fontSize: 15, color: Colors.grey[600])),
                         ],
                       ),
+                    )
+                  : ListView.separated(
+                      padding: EdgeInsets.all(12),
+                      itemCount: favoriteItems.length,
+                      separatorBuilder: (context, index) => SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final item = favoriteItems[index];
+                        final String title = item['title'] ?? 'Unknown Item';
+                        final double price =
+                            (item['price'] as num?)?.toDouble() ?? 0.0;
+                        final String imageUrl = _formatImageUrl(item['image']);
+                        return Card(
+                          elevation: 1.5,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                          child: ListTile(
+                            contentPadding: EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 5),
+                            leading: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: CachedNetworkImage(
+                                imageUrl: imageUrl,
+                                key: ValueKey(imageUrl), // Add key
+                                width: 55, height: 55, fit: BoxFit.cover,
+                                placeholder: (c, u) => Container(
+                                    width: 55,
+                                    height: 55,
+                                    color: Colors.grey[200]),
+                                errorWidget: (c, u, e) => Container(
+                                    width: 55,
+                                    height: 55,
+                                    color: Colors.grey[200],
+                                    child: Icon(Icons.broken_image,
+                                        color: Colors.grey[400])),
+                              ),
+                            ),
+                            title: Text(title,
+                                style: GoogleFonts.poppins(
+                                    fontWeight: FontWeight.w500)),
+                            subtitle: Text('ugx ${price.toStringAsFixed(0)}',
+                                style: GoogleFonts.poppins(
+                                    color: Colors.teal[700])), // Format price
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Tooltip(
+                                  message: 'Add to Cart',
+                                  child: IconButton(
+                                    icon: Icon(Icons.add_shopping_cart,
+                                        color: Colors.teal),
+                                    onPressed: () {
+                                      Favorites.addToCart(
+                                          context, title, price, imageUrl);
+                                      // No need to refresh, cart notifier handles cart UI
+                                    },
+                                  ),
+                                ),
+                                Tooltip(
+                                  message: 'Remove Favorite',
+                                  child: IconButton(
+                                    icon:
+                                        Icon(Icons.favorite, color: Colors.red),
+                                    onPressed: () {
+                                      _confirmRemoveFavorite(context, title);
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
-              ),
-      ),
-    );
+            ),
+          );
+        });
   }
 
   Future<void> _confirmRemoveFavorite(
@@ -1132,8 +1337,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
       ),
     );
     if (mounted && confirm == true) {
-      Favorites.removeItem(title);
-      _refreshFavorites();
+      Favorites.removeItem(title); // This notifies listeners
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('"$title" removed from favorites.'),
         duration: Duration(seconds: 2),
@@ -1166,8 +1370,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
       ),
     );
     if (mounted && confirm == true) {
-      Favorites.clearFavorites();
-      _refreshFavorites();
+      Favorites.clearFavorites(); // This notifies listeners
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Favorites cleared successfully.'),
         duration: Duration(seconds: 2),
@@ -1175,4 +1378,4 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
       ));
     }
   }
-}
+} // End _FavoritesScreenState

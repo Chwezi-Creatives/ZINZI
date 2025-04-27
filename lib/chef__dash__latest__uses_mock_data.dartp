@@ -1105,7 +1105,7 @@ class _ProductsTabState extends State<ProductsTab> {
                   TextFormField(
                       controller: priceController,
                       decoration: const InputDecoration(
-                          labelText: 'Price', prefixText: '\$'),
+                          labelText: 'Price', prefixText: 'ugx '),
                       keyboardType:
                           TextInputType.numberWithOptions(decimal: true),
                       validator: (value) {
@@ -1355,7 +1355,7 @@ class _ProductsTabState extends State<ProductsTab> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '\$${formatCurrency.format(product.price)}', // Format price
+                    'ugx ${formatCurrency.format(product.price)}', // Format price
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.bold, color: Colors.teal[800]),
                   ),

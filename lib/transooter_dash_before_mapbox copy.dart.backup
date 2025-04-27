@@ -10,10 +10,6 @@ import 'package:cached_network_image/cached_network_image.dart'; // Image cachin
 import 'package:shimmer/shimmer.dart'; // Shimmer effect
 import 'package:geolocator/geolocator.dart'; // For location in profile edit (if needed)
 
-// Add these imports at the top of the file
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
-
 // --- Assumed Imports (Ensure these files exist) ---
 import 'package:zinzi2/Transporter_login.dart'; // For logout navigation
 import 'package:zinzi2/user_cache.dart'; // <<< IMPORT UserCache
@@ -22,7 +18,8 @@ import 'package:zinzi2/cache_config.dart'; // <<< IMPORT CacheConfig
 
 // --- Environment Variables ---
 // Ensure loaded in main.dart: await dotenv.load(fileName: ".env");
-final String apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url/api';
+final String apibaseurl =
+    dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url/api';
 final String? imgurClientId = dotenv.env['IMGUR_CLIENT_ID'];
 
 // Path for placeholder image (ensure this exists)
@@ -268,7 +265,7 @@ class Order {
 
   // Static constants for status strings (good practice, from old code)
   static const STATUS_PENDING = 'Pending'; // Often used for 'available'
-  static const STATUS_ASSIGNED = 'assigned'; // Match the example data
+  static const STATUS_ASSIGNED = 'Assigned'; // Specific assignment
   static const STATUS_ACCEPTED = 'Accepted'; // Explicit accept by Rider
   static const STATUS_PICKED_UP = 'Picked Up'; // By Rider
   static const STATUS_ON_THE_WAY = 'On The Way'; // Common alias for delivering
@@ -280,8 +277,15 @@ class Order {
 
   // Calculated properties for UI display (from new code)
   String get simplifiedDeliveryAddress {
+    // Use the safe string, assuming it might be complex JSON string or simple address
     String rawAddress = deliveryAddress;
     try {
+      // Attempt to decode if it looks like JSON, otherwise use as is
+      if (rawAddress.startsWith('{') && rawAddress.endsWith('}')) {
+        Map<String, dynamic> addrMap = jsonDecode(rawAddress);
+        // Extract descriptive part if available
+        return addrMap['desc'] ?? addrMap['display_name'] ?? rawAddress;
+      }
       // Handle potential lat,long,address format
       List<String> parts = rawAddress.split(',');
       if (parts.length > 2 &&
@@ -294,12 +298,6 @@ class Order {
             .where((s) => s.isNotEmpty)
             .join(', ');
       }
-      // Attempt to decode if it looks like JSON, otherwise use as is
-      if (rawAddress.startsWith('{') && rawAddress.endsWith('}')) {
-        Map<String, dynamic> addrMap = jsonDecode(rawAddress);
-        // Extract descriptive part if available
-        return addrMap['desc'] ?? addrMap['display_name'] ?? rawAddress;
-      }
     } catch (e) {
       print("Error parsing simplified address: $e");
     }
@@ -311,22 +309,6 @@ class Order {
   String get pickupAddress {
     // Prioritize the new pickupLocation field if available
     if (pickupLocation != null && pickupLocation!.isNotEmpty) {
-       // Similar parsing logic for pickup location if it contains coordinates
-      try {
-        List<String> parts = pickupLocation!.split(',');
-        if (parts.length > 2 &&
-            double.tryParse(parts[0].trim()) != null &&
-            double.tryParse(parts[1].trim()) != null) {
-          return parts
-              .sublist(2)
-              .map((s) => s.trim())
-              .where((s) => s.isNotEmpty)
-              .join(', ');
-        }
-      } catch (e) {
-        print("Error parsing simplified pickup address: $e");
-      }
-      // Fallback to raw pickup location string if parsing fails or format is different
       return pickupLocation!;
     }
     // Fallback to existing logic if pickupLocation is not available
@@ -348,17 +330,15 @@ class Order {
   String get estimatedDistance =>
       orderType == 'meal' ? '3.2 km' : '4.5 km'; // Example
   // Placeholder for earnings - needs calculation or API field
-  double get earnings => orderType == 'meal' ? 8.50 : 10.75; // Example based on total price for now
-      //totalPrice * 0.1; // Example: 10% of total price, adjust as needed
+  double get earnings => orderType == 'meal' ? 8.50 : 10.75; // Example
 
   // Placeholder for order items - needs detailed structure if available
   List<String> get orderItems {
-    if (productName != null) {
+    if (orderType.toLowerCase() == 'meal' && mealName != null) {
+      return ['$mealName x$quantity'];
+    } else if (productName != null) {
       return ['$productName x$quantity'];
     }
-    if (orderType.toLowerCase() == 'meal' && mealName != null) {
-       return ['$mealName x$quantity'];
-     }
     return ['Item details unavailable'];
   }
 
@@ -394,10 +374,6 @@ class Order {
   factory Order.fromJson(Map<String, dynamic> json) {
     DateTime parseDate(String dateString) {
       try {
-        // Handle potential "+00:00" suffix
-        if (dateString.endsWith('+00:00')) {
-          dateString = dateString.substring(0, dateString.length - 6) + 'Z';
-        }
         return DateTime.parse(dateString).toLocal();
       } catch (e) {
         print("Warning: Could not parse order date '$dateString': $e");
@@ -409,28 +385,33 @@ class Order {
     String? getStringSafe(dynamic value) => value?.toString();
 
     return Order(
-      orderId: parseIntSafe(json['order_id']), // Use safe parser
-      userId: parseIntNullable(json['user_id']),
-      orderType: getStringSafe(json['order_type']) ?? 'unknown',
-      productId: getStringSafe(json['product_id']),
-      chefId: parseIntNullable(json['chef_id']),
-      producerId: parseIntNullable(json['producer_id']),
-      transporterId: parseIntNullable(json['transporter_id']),
+      orderId: json['order_id'] as int? ?? 0,
+      userId: json['user_id'] as int?,
+      orderType: json['order_type'] as String? ?? 'unknown',
+      productId: json['product_id'] as String?,
+      chefId: json['chef_id'] as int?,
+      producerId: json['producer_id'] as int?,
+      transporterId: json['transporter_id'] as int?,
       orderDate: parseDate(
-          getStringSafe(json['order_date']) ?? DateTime.now().toIso8601String()),
+          json['order_date'] as String? ?? DateTime.now().toIso8601String()),
       deliveryAddress: getStringSafe(json['delivery_address']) ??
           'Address not provided', // Use safe getter
       pickupLocation: getStringSafe(
           json['pickup_location']), // <<< NEW: Parse pickup_location
-      orderStatus: getStringSafe(json['order_status']) ?? 'unknown',
-      totalPrice: parseDoubleSafe(json['total_price']), // Use safe parser
+      orderStatus: json['order_status'] as String? ?? 'unknown',
+      // Handle potential String price from API before parsing
+      totalPrice: (json['total_price'] is String
+                  ? double.tryParse(json['total_price'])
+                  : json['total_price'] as num?)
+              ?.toDouble() ??
+          0.0,
       notes: getStringSafe(json['notes']), // Use safe getter
-      paymentStatus: getStringSafe(json['payment_status']) ?? 'unknown',
-      paymentMode: getStringSafe(json['payment_mode']),
-      amountPaid: parseDoubleNullable(json['amount_paid']), // Use safe parser
-      transactionId: getStringSafe(json['transaction_id']),
-      quantity: parseIntSafe(json['quantity'], defaultValue: 1), // Use safe parser
-      mealName: getStringSafe(json['meal_name']), // Compatibility
+      paymentStatus: json['payment_status'] as String? ?? 'unknown',
+      paymentMode: json['payment_mode'] as String?,
+      amountPaid: (json['amount_paid'] as num?)?.toDouble(),
+      transactionId: json['transaction_id'] as String?,
+      quantity: json['quantity'] as int? ?? 1,
+      mealName: getStringSafe(json['meal_name']),
       ingredients: getStringSafe(json['ingredients']),
       producerName: getStringSafe(json['producer_name']),
       producerAddress:
@@ -438,7 +419,7 @@ class Order {
       chefName: getStringSafe(json['chef_name']),
       transporterName: getStringSafe(json['transporter_name']),
       gigDetails: getStringSafe(json['gig_details']),
-      productName: getStringSafe(json['product_name']), // Use safe getter
+      productName: getStringSafe(json['product_name']),
     );
   }
 
@@ -452,7 +433,6 @@ class Order {
         'transporter_id': transporterId,
         'order_date': orderDate.toIso8601String(),
         'delivery_address': deliveryAddress,
-        'pickup_location': pickupLocation, // Include pickup location
         'order_status': orderStatus,
         'total_price': totalPrice,
         'notes': notes,
@@ -482,7 +462,6 @@ class Order {
     ValueGetter<int?>? transporterId,
     DateTime? orderDate,
     String? deliveryAddress,
-    String? pickupLocation, // <<< ADD copyWith support
     String? orderStatus, // Main field to update
     double? totalPrice,
     ValueGetter<String?>? notes,
@@ -511,7 +490,6 @@ class Order {
           transporterId != null ? transporterId() : this.transporterId,
       orderDate: orderDate ?? this.orderDate,
       deliveryAddress: deliveryAddress ?? this.deliveryAddress,
-      pickupLocation: pickupLocation ?? this.pickupLocation, // <<< ADD copyWith
       orderStatus: orderStatus ?? this.orderStatus, // Key update
       totalPrice: totalPrice ?? this.totalPrice,
       notes: notes != null ? notes() : this.notes,
@@ -920,7 +898,7 @@ class TransporterApiService {
   static Future<List<Order>> fetchAvailableOrders() async {
     // Assuming 'pending' or similar status means available
     // Adjust status query param based on your API
-    final Uri uri = Uri.parse('$apibaseurl/rr/orders?order_status=pending'); // Use 'pending' for available
+    final Uri uri = Uri.parse('$apibaseurl/rr/orders?order_status=pending');
     print("Fetching available orders from: $uri");
     try {
       final response =
@@ -955,21 +933,19 @@ class TransporterApiService {
   // Accept an available order
   static Future<bool> acceptOrder(int orderId, String transporterId) async {
     final Uri uri = Uri.parse(
-        '$apibaseurl/rr/orders/$orderId/status'); // Using the status update endpoint
+        '$apibaseurl/rr/orders/$orderId/status'); // Assuming dedicated /accept endpoint
+    // OR use the general update endpoint if that's how accept works:
+    // final Uri uri = Uri.parse('$apibaseurl/rr/orders/$orderId');
     print("Accepting order $orderId for transporter $transporterId via $uri");
     try {
-      // Parse transporterId to int
-      final int? transporterIdInt = int.tryParse(transporterId);
-      if (transporterIdInt == null) {
-          throw Exception('Invalid transporter ID format');
-      }
-
       final response = await http.patch(
+        // Or POST if it's a dedicated action endpoint
         uri,
         headers: _getWriteHeaders(requiresAuth: true),
         body: jsonEncode({
-          'transporter_id': transporterIdInt, // Send transporter ID as int
-          'order_status': Order.STATUS_ASSIGNED // Use the 'assigned' status from your model
+          'transporter_id': int.tryParse(transporterId), // Send transporter ID
+          'order_status': Order
+              .STATUS_ASSIGNED // Or STATUS_ACCEPTED if API expects that on accept
         }),
       );
       if (response.statusCode == 200 || response.statusCode == 204) {
@@ -1478,11 +1454,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
               radius: 16,
               backgroundColor: _primaryTeal.withOpacity(0.1),
               backgroundImage: _transporterProfile?.profileImageUrl != null
-                  ? CachedNetworkImageProvider(_transporterProfile!.profileImageUrl!) // Use CachedNetworkImageProvider
+                  ? NetworkImage(_transporterProfile!.profileImageUrl!)
                   : null,
-              onBackgroundImageError: (_, __) { // Handle image loading errors
-                print("Error loading profile image: ${_transporterProfile?.profileImageUrl}");
-              },
               child: (_transporterProfile?.profileImageUrl == null &&
                       _transporterProfile?.name.isNotEmpty == true)
                   ? Text(_transporterProfile!.name[0].toUpperCase(),
@@ -1535,11 +1508,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             currentAccountPicture: CircleAvatar(
               backgroundColor: _lightTeal,
               backgroundImage: _transporterProfile?.profileImageUrl != null
-                  ? CachedNetworkImageProvider(_transporterProfile!.profileImageUrl!) // Use CachedNetworkImageProvider
+                  ? NetworkImage(_transporterProfile!.profileImageUrl!)
                   : null,
-              onBackgroundImageError: (_, __) {
-                 print("Error loading drawer image: ${_transporterProfile?.profileImageUrl}");
-              },
               child: (_transporterProfile?.profileImageUrl == null &&
                       _transporterProfile?.name.isNotEmpty == true)
                   ? Text(
@@ -1911,8 +1881,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         .where((p) =>
             p.createdAt.isAfter(todayStart) &&
             p.createdAt.isBefore(todayEnd) &&
-            (p.disbursementTransactionStatus.toLowerCase() == 'successful' ||
-             p.disbursementTransactionStatus.toLowerCase() == 'completed')) // Include 'completed' if used
+            p.disbursementTransactionStatus.toLowerCase() == 'successful')
         .fold(0.0, (sum, p) => sum + p.amount);
 
     // Add earnings from orders completed today IF no corresponding payment exists
@@ -1925,10 +1894,9 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             p.orderId == order.orderId &&
             p.createdAt.isAfter(todayStart) &&
             p.createdAt.isBefore(todayEnd) &&
-            (p.disbursementTransactionStatus.toLowerCase() == 'successful' ||
-            p.disbursementTransactionStatus.toLowerCase() == 'completed') );
+            p.disbursementTransactionStatus.toLowerCase() == 'successful');
         if (!paymentExistsToday) {
-          total += order.earnings; // Use calculated earnings
+          total += order.earnings; // Use placeholder earnings
         }
       }
     }
@@ -1940,7 +1908,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     // Same as provided
     return _buildInfoCard(
         title: 'Today\'s Earnings',
-        value: 'ugx ${earnings.toStringAsFixed(0)}', // No decimals for UGX maybe? Adjust if needed.
+        value: 'ugx ${earnings.toStringAsFixed(2)}',
         icon: Icons.attach_money,
         iconBgColor: _green.withOpacity(0.1),
         iconColor: _green,
@@ -2080,10 +2048,10 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   List<Order> _getRecentActivityOrders() {
     List<Order> completedOrCancelled = _allOrders
         .where((o) => [
-              Order.STATUS_DELIVERED.toLowerCase(),
-              Order.STATUS_COMPLETED.toLowerCase(),
-              Order.STATUS_CANCELLED.toLowerCase()
-            ].contains(o.orderStatus.toLowerCase()))
+              Order.STATUS_DELIVERED,
+              Order.STATUS_COMPLETED,
+              Order.STATUS_CANCELLED
+            ].contains(o.orderStatus))
         .toList();
     completedOrCancelled.sort((a, b) => b.orderDate.compareTo(a.orderDate));
     return completedOrCancelled.take(3).toList();
@@ -2092,8 +2060,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   List<Order> _getScheduledOrders() {
     // Scheduled could mean assigned/accepted but not yet started
     return _allOrders
-        .where((o) => [Order.STATUS_ASSIGNED.toLowerCase(), Order.STATUS_ACCEPTED.toLowerCase()]
-            .contains(o.orderStatus.toLowerCase()))
+        .where((o) => [Order.STATUS_ASSIGNED, Order.STATUS_ACCEPTED]
+            .contains(o.orderStatus))
         .toList()
       ..sort((a, b) => a.orderDate.compareTo(b.orderDate)); // Soonest first
   }
@@ -2230,18 +2198,29 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   }
 
   String _getStatusText(String apiStatus) {
-    // Match more carefully based on provided data and constants
-    String statusLower = apiStatus.toLowerCase();
-    if (statusLower == Order.STATUS_PENDING.toLowerCase()) return 'Pending';
-    if (statusLower == Order.STATUS_ASSIGNED.toLowerCase()) return 'Assigned';
-    if (statusLower == Order.STATUS_ACCEPTED.toLowerCase()) return 'Accepted';
-    if (statusLower == Order.STATUS_PICKED_UP.toLowerCase()) return 'Picked Up';
-    if (statusLower == Order.STATUS_ON_THE_WAY.toLowerCase() || statusLower == Order.STATUS_DELIVERING.toLowerCase()) return 'On The Way';
-    if (statusLower == Order.STATUS_DELIVERED.toLowerCase()) return 'Delivered';
-    if (statusLower == Order.STATUS_COMPLETED.toLowerCase()) return 'Completed';
-    if (statusLower == Order.STATUS_CANCELLED.toLowerCase()) return 'Cancelled';
-    // Capitalize first letter as a fallback
-    return apiStatus.isNotEmpty ? apiStatus[0].toUpperCase() + apiStatus.substring(1) : 'Unknown';
+    // Same as provided
+    switch (apiStatus) {
+      // Match exact case from constants if possible
+      case Order.STATUS_PENDING:
+        return 'Pending';
+      case Order.STATUS_ASSIGNED:
+        return 'Assigned';
+      case Order.STATUS_ACCEPTED:
+        return 'Accepted';
+      case Order.STATUS_PICKED_UP:
+        return 'Picked Up';
+      case Order.STATUS_ON_THE_WAY:
+      case Order.STATUS_DELIVERING:
+        return 'On The Way';
+      case Order.STATUS_DELIVERED:
+        return 'Delivered';
+      case Order.STATUS_COMPLETED:
+        return 'Completed';
+      case Order.STATUS_CANCELLED:
+        return 'Cancelled';
+      default:
+        return apiStatus; // Fallback
+    }
   }
 
   Widget _buildScheduledDeliveriesCard(List<Order> scheduledOrders) {
@@ -2321,7 +2300,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                 children: [
                   Text('Dist: ${order.estimatedDistance}',
                       style: TextStyle(color: _grey, fontSize: 13)),
-                  Text('ugx ${order.earnings.toStringAsFixed(0)}', // Use calculated earnings, format UGX
+                  Text('ugx ${order.earnings.toStringAsFixed(2)}',
                       style: TextStyle(
                           color: _green,
                           fontWeight: FontWeight.bold,
@@ -2374,7 +2353,6 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             ),
             onChanged: (value) {
               /* Implement search filtering */ print('Searching for: $value');
-              // TODO: Implement search filtering based on order ID, address, etc.
             },
           ),
         ),
@@ -2473,7 +2451,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
       Order.STATUS_DELIVERING
     };
     return _allOrders
-        .where((o) => activeStatuses.contains(o.orderStatus.toLowerCase()))
+        .where((o) => activeStatuses.contains(o.orderStatus))
         .toList()
       ..sort((a, b) => a.orderDate
           .compareTo(b.orderDate)); // Sort oldest first? Or based on priority?
@@ -2482,10 +2460,10 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   List<Order> _getAvailableOrders() {
     const availableStatuses = {
       Order.STATUS_PENDING,
-      'available' // Add 'available' if used by API
-    };
+      'available'
+    }; // Add 'available' if used by API
     return _allOrders
-        .where((o) => availableStatuses.contains(o.orderStatus.toLowerCase()))
+        .where((o) => availableStatuses.contains(o.orderStatus))
         .toList()
       ..sort((a, b) => b.orderDate.compareTo(a.orderDate)); // Newest first
   }
@@ -2497,7 +2475,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
       Order.STATUS_CANCELLED
     };
     return _allOrders
-        .where((o) => completedStatuses.contains(o.orderStatus.toLowerCase()))
+        .where((o) => completedStatuses.contains(o.orderStatus))
         .toList()
       ..sort((a, b) => b.orderDate.compareTo(a.orderDate)); // Most recent first
   }
@@ -2515,24 +2493,9 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     }
   }
 
-  // *** START: Method Added for Navigation ***
-  Future<void> _launchGoogleMapsNavigation(LatLng destination) async {
-    // Construct the Google Maps URL
-    final url = 'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving';
-
-    // Check if the URL can be launched
-    if (await canLaunch(url)) {
-      await launch(url);
-    } else {
-      // Show an error message if Google Maps cannot be launched
-      _showErrorSnackBar('Could not launch Google Maps');
-    }
-  }
-  // *** END: Method Added for Navigation ***
-
   // Order Card used in Deliveries List
-  // *** MODIFIED: Added Navigation Button ***
   Widget _buildOrderCard(Order order) {
+    // This largely reuses the logic from the provided new code's _buildOrderCard
     String status = order.orderStatus;
     bool isAvailable =
         _getAvailableOrders().any((o) => o.orderId == order.orderId);
@@ -2567,7 +2530,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         )),
       ]);
     } else if (isCompleted) {
-      statusColor = (status.toLowerCase() == Order.STATUS_CANCELLED.toLowerCase()) ? _red : _green;
+      statusColor = (status == Order.STATUS_CANCELLED) ? _red : _green;
       statusText =
           _getStatusText(status); // Show actual completed/cancelled status
       actionButton = SizedBox(
@@ -2622,7 +2585,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                         fontSize: 12)),
               ),
             ]),
-            Text(DateFormat('MMM d, yyyy, h:mm a').format(order.orderDate), // More specific date format
+            Text(DateFormat('M/d/yyyy, h:mm a').format(order.orderDate),
                 style: TextStyle(color: _grey, fontSize: 12)), // Date
             SizedBox(height: 12),
             _buildAddressRow(Icons.storefront, order.pickupAddress), // Pickup
@@ -2633,50 +2596,11 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             _buildOrderInfoRow(order), // Dist, Time, Earn
             SizedBox(height: 16),
             if (actionButton != null) actionButton, // Action Button
-
-            // *** START: Navigation Button Added ***
-            // Only show navigation for active orders
-            if (!isAvailable && !isCompleted) ...[
-              SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  icon: Icon(Icons.directions, size: 18),
-                  label: Text('Navigate'),
-                  onPressed: () {
-                    // Extract coordinates from delivery address if available
-                    // Assumes the address contains coordinates in format "lat,long,address"
-                    final addressParts = order.deliveryAddress.split(',');
-                    if (addressParts.length >= 2) {
-                      final lat = double.tryParse(addressParts[0].trim());
-                      final lng = double.tryParse(addressParts[1].trim());
-                      if (lat != null && lng != null) {
-                        print("Attempting to navigate to: Lat=$lat, Lng=$lng");
-                        _launchGoogleMapsNavigation(LatLng(lat, lng));
-                        return; // Exit after successful launch attempt
-                      } else {
-                         print("Failed to parse lat/lng from: ${addressParts[0]}, ${addressParts[1]}");
-                      }
-                    } else {
-                      print("Address parts length < 2: ${addressParts.length}");
-                    }
-                    // If parsing fails or coordinates are not available
-                    _showErrorSnackBar('Could not parse delivery location coordinates from address: "${order.deliveryAddress}"');
-                  },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: _primaryTeal,
-                    side: BorderSide(color: _lightTeal),
-                  ),
-                ),
-              ),
-            ],
-            // *** END: Navigation Button Added ***
           ],
         ),
       ),
     );
   }
-  // *** END MODIFIED _buildOrderCard ***
 
   Widget _buildAddressRow(IconData icon, String address) {
     // Same as provided
@@ -2687,7 +2611,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           child: Text(address,
               style: TextStyle(fontSize: 14, color: _darkTeal),
               overflow: TextOverflow.ellipsis,
-              maxLines: 2)), // Allow 2 lines for address
+              maxLines: 1)),
     ]);
   }
 
@@ -2696,7 +2620,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     return Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
       _buildInfoChip('Dist: ${order.estimatedDistance}'),
       _buildInfoChip('Time: ${order.estimatedTime}'),
-      _buildInfoChip('Earn: ugx ${order.earnings.toStringAsFixed(0)}', // Format UGX
+      _buildInfoChip('Earn: \$${order.earnings.toStringAsFixed(2)}',
           color: _green, fontWeight: FontWeight.bold),
     ]);
   }
@@ -2857,15 +2781,11 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                 CircleAvatar(
                   radius: 50,
                   backgroundColor: _lightTeal,
-                   backgroundImage: _profileImageFile != null
+                  backgroundImage: _profileImageFile != null
                       ? FileImage(_profileImageFile!) as ImageProvider
                       : (_transporterProfile?.profileImageUrl != null
-                          ? CachedNetworkImageProvider(_transporterProfile!.profileImageUrl!) // Use CachedNetworkImage
+                          ? NetworkImage(_transporterProfile!.profileImageUrl!)
                           : null),
-                   onBackgroundImageError: (_, __) { // Handle image load errors
-                     print("Error loading profile header image: ${_transporterProfile?.profileImageUrl}");
-                     // Optionally display placeholder icon here if needed
-                   },
                   child: (_profileImageFile == null &&
                           _transporterProfile?.profileImageUrl == null)
                       ? Icon(Icons.person, size: 60, color: _primaryTeal)
@@ -2891,7 +2811,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           SizedBox(height: 4),
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             // Chips: Vehicle Type & Rating
-            if (_transporterProfile?.vehicleType != null && _transporterProfile!.vehicleType!.isNotEmpty)
+            if (_transporterProfile?.vehicleType != null)
               Chip(
                   label: Text(_transporterProfile!.vehicleType!,
                       style: TextStyle(fontSize: 12, color: _darkTeal)),
@@ -2900,7 +2820,6 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                   visualDensity: VisualDensity(horizontal: 0.0, vertical: -4),
                   side: BorderSide.none),
             if (_transporterProfile?.vehicleType != null &&
-                _transporterProfile!.vehicleType!.isNotEmpty &&
                 _transporterProfile?.rating != null)
               SizedBox(width: 8),
             if (_transporterProfile?.rating != null)
@@ -2943,8 +2862,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     double completionRate = totalDeliveries > 0 ? 98.0 : 100.0; // Placeholder
     double totalEarnings = _payments
         .where((p) =>
-             (p.disbursementTransactionStatus.toLowerCase() == 'successful' ||
-              p.disbursementTransactionStatus.toLowerCase() == 'completed') )
+            p.disbursementTransactionStatus.toLowerCase() == 'successful')
         .fold(0.0, (sum, p) => sum + p.amount);
 
     return Card(
@@ -2975,7 +2893,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                 '${completionRate.toStringAsFixed(0)}%', 'Completion',
                 color: _green),
             _buildStatItem(Icons.account_balance_wallet_outlined,
-                'ugx ${totalEarnings.toStringAsFixed(0)}', 'Earnings', // Format UGX
+                'ugx ${totalEarnings.toStringAsFixed(0)}', 'Earnings',
                 color: _green),
           ]),
         ]),
@@ -3126,17 +3044,15 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         'phone_number': _phoneController.text,
         'address': _addressController.text,
         // Only include image URL if it's different from the original OR if it was just uploaded
-        // Make sure the key matches the API expectation, e.g., 'image' or 'profile_image_url'
         if (uploadedImageUrl != _transporterProfile?.profileImageUrl)
-          'image': uploadedImageUrl,
+          'profile_image_url': uploadedImageUrl,
       };
       // Clean data (remove unchanged fields - optional but good practice)
-      updateData.removeWhere((key, value) => value == _transporterProfile?.toJson()[key]);
-      updateData.removeWhere((key, value) => value == null || (value is String && value.isEmpty));
+      // updateData.removeWhere((key, value) => value == _transporterProfile?.toJson()[key]);
 
       // 3. Call API to update profile if data changed
       if (updateData.isNotEmpty) {
-        print("Sending profile update data: $updateData");
+        print("Sending update data: $updateData");
         bool success = await TransporterApiService.updateTransporterProfile(
             widget.transporterId, updateData);
         if (!success)
@@ -3288,29 +3204,19 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     _showLoadingSnackbar("Saving Vehicle Info...");
     Map<String, dynamic> updateData = {
       // Use keys expected by your API - these might need adjustment
-      // Ensure these match the keys used in the TransporterProfile.fromJson/toJson if consistent
-      // Using keys common in APIs, adjust if your API uses others.
       'vehicle_make': _vehicleMakeController.text,
       'vehicle_model': _vehicleModelController.text,
       'vehicle_year': _vehicleYearController.text,
       'license_plate': _licensePlateController.text,
       'vehicle_color': _vehicleColorController.text,
-      // Include vehicle_type if it's part of the update AND editable
-      // 'vehicle_type': _transporterProfile?.vehicleType, // Example: Use existing type or make editable
+      // Include vehicle_type if it's part of the update
+      // 'vehicle_type': _transporterProfile?.vehicleType,
     };
     updateData.removeWhere(
-        (key, value) => value == null || (value is String && value.isEmpty)); // Clean empty fields
-
-    // Optional: Remove unchanged values to minimize payload
-    if (_transporterProfile != null) {
-       final currentProfileMap = _transporterProfile!.toJson();
-       updateData.removeWhere((key, value) => currentProfileMap[key] == value);
-    }
-
+        (key, value) => value == null || value.isEmpty); // Clean empty fields
 
     try {
       if (updateData.isNotEmpty) {
-         print("Sending vehicle update data: $updateData");
         bool success = await TransporterApiService.updateTransporterProfile(
             widget.transporterId, updateData);
         if (!success)
@@ -3525,18 +3431,29 @@ class OrderDetailsScreen extends StatefulWidget {
 class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   // State vars same as provided
 
-  // Method to get user-friendly status text (copied from main state)
-  String _getStatusText(String apiStatus) {
-    String statusLower = apiStatus.toLowerCase();
-    if (statusLower == Order.STATUS_PENDING.toLowerCase()) return 'Pending';
-    if (statusLower == Order.STATUS_ASSIGNED.toLowerCase()) return 'Assigned';
-    if (statusLower == Order.STATUS_ACCEPTED.toLowerCase()) return 'Accepted';
-    if (statusLower == Order.STATUS_PICKED_UP.toLowerCase()) return 'Picked Up';
-    if (statusLower == Order.STATUS_ON_THE_WAY.toLowerCase() || statusLower == Order.STATUS_DELIVERING.toLowerCase()) return 'On The Way';
-    if (statusLower == Order.STATUS_DELIVERED.toLowerCase()) return 'Delivered';
-    if (statusLower == Order.STATUS_COMPLETED.toLowerCase()) return 'Completed';
-    if (statusLower == Order.STATUS_CANCELLED.toLowerCase()) return 'Cancelled';
-    return apiStatus.isNotEmpty ? apiStatus[0].toUpperCase() + apiStatus.substring(1) : 'Unknown';
+  // Method to get user-friendly status text
+  String _getStatusText(String status) {
+    switch (status) {
+      case Order.STATUS_PENDING:
+        return 'Pending';
+      case Order.STATUS_ASSIGNED:
+        return 'Assigned';
+      case Order.STATUS_ACCEPTED:
+        return 'Accepted';
+      case Order.STATUS_PICKED_UP:
+        return 'Picked Up';
+      case Order.STATUS_ON_THE_WAY:
+      case Order.STATUS_DELIVERING:
+        return 'On The Way';
+      case Order.STATUS_DELIVERED:
+        return 'Delivered';
+      case Order.STATUS_COMPLETED:
+        return 'Completed';
+      case Order.STATUS_CANCELLED:
+        return 'Cancelled';
+      default:
+        return status; // Fallback for unknown statuses
+    }
   }
 
   late Order _currentOrder;
@@ -3553,7 +3470,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     _currentOrder = widget.order;
     // Show verification immediately if status is on_the_way and needs verification
     _isVerificationVisible =
-        _currentOrder.orderStatus.toLowerCase() == Order.STATUS_ON_THE_WAY.toLowerCase() &&
+        _currentOrder.orderStatus == Order.STATUS_ON_THE_WAY &&
             _needsVerification();
   }
 
@@ -3613,23 +3530,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   }
   // --- End Snackbar Helpers ---
 
-  // *** START: Method Added for Navigation (Copied) ***
-  Future<void> _launchGoogleMapsNavigation(LatLng destination) async {
-    final url = 'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving';
-
-    if (await canLaunch(url)) {
-      await launch(url);
-    } else {
-      _showErrorSnackBar('Could not launch Google Maps');
-    }
-  }
-  // *** END: Method Added for Navigation ***
-
   // --- Status Logic (Adapting old constants) ---
   String? _getNextStatus() {
-    String currentStatusLower = _currentOrder.orderStatus.toLowerCase();
-    switch (currentStatusLower) {
-      case Order.STATUS_ASSIGNED: // Match lowercase constant
+    switch (_currentOrder.orderStatus) {
+      case Order.STATUS_ASSIGNED:
       case Order.STATUS_ACCEPTED:
         return Order.STATUS_PICKED_UP;
       case Order.STATUS_PICKED_UP:
@@ -3646,13 +3550,11 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
   bool _needsVerification() {
     // Add real logic if possible, default to true based on UI video
-    // Let's make it false for now unless specifically needed
-    return false; // Assume verification not needed by default
+    return true;
   }
 
   String _getCompleteButtonText() {
-    String currentStatusLower = _currentOrder.orderStatus.toLowerCase();
-    switch (currentStatusLower) {
+    switch (_currentOrder.orderStatus) {
       case Order.STATUS_ASSIGNED:
       case Order.STATUS_ACCEPTED:
         return 'Mark as Picked Up';
@@ -3667,10 +3569,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   }
 
   bool _canCompleteDelivery() {
-    String currentStatusLower = _currentOrder.orderStatus.toLowerCase();
     // Can complete if there's a next status OR if it's the verification step
     return _getNextStatus() != null ||
-        (currentStatusLower == Order.STATUS_ON_THE_WAY.toLowerCase() &&
+        (_currentOrder.orderStatus == Order.STATUS_ON_THE_WAY &&
             _needsVerification());
   }
 
@@ -3679,15 +3580,13 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     String? nextStatus = _getNextStatus();
     if (nextStatus == null) {
       // This case implies we are at 'on_the_way' and need verification
-      if (_currentOrder.orderStatus.toLowerCase() == Order.STATUS_ON_THE_WAY.toLowerCase() &&
+      if (_currentOrder.orderStatus == Order.STATUS_ON_THE_WAY &&
           _needsVerification()) {
         setState(() => _isVerificationVisible = true); // Show verification card
         _showSnackBar("Please enter verification code.", isError: false);
       } else {
         print(
             "No further status update available for ${_currentOrder.orderStatus}");
-        // Optionally show a snackbar if no action is available
-         _showSnackBar("Order is already ${_getStatusText(_currentOrder.orderStatus)}.", isError: false);
       }
       return;
     }
@@ -3735,7 +3634,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       {bool isVerification = false}) async {
     if (!isVerification) {
       // Show loading snackbar only for non-verification updates
-      _showLoadingSnackbar("Updating status to ${_getStatusText(newStatus)}...");
+      _showLoadingSnackbar("Updating status to $newStatus...");
     }
     setState(() => _isUpdatingStatus = true);
 
@@ -3747,7 +3646,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       if (success && mounted) {
         _showSuccessSnackBar(isVerification
             ? 'Delivery verified and completed!'
-            : 'Order status updated to ${_getStatusText(newStatus)}!');
+            : 'Order status updated to $newStatus!');
         // Update local state and refresh the previous screen
         setState(() {
           // Create a new Order object with the updated status
@@ -3757,7 +3656,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         });
         await widget.onStatusUpdate(); // Call the callback to refresh list
         // Optionally pop screen if it's the final step?
-        // if (newStatus.toLowerCase() == Order.STATUS_DELIVERED.toLowerCase()) Navigator.pop(context);
+        // if (newStatus == Order.STATUS_DELIVERED) Navigator.pop(context);
       } else if (mounted) {
         throw Exception(
             "Update status API failed silently or component unmounted.");
@@ -3777,11 +3676,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     String status = _currentOrder.orderStatus;
-    String statusLower = status.toLowerCase();
     Color statusColor;
     String statusText = _getStatusText(status); // User-friendly
 
-    switch (statusLower) {
+    switch (status) {
       case Order.STATUS_DELIVERED:
       case Order.STATUS_COMPLETED:
         statusColor = _green;
@@ -3791,8 +3689,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         break;
       default:
         statusColor = _primaryTeal;
-        statusText = '$statusText'; // Show specific active status
-        break;
+        statusText = '$statusText';
+        break; // Show specific active status
     }
 
     return Scaffold(
@@ -3837,9 +3735,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           ],
           // Show main action button if applicable
           if (_canCompleteDelivery() &&
-              statusLower != Order.STATUS_DELIVERED &&
-              statusLower != Order.STATUS_COMPLETED &&
-              statusLower != Order.STATUS_CANCELLED)
+              status != Order.STATUS_DELIVERED &&
+              status != Order.STATUS_COMPLETED &&
+              status != Order.STATUS_CANCELLED)
             Padding(
               padding: const EdgeInsets.only(
                   top: 8.0), // Add some space above button
@@ -3884,7 +3782,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text('Map View Placeholder', // Updated text
+              Text('Mapbox Token Required',
                   style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -3892,19 +3790,38 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   textAlign: TextAlign.center),
               SizedBox(height: 8),
               Text(
-                  'Map integration (e.g., Mapbox, Google Maps) would show the route here.', // Updated text
+                  'Please enter your Mapbox access token to load the map. You can get a token from mapbox.com.',
                   style: TextStyle(color: _grey, fontSize: 13),
                   textAlign: TextAlign.center),
-               SizedBox(height: 16),
-               Icon(Icons.map_outlined, size: 40, color: _grey),
-              // Removed token input field for cleaner placeholder
+              SizedBox(height: 16),
+              TextField(
+                decoration: InputDecoration(
+                  hintText: 'Enter your Mapbox token',
+                  hintStyle: TextStyle(fontSize: 14),
+                  filled: true,
+                  fillColor: _white,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8.0),
+                      borderSide: BorderSide(color: Colors.grey.shade400)),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8.0),
+                      borderSide: BorderSide(color: _primaryTeal)),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                ),
+              ),
+              SizedBox(height: 8),
+              Text(
+                  'The token should start with "pk." This is for demonstration purposes only.',
+                  style: TextStyle(color: _grey, fontSize: 11),
+                  textAlign: TextAlign.center),
             ]));
   }
 
-  // *** MODIFIED: Added Navigation Button ***
   Widget _buildOrderDetailsCard() {
-    String restaurantPhone = "(256) 7XX-XXX-XXX"; // Placeholder Uganda format
-    String customerPhone = "(256) 7YY-YYY-YYY"; // Placeholder Uganda format
+    /* ... Same as provided ... */
+    String restaurantPhone = "(555) 123-4567";
+    String customerPhone = "(555) 987-6543"; // Placeholders
     return Card(
         elevation: 1,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -3928,9 +3845,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   isAddress: true),
               _buildDetailRow(Icons.phone_outlined, restaurantPhone),
               Divider(height: 24, color: _lightTeal),
-              _buildDetailRow(Icons.person_outline, 'Customer', isTitle: true), // Added Customer Title
-               _buildDetailRow(Icons.location_on_outlined, 'Delivery Address',
-                   isTitle: false), // Changed to non-title
+              _buildDetailRow(Icons.location_on_outlined, 'Delivery Address',
+                  isTitle: true),
               _buildDetailRow(null, _currentOrder.simplifiedDeliveryAddress,
                   isAddress: true),
               _buildDetailRow(Icons.phone_outlined, customerPhone),
@@ -3945,49 +3861,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                       child:
                           Text('• $item', style: TextStyle(color: _darkTeal))))
                   .toList(),
-              if (_currentOrder.notes != null && _currentOrder.notes!.isNotEmpty && _currentOrder.notes!.toLowerCase() != 'no special instructions') ...[
-                SizedBox(height: 16),
-                _buildDetailRow(Icons.notes_outlined, 'Notes:', isTitle: true),
-                _buildDetailRow(null, _currentOrder.notes!, isAddress: true), // Display notes
-              ],
               SizedBox(height: 16),
               _buildOrderInfoRow(_currentOrder), // Reuses helper
-
-              // *** START: Navigation Button Added ***
-              SizedBox(height: 16), // Space before button
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  icon: Icon(Icons.directions, size: 18),
-                  label: Text('Navigate to Delivery Location'),
-                  onPressed: () {
-                    // Extract coordinates from delivery address if available
-                    final addressParts = _currentOrder.deliveryAddress.split(',');
-                    if (addressParts.length >= 2) {
-                      final lat = double.tryParse(addressParts[0].trim());
-                      final lng = double.tryParse(addressParts[1].trim());
-                      if (lat != null && lng != null) {
-                        print("Attempting to navigate to: Lat=$lat, Lng=$lng");
-                        _launchGoogleMapsNavigation(LatLng(lat, lng));
-                        return; // Exit after successful launch attempt
-                      } else {
-                        print("Failed to parse lat/lng from: ${addressParts[0]}, ${addressParts[1]}");
-                      }
-                    } else {
-                       print("Address parts length < 2: ${addressParts.length}");
-                    }
-                    _showErrorSnackBar('Could not parse delivery location coordinates from address: "${_currentOrder.deliveryAddress}"');
-                  },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: _primaryTeal,
-                    side: BorderSide(color: _lightTeal),
-                  ),
-                ),
-              ),
-              // *** END: Navigation Button Added ***
             ])));
   }
- // *** END MODIFIED _buildOrderDetailsCard ***
 
   Widget _buildDetailRow(IconData? icon, String text,
       {bool isTitle = false, bool isAddress = false}) {
@@ -4006,7 +3883,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   style: TextStyle(
                       fontSize: isTitle ? 15 : 14,
                       fontWeight: isTitle ? FontWeight.w600 : FontWeight.normal,
-                      color: isTitle ? _darkTeal : (isAddress ? _darkTeal : _grey) , // Address uses dark teal
+                      color: isTitle ? _darkTeal : _grey,
                       height: 1.3)))
         ]));
   }
@@ -4016,7 +3893,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     return Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
       _buildInfoChip('Dist: ${order.estimatedDistance}'),
       _buildInfoChip('Time: ${order.estimatedTime}'),
-      _buildInfoChip('Earn: ugx ${order.earnings.toStringAsFixed(0)}', // Format UGX
+      _buildInfoChip('Earn: \$${order.earnings.toStringAsFixed(2)}',
           color: _green, fontWeight: FontWeight.bold)
     ]);
   }
@@ -4038,30 +3915,6 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   // Renamed from _buildStatusCard for clarity
   Widget _buildStatusTimelineCard() {
     // Same structure as _buildStatusCard, just uses timeline items
-     bool isAcceptedMet = _isStatusMet([
-       Order.STATUS_ACCEPTED.toLowerCase(),
-       Order.STATUS_ASSIGNED.toLowerCase(), // Treat assigned as accepted for timeline
-       Order.STATUS_PICKED_UP.toLowerCase(),
-       Order.STATUS_ON_THE_WAY.toLowerCase(),
-       Order.STATUS_DELIVERED.toLowerCase(),
-       Order.STATUS_COMPLETED.toLowerCase()
-     ]);
-     bool isPickedUpMet = _isStatusMet([
-       Order.STATUS_PICKED_UP.toLowerCase(),
-       Order.STATUS_ON_THE_WAY.toLowerCase(),
-       Order.STATUS_DELIVERED.toLowerCase(),
-       Order.STATUS_COMPLETED.toLowerCase()
-     ]);
-     bool isOnTheWayMet = _isStatusMet([
-       Order.STATUS_ON_THE_WAY.toLowerCase(),
-       Order.STATUS_DELIVERED.toLowerCase(),
-       Order.STATUS_COMPLETED.toLowerCase()
-     ]);
-     bool isDeliveredMet = _isStatusMet([
-       Order.STATUS_DELIVERED.toLowerCase(),
-       Order.STATUS_COMPLETED.toLowerCase()
-     ]);
-
     return Card(
         elevation: 1,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -4076,23 +3929,41 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                       color: _darkTeal)),
               SizedBox(height: 16),
               _buildStatusItem(
-                  'Order Accepted/Assigned', // Combined text
+                  'Order Accepted',
                   'You accepted this order',
-                  isAcceptedMet),
+                  _isStatusMet([
+                    Order.STATUS_ACCEPTED,
+                    Order.STATUS_PICKED_UP,
+                    Order.STATUS_ON_THE_WAY,
+                    Order.STATUS_DELIVERED,
+                    Order.STATUS_COMPLETED
+                  ])),
               _buildStatusItem(
                   'Order Picked Up',
                   'You picked up the order',
-                  isPickedUpMet),
+                  _isStatusMet([
+                    Order.STATUS_PICKED_UP,
+                    Order.STATUS_ON_THE_WAY,
+                    Order.STATUS_DELIVERED,
+                    Order.STATUS_COMPLETED
+                  ])),
               _buildStatusItem(
                   'On The Way',
                   'You are delivering the order',
-                   isOnTheWayMet),
+                  _isStatusMet([
+                    Order.STATUS_ON_THE_WAY,
+                    Order.STATUS_DELIVERED,
+                    Order.STATUS_COMPLETED
+                  ])),
               _buildStatusItem(
                   'Delivered',
                   _getDeliveredSubtitle(),
-                  isDeliveredMet,
+                  _isStatusMet(
+                      [Order.STATUS_DELIVERED, Order.STATUS_COMPLETED]),
                   isLast: true,
-                  needsVerification: _needsVerification() && !isDeliveredMet),
+                  needsVerification: _needsVerification() &&
+                      !_isStatusMet(
+                          [Order.STATUS_DELIVERED, Order.STATUS_COMPLETED])),
               // Action button moved outside this card in the main body build method
             ])));
   }
@@ -4103,12 +3974,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     IconData iconData = isCompleted
         ? Icons.check_circle
         : (needsVerification
-            ? Icons.access_time // Icon for verification needed
-            : Icons.radio_button_unchecked); // Icon for pending step
-    Color iconColor = isCompleted ? _green : (needsVerification ? Colors.orange.shade700 : _grey); // Different color for verification step
+            ? Icons.access_time
+            : Icons.radio_button_unchecked);
+    Color iconColor = isCompleted ? _green : _grey;
     Color textColor = isCompleted ? _darkTeal : _grey;
-    Color subtitleColor = isCompleted ? _grey : (needsVerification ? Colors.orange.shade700 : _grey);
-
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Column(children: [
         Icon(iconData, color: iconColor, size: 24),
@@ -4131,21 +4000,21 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
                             color: textColor)),
-                    Text(subtitle, style: TextStyle(fontSize: 13, color: subtitleColor)) // Use subtitleColor
+                    Text(subtitle, style: TextStyle(fontSize: 13, color: _grey))
                   ]))),
     ]);
   }
 
   bool _isStatusMet(List<String> targetStatuses) {
-    // Helper to check if current status is one of the targets (case-insensitive)
-    return targetStatuses.contains(_currentOrder.orderStatus.toLowerCase());
+    // Helper to check if current status is one of the targets
+    return targetStatuses.contains(_currentOrder.orderStatus);
   }
 
   String _getDeliveredSubtitle() {
-    String currentStatusLower = _currentOrder.orderStatus.toLowerCase();
-    if (_isStatusMet([Order.STATUS_DELIVERED.toLowerCase(), Order.STATUS_COMPLETED.toLowerCase()]))
+    // Same as provided
+    if (_isStatusMet([Order.STATUS_DELIVERED, Order.STATUS_COMPLETED]))
       return 'Order successfully delivered';
-    if (_needsVerification() && currentStatusLower == Order.STATUS_ON_THE_WAY.toLowerCase())
+    if (_needsVerification() && _isStatusMet([Order.STATUS_ON_THE_WAY]))
       return 'Verify delivery with code';
     return 'Pending delivery completion';
   }
@@ -4223,7 +4092,7 @@ class EarningsHistoryScreen extends StatelessWidget {
       groupedPayments.putIfAbsent(dateKey, () => []).add(payment);
     }
     List<DateTime> sortedDates = groupedPayments.keys.toList()
-      ..sort((a, b) => b.compareTo(a)); // Sort newest date first
+      ..sort((a, b) => b.compareTo(a));
 
     return Scaffold(
       backgroundColor: _white,
@@ -4248,12 +4117,8 @@ class EarningsHistoryScreen extends StatelessWidget {
               itemBuilder: (context, index) {
                 DateTime date = sortedDates[index];
                 List<Payment> dailyPayments = groupedPayments[date]!;
-                // Calculate daily total ONLY for successful/completed payments
-                double dailyTotal = dailyPayments
-                    .where((p) =>
-                        p.disbursementTransactionStatus.toLowerCase() == 'successful' ||
-                        p.disbursementTransactionStatus.toLowerCase() == 'completed')
-                    .fold(0.0, (sum, p) => sum + p.amount);
+                double dailyTotal =
+                    dailyPayments.fold(0.0, (sum, p) => sum + p.amount);
                 String formattedDate =
                     DateFormat('EEEE, MMM d, yyyy').format(date);
                 return Padding(
@@ -4277,7 +4142,7 @@ class EarningsHistoryScreen extends StatelessWidget {
                                               fontWeight: FontWeight.bold,
                                               color: _darkTeal)),
                                       Text(
-                                          'ugx ${dailyTotal.toStringAsFixed(0)}', // Format UGX
+                                          'ugx ${dailyTotal.toStringAsFixed(2)}',
                                           style: TextStyle(
                                               fontSize: 16,
                                               fontWeight: FontWeight.bold,
@@ -4298,34 +4163,26 @@ class EarningsHistoryScreen extends StatelessWidget {
     /* ... Same as provided ... */
     Color statusColor;
     IconData statusIcon;
-    String statusText = payment.disbursementTransactionStatus; // Default
     switch (payment.disbursementTransactionStatus.toLowerCase()) {
       case 'successful':
-      case 'completed': // Treat completed same as successful visually
         statusColor = _green;
         statusIcon = Icons.check_circle;
-        statusText = 'Successful'; // Normalize text
         break;
       case 'pending':
         statusColor = _grey;
         statusIcon = Icons.hourglass_empty;
-        statusText = 'Pending';
         break;
       case 'in progress':
         statusColor = Colors.orange;
         statusIcon = Icons.sync;
-        statusText = 'In Progress';
         break;
       case 'failed':
         statusColor = _red;
         statusIcon = Icons.error;
-        statusText = 'Failed';
         break;
       default:
         statusColor = _grey;
         statusIcon = Icons.help_outline;
-        // Capitalize if unknown but not empty
-        statusText = statusText.isNotEmpty ? statusText[0].toUpperCase() + statusText.substring(1) : 'Unknown';
     }
     return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -4343,13 +4200,13 @@ class EarningsHistoryScreen extends StatelessWidget {
               ])),
           SizedBox(width: 8),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text('ugx ${payment.amount.toStringAsFixed(0)}', // Format UGX
+            Text('ugx ${payment.amount.toStringAsFixed(2)}',
                 style:
                     TextStyle(fontWeight: FontWeight.bold, color: _darkTeal)),
             Row(children: [
               Icon(statusIcon, size: 12, color: statusColor),
               SizedBox(width: 4),
-              Text(statusText, // Use normalized status text
+              Text(payment.disbursementTransactionStatus,
                   style: TextStyle(color: statusColor, fontSize: 11)),
             ]),
           ]),

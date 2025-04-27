@@ -518,7 +518,7 @@ class _MealDetailScreen2State extends State<MealDetailScreen2> {
               ),
             ),
             Text(
-              '\$${chef['price']}',
+              'ugx ${chef['price']}',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
@@ -738,7 +738,7 @@ class ChooseChef extends StatelessWidget {
                                 _buildStarRating(chef['rating']),
                                 SizedBox(width: 8),
                                 Text(
-                                  '\$${chef['price']}',
+                                  'ugx ${chef['price']}',
                                   style: TextStyle(
                                       fontSize: 16, color: Colors.teal[900]),
                                 ),

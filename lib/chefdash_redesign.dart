@@ -83,12 +83,14 @@ class _ChefProfileOverviewState extends State<ChefProfileOverview> {
       if (chefId == null) {
         throw Exception('Chef ID not found in SharedPreferences');
       }
-      final response = await http.get(Uri.parse('$apibaseurl/rr/rchefs?chef_id=$chefId'));
+      final response =
+          await http.get(Uri.parse('$apibaseurl/rr/rchefs?chef_id=$chefId'));
       if (response.statusCode == 200) {
         final profileData = json.decode(response.body);
         print('DEBUG: Chef Profile Response -> $profileData'); // Debug print
         setState(() {
-          chefProfile = handleApiResponse(profileData); // Handle dynamic response
+          chefProfile =
+              handleApiResponse(profileData); // Handle dynamic response
           isLoading = false;
         });
       } else {
@@ -110,7 +112,9 @@ class _ChefProfileOverviewState extends State<ChefProfileOverview> {
             ? CircularProgressIndicator()
             : errorMessage != null
                 ? Text(errorMessage!, style: TextStyle(color: Colors.red))
-                : chefProfile != null && chefProfile is List && chefProfile.isNotEmpty
+                : chefProfile != null &&
+                        chefProfile is List &&
+                        chefProfile.isNotEmpty
                     ? Padding(
                         padding: const EdgeInsets.all(16.0),
                         child: Column(
@@ -122,7 +126,8 @@ class _ChefProfileOverviewState extends State<ChefProfileOverview> {
                               backgroundColor: Colors.transparent,
                               child: ClipOval(
                                 child: CachedNetworkImage(
-                                  imageUrl: (chefProfile[0]['image'] ?? '').toString(),
+                                  imageUrl: (chefProfile[0]['image'] ?? '')
+                                      .toString(),
                                   fit: BoxFit.cover,
                                   width: 140,
                                   height: 140,
@@ -138,23 +143,32 @@ class _ChefProfileOverviewState extends State<ChefProfileOverview> {
                             SizedBox(height: 20),
                             Text(
                               (chefProfile[0]['name'] ?? '').toString(),
-                              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.teal[900]),
+                              style: TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.teal[900]),
                               textAlign: TextAlign.center,
                             ),
                             SizedBox(height: 8),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                for (int i = 0; i < _getRating(chefProfile[0]); i++)
+                                for (int i = 0;
+                                    i < _getRating(chefProfile[0]);
+                                    i++)
                                   Icon(Icons.star, color: Colors.teal),
-                                for (int i = _getRating(chefProfile[0]); i < 5; i++)
-                                  Icon(Icons.star_border, color: Colors.teal[200]),
+                                for (int i = _getRating(chefProfile[0]);
+                                    i < 5;
+                                    i++)
+                                  Icon(Icons.star_border,
+                                      color: Colors.teal[200]),
                               ],
                             ),
                             SizedBox(height: 16),
                             Text(
                               (chefProfile[0]['bio'] ?? '').toString(),
-                              style: TextStyle(fontSize: 16, color: Colors.grey[700]),
+                              style: TextStyle(
+                                  fontSize: 16, color: Colors.grey[700]),
                               textAlign: TextAlign.center,
                             ),
                             SizedBox(height: 16),
@@ -162,10 +176,12 @@ class _ChefProfileOverviewState extends State<ChefProfileOverview> {
                               onPressed: () {
                                 // Navigate to edit profile
                               },
-                              child: Text('Edit Profile', style: TextStyle(color: Colors.white)),
+                              child: Text('Edit Profile',
+                                  style: TextStyle(color: Colors.white)),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.teal[800],
-                                padding: EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                                padding: EdgeInsets.symmetric(
+                                    horizontal: 32, vertical: 12),
                                 textStyle: TextStyle(fontSize: 18),
                               ),
                             ),
@@ -210,12 +226,14 @@ class _MenuManagementState extends State<MenuManagement> {
       if (chefId == null) {
         throw Exception('Chef ID not found in SharedPreferences');
       }
-      final response = await http.get(Uri.parse('$apibaseurl/rr/menu?chef_id=$chefId'));
+      final response =
+          await http.get(Uri.parse('$apibaseurl/rr/menu?chef_id=$chefId'));
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
         print('DEBUG: Menu Items Response -> $responseData'); // Debug print
         setState(() {
-          menuItems = handleApiResponse(responseData); // Handle dynamic response
+          menuItems =
+              handleApiResponse(responseData); // Handle dynamic response
           isLoading = false;
         });
       } else {
@@ -237,13 +255,17 @@ class _MenuManagementState extends State<MenuManagement> {
         children: [
           Text(
             'Manage Menu',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.teal[900]),
+            style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Colors.teal[900]),
           ),
           SizedBox(height: 20),
           if (isLoading)
             Center(child: CircularProgressIndicator())
           else if (errorMessage != null)
-            Center(child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
+            Center(
+                child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
           else if (menuItems != null && menuItems is List)
             Expanded(
               child: ListView.builder(
@@ -252,7 +274,7 @@ class _MenuManagementState extends State<MenuManagement> {
                   final menuItem = menuItems[index];
                   return ListTile(
                     title: Text(menuItem['name'].toString()),
-                    subtitle: Text('\$${_parsePrice(menuItem['price'])}'),
+                    subtitle: Text('ugx ${_parsePrice(menuItem['price'])}'),
                   );
                 },
               ),
@@ -265,7 +287,7 @@ class _MenuManagementState extends State<MenuManagement> {
                   final menuItem = menuItems['data'][index];
                   return ListTile(
                     title: Text(menuItem['name'].toString()),
-                    subtitle: Text('\$${_parsePrice(menuItem['price'])}'),
+                    subtitle: Text('ugx ${_parsePrice(menuItem['price'])}'),
                   );
                 },
               ),
@@ -309,7 +331,8 @@ class _OrdersListState extends State<OrdersList> {
       if (chefId == null) {
         throw Exception('Chef ID not found in SharedPreferences');
       }
-      final response = await http.get(Uri.parse('$apibaseurl/rr/orders?chef_id=$chefId'));
+      final response =
+          await http.get(Uri.parse('$apibaseurl/rr/orders?chef_id=$chefId'));
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
         print('DEBUG: Orders Response -> $responseData'); // Debug print
@@ -336,13 +359,17 @@ class _OrdersListState extends State<OrdersList> {
         children: [
           Text(
             'Orders',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.teal[900]),
+            style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Colors.teal[900]),
           ),
           SizedBox(height: 20),
           if (isLoading)
             Center(child: CircularProgressIndicator())
           else if (errorMessage != null)
-            Center(child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
+            Center(
+                child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
           else if (orders != null && orders is List)
             Expanded(
               child: ListView.builder(
@@ -350,12 +377,14 @@ class _OrdersListState extends State<OrdersList> {
                 itemBuilder: (context, index) {
                   final order = orders[index];
                   return ListTile(
-                    title: Text('Order #${_parseId(order['order_id'])}', style: TextStyle(color: Colors.teal[800])),
+                    title: Text('Order #${_parseId(order['order_id'])}',
+                        style: TextStyle(color: Colors.teal[800])),
                     subtitle: Text(
                       'Item: ${order['meal_name']}, Quantity: ${_parseQuantity(order['quantity'])}',
                       style: TextStyle(color: Colors.grey[600]),
                     ),
-                    trailing: Text(order['order_status'].toString(), style: TextStyle(color: Colors.teal[800])),
+                    trailing: Text(order['order_status'].toString(),
+                        style: TextStyle(color: Colors.teal[800])),
                   );
                 },
               ),

@@ -55,7 +55,7 @@ class ProfilePage extends StatefulWidget {
   _ProfilePageState createState() => _ProfilePageState();
 }
 
-class _ProfilePageState extends State<ProfilePage> {
+class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStateMixin {
   // --- Caching ---
   static Map<String, dynamic> _userDetailsCache = {};
   static DateTime? _userDetailsCacheTimestamp;
@@ -78,16 +78,32 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _isEditingWeight = false;
   String _originalWeight = ''; // Store original weight before editing
 
+  late final AnimationController _refreshIconController;
+
   @override
   void initState() {
     super.initState();
+    _refreshIconController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    );
     _initializeProfile();
   }
 
   @override
   void dispose() {
+    _refreshIconController.dispose();
     _weightController.dispose();
     super.dispose();
+  }
+
+  void _startRefreshAnimation() {
+    _refreshIconController.repeat();
+  }
+
+  void _stopRefreshAnimation() {
+    _refreshIconController.stop();
+    _refreshIconController.reset();
   }
 
   Future<void> _initializeProfile() async {
@@ -589,6 +605,26 @@ class _ProfilePageState extends State<ProfilePage> {
         foregroundColor: kColorTextOnPrimary,
         elevation: 1.0, // Subtle elevation
         centerTitle: true, // Center title for a balanced look
+        actions: [
+          AnimatedBuilder(
+            animation: _refreshIconController,
+            builder: (context, child) {
+              return IconButton(
+                icon: Transform.rotate(
+                  angle: _isLoading ? _refreshIconController.value * 6.3 : 0,
+                  child: const Icon(Icons.refresh),
+                ),
+                tooltip: _isLoading ? 'Refreshing...' : 'Refresh',
+                onPressed: _isLoading
+                    ? null
+                    : () {
+                        _startRefreshAnimation();
+                        _fetchData().whenComplete(_stopRefreshAnimation);
+                      },
+              );
+            },
+          ),
+        ],
       ),
       drawer: const AppDrawer(), // Unified drawer
       body: RefreshIndicator(

@@ -59,10 +59,10 @@ String _formatCurrency(dynamic amount) {
   if (amount == null) return 'N/A';
   try {
     final doubleValue = double.parse(amount.toString());
-    return NumberFormat.currency(symbol: '\$', decimalDigits: 2)
+    return NumberFormat.currency(symbol: 'ugx ', decimalDigits: 2)
         .format(doubleValue);
   } catch (e) {
-     print("Error formatting currency '$amount': $e");
+    print("Error formatting currency '$amount': $e");
     return amount.toString(); // Return original if parsing fails
   }
 }
@@ -90,10 +90,12 @@ String _getStatusDisplay(String? status) {
           ?.trim()
           .replaceAll('_', ' ')
           .split(' ')
-          .map((word) => word.isNotEmpty ? word[0].toUpperCase() + word.substring(1) : '')
+          .map((word) =>
+              word.isNotEmpty ? word[0].toUpperCase() + word.substring(1) : '')
           .join(' ')
           .trim() // Ensure no leading/trailing spaces
-          ?? 'Unknown'; // Default for null status
+      ??
+      'Unknown'; // Default for null status
 }
 
 // --- Order History Screen Widget ---
@@ -121,7 +123,8 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   Future<List<Map<String, dynamic>>> _loadInitialHistory() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      int? userId = prefs.getInt('user_id'); // Assuming user_id is stored as an int
+      int? userId =
+          prefs.getInt('user_id'); // Assuming user_id is stored as an int
 
       if (userId == null) {
         print("User ID not found for order history. User needs to log in.");
@@ -131,15 +134,15 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       // If userId is valid, fetch the details
       return _fetchOrderHistoryDetails(userId);
     } catch (e) {
-       // Rethrow any other unexpected errors during initial load
-       print("Error during initial history load setup: $e");
-       throw Exception("Failed to initialize order history: ${e.toString()}");
+      // Rethrow any other unexpected errors during initial load
+      print("Error during initial history load setup: $e");
+      throw Exception("Failed to initialize order history: ${e.toString()}");
     }
   }
 
-
   // Fetches actual order details (remains mostly the same)
-  Future<List<Map<String, dynamic>>> _fetchOrderHistoryDetails(int userId) async {
+  Future<List<Map<String, dynamic>>> _fetchOrderHistoryDetails(
+      int userId) async {
     List<Map<String, dynamic>> orders = [];
     final uri = Uri.parse('$apiBaseUrl/rr/orders?user_id=$userId');
     print("Fetching order history from: $uri"); // Debug log
@@ -154,27 +157,32 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
           orders = orderDataList
               .whereType<Map<String, dynamic>>() // Ensure items are maps
               .map((orderData) {
-                 // Try parsing order_id safely within the map
-                 int? parsedId = int.tryParse(orderData['order_id']?.toString() ?? '');
-                 if (parsedId != null) {
-                   orderData['order_id'] = parsedId; // Replace original with parsed int
-                 } else {
-                    print("Warning: Could not parse order_id for order data: $orderData");
-                    // Decide how to handle invalid IDs (e.g., assign a temp negative ID or filter out)
-                    orderData['order_id'] = -1; // Assign temporary invalid ID
-                 }
-                 return orderData;
+                // Try parsing order_id safely within the map
+                int? parsedId =
+                    int.tryParse(orderData['order_id']?.toString() ?? '');
+                if (parsedId != null) {
+                  orderData['order_id'] =
+                      parsedId; // Replace original with parsed int
+                } else {
+                  print(
+                      "Warning: Could not parse order_id for order data: $orderData");
+                  // Decide how to handle invalid IDs (e.g., assign a temp negative ID or filter out)
+                  orderData['order_id'] = -1; // Assign temporary invalid ID
+                }
+                return orderData;
               })
-              .where((order) => order['order_id'] != -1) // Filter out items with invalid IDs
+              .where((order) =>
+                  order['order_id'] != -1) // Filter out items with invalid IDs
               .toList();
-
         } else {
           print("Unexpected data format received for order history: $data");
           throw Exception('Invalid data format from server.');
         }
       } else {
-        print("Failed to fetch history orders: Status ${response.statusCode}, Body: ${response.body}");
-        throw Exception('Failed to load order history (Status: ${response.statusCode}).');
+        print(
+            "Failed to fetch history orders: Status ${response.statusCode}, Body: ${response.body}");
+        throw Exception(
+            'Failed to load order history (Status: ${response.statusCode}).');
       }
 
       // Sort orders (newest first)
@@ -187,13 +195,13 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         return dateB.compareTo(dateA); // Newest first
       });
 
-       print("Fetched and sorted ${orders.length} orders."); // Debug log
+      print("Fetched and sorted ${orders.length} orders."); // Debug log
       return orders;
     } on TimeoutException catch (_) {
       print("Order history request timed out.");
       throw Exception('Request timed out. Please check your connection.');
     } on http.ClientException catch (e) {
-       print("Network error fetching order history: ${e.message}");
+      print("Network error fetching order history: ${e.message}");
       throw Exception('Network error: Could not connect to the server.');
     } catch (e) {
       print("Error fetching or processing order history details: $e");
@@ -212,20 +220,20 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     });
     // Wait for the refresh to complete (optional, useful for showing indicator correctly)
     try {
-       await _orderHistoryFuture;
+      await _orderHistoryFuture;
     } catch (e) {
-       // Error during refresh is handled by FutureBuilder, but you could log here
-       print("Error caught during refresh: $e");
+      // Error during refresh is handled by FutureBuilder, but you could log here
+      print("Error caught during refresh: $e");
     }
   }
 
   // Helper to navigate to login
   void _navigateToLogin() {
-     // Use pushReplacementNamed to prevent coming back here without logging in
-      Navigator.pushReplacementNamed(context, '/login'); // Ensure '/login' route exists
-       print("Navigating to login screen.");
+    // Use pushReplacementNamed to prevent coming back here without logging in
+    Navigator.pushReplacementNamed(
+        context, '/login'); // Ensure '/login' route exists
+    print("Navigating to login screen.");
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -259,13 +267,14 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
           builder: (context, snapshot) {
             // --- Loading State ---
             if (snapshot.connectionState == ConnectionState.waiting) {
-               print("FutureBuilder: Waiting for order history...");
+              print("FutureBuilder: Waiting for order history...");
               return _buildLoadingShimmer();
             }
 
             // --- Error State ---
             if (snapshot.hasError) {
-               print("FutureBuilder: Error loading order history: ${snapshot.error}");
+              print(
+                  "FutureBuilder: Error loading order history: ${snapshot.error}");
               // Pass the specific error to the error widget
               return _buildErrorWidget(context, snapshot.error);
             }
@@ -279,7 +288,8 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
 
             // --- Success State ---
             final orders = snapshot.data!;
-             print("FutureBuilder: Successfully loaded ${orders.length} orders.");
+            print(
+                "FutureBuilder: Successfully loaded ${orders.length} orders.");
             return RefreshIndicator(
               onRefresh: _refreshHistory, // Use the refresh method
               color: kColorPrimary,
@@ -390,7 +400,8 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
               crossFadeState: isExpanded
                   ? CrossFadeState.showSecond
                   : CrossFadeState.showFirst,
-              duration: const Duration(milliseconds: 250), // Slightly faster animation
+              duration: const Duration(
+                  milliseconds: 250), // Slightly faster animation
               firstCurve: Curves.easeOut,
               secondCurve: Curves.easeIn,
               sizeCurve: Curves.easeInOut,
@@ -431,7 +442,8 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                 isExpanded
                     ? Icons.keyboard_arrow_up
                     : Icons.keyboard_arrow_down,
-                color: kColorTextSecondary.withOpacity(0.6), // More subtle color
+                color:
+                    kColorTextSecondary.withOpacity(0.6), // More subtle color
                 size: 20,
               ),
             ),
@@ -442,8 +454,9 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   }
 
   Widget _buildOrderDetails(BuildContext context, Map<String, dynamic> order) {
-     // Safely extract items list
-    final List<dynamic> itemsList = order['items'] is List ? order['items'] : [];
+    // Safely extract items list
+    final List<dynamic> itemsList =
+        order['items'] is List ? order['items'] : [];
 
     return Padding(
       padding: const EdgeInsets.only(
@@ -476,44 +489,48 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
           ),
           // Display Order Items (if available)
           if (itemsList.isNotEmpty) ...[
-             const SizedBox(height: 12),
-             Text(
-                "Items:",
-                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: kColorTextSecondary,
-                      fontWeight: FontWeight.w600,
-                    ),
-             ),
-             const SizedBox(height: 6),
-             // Using Column + map for simplicity, could use ListView if many items
-             Column(
-               crossAxisAlignment: CrossAxisAlignment.start,
-               children: itemsList.map((item) {
-                  if (item is! Map<String, dynamic>) return const SizedBox.shrink(); // Skip invalid items
-                  final itemName = item['meal_name'] ?? item['gig_type'] ?? 'Unknown Item';
-                  final quantity = item['quantity'] as int?; // Nullable int
-                  final price = (item['price'] as num?)?.toDouble(); // Nullable double
+            const SizedBox(height: 12),
+            Text(
+              "Items:",
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: kColorTextSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+            const SizedBox(height: 6),
+            // Using Column + map for simplicity, could use ListView if many items
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: itemsList.map((item) {
+                if (item is! Map<String, dynamic>)
+                  return const SizedBox.shrink(); // Skip invalid items
+                final itemName =
+                    item['meal_name'] ?? item['gig_type'] ?? 'Unknown Item';
+                final quantity = item['quantity'] as int?; // Nullable int
+                final price =
+                    (item['price'] as num?)?.toDouble(); // Nullable double
 
-                  String displayString = "- $itemName";
-                  if (quantity != null && quantity > 0) {
-                     displayString += " (x$quantity)";
-                  }
-                   if (price != null) {
-                      // Optional: Show price per item if needed
-                      // displayString += " @ ${_formatCurrency(price)}";
-                  }
+                String displayString = "- $itemName";
+                if (quantity != null && quantity > 0) {
+                  displayString += " (x$quantity)";
+                }
+                if (price != null) {
+                  // Optional: Show price per item if needed
+                  // displayString += " @ ${_formatCurrency(price)}";
+                }
 
-                 return Padding(
-                   padding: const EdgeInsets.only(left: 20.0, top: 4.0), // Indent items
-                   child: Text(
-                      displayString,
-                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: kColorTextPrimary,
-                          ),
-                   ),
-                 );
-               }).toList(),
-             ),
+                return Padding(
+                  padding: const EdgeInsets.only(
+                      left: 20.0, top: 4.0), // Indent items
+                  child: Text(
+                    displayString,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: kColorTextPrimary,
+                        ),
+                  ),
+                );
+              }).toList(),
+            ),
           ],
         ],
       ),
@@ -584,30 +601,46 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row( // Shimmer Header
+                  Row(
+                    // Shimmer Header
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(width: 100 + (index % 3 * 20), height: 16, color: Colors.white), // Variable width
+                          Container(
+                              width: 100 + (index % 3 * 20),
+                              height: 16,
+                              color: Colors.white), // Variable width
                           const SizedBox(height: 6),
-                          Container(width: 140 + (index % 2 * 30), height: 12, color: Colors.white),
+                          Container(
+                              width: 140 + (index % 2 * 30),
+                              height: 12,
+                              color: Colors.white),
                         ],
                       ),
-                      Container(width: 60 + (index % 2 * 10), height: 24, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12))),
+                      Container(
+                          width: 60 + (index % 2 * 10),
+                          height: 24,
+                          decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12))),
                     ],
                   ),
-                   const SizedBox(height: 12),
-                   const Divider(height: 1),
-                   const SizedBox(height: 12),
-                   // Shimmer Details
-                   Container(width: double.infinity, height: 14, color: Colors.white),
-                   const SizedBox(height: 8),
-                   Container(width: MediaQuery.of(context).size.width * 0.6, height: 14, color: Colors.white), // 60% width
-                   const SizedBox(height: 16),
-                   // Shimmer Footer
-                   Container( height: 35, color: Colors.white.withOpacity(0.7))
+                  const SizedBox(height: 12),
+                  const Divider(height: 1),
+                  const SizedBox(height: 12),
+                  // Shimmer Details
+                  Container(
+                      width: double.infinity, height: 14, color: Colors.white),
+                  const SizedBox(height: 8),
+                  Container(
+                      width: MediaQuery.of(context).size.width * 0.6,
+                      height: 14,
+                      color: Colors.white), // 60% width
+                  const SizedBox(height: 16),
+                  // Shimmer Footer
+                  Container(height: 35, color: Colors.white.withOpacity(0.7))
                 ],
               ),
             ),
@@ -618,40 +651,45 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   }
 
   Widget _buildErrorWidget(BuildContext context, Object? error) {
-     String errorMessage = 'An unexpected error occurred.';
-     bool showLoginButton = false;
+    String errorMessage = 'An unexpected error occurred.';
+    bool showLoginButton = false;
 
-     if (error is Exception) {
-       String errorString = error.toString();
-        errorMessage = errorString.replaceFirst("Exception: ", "");
-        if (errorMessage.contains("User not logged in")) {
-           showLoginButton = true;
-           errorMessage = "Please log in to view your order history."; // User-friendly message
-        } else if (errorMessage.contains("Network error")) {
-          errorMessage = "Could not connect to the server. Please check your internet connection.";
-        } else if (errorMessage.contains("timed out")) {
-           errorMessage = "The request took too long to respond. Please try again later.";
-        }
-        // Keep other specific error messages if needed
-     }
+    if (error is Exception) {
+      String errorString = error.toString();
+      errorMessage = errorString.replaceFirst("Exception: ", "");
+      if (errorMessage.contains("User not logged in")) {
+        showLoginButton = true;
+        errorMessage =
+            "Please log in to view your order history."; // User-friendly message
+      } else if (errorMessage.contains("Network error")) {
+        errorMessage =
+            "Could not connect to the server. Please check your internet connection.";
+      } else if (errorMessage.contains("timed out")) {
+        errorMessage =
+            "The request took too long to respond. Please try again later.";
+      }
+      // Keep other specific error messages if needed
+    }
 
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(_horizontalPadding * 1.5), // Reduced padding
+        padding:
+            const EdgeInsets.all(_horizontalPadding * 1.5), // Reduced padding
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Icon(
-                showLoginButton ? Icons.login : Icons.error_outline, // Different icon for login
-                color: kColorError, size: 50),
+                showLoginButton
+                    ? Icons.login
+                    : Icons.error_outline, // Different icon for login
+                color: kColorError,
+                size: 50),
             const SizedBox(height: _verticalPadding),
             Text(
               showLoginButton ? 'Login Required' : 'Load Failed',
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineSmall
-                  ?.copyWith(color: kColorTextPrimary, fontWeight: FontWeight.w600),
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: kColorTextPrimary, fontWeight: FontWeight.w600),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
@@ -666,15 +704,17 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
             const SizedBox(height: _verticalPadding * 1.5),
             if (showLoginButton)
               ElevatedButton.icon(
-                 icon: const Icon(Icons.login_rounded),
-                 label: const Text('Go to Login'),
-                 style: ElevatedButton.styleFrom(
-                   backgroundColor: kColorPrimary,
-                   foregroundColor: kColorSurface,
-                   shape: RoundedRectangleBorder( borderRadius: BorderRadius.circular(30)),
-                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                 ),
-                 onPressed: _navigateToLogin, // Navigate to login
+                icon: const Icon(Icons.login_rounded),
+                label: const Text('Go to Login'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kColorPrimary,
+                  foregroundColor: kColorSurface,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30)),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
+                onPressed: _navigateToLogin, // Navigate to login
               )
             else // Show Retry button for other errors
               ElevatedButton.icon(
@@ -683,8 +723,10 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: kColorPrimary,
                   foregroundColor: kColorSurface,
-                  shape: RoundedRectangleBorder( borderRadius: BorderRadius.circular(30)),
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30)),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 ),
                 onPressed: _refreshHistory, // Call refresh method
               ),
@@ -703,40 +745,40 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Icon(Icons.receipt_long_outlined, // More relevant icon
-                color: kColorTextSecondary.withOpacity(0.6), size: 50),
+                color: kColorTextSecondary.withOpacity(0.6),
+                size: 50),
             const SizedBox(height: _verticalPadding),
             Text(
               'No Orders Found',
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineSmall
-                  ?.copyWith(color: kColorTextPrimary, fontWeight: FontWeight.w600),
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: kColorTextPrimary, fontWeight: FontWeight.w600),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
               "You haven't placed any orders yet.\nStart shopping to see your history here!",
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyMedium
-                  ?.copyWith(color: kColorTextSecondary, height: 1.4), // Added line height
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: kColorTextSecondary, height: 1.4), // Added line height
               textAlign: TextAlign.center,
             ),
-             const SizedBox(height: _verticalPadding * 1.5),
-             // Optional: Button to go shopping
-              ElevatedButton(
-                child: const Text('Start Shopping'),
-                 style: ElevatedButton.styleFrom(
-                   backgroundColor: kColorPrimary,
-                   foregroundColor: kColorSurface,
-                   shape: RoundedRectangleBorder( borderRadius: BorderRadius.circular(30)),
-                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                 ),
-                 onPressed: () {
-                    // TODO: Navigate to your main shopping/home screen
-                    Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
-                 },
-              )
+            const SizedBox(height: _verticalPadding * 1.5),
+            // Optional: Button to go shopping
+            ElevatedButton(
+              child: const Text('Start Shopping'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kColorPrimary,
+                foregroundColor: kColorSurface,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              ),
+              onPressed: () {
+                // TODO: Navigate to your main shopping/home screen
+                Navigator.pushNamedAndRemoveUntil(
+                    context, '/home', (route) => false);
+              },
+            )
           ],
         ),
       ),

@@ -9,7 +9,8 @@ final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 
 class ProducerDashboardRedesign extends StatefulWidget {
   @override
-  _ProducerDashboardRedesignState createState() => _ProducerDashboardRedesignState();
+  _ProducerDashboardRedesignState createState() =>
+      _ProducerDashboardRedesignState();
 }
 
 class _ProducerDashboardRedesignState extends State<ProducerDashboardRedesign> {
@@ -63,7 +64,8 @@ class _ProducerDashboardRedesignState extends State<ProducerDashboardRedesign> {
 
 class ProducerProfileOverview extends StatefulWidget {
   @override
-  _ProducerProfileOverviewState createState() => _ProducerProfileOverviewState();
+  _ProducerProfileOverviewState createState() =>
+      _ProducerProfileOverviewState();
 }
 
 class _ProducerProfileOverviewState extends State<ProducerProfileOverview> {
@@ -83,10 +85,12 @@ class _ProducerProfileOverviewState extends State<ProducerProfileOverview> {
       if (producerId == null) {
         throw Exception('Producer ID not found in SharedPreferences');
       }
-      final response = await http.get(Uri.parse('$apibaseurl/rr/rproducers?producer_id=$producerId'));
+      final response = await http
+          .get(Uri.parse('$apibaseurl/rr/rproducers?producer_id=$producerId'));
       if (response.statusCode == 200) {
         final profileData = json.decode(response.body);
-        print('DEBUG: Producer Profile Response -> $profileData'); // Debug print
+        print(
+            'DEBUG: Producer Profile Response -> $profileData'); // Debug print
         setState(() {
           if (profileData is Map && profileData.containsKey('data')) {
             final data = profileData['data'];
@@ -131,40 +135,66 @@ class _ProducerProfileOverviewState extends State<ProducerProfileOverview> {
                               backgroundColor: Colors.transparent,
                               child: ClipOval(
                                 child: CachedNetworkImage(
-                                  imageUrl: producerProfile!['Image'] ?? 'assets/images/producerHolder.png',
+                                  imageUrl: producerProfile!['Image'] ??
+                                      'assets/images/producerHolder.png',
                                   fit: BoxFit.cover,
                                   width: 140,
                                   height: 140,
-                                  errorWidget: (context, url, error) => Image.asset('assets/images/producerHolder.png'),
+                                  errorWidget: (context, url, error) =>
+                                      Image.asset(
+                                          'assets/images/producerHolder.png'),
                                 ),
                               ),
                             ),
                             SizedBox(height: 20),
                             Text(
                               producerProfile!['Name'] ?? 'Unknown Producer',
-                              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.teal[900]),
+                              style: TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.teal[900]),
                               textAlign: TextAlign.center,
                             ),
                             SizedBox(height: 8),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                for (int i = 0; i < (double.tryParse(producerProfile!['Rating']?.toString() ?? '0')?.toInt() ?? 0); i++)
+                                for (int i = 0;
+                                    i <
+                                        (double.tryParse(
+                                                    producerProfile!['Rating']
+                                                            ?.toString() ??
+                                                        '0')
+                                                ?.toInt() ??
+                                            0);
+                                    i++)
                                   Icon(Icons.star, color: Colors.teal),
-                                for (int i = (double.tryParse(producerProfile!['Rating']?.toString() ?? '0')?.toInt() ?? 0); i < 5; i++)
-                                  Icon(Icons.star_border, color: Colors.teal[200]),
+                                for (int i = (double.tryParse(
+                                                producerProfile!['Rating']
+                                                        ?.toString() ??
+                                                    '0')
+                                            ?.toInt() ??
+                                        0);
+                                    i < 5;
+                                    i++)
+                                  Icon(Icons.star_border,
+                                      color: Colors.teal[200]),
                               ],
                             ),
                             SizedBox(height: 16),
                             Text(
-                              producerProfile!['Location']?.toString() ?? 'Unknown Location',
-                              style: TextStyle(fontSize: 16, color: Colors.grey[700]),
+                              producerProfile!['Location']?.toString() ??
+                                  'Unknown Location',
+                              style: TextStyle(
+                                  fontSize: 16, color: Colors.grey[700]),
                               textAlign: TextAlign.center,
                             ),
                             SizedBox(height: 16),
                             Text(
-                              producerProfile!['Description']?.toString() ?? 'No description available',
-                              style: TextStyle(fontSize: 16, color: Colors.grey[700]),
+                              producerProfile!['Description']?.toString() ??
+                                  'No description available',
+                              style: TextStyle(
+                                  fontSize: 16, color: Colors.grey[700]),
                               textAlign: TextAlign.center,
                             ),
                             SizedBox(height: 24),
@@ -172,10 +202,12 @@ class _ProducerProfileOverviewState extends State<ProducerProfileOverview> {
                               onPressed: () {
                                 // Navigate to edit profile
                               },
-                              child: Text('Edit Profile', style: TextStyle(color: Colors.white)),
+                              child: Text('Edit Profile',
+                                  style: TextStyle(color: Colors.white)),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.teal[800],
-                                padding: EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                                padding: EdgeInsets.symmetric(
+                                    horizontal: 32, vertical: 12),
                                 textStyle: TextStyle(fontSize: 18),
                               ),
                             ),
@@ -210,7 +242,8 @@ class _ProductManagementState extends State<ProductManagement> {
       if (producerId == null) {
         throw Exception('Producer ID not found in SharedPreferences');
       }
-      final response = await http.get(Uri.parse('$apibaseurl/rr/produce?producer_id=$producerId'));
+      final response = await http
+          .get(Uri.parse('$apibaseurl/rr/produce?producer_id=$producerId'));
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
         print('DEBUG: Products Response -> $responseData'); // Debug print
@@ -238,13 +271,21 @@ class _ProductManagementState extends State<ProductManagement> {
 
   void _addProduct(String name, double price) {
     setState(() {
-      products.add({'id': DateTime.now().millisecondsSinceEpoch, 'name': name, 'price': price});
+      products.add({
+        'id': DateTime.now().millisecondsSinceEpoch,
+        'name': name,
+        'price': price
+      });
     });
   }
 
   void _editProduct(int index, String name, double price) {
     setState(() {
-      products[index] = {'id': products[index]['id'], 'name': name, 'price': price};
+      products[index] = {
+        'id': products[index]['id'],
+        'name': name,
+        'price': price
+      };
     });
   }
 
@@ -324,7 +365,10 @@ class _ProductManagementState extends State<ProductManagement> {
         children: [
           Text(
             'Manage Products',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.teal[900]),
+            style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Colors.teal[900]),
           ),
           SizedBox(height: 20),
           ElevatedButton(
@@ -340,7 +384,8 @@ class _ProductManagementState extends State<ProductManagement> {
           if (isLoading)
             Center(child: CircularProgressIndicator())
           else if (errorMessage != null)
-            Center(child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
+            Center(
+                child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
           else
             Expanded(
               child: ListView.builder(
@@ -351,8 +396,12 @@ class _ProductManagementState extends State<ProductManagement> {
                     elevation: 2,
                     margin: EdgeInsets.symmetric(vertical: 8),
                     child: ListTile(
-                      title: Text(product['name']?.toString() ?? 'Unnamed Product', style: TextStyle(color: Colors.teal[800])),
-                      subtitle: Text('\$${(product['price'] ?? 0.0).toStringAsFixed(2)}', style: TextStyle(color: Colors.grey[600])),
+                      title: Text(
+                          product['name']?.toString() ?? 'Unnamed Product',
+                          style: TextStyle(color: Colors.teal[800])),
+                      subtitle: Text(
+                          'ugx ${(product['price'] ?? 0.0).toStringAsFixed(2)}',
+                          style: TextStyle(color: Colors.grey[600])),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -432,13 +481,17 @@ class _SupplyRequestListState extends State<SupplyRequestList> {
         children: [
           Text(
             'Orders',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.teal[900]),
+            style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Colors.teal[900]),
           ),
           SizedBox(height: 20),
           if (isLoading)
             Center(child: CircularProgressIndicator())
           else if (errorMessage != null)
-            Center(child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
+            Center(
+                child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
           else
             Expanded(
               child: ListView.builder(
@@ -449,12 +502,16 @@ class _SupplyRequestListState extends State<SupplyRequestList> {
                     elevation: 2,
                     margin: EdgeInsets.symmetric(vertical: 8),
                     child: ListTile(
-                      title: Text('Order #${order['order_id']?.toString() ?? 'Unknown'}', style: TextStyle(color: Colors.teal[800])),
+                      title: Text(
+                          'Order #${order['order_id']?.toString() ?? 'Unknown'}',
+                          style: TextStyle(color: Colors.teal[800])),
                       subtitle: Text(
                         'Product: ${order['meal_name']?.toString() ?? 'Unknown'}, Quantity: ${order['quantity']?.toString() ?? '0'}',
                         style: TextStyle(color: Colors.grey[600]),
                       ),
-                      trailing: Text(order['order_status']?.toString() ?? 'Pending', style: TextStyle(color: Colors.teal[800])),
+                      trailing: Text(
+                          order['order_status']?.toString() ?? 'Pending',
+                          style: TextStyle(color: Colors.teal[800])),
                     ),
                   );
                 },

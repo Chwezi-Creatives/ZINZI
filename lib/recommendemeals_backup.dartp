@@ -334,7 +334,7 @@ class _RecommendedMealsScreenBackupState
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      '\$${price.toStringAsFixed(2)}',
+                      'ugx ${price.toStringAsFixed(2)}',
                       style: TextStyle(
                           fontSize: 15.0, fontWeight: FontWeight.w500),
                     ),

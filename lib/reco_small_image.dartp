@@ -327,7 +327,7 @@ class _RecommendedMealsScreenSmallState
                   SizedBox(height: 8.0),
                   Text(description),
                   SizedBox(height: 8.0),
-                  Text('\$${price.toStringAsFixed(2)}'),
+                  Text('ugx ${price.toStringAsFixed(2)}'),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [

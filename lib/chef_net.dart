@@ -31,7 +31,8 @@ const Color kColorPrimaryLightest = Color(0xFFE0F2F1);
 const Color kColorBackground = Color(0xFFFAFAFA);
 const Color kColorSurface = Colors.white;
 const Color kColorTextPrimary = Color(0xFF212121);
-const Color kColorTextSecondary = Color(0xFF757575); // Corrected from target's 757570
+const Color kColorTextSecondary =
+    Color(0xFF757575); // Corrected from target's 757570
 const Color kColorTextOnPrimary = Colors.white;
 const Color kColorBorder = kColorPrimaryLighter;
 const Color kColorDivider = Color(0xFFEEEEEE);
@@ -541,7 +542,8 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
                 color: kColorBackground,
                 borderRadius: BorderRadius.circular(kRadiusMedium),
                 child: TextField(
-                    controller: _searchController, // Uses controller from source logic
+                    controller:
+                        _searchController, // Uses controller from source logic
                     style: GoogleFonts.poppins(
                         fontSize: 14, color: kColorTextPrimary),
                     decoration: InputDecoration(
@@ -588,13 +590,15 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
                   itemCount: sortedCuisineTypes.length,
                   itemBuilder: (context, index) {
                     final cuisine = sortedCuisineTypes[index];
-                    final bool isSelected = activeFilter == cuisine; // Uses activeFilter from source
+                    final bool isSelected = activeFilter ==
+                        cuisine; // Uses activeFilter from source
                     return Padding(
                         padding: const EdgeInsets.only(right: 8),
                         child: ChoiceChip(
                             label: Text(cuisine),
                             selected: isSelected,
-                            onSelected: (_) => _applyCategoryFilter(cuisine), // Calls filter func from source
+                            onSelected: (_) => _applyCategoryFilter(
+                                cuisine), // Calls filter func from source
                             backgroundColor: kColorBackground,
                             selectedColor: kColorPrimaryLightest,
                             labelStyle: GoogleFonts.poppins(
@@ -643,7 +647,8 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
                                   color: kColorPrimary,
                                   fontSize: 13,
                                   fontWeight: FontWeight.w500)),
-                          onPressed: _clearFiltersAndSearch, // Calls clear func from source
+                          onPressed:
+                              _clearFiltersAndSearch, // Calls clear func from source
                           style: TextButton.styleFrom(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 4),
@@ -667,7 +672,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
                         : _buildChefListView() // Target's list view builder
             ),
       ]),
-       // Floating Action Button - Added from Source file (as it was present there)
+      // Floating Action Button - Added from Source file (as it was present there)
     );
   }
 
@@ -778,8 +783,8 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
   }
 
   Widget _buildEmptyState() {
-    final bool isFiltering =
-        activeFilter != 'All' || _searchController.text.isNotEmpty; // Uses state from source
+    final bool isFiltering = activeFilter != 'All' ||
+        _searchController.text.isNotEmpty; // Uses state from source
     return Center(
         child: Padding(
             padding: const EdgeInsets.all(24.0),
@@ -819,7 +824,8 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
                 ElevatedButton.icon(
                     icon: const Icon(Icons.clear_all_rounded, size: 18),
                     label: const Text("Clear Search & Filters"),
-                    onPressed: _clearFiltersAndSearch, // Calls clear func from source
+                    onPressed:
+                        _clearFiltersAndSearch, // Calls clear func from source
                     style: ElevatedButton.styleFrom(
                         foregroundColor: kColorTextOnPrimary,
                         backgroundColor: kColorPrimary,
@@ -847,7 +853,8 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
               final chef = filteredChefs[index];
               // Use a stable key based on chef ID if available, otherwise index
               final Key itemKey = ValueKey(chef['chefid'] ?? 'chef_$index');
-              return _buildChefCard(context, chef, index, itemKey); // Target's card builder
+              return _buildChefCard(
+                  context, chef, index, itemKey); // Target's card builder
             }));
   }
 
@@ -922,8 +929,10 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
                             context,
                             PageRouteBuilder(
                                 transitionDuration: kDurationMedium,
-                                pageBuilder: (_, __, ___) => ChefDetailScreen( // Target's Detail Screen
-                                    chef: chef, heroTag: 'chef-card-$chefId'),
+                                pageBuilder: (_, __, ___) => ChefDetailScreen(
+                                    // Target's Detail Screen
+                                    chef: chef,
+                                    heroTag: 'chef-card-$chefId'),
                                 transitionsBuilder: (_, animation, __, child) =>
                                     FadeTransition(
                                         opacity: animation, child: child)));
@@ -1010,7 +1019,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
                                               kRadiusSmall),
                                           boxShadow: [kSubtleElevationShadow]),
                                       child: Text(
-                                          '\$${chefPrice.toStringAsFixed(0)}',
+                                          'ugx ${chefPrice.toStringAsFixed(0)}',
                                           style: GoogleFonts.poppins(
                                               color: kColorPrimaryDark,
                                               fontSize: 14,
@@ -1576,7 +1585,8 @@ class ChefDetailScreen extends StatelessWidget {
                   ? Icons.event_available_outlined
                   : Icons.event_busy_outlined,
               size: 20),
-          label: Text(canBookGig ? 'Request Booking' : 'unavailable for this chef'),
+          label: Text(
+              canBookGig ? 'Request Booking' : 'unavailable for this chef'),
           style: ElevatedButton.styleFrom(
             backgroundColor:
                 canBookGig ? kColorPrimaryDark : Colors.grey.shade500,
@@ -1605,9 +1615,11 @@ class ChefDetailScreen extends StatelessWidget {
                             onPressed: () {
                               // Navigate to SignUpOrLoginPage if not logged in
                               if (context.mounted) {
-                                 Navigator.push(
-                                    context,
-                                    MaterialPageRoute(builder: (context) => SignUpOrLoginPage()), // Navigate to login/signup
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                      builder: (context) =>
+                                          SignUpOrLoginPage()), // Navigate to login/signup
                                 );
                               }
                             }),

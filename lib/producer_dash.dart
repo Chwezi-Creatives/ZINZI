@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'producer_dash_redesign.dart';
+
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 
 class ProducerDashboard extends StatelessWidget {
@@ -17,7 +18,8 @@ class ProducerDashboard extends StatelessWidget {
 
 class ProducerProfileOverview extends StatefulWidget {
   @override
-  _ProducerProfileOverviewState createState() => _ProducerProfileOverviewState();
+  _ProducerProfileOverviewState createState() =>
+      _ProducerProfileOverviewState();
 }
 
 class _ProducerProfileOverviewState extends State<ProducerProfileOverview> {
@@ -37,10 +39,12 @@ class _ProducerProfileOverviewState extends State<ProducerProfileOverview> {
       if (producerId == null) {
         throw Exception('Producer ID not found in SharedPreferences');
       }
-      final response = await http.get(Uri.parse('$apibaseurl/rr/rproducers?producer_id=$producerId'));
+      final response = await http
+          .get(Uri.parse('$apibaseurl/rr/rproducers?producer_id=$producerId'));
       if (response.statusCode == 200) {
         final profileData = json.decode(response.body);
-        print('DEBUG: Producer Profile Response -> $profileData'); // Debug print
+        print(
+            'DEBUG: Producer Profile Response -> $profileData'); // Debug print
         setState(() {
           if (profileData is Map && profileData.containsKey('data')) {
             final data = profileData['data'];
@@ -75,7 +79,8 @@ class _ProducerProfileOverviewState extends State<ProducerProfileOverview> {
           if (isLoading)
             Center(child: CircularProgressIndicator())
           else if (errorMessage != null)
-            Center(child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
+            Center(
+                child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
           else if (producerProfile != null)
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -85,7 +90,8 @@ class _ProducerProfileOverviewState extends State<ProducerProfileOverview> {
                   backgroundColor: Colors.transparent,
                   child: ClipOval(
                     child: CachedNetworkImage(
-                      imageUrl: producerProfile!['Image'] ?? 'https://example.com/placeholder.jpg',
+                      imageUrl: producerProfile!['Image'] ??
+                          'https://example.com/placeholder.jpg',
                       fit: BoxFit.cover,
                       errorWidget: (context, url, error) {
                         return Image.asset(
@@ -107,15 +113,29 @@ class _ProducerProfileOverviewState extends State<ProducerProfileOverview> {
                 ),
                 Row(
                   children: [
-                    for (int i = 0; i < (double.tryParse(producerProfile!['Rating']?.toString() ?? '0')?.toInt() ?? 0); i++)
+                    for (int i = 0;
+                        i <
+                            (double.tryParse(producerProfile!['Rating']
+                                            ?.toString() ??
+                                        '0')
+                                    ?.toInt() ??
+                                0);
+                        i++)
                       Icon(Icons.star, color: Colors.teal),
-                    for (int i = (double.tryParse(producerProfile!['Rating']?.toString() ?? '0')?.toInt() ?? 0); i < 5; i++)
+                    for (int i = (double.tryParse(
+                                    producerProfile!['Rating']?.toString() ??
+                                        '0')
+                                ?.toInt() ??
+                            0);
+                        i < 5;
+                        i++)
                       Icon(Icons.star_border, color: Colors.teal[200]),
                   ],
                 ),
                 SizedBox(height: 16),
                 Text(
-                  producerProfile!['Description']?.toString() ?? 'No description available',
+                  producerProfile!['Description']?.toString() ??
+                      'No description available',
                   style: TextStyle(fontSize: 16, color: Colors.grey[700]),
                 ),
                 SizedBox(height: 16),
@@ -161,7 +181,8 @@ class _ProductManagementState extends State<ProductManagement> {
       if (producerId == null) {
         throw Exception('Producer ID not found in SharedPreferences');
       }
-      final response = await http.get(Uri.parse('$apibaseurl/rr/produce?producer_id=$producerId'));
+      final response = await http
+          .get(Uri.parse('$apibaseurl/rr/produce?producer_id=$producerId'));
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
         print('DEBUG: Products Response -> $responseData'); // Debug print
@@ -189,13 +210,21 @@ class _ProductManagementState extends State<ProductManagement> {
 
   void _addProduct(String name, double price) {
     setState(() {
-      products.add({'id': DateTime.now().millisecondsSinceEpoch, 'name': name, 'price': price});
+      products.add({
+        'id': DateTime.now().millisecondsSinceEpoch,
+        'name': name,
+        'price': price
+      });
     });
   }
 
   void _editProduct(int index, String name, double price) {
     setState(() {
-      products[index] = {'id': products[index]['id'], 'name': name, 'price': price};
+      products[index] = {
+        'id': products[index]['id'],
+        'name': name,
+        'price': price
+      };
     });
   }
 
@@ -285,7 +314,8 @@ class _ProductManagementState extends State<ProductManagement> {
           if (isLoading)
             Center(child: CircularProgressIndicator())
           else if (errorMessage != null)
-            Center(child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
+            Center(
+                child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
           else
             Expanded(
               child: ListView.builder(
@@ -293,8 +323,10 @@ class _ProductManagementState extends State<ProductManagement> {
                 itemBuilder: (context, index) {
                   final product = products[index];
                   return ListTile(
-                    title: Text(product['name']?.toString() ?? 'Unnamed Product'),
-                    subtitle: Text('\$${(product['price'] ?? 0.0).toStringAsFixed(2)}'),
+                    title:
+                        Text(product['name']?.toString() ?? 'Unnamed Product'),
+                    subtitle: Text(
+                        'ugx ${(product['price'] ?? 0.0).toStringAsFixed(2)}'),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -378,7 +410,8 @@ class _SupplyRequestListState extends State<SupplyRequestList> {
           if (isLoading)
             Center(child: CircularProgressIndicator())
           else if (errorMessage != null)
-            Center(child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
+            Center(
+                child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
           else
             Expanded(
               child: ListView.builder(
@@ -386,11 +419,13 @@ class _SupplyRequestListState extends State<SupplyRequestList> {
                 itemBuilder: (context, index) {
                   final order = orders[index];
                   return ListTile(
-                    title: Text('Order #${order['order_id']?.toString() ?? 'Unknown'}'),
+                    title: Text(
+                        'Order #${order['order_id']?.toString() ?? 'Unknown'}'),
                     subtitle: Text(
                       'Product: ${order['meal_name']?.toString() ?? 'Unknown'}, Quantity: ${order['quantity']?.toString() ?? '0'}',
                     ),
-                    trailing: Text(order['payment_status']?.toString() ?? 'Pending'),
+                    trailing:
+                        Text(order['payment_status']?.toString() ?? 'Pending'),
                   );
                 },
               ),

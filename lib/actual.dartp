@@ -756,7 +756,7 @@ class _ActualRecommendedMealsScreenState
                         TextStyle(fontSize: 16.0, fontWeight: FontWeight.bold),
                   ),
                   Text(
-                    '\$${price.toStringAsFixed(2)}',
+                    'ugx ${price.toStringAsFixed(2)}',
                     style: TextStyle(color: Colors.teal, fontSize: 14),
                   ),
                 ],

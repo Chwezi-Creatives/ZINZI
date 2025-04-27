@@ -2729,7 +2729,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
                 Icons.local_shipping_outlined), // Icon for active orders
             _buildSummaryItem('Total Today', _orders.length.toString(),
                 Icons.list_alt_outlined), // Example: Total orders today
-            // _buildSummaryItem('Revenue', '\$${revenueToday.toStringAsFixed(2)}', Icons.attach_money),
+            // _buildSummaryItem('Revenue', 'ugx ${revenueToday.toStringAsFixed(2)}', Icons.attach_money),
           ],
         ),
       ),

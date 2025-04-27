@@ -386,7 +386,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
             _buildDetailTile(context, textTheme, icon: Icons.credit_card, label: 'Payment Mode', value: paymentMode.capitalizeFirst()),
             _buildDetailTile(context, textTheme, icon: Icons.payment, label: 'Payment Status', valueWidget: _buildStatusChip( context, textTheme, paymentStatus, isPaymentStatus: true)),
             const Divider(height: 20, thickness: 0.8, color: kColorDivider),
-            _buildDetailTile(context, textTheme, icon: Icons.monetization_on_outlined, label: 'Order Total', value: '\$${totalPrice.toStringAsFixed(2)}', isBoldValue: true, valueColor: kColorPrimaryDark),
+            _buildDetailTile(context, textTheme, icon: Icons.monetization_on_outlined, label: 'Order Total', value: 'ugx ${totalPrice.toStringAsFixed(2)}', isBoldValue: true, valueColor: kColorPrimaryDark),
           ],
         ),
       ),
@@ -552,7 +552,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
     final String producerName = order['producer_name']?.toString() ?? itemDetails['producer_name']?.toString() ?? '';
     final String chefName = order['chef_name']?.toString() ?? itemDetails['chef_name']?.toString() ?? '';
     final String quantityStr = order['quantity']?.toString() ?? itemDetails['quantity']?.toString() ?? '1';
-    final String displayPrice = '\$${(_parseDouble(order['total_price']) ?? 0.0).toStringAsFixed(2)}';
+    final String displayPrice = 'ugx ${(_parseDouble(order['total_price']) ?? 0.0).toStringAsFixed(2)}';
 
     return Card(
       elevation: _cardElevation,

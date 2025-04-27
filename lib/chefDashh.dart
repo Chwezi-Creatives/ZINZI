@@ -34,12 +34,14 @@ class _ChefProfileOverviewState extends State<ChefProfileOverview> {
       if (chefId == null) {
         throw Exception('Chef ID not found in SharedPreferences');
       }
-      final response = await http.get(Uri.parse('$apibaseurl/rr/rchefs?chef_id=$chefId'));
+      final response =
+          await http.get(Uri.parse('$apibaseurl/rr/rchefs?chef_id=$chefId'));
       if (response.statusCode == 200) {
         final profileData = json.decode(response.body);
         print('DEBUG: Chef Profile Response -> $profileData'); // Debug print
         setState(() {
-          chefProfile = handleApiResponse(profileData); // Handle dynamic response
+          chefProfile =
+              handleApiResponse(profileData); // Handle dynamic response
           isLoading = false;
         });
       } else {
@@ -63,8 +65,11 @@ class _ChefProfileOverviewState extends State<ChefProfileOverview> {
           if (isLoading)
             Center(child: CircularProgressIndicator())
           else if (errorMessage != null)
-            Center(child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
-          else if (chefProfile != null && chefProfile is List && chefProfile.isNotEmpty)
+            Center(
+                child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
+          else if (chefProfile != null &&
+              chefProfile is List &&
+              chefProfile.isNotEmpty)
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -160,12 +165,14 @@ class _MenuManagementState extends State<MenuManagement> {
       if (chefId == null) {
         throw Exception('Chef ID not found in SharedPreferences');
       }
-      final response = await http.get(Uri.parse('$apibaseurl/rr/menu?chef_id=$chefId'));
+      final response =
+          await http.get(Uri.parse('$apibaseurl/rr/menu?chef_id=$chefId'));
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
         print('DEBUG: Menu Items Response -> $responseData'); // Debug print
         setState(() {
-          menuItems = handleApiResponse(responseData); // Handle dynamic response
+          menuItems =
+              handleApiResponse(responseData); // Handle dynamic response
           isLoading = false;
         });
       } else {
@@ -193,7 +200,8 @@ class _MenuManagementState extends State<MenuManagement> {
           if (isLoading)
             Center(child: CircularProgressIndicator())
           else if (errorMessage != null)
-            Center(child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
+            Center(
+                child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
           else if (menuItems != null && menuItems is List)
             Expanded(
               child: ListView.builder(
@@ -202,7 +210,7 @@ class _MenuManagementState extends State<MenuManagement> {
                   final menuItem = menuItems[index];
                   return ListTile(
                     title: Text(menuItem['name'].toString()),
-                    subtitle: Text('\$${_parsePrice(menuItem['price'])}'),
+                    subtitle: Text('ugx ${_parsePrice(menuItem['price'])}'),
                   );
                 },
               ),
@@ -215,7 +223,7 @@ class _MenuManagementState extends State<MenuManagement> {
                   final menuItem = menuItems['data'][index];
                   return ListTile(
                     title: Text(menuItem['name'].toString()),
-                    subtitle: Text('\$${_parsePrice(menuItem['price'])}'),
+                    subtitle: Text('ugx ${_parsePrice(menuItem['price'])}'),
                   );
                 },
               ),
@@ -259,7 +267,8 @@ class _OrdersListState extends State<OrdersList> {
       if (chefId == null) {
         throw Exception('Chef ID not found in SharedPreferences');
       }
-      final response = await http.get(Uri.parse('$apibaseurl/rr/orders?chef_id=$chefId'));
+      final response =
+          await http.get(Uri.parse('$apibaseurl/rr/orders?chef_id=$chefId'));
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
         print('DEBUG: Orders Response -> $responseData'); // Debug print
@@ -291,7 +300,8 @@ class _OrdersListState extends State<OrdersList> {
           if (isLoading)
             Center(child: CircularProgressIndicator())
           else if (errorMessage != null)
-            Center(child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
+            Center(
+                child: Text(errorMessage!, style: TextStyle(color: Colors.red)))
           else if (orders != null && orders is List)
             Expanded(
               child: ListView.builder(

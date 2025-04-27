@@ -51,7 +51,7 @@ class AllMealsScreen extends StatefulWidget {
   _AllMealsScreenState createState() => _AllMealsScreenState();
 }
 
-class _AllMealsScreenState extends State<AllMealsScreen> {
+class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProviderStateMixin {
   // --- Caching ---
   List<Map<String, dynamic>> _meals = [];
   static List<Map<String, dynamic>> _mealsCache = [];
@@ -103,9 +103,15 @@ class _AllMealsScreenState extends State<AllMealsScreen> {
   bool _isLoadingMeals = true; // Track meal loading state separately
   String _fetchError = ''; // Store fetch error message
 
+  late final AnimationController _refreshIconController;
+
   @override
   void initState() {
     super.initState();
+    _refreshIconController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    );
     // Load persistent cache first (async)
     // Load persistent cache first (async)
     _initialFetchFuture = (() async {
@@ -332,11 +338,21 @@ class _AllMealsScreenState extends State<AllMealsScreen> {
 
   @override
   void dispose() {
+    _refreshIconController.dispose();
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     _debounce?.cancel();
     _filteredMealsNotifier.dispose(); // Dispose the notifier
     super.dispose();
+  }
+
+  void _startRefreshAnimation() {
+    _refreshIconController.repeat();
+  }
+
+  void _stopRefreshAnimation() {
+    _refreshIconController.stop();
+    _refreshIconController.reset();
   }
 
   @override
@@ -351,9 +367,23 @@ class _AllMealsScreenState extends State<AllMealsScreen> {
         iconTheme: const IconThemeData(
             color: kColorTextOnPrimary), // Explicit drawer icon color
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _fetchMealsAndPreprocess,
+          AnimatedBuilder(
+            animation: _refreshIconController,
+            builder: (context, child) {
+              return IconButton(
+                icon: Transform.rotate(
+                  angle: _isLoadingMeals ? _refreshIconController.value * 6.3 : 0, // 2pi radians
+                  child: const Icon(Icons.refresh),
+                ),
+                tooltip: _isLoadingMeals ? 'Refreshing...' : 'Refresh',
+                onPressed: _isLoadingMeals
+                    ? null
+                    : () {
+                        _startRefreshAnimation();
+                        _fetchMealsAndPreprocess().whenComplete(_stopRefreshAnimation);
+                      },
+              );
+            },
           ),
           IconButton(
             tooltip: "Shopping Cart",
