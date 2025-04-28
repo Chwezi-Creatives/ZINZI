@@ -23,7 +23,8 @@ class _NutritionChatAppState extends State<NutritionChatApp> {
   // Light Theme
   static const Color lightScaffoldBackgroundColor = Color(0xFFF0F4F7);
   static const Color appBarColorLight = Color(0xFF00796B); // Teal variant
-  static const Color userBubbleColorLight = Color(0xFF128C7E); // WhatsApp Teal Green
+  static const Color userBubbleColorLight =
+      Color(0xFF128C7E); // WhatsApp Teal Green
   static final Color botBubbleColorLight = Colors.grey[200]!; // Light Grey
   static const Color inputFieldColorLight = Color(0xFFFFFFFF); // White
   static const Color inputTextColorLight = Colors.black87;
@@ -31,16 +32,20 @@ class _NutritionChatAppState extends State<NutritionChatApp> {
   static const Color sendButtonColorLight = Color(0xFF00796B); // Teal variant
 
   // Dark Theme
-  static const Color darkScaffoldBackgroundColor = Color(0xFF121212); // Dark Grey
+  static const Color darkScaffoldBackgroundColor =
+      Color(0xFF121212); // Dark Grey
   static const Color appBarColorDark = Color(0xFF004D40); // Darker Teal
-  static const Color userBubbleColorDark = Color(0xFF005C4B); // Dark Greenish Teal
-  static const Color botBubbleColorDark = Color(0xFF262D31); // Very Dark Grey/Blue
-  static const Color inputFieldColorDark = Color(0xFF1E1E1E); // Slightly Lighter Dark
+  static const Color userBubbleColorDark =
+      Color(0xFF005C4B); // Dark Greenish Teal
+  static const Color botBubbleColorDark =
+      Color(0xFF262D31); // Very Dark Grey/Blue
+  static const Color inputFieldColorDark =
+      Color(0xFF1E1E1E); // Slightly Lighter Dark
   static const Color inputTextColorDark = Colors.white;
   static const Color hintTextColorDark = Colors.grey;
-  static const Color sendButtonColorDark = Color(0xFF00796B); // Teal variant (consistent)
+  static const Color sendButtonColorDark =
+      Color(0xFF00796B); // Teal variant (consistent)
   // --- End Color Constants ---
-
 
   @override
   Widget build(BuildContext context) {
@@ -69,7 +74,8 @@ class _NutritionChatAppState extends State<NutritionChatApp> {
         cardTheme: const CardTheme(
           color: inputFieldColorLight, // Used for input field background
         ),
-        iconTheme: const IconThemeData(color: sendButtonColorLight), // Default icon color
+        iconTheme: const IconThemeData(
+            color: sendButtonColorLight), // Default icon color
         colorScheme: ColorScheme.fromSeed(
             seedColor: appBarColorLight,
             brightness: Brightness.light,
@@ -78,8 +84,7 @@ class _NutritionChatAppState extends State<NutritionChatApp> {
             surface: inputFieldColorLight,
             onSurface: inputTextColorLight,
             background: lightScaffoldBackgroundColor,
-            onBackground: inputTextColorLight
-        ),
+            onBackground: inputTextColorLight),
       ),
       darkTheme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: darkScaffoldBackgroundColor,
@@ -102,8 +107,9 @@ class _NutritionChatAppState extends State<NutritionChatApp> {
         cardTheme: const CardTheme(
           color: inputFieldColorDark, // Used for input field background
         ),
-         iconTheme: const IconThemeData(color: sendButtonColorDark), // Default icon color for dark theme
-         colorScheme: ColorScheme.fromSeed(
+        iconTheme: const IconThemeData(
+            color: sendButtonColorDark), // Default icon color for dark theme
+        colorScheme: ColorScheme.fromSeed(
             seedColor: appBarColorDark,
             brightness: Brightness.dark,
             primary: appBarColorDark,
@@ -111,8 +117,7 @@ class _NutritionChatAppState extends State<NutritionChatApp> {
             surface: inputFieldColorDark,
             onSurface: inputTextColorDark,
             background: darkScaffoldBackgroundColor,
-            onBackground: inputTextColorDark
-        ),
+            onBackground: inputTextColorDark),
       ),
       home: ChatScreen(
         onThemeToggle: () => setState(() => isDarkMode = !isDarkMode),
@@ -120,7 +125,6 @@ class _NutritionChatAppState extends State<NutritionChatApp> {
     );
   }
 }
-
 
 // Chat Screen Widget
 class ChatScreen extends StatefulWidget {
@@ -145,12 +149,12 @@ class _ChatScreenState extends State<ChatScreen> {
     super.initState();
     // Add initial greeting message
     _messages.add(const ChatMessage(
-      text: 'Hi! I\'m your Nutrition Chat Agent, Sensei. How can I assist you today?',
+      text:
+          'Hi! I\'m your Nutrition Chat Agent, Sensei. How can I assist you today?',
       isUser: false,
     ));
     // Removed TTS/STT initialization calls
   }
-
 
   // Send message to webhook and handle response
   Future<void> _sendMessage(String message) async {
@@ -176,7 +180,9 @@ class _ChatScreenState extends State<ChatScreen> {
       final response = await http
           .post(
             Uri.parse(webhookUrl),
-            headers: {'Content-Type': 'application/json; charset=UTF-8'}, // Ensure UTF-8
+            headers: {
+              'Content-Type': 'application/json; charset=UTF-8'
+            }, // Ensure UTF-8
             body: jsonEncode({'message': message}),
           )
           .timeout(const Duration(seconds: 30)); // Increased timeout
@@ -189,17 +195,24 @@ class _ChatScreenState extends State<ChatScreen> {
           if (responseBody.isNotEmpty) {
             final data = jsonDecode(responseBody);
             // Check structure of response (adjust based on your n8n webhook)
-            if (data != null && data is Map && data.containsKey('output') && data['output'] is String) {
+            if (data != null &&
+                data is Map &&
+                data.containsKey('output') &&
+                data['output'] is String) {
               botResponseText = data['output'];
-            } else if (data != null && data is Map && data.containsKey('response') && data['response'] is String) { // Alternative key check
+            } else if (data != null &&
+                data is Map &&
+                data.containsKey('response') &&
+                data['response'] is String) {
+              // Alternative key check
               botResponseText = data['response'];
-            }
-            else {
+            } else {
               // If the response is just a plain string in the body
               if (data is String) {
-                 botResponseText = data;
+                botResponseText = data;
               } else {
-                botResponseText = 'Received unclear data structure from server.';
+                botResponseText =
+                    'Received unclear data structure from server.';
                 print("Server Response format unexpected: $responseBody");
               }
             }
@@ -207,10 +220,11 @@ class _ChatScreenState extends State<ChatScreen> {
             botResponseText = 'Received an empty response from the server.';
           }
         } catch (e) {
-           // Handle cases where the response might not be JSON but plain text
+          // Handle cases where the response might not be JSON but plain text
           final responseBody = utf8.decode(response.bodyBytes);
           if (responseBody.isNotEmpty) {
-            botResponseText = responseBody; // Treat non-JSON response as plain text
+            botResponseText =
+                responseBody; // Treat non-JSON response as plain text
             print("Response was not JSON, treated as plain text.");
           } else {
             botResponseText = 'Error processing server response.';
@@ -220,17 +234,17 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       } else {
         // Handle HTTP errors
-        botResponseText =
-            'Oops! Server error. Status: ${response.statusCode}.';
+        botResponseText = 'Oops! Server error. Status: ${response.statusCode}.';
         print("Server Error: ${response.statusCode}, Body: ${response.body}");
       }
       // Add bot message only if component is still mounted
       if (mounted) _addBotMessage(botResponseText);
-
     } catch (e) {
       print("Network/Timeout Error: $e");
       // Add error message only if component is still mounted
-      if (mounted) _addBotMessage('Sorry, I couldn\'t connect to Sensei right now. Please check your connection and try again.');
+      if (mounted)
+        _addBotMessage(
+            'Sorry, I couldn\'t connect to Sensei right now. Please check your connection and try again.');
     } finally {
       // Ensure loading indicator is turned off even if errors occur
       if (mounted) {
@@ -258,7 +272,8 @@ class _ChatScreenState extends State<ChatScreen> {
     // Ensure scroll controller has clients and scheduling the scroll after the frame build
     if (_scrollController.hasClients) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scrollController.hasClients) { // Double check after callback
+        if (_scrollController.hasClients) {
+          // Double check after callback
           _scrollController.animateTo(
             _scrollController.position.maxScrollExtent,
             duration: const Duration(milliseconds: 300),
@@ -289,9 +304,11 @@ class _ChatScreenState extends State<ChatScreen> {
       onPopInvoked: (didPop) {
         if (!didPop) {
           // Navigate back to LandingPage when back is pressed
-           Navigator.of(context).pushReplacement(
-             MaterialPageRoute(builder: (context) =>  LandingPage()), // Ensure LandingPage exists
-           );
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+                builder: (context) =>
+                    LandingPage()), // Ensure LandingPage exists
+          );
         }
       },
       child: Scaffold(
@@ -303,7 +320,9 @@ class _ChatScreenState extends State<ChatScreen> {
             icon: const Icon(Icons.arrow_back),
             onPressed: () {
               Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (context) =>  LandingPage()), // Ensure LandingPage exists
+                MaterialPageRoute(
+                    builder: (context) =>
+                        LandingPage()), // Ensure LandingPage exists
               );
             },
             tooltip: 'Go Back',
@@ -357,12 +376,17 @@ class _ChatScreenState extends State<ChatScreen> {
                     Text(
                       "Sensei is thinking...",
                       style: TextStyle(
-                        color: Theme.of(context).textTheme.bodySmall?.color?.withOpacity(0.7) ?? Colors.grey[600],
+                        color: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.color
+                                ?.withOpacity(0.7) ??
+                            Colors.grey[600],
                         fontStyle: FontStyle.italic,
                         fontSize: 13,
                       ),
                     ),
-                     const SizedBox(width: 8),
+                    const SizedBox(width: 8),
                     const SizedBox(
                       width: 14,
                       height: 14,
@@ -402,9 +426,11 @@ class _ChatScreenState extends State<ChatScreen> {
           )
         ],
       ),
-      child: SafeArea( // Ensure input field is above system intrusions (like keyboard)
+      child: SafeArea(
+        // Ensure input field is above system intrusions (like keyboard)
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center, // Align items vertically center
+          crossAxisAlignment:
+              CrossAxisAlignment.center, // Align items vertically center
           children: [
             // Removed Microphone button
             // Text input field
@@ -422,26 +448,33 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                   isDense: true, // Reduces the vertical height
                 ),
-                onSubmitted: _sendMessage, // Send message on keyboard submit action
-                textInputAction: TextInputAction.send, // Show send button on keyboard
+                onSubmitted:
+                    _sendMessage, // Send message on keyboard submit action
+                textInputAction:
+                    TextInputAction.send, // Show send button on keyboard
                 maxLines: 5, // Allow multiple lines up to 5
                 minLines: 1, // Start with a single line
                 keyboardType: TextInputType.multiline, // Use multiline keyboard
-                textCapitalization: TextCapitalization.sentences, // Capitalize sentences
+                textCapitalization:
+                    TextCapitalization.sentences, // Capitalize sentences
               ),
             ),
             // Send button - enabled only when text is entered and not loading
-             ValueListenableBuilder<TextEditingValue>(
+            ValueListenableBuilder<TextEditingValue>(
               valueListenable: _controller,
               builder: (context, value, child) {
-                final bool canSend = value.text.trim().isNotEmpty && !_isLoading;
+                final bool canSend =
+                    value.text.trim().isNotEmpty && !_isLoading;
                 return IconButton(
                   icon: Icon(
                     Icons.send_rounded,
-                    color: canSend ? iconColor : Colors.grey, // Change color when disabled
+                    color: canSend
+                        ? iconColor
+                        : Colors.grey, // Change color when disabled
                   ),
                   onPressed: canSend
-                      ? () => _sendMessage(_controller.text) // Send message on tap
+                      ? () =>
+                          _sendMessage(_controller.text) // Send message on tap
                       : null, // Disable button if no text or loading
                   tooltip: 'Send message',
                 );
@@ -453,7 +486,6 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 }
-
 
 // Data class for Chat Message
 class ChatMessage {
@@ -477,7 +509,6 @@ class ChatMessage {
   @override
   int get hashCode => text.hashCode ^ isUser.hashCode;
 }
-
 
 // Animated Chat Bubble Widget (Updated for Both Bullet Types)
 class AnimatedChatBubble extends StatefulWidget {
@@ -534,7 +565,8 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
   }
 
   // --- HELPER FUNCTION TO PARSE AND BUILD MESSAGE CONTENT (HANDLES BOTH BULLET TYPES) ---
-  Widget _buildMessageContent(BuildContext context, String text, Color textColor) {
+  Widget _buildMessageContent(
+      BuildContext context, String text, Color textColor) {
     final baseStyle = TextStyle(
       color: textColor,
       fontSize: 14.0,
@@ -549,7 +581,8 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
     // Pattern 1: Hyphen bullet "- **Title**: Desc" (2 capture groups: title, description)
     final hyphenBulletPattern = RegExp(r'^\s*-\s*\*\*(.+?)\*\*[:]?\s*(.*)');
     // Pattern 2: Numbered bullet "4. **Title**: Desc" (3 capture groups: number, title, description)
-    final numberedBulletPattern = RegExp(r'^\s*(\d+\.)\s*\*\*(.+?)\*\*[:]?\s*(.*)');
+    final numberedBulletPattern =
+        RegExp(r'^\s*(\d+\.)\s*\*\*(.+?)\*\*[:]?\s*(.*)');
 
     // print("Processing text: '''$text'''"); // Debugging
 
@@ -566,7 +599,6 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
       final listPaddingTop = contentWidgets.isNotEmpty ? 6.0 : 0.0;
       final normalPaddingTop = contentWidgets.isNotEmpty ? 4.0 : 0.0;
 
-
       // --- Check which pattern matched (if any) ---
       if (hyphenMatch != null && hyphenMatch.groupCount == 2) {
         // --- Format as HYPHEN bullet ---
@@ -582,16 +614,18 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
               children: [
                 Padding(
                   padding: const EdgeInsets.only(right: 6.0, top: 1.0),
-                  child: Text( "•", style: boldStyle), // Use bullet symbol
+                  child: Text("•", style: boldStyle), // Use bullet symbol
                 ),
                 Expanded(
                   child: RichText(
                     text: TextSpan(
                       style: baseStyle,
                       children: <TextSpan>[
-                        TextSpan( text: title, style: boldStyle),
-                        if (description.isNotEmpty) TextSpan(text: ': $description'),
-                        if (description.isEmpty) const TextSpan(text: ':'), // Keep colon
+                        TextSpan(text: title, style: boldStyle),
+                        if (description.isNotEmpty)
+                          TextSpan(text: ': $description'),
+                        if (description.isEmpty)
+                          const TextSpan(text: ':'), // Keep colon
                       ],
                     ),
                   ),
@@ -600,7 +634,6 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
             ),
           ),
         );
-
       } else if (numberedMatch != null && numberedMatch.groupCount == 3) {
         // --- Format as NUMBERED bullet ---
         final number = numberedMatch.group(1)?.trim() ?? '';
@@ -608,7 +641,7 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
         final description = numberedMatch.group(3)?.trim() ?? '';
         // print('    -> Matched NUMBERED! Num: "$number", Title: "$title", Desc: "$description"'); // Debugging
 
-         contentWidgets.add(
+        contentWidgets.add(
           Padding(
             padding: EdgeInsets.only(top: listPaddingTop),
             child: Row(
@@ -616,16 +649,18 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
               children: [
                 Padding(
                   padding: const EdgeInsets.only(right: 6.0, top: 1.0),
-                  child: Text( number, style: boldStyle), // Use captured number
+                  child: Text(number, style: boldStyle), // Use captured number
                 ),
                 Expanded(
                   child: RichText(
                     text: TextSpan(
                       style: baseStyle,
                       children: <TextSpan>[
-                        TextSpan( text: title, style: boldStyle),
-                        if (description.isNotEmpty) TextSpan(text: ': $description'),
-                        if (description.isEmpty) const TextSpan(text: ':'), // Keep colon
+                        TextSpan(text: title, style: boldStyle),
+                        if (description.isNotEmpty)
+                          TextSpan(text: ': $description'),
+                        if (description.isEmpty)
+                          const TextSpan(text: ':'), // Keep colon
                       ],
                     ),
                   ),
@@ -634,13 +669,13 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
             ),
           ),
         );
-
       } else if (line.trim().isNotEmpty) {
         // --- Format as NORMAL text ---
         // print('    -> Not a bullet or empty.'); // Debugging
         contentWidgets.add(
           Padding(
-            padding: EdgeInsets.only(top: normalPaddingTop), // Use normal padding
+            padding:
+                EdgeInsets.only(top: normalPaddingTop), // Use normal padding
             child: SelectableText(
               line.trim(),
               style: baseStyle,
@@ -662,7 +697,6 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
     );
   }
   // --- END HELPER FUNCTION ---
-
 
   @override
   Widget build(BuildContext context) {
@@ -686,7 +720,8 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
     final botAvatar = CircleAvatar(
       radius: 14,
       backgroundColor: Colors.teal[700], // Slightly darker teal for avatar
-      child: const Icon(Icons.smart_toy_outlined, color: Colors.white, size: 18),
+      child:
+          const Icon(Icons.smart_toy_outlined, color: Colors.white, size: 18),
     );
     final userAvatar = CircleAvatar(
       radius: 14,
@@ -703,10 +738,13 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
       child: FadeTransition(
         opacity: _fadeAnimation,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 5.0), // Vertical spacing between bubbles
+          padding: const EdgeInsets.symmetric(
+              vertical: 5.0), // Vertical spacing between bubbles
           child: Row(
-            mainAxisAlignment: rowMainAxisAlignment, // Align left for bot, right for user
-            crossAxisAlignment: CrossAxisAlignment.end, // Align avatar with bottom of bubble
+            mainAxisAlignment:
+                rowMainAxisAlignment, // Align left for bot, right for user
+            crossAxisAlignment:
+                CrossAxisAlignment.end, // Align avatar with bottom of bubble
             children: [
               // Show bot avatar on the left for bot messages
               if (!widget.message.isUser)
@@ -719,12 +757,16 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
                 child: Container(
                   // Margin to push bubble away from the edge opposite the avatar
                   margin: EdgeInsets.only(
-                    left: widget.message.isUser ? 40.0 : 0, // Margin left for user
-                    right: widget.message.isUser ? 0 : 40.0, // Margin right for bot
+                    left: widget.message.isUser
+                        ? 40.0
+                        : 0, // Margin left for user
+                    right: widget.message.isUser
+                        ? 0
+                        : 40.0, // Margin right for bot
                   ),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14.0, // Horizontal padding inside bubble
-                    vertical: 10.0,   // Vertical padding inside bubble
+                    vertical: 10.0, // Vertical padding inside bubble
                   ),
                   decoration: BoxDecoration(
                     color: bubbleColor, // Bubble background color
@@ -733,11 +775,15 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
                       topLeft: const Radius.circular(18.0),
                       topRight: const Radius.circular(18.0),
                       bottomLeft: widget.message.isUser
-                          ? const Radius.circular(18.0) // Rounded bottom-left for user
-                          : const Radius.circular(4.0),  // Sharp bottom-left for bot
+                          ? const Radius.circular(
+                              18.0) // Rounded bottom-left for user
+                          : const Radius.circular(
+                              4.0), // Sharp bottom-left for bot
                       bottomRight: widget.message.isUser
-                          ? const Radius.circular(4.0)   // Sharp bottom-right for user
-                          : const Radius.circular(18.0), // Rounded bottom-right for bot
+                          ? const Radius.circular(
+                              4.0) // Sharp bottom-right for user
+                          : const Radius.circular(
+                              18.0), // Rounded bottom-right for bot
                     ),
                     // Subtle shadow for depth
                     boxShadow: [
@@ -749,7 +795,8 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
                     ],
                   ),
                   // *** Use the helper function to build the content ***
-                  child: _buildMessageContent(context, widget.message.text, textColor),
+                  child: _buildMessageContent(
+                      context, widget.message.text, textColor),
                 ),
               ),
               // Show user avatar on the right for user messages
@@ -765,4 +812,3 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
     );
   }
 }
-
