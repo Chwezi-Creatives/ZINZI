@@ -216,13 +216,39 @@ class NutritionItem {
 }
 
 class NutritionPage extends StatefulWidget {
-  const NutritionPage({super.key});
+  static final GlobalKey<_NutritionPageState> globalKey = GlobalKey<_NutritionPageState>();
+  NutritionPage({Key? key}) : super(key: globalKey);
+
+  static Future<void> manualRefreshFromAppBar() async {
+    final state = globalKey.currentState;
+    if (state != null) {
+      await state.manualRefreshFromAppBar();
+    }
+  }
 
   @override
   State<NutritionPage> createState() => _NutritionPageState();
 }
 
 class _NutritionPageState extends State<NutritionPage> with TickerProviderStateMixin {
+  Future<void> manualRefreshFromAppBar() async {
+    setState(() {
+      spicesLoading = true;
+      herbalsLoading = true;
+      supplementsLoading = true;
+      gadgetsLoading = true;
+      spicesError = null;
+      herbalsError = null;
+      supplementsError = null;
+      gadgetsError = null;
+    });
+    await Future.wait([
+      _fetchSpices(),
+      _fetchHerbals(),
+      _fetchSupplements(),
+      _fetchGadgets(),
+    ]);
+  }
   late AnimationController _refreshIconController;
   late TabController _tabController;
 

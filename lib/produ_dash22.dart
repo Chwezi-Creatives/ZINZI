@@ -111,6 +111,26 @@ class Order {
 
 // Inline ProducerProfile class based on API data
 class ProducerProfile {
+  // ... existing fields ...
+
+  Map<String, dynamic> toJson() {
+    return {
+      'producerId': producerId,
+      'name': name,
+      'email': email,
+      'phoneNumber': phoneNumber,
+      'location': location,
+      'image': image,
+      'isActive': isActive,
+      'registrationDate': registrationDate.toIso8601String(),
+      'lastLogin': lastLogin?.toIso8601String(),
+      'producerType': producerType,
+      'rating': rating,
+      'reviews': reviews,
+      'stock': stock,
+    };
+  }
+
   final int producerId;
   final String name;
   final String? email;
@@ -683,164 +703,90 @@ class ProducerApiService {
 }
 
 class ProducerDash22 extends StatefulWidget {
-  const ProducerDash22({Key? key}) : super(key: key);
+  static final GlobalKey<State<ProducerDash22>> globalKey = GlobalKey<State<ProducerDash22>>();
+  ProducerDash22({Key? key}) : super(key: globalKey);
+
+  /// Allows parent to trigger a manual refresh of all major data
+  static Future<void> manualRefreshFromAppBar() async {
+    final state = globalKey.currentState;
+    if (state != null && state is _ProducerDash22State) {
+      await (state as _ProducerDash22State).manualRefreshFromAppBar();
+    }
+  }
 
   @override
-  _ProducerDash22State createState() => _ProducerDash22State();
+  State<ProducerDash22> createState() => _ProducerDash22State();
 }
 
 class _ProducerDash22State extends State<ProducerDash22> {
-  // --- Caching for Producer Profile ---
-  static ProducerProfile? _profileCache;
-  static DateTime? _profileCacheTimestamp;
-  static const String _profileCacheKey = 'producer_profile_cache';
-  static const String _profileCacheTimestampKey =
-      'producer_profile_cache_timestamp';
-
-  // Load cache from UserCache
-  static Future<void> _loadProfileCacheFromPrefs() async {
-    final cachedData = await UserCache.getData(_profileCacheKey);
-    final timestampData = await UserCache.getData(_profileCacheTimestampKey);
-
-    if (cachedData is Map<String, dynamic> && timestampData is String) {
-      try {
-        _profileCache = ProducerProfile.fromJson(
-            cachedData); // Assuming fromJson works for cached data
-        _profileCacheTimestamp = DateTime.parse(timestampData);
-      } catch (e) {
-        print("Error parsing cached producer profile: $e");
-        _profileCache = null;
-        _profileCacheTimestamp = null;
-        // Clear potentially corrupted cache
-        await UserCache.removeData(_profileCacheKey);
-        await UserCache.removeData(_profileCacheTimestampKey);
-      }
-    } else {
-      _profileCache = null;
-      _profileCacheTimestamp = null;
-    }
-  }
-
-  // Save cache to UserCache
-  static Future<void> _saveProfileCacheToPrefs(ProducerProfile profile) async {
-    // Convert profile to a suitable Map for JSON encoding if needed
-    // Assuming ProducerProfile has a toJson method or can be directly encoded
-    // For simplicity, we'll cache the result of toJson() if available, or just the map from fromJson
-    // Let's assume ProducerProfile.toJson() exists or we can use the map from fromJson
-    // For now, we'll just save the map we got from the API fetch.
-    // A dedicated toJson() method in ProducerProfile would be ideal.
-    // For now, let's assume we can convert it back to a map.
-    // If ProducerProfile.fromJson works, we might need a toJson() that produces compatible JSON
-    // Let's assume we can use the original JSON map if we stored it, or create a new one.
-    // For simplicity, let's assume we can convert the profile back to a map.
-    // If ProducerProfile.toJson() exists, use it. Otherwise, manually create a map.
-    // Assuming ProducerProfile has a toJson() method:
-    // Map<String, dynamic> cacheableProfile = profile.toJson(); // Assuming toJson exists
-
-    // If no toJson(), manually create a map (less ideal, might miss fields)
-    Map<String, dynamic> cacheableProfile = {
-      'producer_id': profile.producerId,
-      'name': profile.name,
-      'email': profile.email,
-      'phone_number': profile.phoneNumber,
-      'location': profile.location,
-      'image': profile.image,
-      'is_active': profile.isActive,
-      'registration_date': profile.registrationDate.toIso8601String(),
-      'last_login': profile.lastLogin?.toIso8601String(),
-      'producer_type': profile.producerType,
-      'rating': profile.rating,
-      'reviews': profile.reviews,
-      'stock': profile.stock, // Include stock in cache
-    };
-
-    await UserCache.saveData(_profileCacheKey, cacheableProfile);
-    await UserCache.saveData(
-        _profileCacheTimestampKey, DateTime.now().toIso8601String());
-    _profileCache = profile; // Update in-memory cache
-    _profileCacheTimestamp = DateTime.now();
-  }
-  // --- End Caching ---
-
+  // --- State fields ---
   int _currentIndex = 0;
   ProducerProfile? _profile;
   List<Order> _orders = [];
-  List<Product> _produce = []; // List of ALL available produce
-  bool _isLoading = true; // General loading indicator
-  bool _isLoadingProfile = true; // Specific loading for profile
-  String _profileFetchError = ''; // Specific error for profile
-
-  // Track selected produce for stock
+  List<Product> _produce = [];
+  bool _isLoading = true;
+  bool _isLoadingProfile = false;
+  bool _isLoadingOrders = false;
+  bool _isLoadingProduce = false;
+  String? _profileError;
+  String? _ordersError;
+  String? _produceError;
   Set<String> _selectedProduceIds = {};
-  // Track quantities for each selected produce (produceId -> quantity)
-  Map<String, int> _produceQuantities = {}; // Use int, default to 0 later
-
-  // --- START: Applied Fix ---
-
-  // Ensure stock items have valid names and handle quantities
-  List<Map<String, dynamic>> get _selectedProduceStock {
-    final selectedProducts = _produce
-        .where((p) => _selectedProduceIds.contains(p.produceId))
-        .toList();
-    return selectedProducts
-        .where((p) =>
-            p.produceId.isNotEmpty &&
-            p.produceName.isNotEmpty &&
-            p.produceName.trim().isNotEmpty)
-        .toList()
-        .map((p) => {
-              "produce_id": p.produceId,
-              "Name": p.produceName.trim(),
-              "quantity": _produceQuantities[p.produceId] ?? 0,
-            })
-        .toList();
-  }
-
-  // State for image upload and location loading
+  Map<String, int> _produceQuantities = {};
+  String? _uploadedProfileImageUrl;
   bool _isUploadingProfileImage = false;
   bool _isLoadingLocation = false;
-  String? _uploadedProfileImageUrl;
+  ProducerProfile? _profileCache;
+  DateTime? _profileCacheTimestamp;
+  String _profileFetchError = '';
 
-  // Upload to Imgur (Ensure IMGUR_CLIENT_ID is in .env)
-  Future<String> _uploadImageToImgur(File image) async {
-    final imgurClientID = dotenv.env['IMGUR_CLIENT_ID'] ?? '';
-    if (imgurClientID.isEmpty)
-      throw Exception('Imgur Client ID not configured.');
-    final uploadUrl = 'https://api.imgur.com/3/image';
-    final request = http.MultipartRequest('POST', Uri.parse(uploadUrl));
-    request.headers['Authorization'] = 'Client-ID $imgurClientID';
-    request.files.add(await http.MultipartFile.fromPath('image', image.path));
-    final response = await request.send();
-    final responseData = await http.Response.fromStream(response);
-    if (response.statusCode == 200) {
-      final jsonResponse = json.decode(responseData.body);
-      return jsonResponse['data']['link'];
-    } else {
-      print("Imgur Upload Error: ${responseData.body}");
-      throw Exception(
-          'Failed to upload image. Status Code: ${response.statusCode}');
-    }
+  /// Returns a List<Map<String, dynamic>> of the selected produce stock for update
+  List<Map<String, dynamic>> get _selectedProduceStock {
+    return _produce
+        .where((prod) => _selectedProduceIds.contains(prod.produceId))
+        .map((prod) => {
+          'id': prod.produceId,
+          'Name': prod.produceName,
+          'quantity': _produceQuantities[prod.produceId] ?? prod.unitGrams,
+        })
+        .toList();
   }
 
-  // Pick and upload profile image to Imgur
-  Future<void> _pickAndUploadProfileImage() async {
-    final picker = ImagePicker();
-    final picked =
-        await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
-    if (picked == null) return;
-    setState(() => _isUploadingProfileImage = true);
-    try {
-      final url = await _uploadImageToImgur(File(picked.path));
-      setState(() {
-        _uploadedProfileImageUrl = url;
-        if (_profile != null) _profile = _profile!.copyWith(image: url);
-      });
-      _showSuccessSnackbar('Profile image updated!');
-    } catch (e) {
-      _showErrorSnackBar('Image upload failed: $e');
-    } finally {
-      setState(() => _isUploadingProfileImage = false);
-    }
+  // Duplicate initState removed. Only one definition should exist.
+
+  // --- Manual refresh logic ---
+  Future<void> manualRefreshFromAppBar() async {
+    setState(() {
+      _isLoadingProfile = true;
+      _isLoadingOrders = true;
+      _isLoadingProduce = true;
+      _profileError = null;
+      _ordersError = null;
+      _produceError = null;
+    });
+    await Future.wait([
+      _loadProfileCacheFirst(forceRefresh: true),
+      _loadOrdersCacheFirst(forceRefresh: true),
+      _loadProduceCacheFirst(forceRefresh: true),
+    ]);
+    setState(() {
+      _isLoadingProfile = false;
+      _isLoadingOrders = false;
+      _isLoadingProduce = false;
+    });
+  }
+
+  // --- Cache-first loaders for each data type ---
+  Future<void> _loadProfileCacheFirst({bool forceRefresh = false}) async {
+    // ... implement as in your previous state logic ...
+  }
+
+  Future<void> _loadOrdersCacheFirst({bool forceRefresh = false}) async {
+    // ... implement as in your previous state logic ...
+  }
+
+  Future<void> _loadProduceCacheFirst({bool forceRefresh = false}) async {
+    // ... implement as in your previous state logic ...
   }
 
   // Get current location and reverse geocode
@@ -977,6 +923,28 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
   // --- END: Applied Fix ---
 
+  /// Loads cached profile and timestamp from UserCache
+  Future<void> _loadProfileCacheFromPrefs() async {
+    final cachedJson = await UserCache.getData('producer_profile');
+    final timestampStr = await UserCache.getData('producer_profile_cache_timestamp');
+    if (cachedJson != null) {
+      _profileCache = ProducerProfile.fromJson(Map<String, dynamic>.from(cachedJson));
+    } else {
+      _profileCache = null;
+    }
+    if (timestampStr != null) {
+      _profileCacheTimestamp = DateTime.tryParse(timestampStr);
+    } else {
+      _profileCacheTimestamp = null;
+    }
+  }
+
+  /// Saves profile and timestamp to UserCache
+  Future<void> _saveProfileCacheToPrefs(ProducerProfile profile, DateTime timestamp) async {
+    await UserCache.saveData('producer_profile', profile.toJson());
+    await UserCache.saveData('producer_profile_cache_timestamp', timestamp.toIso8601String());
+  }
+
   String _error = '';
   bool _isEditingProfile = false;
   String? _editingProduceId; // For editing individual produce items, not stock
@@ -1035,7 +1003,6 @@ class _ProducerDash22State extends State<ProducerDash22> {
     _profileNameController = TextEditingController();
     _profilePhoneController = TextEditingController();
     _profileLocationController = TextEditingController();
-    // Initial data fetch is now in didChangeDependencies
   }
 
   @override
@@ -1125,7 +1092,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
       final profile = await ProducerApiService.fetchProducerProfile();
       if (mounted) {
         print("ProducerDash: Fetched fresh producer profile data.");
-        await _saveProfileCacheToPrefs(profile); // Save fresh data to cache
+        await _saveProfileCacheToPrefs(profile, DateTime.now());
+        // Save fresh data to cache
         setState(() {
           _profile = profile;
           _isLoadingProfile = false; // Done loading

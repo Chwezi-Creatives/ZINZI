@@ -18,10 +18,18 @@ const Color priceColor = Color(0xFF0B5345); // Price in dark teal
 const Color errorIconColor = Colors.redAccent;
 
 class Nutri_DetailPage extends StatefulWidget {
+  static final GlobalKey<_Nutri_DetailPageState> globalKey = GlobalKey<_Nutri_DetailPageState>();
   final NutritionItem item;
-  final Widget? decodedImage; // Widget holding the already-decoded image
+  final Widget? decodedImage;
 
-  Nutri_DetailPage({required this.item, this.decodedImage});
+  Nutri_DetailPage({required this.item, this.decodedImage}) : super(key: globalKey);
+
+  static Future<void> manualRefreshFromAppBar() async {
+    final state = globalKey.currentState;
+    if (state != null) {
+      await state.manualRefreshFromAppBar();
+    }
+  }
 
   @override
   _Nutri_DetailPageState createState() => _Nutri_DetailPageState();
@@ -29,6 +37,10 @@ class Nutri_DetailPage extends StatefulWidget {
 
 class _Nutri_DetailPageState extends State<Nutri_DetailPage>
     with SingleTickerProviderStateMixin {
+  // Add manualRefreshFromAppBar to match dashboard refresh pattern
+  Future<void> manualRefreshFromAppBar() async {
+    await _refreshProducersWithAnimation();
+  }
   late AnimationController _refreshIconController;
   Map<String, dynamic>? selectedProducer;
   bool isFavorite = false;
