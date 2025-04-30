@@ -78,6 +78,7 @@ class MealDetailScreen extends StatefulWidget {
 
     if (cachedData != null && timestampData != null) {
       try {
+        print('[MealDetail] Cache hit: Loaded chefs from cache');
         _chefsCache = List<dynamic>.from(cachedData);
         _chefsCacheTimestamp = DateTime.parse(timestampData);
       } catch (_) {
@@ -104,6 +105,7 @@ class MealDetailScreen extends StatefulWidget {
 
     if (cachedData != null && timestampData != null) {
       try {
+        print('[MealDetail] Cache hit: Loaded producers from cache');
         _producersCache = List<dynamic>.from(cachedData);
         _producersCacheTimestamp = DateTime.parse(timestampData);
       } catch (_) {

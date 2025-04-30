@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart'; // Needed for cachi
 import 'dart:async';
 import 'dart:math'; // Added for max used in _extractHumanReadableLocation (from target)
 import 'package:zinzi2/app_drawer_unified.dart'; // Import the AppDrawer
+import 'package:zinzi2/user_cache.dart'; // Import UserCache for caching
 
 // Import your actual Gig Creation Screen
 import 'package:zinzi2/create_gig_screen.dart'; // <-- MAKE SURE THIS PATH IS CORRECT
@@ -73,6 +74,33 @@ const String kChefSortField =
 
 // --- Chef List Screen ---
 class ChooseChefNetwork extends StatefulWidget {
+  /// Preload the chef network cache for splash screen (no UI, no context needed)
+  static Future<void> preloadCacheForSplash() async {
+    const String kCacheKeyChefs = 'cached_chefs_data';
+    const String kCacheKeyTimestamp = 'cached_chefs_timestamp';
+    const Duration kCacheDuration = Duration(days: 2);
+    final cachedData = await UserCache.getData(kCacheKeyChefs);
+    final cachedTs = await UserCache.getData(kCacheKeyTimestamp);
+    final now = DateTime.now();
+    bool cacheValid = false;
+    if (cachedData != null && cachedTs != null) {
+      final cacheTime = DateTime.tryParse(cachedTs.toString());
+      if (cacheTime != null && now.difference(cacheTime) < kCacheDuration) {
+        cacheValid = true;
+      }
+    }
+    if (!cacheValid) {
+      try {
+        final apiBaseUrl = dotenv.env['API_BASE_URL'] ?? dotenv.env['API_BASE_URL-intranet'] ?? 'https://your.default.api.url/api';
+        final response = await http.get(Uri.parse('apiBaseUrl/rr/rchefs')).timeout(const Duration(seconds: 15));
+        if (response.statusCode == 200) {
+          final dataList = jsonDecode(response.body);
+          await UserCache.saveData(kCacheKeyChefs, dataList);
+          await UserCache.saveData(kCacheKeyTimestamp, now.toIso8601String());
+        }
+      } catch (e) { print('[Splash][ChefNet] preload error: $e'); }
+    }
+  }
   const ChooseChefNetwork({super.key});
   @override
   _ChooseChefNetworkState createState() => _ChooseChefNetworkState();

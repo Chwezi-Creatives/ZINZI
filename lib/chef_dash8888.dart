@@ -377,7 +377,7 @@ class Order {
 
     return Order(
       orderId: _parseIntSafe(json['order_id']),
-      mealName: _getStringSafe(json['meal_name']) ?? 'N/A',
+      mealName: _getStringSafe(json['product_name']) ?? 'N/A',
       producerName: _getStringSafe(json['producer_name']),
       orderDate: parsedDate,
       orderStatus: _getStringSafe(json['order_status']) ?? 'Unknown',

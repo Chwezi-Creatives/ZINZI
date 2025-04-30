@@ -216,6 +216,124 @@ class NutritionItem {
 }
 
 class NutritionPage extends StatefulWidget {
+  /// Preload all Nutrition+ tab caches for splash screen (no UI, no context needed)
+  static Future<void> preloadCachesForSplash() async {
+    // Spices
+    const String spicesKey = 'nutrition_spices';
+    const String spicesTsKey = 'nutrition_spices_ts';
+    final now = DateTime.now();
+    final cachedSpices = await UserCache.getData(spicesKey);
+    final cachedSpicesTs = await UserCache.getData(spicesTsKey);
+    bool spicesValid = false;
+    if (cachedSpices != null && cachedSpicesTs != null) {
+      final cacheTime = DateTime.tryParse(cachedSpicesTs.toString());
+      if (cacheTime != null && now.difference(cacheTime) < CacheConfig.chefProducerDetailCacheDuration) {
+        spicesValid = true;
+      }
+    }
+    if (!spicesValid) {
+      // Fetch and cache spices (same as _fetchSpices logic, but no UI)
+      try {
+        // TODO: Replace with your actual API endpoint for spices
+        final apiBaseUrl = dotenv.env['API_BASE_URL'];
+if (apiBaseUrl != null) {
+  final response = await http.get(Uri.parse(apiBaseUrl + '/rr/rspices'));
+  if (response.statusCode == 200) {
+    final dataList = jsonDecode(response.body);
+    await UserCache.saveData(spicesKey, dataList);
+    await UserCache.saveData(spicesTsKey, now.toIso8601String());
+  }
+} else {
+  print('[Splash][Nutrition+] API_BASE_URL is null. Cannot fetch spices.');
+}
+
+      } catch (e) { print('[Splash][Nutrition+] preload spices error: $e'); }
+    }
+    // Herbals
+    const String herbalsKey = 'nutrition_herbals';
+    const String herbalsTsKey = 'nutrition_herbals_ts';
+    final cachedHerbals = await UserCache.getData(herbalsKey);
+    final cachedHerbalsTs = await UserCache.getData(herbalsTsKey);
+    bool herbalsValid = false;
+    if (cachedHerbals != null && cachedHerbalsTs != null) {
+      final cacheTime = DateTime.tryParse(cachedHerbalsTs.toString());
+      if (cacheTime != null && now.difference(cacheTime) < CacheConfig.chefProducerDetailCacheDuration) {
+        herbalsValid = true;
+      }
+    }
+    if (!herbalsValid) {
+      try {
+        final apiBaseUrl = dotenv.env['API_BASE_URL'];
+        if (apiBaseUrl != null) {
+          final response = await http.get(Uri.parse(apiBaseUrl + '/rr/rherbals'));
+          if (response.statusCode == 200) {
+            final dataList = jsonDecode(response.body);
+            await UserCache.saveData(herbalsKey, dataList);
+            await UserCache.saveData(herbalsTsKey, now.toIso8601String());
+          }
+        } else {
+          print('[Splash][Nutrition+] API_BASE_URL is null. Cannot fetch herbals.');
+        }
+
+      } catch (e) { print('[Splash][Nutrition+] preload herbals error: $e'); }
+    }
+    // Supplements
+    const String supplementsKey = 'nutrition_supplements';
+    const String supplementsTsKey = 'nutrition_supplements_ts';
+    final cachedSupplements = await UserCache.getData(supplementsKey);
+    final cachedSupplementsTs = await UserCache.getData(supplementsTsKey);
+    bool supplementsValid = false;
+    if (cachedSupplements != null && cachedSupplementsTs != null) {
+      final cacheTime = DateTime.tryParse(cachedSupplementsTs.toString());
+      if (cacheTime != null && now.difference(cacheTime) < CacheConfig.chefProducerDetailCacheDuration) {
+        supplementsValid = true;
+      }
+    }
+    if (!supplementsValid) {
+      try {
+        final apiBaseUrl = dotenv.env['API_BASE_URL'];
+        if (apiBaseUrl != null) {
+          final response = await http.get(Uri.parse(apiBaseUrl + '/rr/rsupplements'));
+          if (response.statusCode == 200) {
+            final dataList = jsonDecode(response.body);
+            await UserCache.saveData(supplementsKey, dataList);
+            await UserCache.saveData(supplementsTsKey, now.toIso8601String());
+          }
+        } else {
+          print('[Splash][Nutrition+] API_BASE_URL is null. Cannot fetch supplements.');
+        }
+
+      } catch (e) { print('[Splash][Nutrition+] preload supplements error: $e'); }
+    }
+    // Gadgets
+    const String gadgetsKey = 'nutrition_gadgets';
+    const String gadgetsTsKey = 'nutrition_gadgets_ts';
+    final cachedGadgets = await UserCache.getData(gadgetsKey);
+    final cachedGadgetsTs = await UserCache.getData(gadgetsTsKey);
+    bool gadgetsValid = false;
+    if (cachedGadgets != null && cachedGadgetsTs != null) {
+      final cacheTime = DateTime.tryParse(cachedGadgetsTs.toString());
+      if (cacheTime != null && now.difference(cacheTime) < CacheConfig.chefProducerDetailCacheDuration) {
+        gadgetsValid = true;
+      }
+    }
+    if (!gadgetsValid) {
+      try {
+        final apiBaseUrl = dotenv.env['API_BASE_URL'];
+        if (apiBaseUrl != null) {
+          final response = await http.get(Uri.parse(apiBaseUrl + '/rr/rgadgets'));
+          if (response.statusCode == 200) {
+            final dataList = jsonDecode(response.body);
+            await UserCache.saveData(gadgetsKey, dataList);
+            await UserCache.saveData(gadgetsTsKey, now.toIso8601String());
+          }
+        } else {
+          print('[Splash][Nutrition+] API_BASE_URL is null. Cannot fetch gadgets.');
+        }
+
+      } catch (e) { print('[Splash][Nutrition+] preload gadgets error: $e'); }
+    }
+  }
   static final GlobalKey<_NutritionPageState> globalKey = GlobalKey<_NutritionPageState>();
   NutritionPage({Key? key}) : super(key: globalKey);
 
@@ -290,7 +408,7 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
   }
 
   Future<void> _fetchSpices() async {
-    print('[Nutrition+] Fetching spices...');
+    print('[Nutrition+] Fetching spices (API fetch started)...');
     setState(() {
       spicesLoading = true;
       spicesError = null;
@@ -368,7 +486,7 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
   }
 
   Future<void> _fetchHerbals() async {
-    print('[Nutrition+] Fetching herbals...');
+    print('[Nutrition+] Fetching herbals (API fetch started)...');
     setState(() {
       herbalsLoading = true;
       herbalsError = null;
@@ -441,7 +559,7 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
   }
 
   Future<void> _fetchSupplements() async {
-    print('[Nutrition+] Fetching supplements...');
+    print('[Nutrition+] Fetching supplements (API fetch started)...');
     setState(() {
       supplementsLoading = true;
       supplementsError = null;
@@ -515,7 +633,7 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
   }
 
   Future<void> _fetchGadgets() async {
-    print('[Nutrition+] Fetching gadgets...');
+    print('[Nutrition+] Fetching gadgets (API fetch started)...');
     setState(() {
       gadgetsLoading = true;
       gadgetsError = null;

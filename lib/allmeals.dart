@@ -67,7 +67,8 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
 
     if (cachedData != null && timestampData != null) {
       try {
-        _mealsCache = List<Map<String, dynamic>>.from(cachedData);
+        print('[AllMeals] Cache hit: Loaded meals from cache');
+      _mealsCache = List<Map<String, dynamic>>.from(cachedData);
         _mealsCacheTimestamp = DateTime.parse(timestampData);
       } catch (_) {
         _mealsCache = [];

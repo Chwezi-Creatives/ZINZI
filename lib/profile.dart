@@ -48,6 +48,31 @@ final apiBaseUrl = dotenv.env['API_BASE_URL'] ??
     'https://default.url';
 
 class ProfilePage extends StatefulWidget {
+  /// Preload the user profile cache for splash screen (no UI, no context needed)
+  static Future<void> preloadCacheForSplash() async {
+    final prefs = await SharedPreferences.getInstance();
+    final cachedData = await UserCache.getData('user_details_cache');
+    final cachedTimestampMillis = prefs.getInt('user_details_cache_timestamp');
+    final now = DateTime.now();
+    bool cacheValid = false;
+    if (cachedData != null && cachedTimestampMillis != null &&
+        now.difference(DateTime.fromMillisecondsSinceEpoch(cachedTimestampMillis)) < CacheConfig.profileCacheDuration) {
+      cacheValid = true;
+    }
+    if (!cacheValid) {
+      try {
+        final apiBaseUrl = dotenv.env['API_BASE_URL'] ?? dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
+        final response = await http.get(Uri.parse('apiBaseUrl/rr/rusers/${prefs.getInt('userId') ?? ''}')).timeout(const Duration(seconds: 10));
+        if (response.statusCode == 200) {
+          final responseData = json.decode(response.body);
+          if (responseData is Map<String, dynamic>) {
+            await UserCache.saveData('user_details_cache', responseData);
+            await prefs.setInt('user_details_cache_timestamp', DateTime.now().millisecondsSinceEpoch);
+          }
+        }
+      } catch (e) { print('[Splash][Profile] preload error: $e'); }
+    }
+  }
   // Use const constructor
   const ProfilePage({super.key});
 
@@ -269,7 +294,7 @@ class _ProfilePageState extends State<ProfilePage>
     final url =
         '$apiBaseUrl/rr/rusers/$_userId'; // Use path parameter style if API supports it
     // final url = '$apiBaseUrl/rr/rusers?user_id=$_userId'; // Or keep query param
-    print("Fetching User Details from URL: $url");
+    print('[Profile] API fetch: Fetching user details... from URL: $url');
     try {
       final response =
           await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
@@ -380,14 +405,36 @@ class _ProfilePageState extends State<ProfilePage>
           // Use .get with defaults and check case variations
           setState(() {
             _userMetrics = {
-              'height':
-                  (metrics['height'] ?? metrics['height'])?.toString() ?? 'N/A',
-              'weight':
-                  (metrics['weight'] ?? metrics['weight'])?.toString() ?? 'N/A',
-              'bmi': (metrics['bmi'] ?? metrics['bmi'])?.toString() ??
-                  '0', // Default BMI 0
-              // Add other metrics as needed
+              // Basic metrics
+              'height': (metrics['height'] ?? metrics['Height'])?.toString() ?? 'N/A',
+              'weight': (metrics['weight'] ?? metrics['Weight'])?.toString() ?? 'N/A',
+              'bmi': (metrics['bmi'] ?? metrics['BMI'])?.toString() ?? '0',
+
+              // Age/age range
+              'age': (metrics['age'] ?? metrics['Age'])?.toString() ?? 'N/A',
+              'age_range': (metrics['age_range'] ?? metrics['Age_Range'])?.toString() ?? 'N/A',
+
+              // Cholesterol
+              'cholesterol_level': (metrics['cholesterol_level'] ?? metrics['Cholesterol_Level'])?.toString() ?? 'N/A',
+
+              // Blood pressure (may be stored as separate systolic/diastolic or a string)
+              'blood_pressure': (metrics['blood_pressure'] ?? metrics['Blood_Pressure'])?.toString() ?? 'N/A',
+              'systolic': (metrics['systolic'] ?? metrics['Systolic'])?.toString() ?? 'N/A',
+              'diastolic': (metrics['diastolic'] ?? metrics['Diastolic'])?.toString() ?? 'N/A',
+
+              // Pulse/heart rate
+              'pulse': (metrics['pulse'] ?? metrics['Pulse'])?.toString() ?? 'N/A',
+              'heart_rate': (metrics['heart_rate'] ?? metrics['Heart_Rate'])?.toString() ?? 'N/A',
+
+              // Add more fields as needed based on your backend JSON structure
+              'glucose_level': (metrics['glucose_level'] ?? metrics['Glucose_Level'])?.toString() ?? 'N/A',
+              'waist_circumference': (metrics['waist_circumference'] ?? metrics['Waist_Circumference'])?.toString() ?? 'N/A',
+              'hip_circumference': (metrics['hip_circumference'] ?? metrics['Hip_Circumference'])?.toString() ?? 'N/A',
+              'body_fat_percentage': (metrics['body_fat_percentage'] ?? metrics['Body_Fat_Percentage'])?.toString() ?? 'N/A',
+              'muscle_mass': (metrics['muscle_mass'] ?? metrics['Muscle_Mass'])?.toString() ?? 'N/A',
+              // You can continue to add more as needed
             };
+            // Comments: All relevant metrics fields are extracted and safely converted to strings. Add/remove fields as your backend evolves.
             // Initialize weight controller if editing is not active
             if (!_isEditingWeight) {
               _weightController.text = _userMetrics['weight'] ?? '';

@@ -18,6 +18,32 @@ const Color priceColor = Color(0xFF0B5345); // Price in dark teal
 const Color errorIconColor = Colors.redAccent;
 
 class Nutri_DetailPage extends StatefulWidget {
+  static Future<void> preloadProducersCacheForSplash() async {
+    // Use the same keys as MealDetailScreen for global producers cache
+    const String producersCacheKey = 'producers_list_cache';
+    const String producersCacheTimestampKey = 'producers_list_cache_timestamp';
+    final cachedData = await UserCache.getData(producersCacheKey);
+    final cachedTs = await UserCache.getData(producersCacheTimestampKey);
+    final now = DateTime.now();
+    bool cacheValid = false;
+    if (cachedData != null && cachedTs != null) {
+      final cacheTime = DateTime.tryParse(cachedTs.toString());
+      if (cacheTime != null && now.difference(cacheTime) < CacheConfig.chefProducerDetailCacheDuration) {
+        cacheValid = true;
+      }
+    }
+    if (!cacheValid) {
+      try {
+        final apiBaseUrl = dotenv.env['API_BASE_URL'] ?? dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
+        final response = await http.get(Uri.parse('apiBaseUrl/rr/rproducers')).timeout(const Duration(seconds: 15));
+        if (response.statusCode == 200) {
+          final dataList = jsonDecode(response.body);
+          await UserCache.saveData(producersCacheKey, dataList);
+          await UserCache.saveData(producersCacheTimestampKey, now.toIso8601String());
+        }
+      } catch (e) { print('[Splash][NutriDetail] preload producers error: $e'); }
+    }
+  }
   static final GlobalKey<_Nutri_DetailPageState> globalKey = GlobalKey<_Nutri_DetailPageState>();
   final NutritionItem item;
   final Widget? decodedImage;
@@ -96,7 +122,7 @@ class _Nutri_DetailPageState extends State<Nutri_DetailPage>
               _isCacheValid = true;
             });
           }
-          print('[NutriDetail] Loaded producers from valid cache');
+          print('[NutriDetail] Cache hit: Loaded producers from valid cache');
           return;
         }
       }

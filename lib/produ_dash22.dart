@@ -28,6 +28,8 @@ class Order {
   final String? ingredients;
   final String? paymentStatus;
 
+  // Null safety: All fields are properly typed with nullability annotations.
+
   Order({
     required this.orderId,
     required this.mealName,
@@ -57,20 +59,28 @@ class Order {
       return 0.0;
     }
 
-    return Order(
-      orderId: parseInt(json['order_id']),
-      mealName: json['meal_name'] as String? ??
-          'Unknown Meal', // Handle potential null
-      orderDate: DateTime.parse(json['order_date'] as String),
-      totalPrice: parseDouble(json['total_price']),
-      quantity: parseInt(json['quantity']),
-      orderStatus: json['order_status'] as String,
-      producerName: json['producer_name'] as String?,
-      deliveryAddress: json['delivery_address'] as String?,
-      notes: json['notes'] as String?,
-      ingredients: json['ingredients'] as String?,
-      paymentStatus: json['payment_status'] as String?,
-    );
+    try {
+      print('[DEBUG] Order.fromJson input: ' + json.toString());
+      final order = Order(
+        orderId: parseInt(json['order_id']),
+        mealName: json['meal_name'] as String? ??
+            'Unknown Meal', // Handle potential null
+        orderDate: DateTime.parse(json['order_date'] as String),
+        totalPrice: parseDouble(json['total_price']),
+        quantity: parseInt(json['quantity']),
+        orderStatus: json['order_status'] as String? ?? Order.STATUS_PENDING,
+        paymentStatus: json['payment_status'] as String?,
+        notes: json['notes'] as String?,
+        deliveryAddress: json['delivery_address'] as String?,
+        producerName: json['producer_name'] as String?,
+        ingredients: json['ingredients'] as String?,
+      );
+      print('[DEBUG] Order parsed: ' + order.toString());
+      return order;
+    } catch (e, stack) {
+      print('[ERROR] Order.fromJson failed: $e\n$stack\nInput: ' + json.toString());
+      rethrow;
+    }
   }
 
   Order copyWith({
@@ -111,7 +121,7 @@ class Order {
 
 // Inline ProducerProfile class based on API data
 class ProducerProfile {
-  // ... existing fields ...
+  // Null safety: All fields are properly typed with nullability annotations.
 
   Map<String, dynamic> toJson() {
     return {
@@ -162,52 +172,67 @@ class ProducerProfile {
   });
 
   factory ProducerProfile.fromJson(Map<String, dynamic> json) {
-    int parseInt(dynamic value) {
-      if (value is int) return value;
-      if (value is double) return value.toInt();
-      if (value is String) return int.tryParse(value) ?? 0;
-      return 0;
-    }
-
-    double? parseDouble(dynamic value) {
-      if (value == null) return null;
-      if (value is double) return value;
-      if (value is int) return value.toDouble();
-      if (value is String) return double.tryParse(value);
-      return null;
-    }
-
-    List<Map<String, dynamic>>? parseStock(dynamic value) {
-      if (value is String) {
-        try {
-          final decoded = jsonDecode(value);
-          if (decoded is List) {
-            return decoded.whereType<Map<String, dynamic>>().toList();
-          }
-        } catch (_) {}
-      } else if (value is List) {
-        return value.whereType<Map<String, dynamic>>().toList();
+    try {
+      print('[DEBUG] ProducerProfile.fromJson input: ' + json.toString());
+      int parseInt(dynamic value) {
+        if (value is int) return value;
+        if (value is double) return value.toInt();
+        if (value is String) return int.tryParse(value) ?? 0;
+        return 0;
       }
-      return null;
-    }
 
-    return ProducerProfile(
-      producerId: parseInt(json['producer_id']),
-      name: json['name'] as String,
-      email: json['email'] as String?,
-      phoneNumber: json['phone_number'] as String?,
-      location: json['location'] as String?,
-      image: json['image'] as String?,
-      isActive: json['is_active'] as bool,
-      registrationDate: DateTime.parse(json['registration_date'] as String),
-      lastLogin: json['last_login'] != null
-          ? DateTime.parse(json['last_login'] as String)
-          : null,
-      producerType: json['producer_type'] as String?,
-      rating: parseDouble(json['rating']),
-      reviews: json['reviews'] as String?,
-      stock: parseStock(json['stock']),
-    );
+      double? parseDouble(dynamic value) {
+        if (value == null) return null;
+        if (value is double) return value;
+        if (value is int) return value.toDouble();
+        if (value is String) return double.tryParse(value);
+        return null;
+      }
+
+      List<Map<String, dynamic>>? parseStock(dynamic value) {
+        if (value is String) {
+          try {
+            final decoded = jsonDecode(value);
+            if (decoded is List) {
+              return decoded.whereType<Map<String, dynamic>>().toList();
+            }
+          } catch (_) {}
+        } else if (value is List) {
+          return value.whereType<Map<String, dynamic>>().toList();
+        }
+        return null;
+      }
+
+      final profile = ProducerProfile(
+        producerId: parseInt(json['producer_id']),
+        name: json['name'] as String,
+        email: json['email'] as String?,
+        phoneNumber: json['phone_number'] as String?,
+        location: json['location'] as String?,
+        image: json['image'] as String?,
+        isActive: (() {
+  final v = json['is_active'];
+  if (v == null) return false;
+  if (v is bool) return v;
+  if (v is int) return v == 1;
+  if (v is String) return v.toLowerCase() == 'true' || v == '1';
+  return false;
+})(), // Robust null safety: default to false if null or invalid
+        registrationDate: DateTime.parse(json['registration_date'] as String),
+        lastLogin: json['last_login'] != null
+            ? DateTime.parse(json['last_login'] as String)
+            : null,
+        producerType: json['producer_type'] as String?,
+        rating: parseDouble(json['rating']),
+        reviews: json['reviews'] as String?,
+        stock: parseStock(json['stock']),
+      );
+      print('[DEBUG] ProducerProfile parsed: ' + profile.toString());
+      return profile;
+    } catch (e, stack) {
+      print('[ERROR] ProducerProfile.fromJson failed: $e\n$stack\nInput: ' + json.toString());
+      rethrow;
+    }
   }
 
   ProducerProfile copyWith({
@@ -254,6 +279,8 @@ class Product {
   final int? unitGrams;
   final String? source;
 
+  // Null safety: All fields are properly typed with nullability annotations.
+
   Product({
     required this.produceId,
     required this.produceName,
@@ -274,21 +301,29 @@ class Product {
       return null;
     }
 
-    return Product(
-      produceId: json['produce_id'] as String,
-      produceName:
-          json['produce_name'] as String? ?? '', // Ensure name is not null
-      calories: parseInt(json['calories']),
-      carbohydrates: json['carbohydrates'] != null
-          ? (json['carbohydrates'] as num).toDouble()
-          : null,
-      fats: json['fats'] != null ? (json['fats'] as num).toDouble() : null,
-      proteins: json['proteins'] != null
-          ? (json['proteins'] as num).toDouble()
-          : null,
-      unitGrams: parseInt(json['unit_grams']),
-      source: json['source'] as String?,
-    );
+    try {
+      print('[DEBUG] Product.fromJson input: ' + json.toString());
+      final product = Product(
+        produceId: json['produce_id'] as String,
+        produceName:
+            json['produce_name'] as String? ?? '', // Ensure name is not null
+        calories: parseInt(json['calories']),
+        carbohydrates: json['carbohydrates'] != null
+            ? (json['carbohydrates'] as num).toDouble()
+            : null,
+        fats: json['fats'] != null ? (json['fats'] as num).toDouble() : null,
+        proteins: json['proteins'] != null
+            ? (json['proteins'] as num).toDouble()
+            : null,
+        unitGrams: parseInt(json['unit_grams']),
+        source: json['source'] as String?,
+      );
+      print('[DEBUG] Product parsed: ' + product.toString());
+      return product;
+    } catch (e, stack) {
+      print('[ERROR] Product.fromJson failed: $e\n$stack\nInput: ' + json.toString());
+      rethrow;
+    }
   }
 
   Product copyWith({
@@ -352,34 +387,35 @@ class ProducerApiService {
     print("Fetching producer profile from: $uri");
 
     try {
-      final response = await http.get(uri);
+      final response = await http.get(uri, headers: _getReadHeaders());
+      print('[DEBUG] fetchProducerProfile response: status=${response.statusCode}, body=${response.body}');
 
       if (response.statusCode == 200) {
         final dynamic rawData = json.decode(response.body);
+        print('[DEBUG] fetchProducerProfile decoded rawData: ' + rawData.toString());
         final dynamic handledData = _handleApiResponse(rawData);
+        print('[DEBUG] fetchProducerProfile handledData: ' + handledData.toString());
 
         // Handle case where API might return a list with one item or the item directly
         Map<String, dynamic>? profileMap;
         if (handledData is List && handledData.isNotEmpty) {
           profileMap = handledData[0] as Map<String, dynamic>;
-        } else if (handledData is Map<String, dynamic>) {
+        } else {
           profileMap = handledData; // If API returns the object directly
         }
 
         if (profileMap == null) {
-          throw Exception(
-              'Failed to parse profile: Unexpected API response format or empty data.');
+          print('[ERROR] Producer profile not found in API response.');
+          throw Exception('Producer profile not found in API response.');
         }
 
         return ProducerProfile.fromJson(profileMap);
       } else {
-        print(
-            "Error fetching producer profile: ${response.statusCode} ${response.body}");
-        throw Exception(
-            'Failed to load producer profile (Status code: ${response.statusCode})');
+        print('[ERROR] Failed to fetch producer profile: Status: ${response.statusCode}\nBody: ${response.body}');
+        throw Exception('Failed to fetch producer profile.');
       }
-    } catch (e) {
-      print("Exception fetching producer profile: $e");
+    } catch (e, stack) {
+      print('[ERROR] Exception fetching producer profile: $e\n$stack');
       rethrow;
     }
   }
@@ -394,31 +430,32 @@ class ProducerApiService {
     print("Fetching producer orders from: $uri");
 
     try {
-      final response = await http.get(uri);
+      final response = await http.get(uri, headers: _getReadHeaders());
+      print('[DEBUG] fetchProducerOrders response: status=${response.statusCode}, body=${response.body}');
 
       if (response.statusCode == 200) {
         final dynamic rawData = json.decode(response.body);
-        final dynamic ordersList = _handleApiResponse(rawData);
+        print('[DEBUG] fetchProducerOrders decoded rawData: ' + rawData.toString());
+        final dynamic handledData = _handleApiResponse(rawData);
+        print('[DEBUG] fetchProducerOrders handledData: ' + handledData.toString());
 
-        if (ordersList is List) {
-          return ordersList
-              .where((item) => item is Map<String, dynamic>)
-              .map((item) => Order.fromJson(item as Map<String, dynamic>))
+        if (handledData is List) {
+          final List<Order> orders = handledData
+              .map<Order>((orderJson) => Order.fromJson(orderJson))
               .toList();
+          print('[DEBUG] fetchProducerOrders parsed orders: ' + orders.toString());
+          return orders;
         } else {
-          print(
-              "Orders API response format unexpected: Expected a List. Got: ${ordersList?.runtimeType}");
+          print('[ERROR] Orders API response format unexpected: Expected a List. Got: ' + handledData.runtimeType.toString());
           return []; // Return empty list if format is wrong
         }
       } else {
-        print(
-            "Error fetching producer orders: ${response.statusCode} ${response.body}");
-        throw Exception(
-            'Failed to load orders (Status code: ${response.statusCode})');
+        print('[ERROR] Orders API call failed: Status ${response.statusCode}, Body: ${response.body}');
+        return [];
       }
-    } catch (e) {
-      print("Exception fetching producer orders: $e");
-      rethrow;
+    } catch (e, stack) {
+      print('[ERROR] Exception fetching orders: $e\n$stack');
+      return [];
     }
   }
 
@@ -433,32 +470,32 @@ class ProducerApiService {
     print("Fetching all produce from: $uri");
 
     try {
-      // Assuming GET for produce doesn't need authentication, adjust if needed
       final response = await http.get(uri, headers: _getReadHeaders());
+      print('[DEBUG] fetchProducerProduce response: status=${response.statusCode}, body=${response.body}');
 
       if (response.statusCode == 200) {
         final dynamic rawData = json.decode(response.body);
-        final dynamic produceList = _handleApiResponse(rawData);
+        print('[DEBUG] fetchProducerProduce decoded rawData: ' + rawData.toString());
+        final dynamic handledData = _handleApiResponse(rawData);
+        print('[DEBUG] fetchProducerProduce handledData: ' + handledData.toString());
 
-        if (produceList is List) {
-          return produceList
-              .where((item) => item is Map<String, dynamic>)
-              .map((item) => Product.fromJson(item as Map<String, dynamic>))
+        if (handledData is List) {
+          final List<Product> produce = handledData
+              .map<Product>((prodJson) => Product.fromJson(prodJson))
               .toList();
+          print('[DEBUG] fetchProducerProduce parsed produce: ' + produce.toString());
+          return produce;
         } else {
-          print(
-              "Produce API response format unexpected: Expected a List. Got: ${produceList?.runtimeType}");
+          print('[ERROR] Produce API response format unexpected: Expected a List. Got: ' + handledData.runtimeType.toString());
           return []; // Return empty list
         }
       } else {
-        print(
-            "Error fetching produce: ${response.statusCode} ${response.body}");
-        throw Exception(
-            'Failed to load produce (Status code: ${response.statusCode})');
+        print('[ERROR] Produce API call failed: Status ${response.statusCode}, Body: ${response.body}');
+        return [];
       }
-    } catch (e) {
-      print("Exception fetching produce: $e");
-      rethrow;
+    } catch (e, stack) {
+      print('[ERROR] Exception fetching produce: $e\n$stack');
+      return [];
     }
   }
 
@@ -928,7 +965,21 @@ class _ProducerDash22State extends State<ProducerDash22> {
     final cachedJson = await UserCache.getData('producer_profile');
     final timestampStr = await UserCache.getData('producer_profile_cache_timestamp');
     if (cachedJson != null) {
-      _profileCache = ProducerProfile.fromJson(Map<String, dynamic>.from(cachedJson));
+      try {
+        _profileCache = ProducerProfile.fromJson(Map<String, dynamic>.from(cachedJson));
+      } catch (e, stack) {
+        print('[ERROR] Failed to parse cached producer profile: $e\n$stack');
+        _profileCache = null;
+        // Clear potentially corrupted cache
+        await UserCache.removeData('producer_profile');
+        await UserCache.removeData('producer_profile_cache_timestamp');
+        if (mounted) {
+          setState(() {
+            _error = 'Could not load profile details. Please try again.';
+          });
+        }
+        return;
+      }
     } else {
       _profileCache = null;
     }
