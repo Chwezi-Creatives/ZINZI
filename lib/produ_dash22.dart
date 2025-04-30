@@ -60,7 +60,7 @@ class Order {
     }
 
     try {
-      print('[DEBUG] Order.fromJson input: ' + json.toString());
+      // Process order data
       final order = Order(
         orderId: parseInt(json['order_id']),
         mealName: json['meal_name'] as String? ??
@@ -75,10 +75,9 @@ class Order {
         producerName: json['producer_name'] as String?,
         ingredients: json['ingredients'] as String?,
       );
-      print('[DEBUG] Order parsed: ' + order.toString());
       return order;
     } catch (e, stack) {
-      print('[ERROR] Order.fromJson failed: $e\n$stack\nInput: ' + json.toString());
+      print('[ProducerDash] Order parsing error: $e');
       rethrow;
     }
   }
@@ -125,19 +124,20 @@ class ProducerProfile {
 
   Map<String, dynamic> toJson() {
     return {
-      'producerId': producerId,
+      'producer_id': producerId,
       'name': name,
       'email': email,
-      'phoneNumber': phoneNumber,
+      'phone_number': phoneNumber,
       'location': location,
       'image': image,
-      'isActive': isActive,
-      'registrationDate': registrationDate.toIso8601String(),
-      'lastLogin': lastLogin?.toIso8601String(),
-      'producerType': producerType,
+      'is_active': isActive,
+      'registration_date': registrationDate.toIso8601String(),
+      'last_login': lastLogin?.toIso8601String(),
+      'producer_type': producerType,
       'rating': rating,
       'reviews': reviews,
-      'stock': stock,
+      'user_type': userType,
+      'is_email_verified': isEmailVerified,
     };
   }
 
@@ -153,7 +153,9 @@ class ProducerProfile {
   final String? producerType;
   final double? rating;
   final String? reviews;
-  final List<Map<String, dynamic>>? stock; // New field for stock
+  final String? userType;
+  final bool? isEmailVerified;
+  final List<Map<String, dynamic>>? stock; // Stock field for tracking produce inventory
 
   ProducerProfile({
     required this.producerId,
@@ -168,12 +170,14 @@ class ProducerProfile {
     this.producerType,
     this.rating,
     this.reviews,
+    this.userType,
+    this.isEmailVerified,
     this.stock,
   });
 
   factory ProducerProfile.fromJson(Map<String, dynamic> json) {
     try {
-      print('[DEBUG] ProducerProfile.fromJson input: ' + json.toString());
+      // Parse producer profile
       int parseInt(dynamic value) {
         if (value is int) return value;
         if (value is double) return value.toInt();
@@ -188,8 +192,9 @@ class ProducerProfile {
         if (value is String) return double.tryParse(value);
         return null;
       }
-
+      
       List<Map<String, dynamic>>? parseStock(dynamic value) {
+        if (value == null) return [];
         if (value is String) {
           try {
             final decoded = jsonDecode(value);
@@ -200,37 +205,40 @@ class ProducerProfile {
         } else if (value is List) {
           return value.whereType<Map<String, dynamic>>().toList();
         }
-        return null;
+        return [];
       }
 
       final profile = ProducerProfile(
         producerId: parseInt(json['producer_id']),
-        name: json['name'] as String,
+        name: json['name'] as String? ?? 'Unknown Producer',
         email: json['email'] as String?,
         phoneNumber: json['phone_number'] as String?,
         location: json['location'] as String?,
         image: json['image'] as String?,
         isActive: (() {
-  final v = json['is_active'];
-  if (v == null) return false;
-  if (v is bool) return v;
-  if (v is int) return v == 1;
-  if (v is String) return v.toLowerCase() == 'true' || v == '1';
-  return false;
-})(), // Robust null safety: default to false if null or invalid
-        registrationDate: DateTime.parse(json['registration_date'] as String),
+          final v = json['is_active'];
+          if (v == null) return false;
+          if (v is bool) return v;
+          if (v is int) return v == 1;
+          if (v is String) return v.toLowerCase() == 'true' || v == '1';
+          return false;
+        })(), // Robust null safety: default to false if null or invalid
+        registrationDate: json['registration_date'] != null
+            ? DateTime.parse(json['registration_date'] as String)
+            : DateTime.now(), // Default to current time if null
         lastLogin: json['last_login'] != null
             ? DateTime.parse(json['last_login'] as String)
             : null,
         producerType: json['producer_type'] as String?,
         rating: parseDouble(json['rating']),
         reviews: json['reviews'] as String?,
+        userType: json['user_type'] as String?,
+        isEmailVerified: json['is_email_verified'] as bool?,
         stock: parseStock(json['stock']),
       );
-      print('[DEBUG] ProducerProfile parsed: ' + profile.toString());
       return profile;
-    } catch (e, stack) {
-      print('[ERROR] ProducerProfile.fromJson failed: $e\n$stack\nInput: ' + json.toString());
+    } catch (e) {
+      print('[ProducerDash] Profile parsing error: $e');
       rethrow;
     }
   }
@@ -248,7 +256,9 @@ class ProducerProfile {
     String? producerType,
     double? rating,
     String? reviews,
-    List<Map<String, dynamic>>? stock, // Added stock to copyWith
+    String? userType,
+    bool? isEmailVerified,
+    List<Map<String, dynamic>>? stock,
   }) {
     return ProducerProfile(
       producerId: producerId ?? this.producerId,
@@ -263,7 +273,9 @@ class ProducerProfile {
       producerType: producerType ?? this.producerType,
       rating: rating ?? this.rating,
       reviews: reviews ?? this.reviews,
-      stock: stock ?? this.stock, // Added stock to copyWith
+      userType: userType ?? this.userType,
+      isEmailVerified: isEmailVerified ?? this.isEmailVerified,
+      stock: stock ?? this.stock,
     );
   }
 }
@@ -302,7 +314,6 @@ class Product {
     }
 
     try {
-      print('[DEBUG] Product.fromJson input: ' + json.toString());
       final product = Product(
         produceId: json['produce_id'] as String,
         produceName:
@@ -318,10 +329,9 @@ class Product {
         unitGrams: parseInt(json['unit_grams']),
         source: json['source'] as String?,
       );
-      print('[DEBUG] Product parsed: ' + product.toString());
       return product;
     } catch (e, stack) {
-      print('[ERROR] Product.fromJson failed: $e\n$stack\nInput: ' + json.toString());
+      print('[ProducerDash] Product parsing error: $e');
       rethrow;
     }
   }
@@ -358,7 +368,7 @@ class ProducerApiService {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       return prefs.getString('producer_id');
     } catch (e) {
-      print("Error accessing SharedPreferences for producer ID: $e");
+      print("[ProducerDash] SharedPreferences error: $e");
       return null;
     }
   }
@@ -372,8 +382,7 @@ class ProducerApiService {
       // If it's a map but no 'data' key, return the map itself (e.g., for single item responses)
       return responseData;
     }
-    print(
-        "API Warning: Unhandled response format. Expected List or Map (potentially with 'data' key). Got: ${responseData.runtimeType}");
+    print("[ProducerDash] API response format warning: Got ${responseData.runtimeType}");
     return null; // Return null or throw an exception based on required behavior
   }
 
@@ -384,17 +393,14 @@ class ProducerApiService {
     }
 
     final Uri uri = Uri.parse('$apibaseurl/rr/rproducers/$producerId');
-    print("Fetching producer profile from: $uri");
+    print("[ProducerDash] Fetching profile: $uri");
 
     try {
       final response = await http.get(uri, headers: _getReadHeaders());
-      print('[DEBUG] fetchProducerProfile response: status=${response.statusCode}, body=${response.body}');
-
+      
       if (response.statusCode == 200) {
         final dynamic rawData = json.decode(response.body);
-        print('[DEBUG] fetchProducerProfile decoded rawData: ' + rawData.toString());
         final dynamic handledData = _handleApiResponse(rawData);
-        print('[DEBUG] fetchProducerProfile handledData: ' + handledData.toString());
 
         // Handle case where API might return a list with one item or the item directly
         Map<String, dynamic>? profileMap;
@@ -411,11 +417,11 @@ class ProducerApiService {
 
         return ProducerProfile.fromJson(profileMap);
       } else {
-        print('[ERROR] Failed to fetch producer profile: Status: ${response.statusCode}\nBody: ${response.body}');
+        print('[ProducerDash] Profile fetch failed: ${response.statusCode}');
         throw Exception('Failed to fetch producer profile.');
       }
     } catch (e, stack) {
-      print('[ERROR] Exception fetching producer profile: $e\n$stack');
+      print('[ProducerDash] Profile fetch error: $e');
       rethrow;
     }
   }
@@ -427,34 +433,31 @@ class ProducerApiService {
     }
 
     final Uri uri = Uri.parse('$apibaseurl/rr/orders?producer_id=$producerId');
-    print("Fetching producer orders from: $uri");
+    print("[ProducerDash] Fetching orders: $uri");
 
     try {
       final response = await http.get(uri, headers: _getReadHeaders());
-      print('[DEBUG] fetchProducerOrders response: status=${response.statusCode}, body=${response.body}');
-
+      
       if (response.statusCode == 200) {
         final dynamic rawData = json.decode(response.body);
-        print('[DEBUG] fetchProducerOrders decoded rawData: ' + rawData.toString());
         final dynamic handledData = _handleApiResponse(rawData);
-        print('[DEBUG] fetchProducerOrders handledData: ' + handledData.toString());
 
         if (handledData is List) {
           final List<Order> orders = handledData
               .map<Order>((orderJson) => Order.fromJson(orderJson))
               .toList();
-          print('[DEBUG] fetchProducerOrders parsed orders: ' + orders.toString());
+          print("[ProducerDash] Fetched ${orders.length} orders");
           return orders;
         } else {
-          print('[ERROR] Orders API response format unexpected: Expected a List. Got: ' + handledData.runtimeType.toString());
+          print('[ProducerDash] Orders response format error: expected List, got ${handledData.runtimeType}');
           return []; // Return empty list if format is wrong
         }
       } else {
-        print('[ERROR] Orders API call failed: Status ${response.statusCode}, Body: ${response.body}');
+        print('[ProducerDash] Orders fetch failed: ${response.statusCode}');
         return [];
       }
     } catch (e, stack) {
-      print('[ERROR] Exception fetching orders: $e\n$stack');
+      print('[ProducerDash] Orders fetch error: $e');
       return [];
     }
   }
@@ -467,34 +470,31 @@ class ProducerApiService {
 
     // Assuming produce is general and not tied to a specific producer for listing
     final Uri uri = Uri.parse('$apibaseurl/rr/produce');
-    print("Fetching all produce from: $uri");
+    print("[ProducerDash] Fetching produce: $uri");
 
     try {
       final response = await http.get(uri, headers: _getReadHeaders());
-      print('[DEBUG] fetchProducerProduce response: status=${response.statusCode}, body=${response.body}');
-
+      
       if (response.statusCode == 200) {
         final dynamic rawData = json.decode(response.body);
-        print('[DEBUG] fetchProducerProduce decoded rawData: ' + rawData.toString());
         final dynamic handledData = _handleApiResponse(rawData);
-        print('[DEBUG] fetchProducerProduce handledData: ' + handledData.toString());
 
         if (handledData is List) {
           final List<Product> produce = handledData
               .map<Product>((prodJson) => Product.fromJson(prodJson))
               .toList();
-          print('[DEBUG] fetchProducerProduce parsed produce: ' + produce.toString());
+          print("[ProducerDash] Fetched ${produce.length} produce items");
           return produce;
         } else {
-          print('[ERROR] Produce API response format unexpected: Expected a List. Got: ' + handledData.runtimeType.toString());
+          print('[ProducerDash] Produce response format error: expected List, got ${handledData.runtimeType}');
           return []; // Return empty list
         }
       } else {
-        print('[ERROR] Produce API call failed: Status ${response.statusCode}, Body: ${response.body}');
+        print('[ProducerDash] Produce fetch failed: ${response.statusCode}');
         return [];
       }
     } catch (e, stack) {
-      print('[ERROR] Exception fetching produce: $e\n$stack');
+      print('[ProducerDash] Produce fetch error: $e');
       return [];
     }
   }
@@ -531,12 +531,11 @@ class ProducerApiService {
       if (response.statusCode == 200 || response.statusCode == 204) {
         return true;
       } else {
-        print(
-            "Error updating order status: ${response.statusCode} ${response.body}");
+        print("[ProducerDash] Order status update failed: ${response.statusCode}");
         return false;
       }
     } catch (e) {
-      print("Exception updating order status: $e");
+      print("[ProducerDash] Order status update error: $e");
       return false;
     }
   }
@@ -740,7 +739,8 @@ class ProducerApiService {
 }
 
 class ProducerDash22 extends StatefulWidget {
-  static final GlobalKey<State<ProducerDash22>> globalKey = GlobalKey<State<ProducerDash22>>();
+  static final GlobalKey<State<ProducerDash22>> globalKey =
+      GlobalKey<State<ProducerDash22>>();
   ProducerDash22({Key? key}) : super(key: globalKey);
 
   /// Allows parent to trigger a manual refresh of all major data
@@ -782,10 +782,10 @@ class _ProducerDash22State extends State<ProducerDash22> {
     return _produce
         .where((prod) => _selectedProduceIds.contains(prod.produceId))
         .map((prod) => {
-          'id': prod.produceId,
-          'Name': prod.produceName,
-          'quantity': _produceQuantities[prod.produceId] ?? prod.unitGrams,
-        })
+              'produce_id': prod.produceId,  // Use produce_id to match API format
+              'name': prod.produceName,      // Use name to match API format
+              'quantity': _produceQuantities[prod.produceId] ?? prod.unitGrams,
+            })
         .toList();
   }
 
@@ -963,12 +963,14 @@ class _ProducerDash22State extends State<ProducerDash22> {
   /// Loads cached profile and timestamp from UserCache
   Future<void> _loadProfileCacheFromPrefs() async {
     final cachedJson = await UserCache.getData('producer_profile');
-    final timestampStr = await UserCache.getData('producer_profile_cache_timestamp');
+    final timestampStr =
+        await UserCache.getData('producer_profile_cache_timestamp');
     if (cachedJson != null) {
       try {
-        _profileCache = ProducerProfile.fromJson(Map<String, dynamic>.from(cachedJson));
+        _profileCache =
+            ProducerProfile.fromJson(Map<String, dynamic>.from(cachedJson));
       } catch (e, stack) {
-        print('[ERROR] Failed to parse cached producer profile: $e\n$stack');
+        print('[ProducerDash] Cache parse error: $e');
         _profileCache = null;
         // Clear potentially corrupted cache
         await UserCache.removeData('producer_profile');
@@ -991,9 +993,11 @@ class _ProducerDash22State extends State<ProducerDash22> {
   }
 
   /// Saves profile and timestamp to UserCache
-  Future<void> _saveProfileCacheToPrefs(ProducerProfile profile, DateTime timestamp) async {
+  Future<void> _saveProfileCacheToPrefs(
+      ProducerProfile profile, DateTime timestamp) async {
     await UserCache.saveData('producer_profile', profile.toJson());
-    await UserCache.saveData('producer_profile_cache_timestamp', timestamp.toIso8601String());
+    await UserCache.saveData(
+        'producer_profile_cache_timestamp', timestamp.toIso8601String());
   }
 
   String _error = '';
@@ -1242,10 +1246,22 @@ class _ProducerDash22State extends State<ProducerDash22> {
     _selectedProduceIds.clear();
     _produceQuantities.clear();
     if (_profile?.stock != null) {
+      print('[ProducerDash] Syncing stock from profile: ${_profile!.stock!.length} items');
       for (var stockItem in _profile!.stock!) {
-        final String? produceId = stockItem['produce_id']?.toString();
-        final int? quantity =
-            int.tryParse(stockItem['quantity']?.toString() ?? '');
+        // Try multiple possible keys for produce_id to handle API inconsistencies
+        String? produceId = stockItem['produce_id']?.toString();
+        if (produceId == null || produceId.isEmpty) {
+          produceId = stockItem['id']?.toString();
+        }
+        
+        // Try multiple possible keys for quantity
+        int? quantity;
+        if (stockItem['quantity'] != null) {
+          quantity = int.tryParse(stockItem['quantity'].toString());
+        }
+
+        // Debug log the stock item
+        print('[ProducerDash] Stock item: ID=$produceId, Quantity=$quantity, Keys=${stockItem.keys.join(', ')}');
 
         // Check if the produce ID from stock exists in our master _produce list
         if (produceId != null &&
@@ -1255,14 +1271,18 @@ class _ProducerDash22State extends State<ProducerDash22> {
           _produceQuantities[produceId] =
               quantity ?? 0; // Default to 0 if quantity is missing/invalid
         } else {
-          print(
-              "Warning: Stock item with ID '$produceId' not found in master produce list.");
+          print('[ProducerDash] Warning: Stock item with ID "$produceId" not found in master produce list.');
         }
       }
+    } else {
+      print('[ProducerDash] No stock data found in profile');
     }
+    
     // Ensure quantities map only contains keys present in selected IDs
     _produceQuantities
         .removeWhere((key, value) => !_selectedProduceIds.contains(key));
+        
+    print('[ProducerDash] Sync complete: ${_selectedProduceIds.length} items selected with quantities');
   }
 
   void _sortOrders() {
@@ -2414,34 +2434,20 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
     // --- Info Cards Grid ---
     List<Widget> infoCards = [
+      // Only show fields that are in the API response
+      infoCard(
+          icon: Icons.person_outline_rounded,
+          label: 'User Type',
+          value: profile.userType ?? ''),
       infoCard(
           icon: Icons.info_outline_rounded,
-          label: 'Bio',
+          label: 'Producer Type',
           value: profile.producerType ?? ''),
-      infoCard(
-          icon: Icons.star_outline_rounded,
-          label: 'Specialties',
-          value: profile.reviews ?? ''),
-      infoCard(icon: Icons.timer_outlined, label: 'Experience', value: 'N/A'),
-      infoCard(icon: Icons.language_rounded, label: 'Languages', value: 'N/A'),
-      infoCard(
-          icon: Icons.calendar_today_rounded,
-          label: 'Availability',
-          value: 'N/A'),
-      infoCard(
-          icon: Icons.verified_user_outlined,
-          label: 'Certifications',
-          value: 'N/A'),
-      infoCard(
-          icon: Icons.attach_money_rounded,
-          label: 'Base Price/Fee',
-          value: 'N/A'),
-      infoCard(
-          icon: Icons.schedule_rounded, label: 'Response Time', value: 'N/A'),
-      infoCard(
-          icon: Icons.menu_book_rounded, label: 'Sample Menu', value: 'N/A'),
-      infoCard(
-          icon: Icons.build_circle_outlined, label: 'Equipment', value: 'N/A'),
+      if (profile.rating != null)
+        infoCard(
+            icon: Icons.star_outline_rounded,
+            label: 'Rating',
+            value: profile.rating!.toString()),
       infoCard(
           icon: Icons.location_on_outlined,
           label: 'Location',
@@ -2454,6 +2460,23 @@ class _ProducerDash22State extends State<ProducerDash22> {
           icon: Icons.email_outlined,
           label: 'Email',
           value: profile.email ?? ''),
+      infoCard(
+          icon: Icons.calendar_today_rounded,
+          label: 'Registration Date',
+          value: profile.registrationDate != null
+              ? DateFormat('MMM d, yyyy').format(profile.registrationDate)
+              : ''),
+      infoCard(
+          icon: Icons.access_time_rounded,
+          label: 'Last Login',
+          value: profile.lastLogin != null
+              ? DateFormat('MMM d, yyyy').format(profile.lastLogin!)
+              : ''),
+      if (profile.isEmailVerified != null)
+        infoCard(
+            icon: Icons.verified_outlined,
+            label: 'Email Verified',
+            value: profile.isEmailVerified! ? 'Yes' : 'No'),
     ];
 
     // --- Main Layout ---
@@ -3136,38 +3159,75 @@ class _ProducerDash22State extends State<ProducerDash22> {
   // Builds the display card for a single produce item in the master list
   Widget _buildProduceItem(Product product) {
     final bool isTemp = product.produceId.startsWith('TEMP_');
+    // Check if this product has stock quantity from producer profile
+    final int currentStock = _produceQuantities[product.produceId] ?? 0;
+    final bool hasStock = currentStock > 0;
+
     return Card(
       elevation: 1.0,
       color: isTemp
           ? Colors.yellow.shade100.withOpacity(0.7)
-          : whiteColor.withOpacity(0.9), // Highlight temporary items
+          : (hasStock ? lightTeal.withOpacity(0.15) : whiteColor.withOpacity(0.9)), // Highlight items with stock
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8.0),
-        side: BorderSide(color: primaryTeal.withOpacity(0.3), width: 0.8),
+        side: BorderSide(
+          color: hasStock ? primaryTeal.withOpacity(0.5) : primaryTeal.withOpacity(0.3),
+          width: hasStock ? 1.0 : 0.8
+        ),
       ),
       child: ListTile(
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
-        title: Text(
-          product.produceName.isEmpty
-              ? (isTemp ? 'New Item (Editing...)' : 'Unnamed Produce')
-              : product.produceName,
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-            color: product.produceName.isEmpty ? subtleText : textOnWhite,
-          ),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                product.produceName.isEmpty
+                    ? (isTemp ? 'New Item (Editing...)' : 'Unnamed Produce')
+                    : product.produceName,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                  color: product.produceName.isEmpty ? subtleText : textOnWhite,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (hasStock) Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: primaryTeal.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: primaryTeal.withOpacity(0.3))
+              ),
+              child: Text(
+                '$currentStock in stock',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: darkTeal,
+                ),
+              ),
+            ),
+          ],
         ),
         subtitle: Padding(
           padding: const EdgeInsets.only(top: 4.0),
-          child: Text(
-            // Show some nutritional info or placeholder
-            product.calories != null
-                ? '${product.calories} kcal${product.unitGrams != null ? ' / ${product.unitGrams}g' : ''}'
-                : (isTemp ? '...' : 'Nutritional info missing'),
-            style: TextStyle(fontSize: 11, color: subtleText.withOpacity(0.8)),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  // Show some nutritional info or placeholder
+                  product.calories != null
+                      ? '${product.calories} kcal${product.unitGrams != null ? ' / ${product.unitGrams}g' : ''}'
+                      : (isTemp ? '...' : 'Nutritional info missing'),
+                  style: TextStyle(fontSize: 11, color: subtleText.withOpacity(0.8)),
+                ),
+              ),
+              if (_selectedProduceIds.contains(product.produceId)) 
+                const Icon(Icons.check_circle, color: primaryTeal, size: 16),
+            ],
           ),
         ),
         trailing: isTemp
@@ -3176,29 +3236,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
                 child: Center(
                     child: CircularProgressIndicator(
                         strokeWidth: 2))) // Indicate saving/loading
-            : Row(
-                // Action buttons for existing items
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // IconButton( // Commented out edit button
-                  //   icon: const Icon(Icons.edit_outlined, size: 20),
-                  //   color: actionButtonForeground, // Use defined color
-                  //   tooltip: 'Edit Item Details',
-                  //   padding: EdgeInsets.zero,
-                  //   constraints: const BoxConstraints(), // Compact button
-                  //    onPressed: () => _handleEditProduce(product), // Open edit form
-                  // ),
-                  // const SizedBox(width: 4), // Space between buttons
-                  // IconButton( // Commented out delete button
-                  //   icon: const Icon(Icons.delete_outline, size: 20),
-                  //   color: destructiveButtonForeground, // Use defined color
-                  //   tooltip: 'Delete Item',
-                  //   padding: EdgeInsets.zero,
-                  //    constraints: const BoxConstraints(), // Compact button
-                  //   onPressed: () => _handleDeleteProduce(product), // Show delete confirmation
-                  // ),
-                ],
-              ),
+            : null,
         // Allow tapping the whole tile to edit as well
         onTap: isTemp ? null : () => _handleEditProduce(product),
       ),
