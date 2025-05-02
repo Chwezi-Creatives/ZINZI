@@ -6,13 +6,10 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
-
 import 'package:google_fonts/google_fonts.dart';
-import 'orderstatus polls.dart' as order_status; // Import with prefix for OrderStatusScreen
+import 'orderstatus polls.dart' as order_status;
 
-
-final String apibaseurl =
-    dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
+final String apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 
 class CheckoutScreen extends StatefulWidget {
   final List<Map<String, dynamic>> items;
@@ -29,13 +26,6 @@ class CheckoutScreen extends StatefulWidget {
 }
 
 class _CheckoutScreenState extends State<CheckoutScreen> {
-  String _extractGuests(dynamic numberOfPeople) {
-    if (numberOfPeople == null) return 'ugx';
-    final str = numberOfPeople.toString();
-    final match = RegExp(r'\d+').firstMatch(str);
-    return match != null ? match.group(0)! : 'ugx';
-  }
-
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -48,6 +38,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   String _location = '';
   late double _scaleFactor;
   late Timer _timer;
+
+  String _extractGuests(dynamic numberOfPeople) {
+    if (numberOfPeople == null) return 'ugx';
+    final str = numberOfPeople.toString();
+    final match = RegExp(r'\d+').firstMatch(str);
+    return match != null ? match.group(0)! : 'ugx';
+  }
 
   @override
   void initState() {
@@ -164,150 +161,127 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
     setState(() => _isLoading = true);
 
+    int? userId;
     try {
       final prefs = await SharedPreferences.getInstance();
-      final userId = prefs.getInt('user_id');
+      userId = prefs.getInt('user_id');
 
       if (userId == null) {
         _showSnackBar('User is not logged in.');
         setState(() => _isLoading = false);
         return;
       }
+    } catch (e) {
+      print('Error getting user ID: $e');
+      _showSnackBar('Failed to get user information. Please try again.');
+      setState(() => _isLoading = false);
+      return;
+    }
 
-      // Determine order_type based on items in the cart
-      // Set orderType to the actual product type (e.g., spice, gadget, etc.)
-      String orderType = (() {
-        if (widget.items.isNotEmpty) {
-          final first = widget.items.first;
-          if (first.containsKey('meal') && first['meal'] is Map && first['meal']['order_type'] != null) {
-            return first['meal']['order_type'].toString();
-          }
-          if (first['type'] != null) {
-            return first['type'].toString();
-          }
-        }
-        return 'meal';
-      })();
+    // Process each item as a separate order
+    List<String> orderIds = [];
+    double totalProcessedPrice = 0.0;
 
-      // Support multiple gigs and multiple meals in a single order
-      List<Map<String, dynamic>> itemsPayload = widget.items.map((item) {
-        if (item['type'] == 'gig') {
-          final gigDetails = item['gigDetails'] as Map<String, dynamic>? ?? {};
-          return {
-            'user_id': userId.toString(),
-            'chef_id': gigDetails['chef_id'],
-            'producer_id': gigDetails['producer_id'],
-            'gig_details': {
-              'gig_type': gigDetails['gig_type'],
-              'location': gigDetails['location'],
-              'scheduled_date': gigDetails['scheduled_date'],
-              'time': gigDetails['time'],
-              'estimated_duration': gigDetails['estimated_duration'],
-              'number_of_people': gigDetails['number_of_people'],
-              'price': gigDetails['price'],
-              'detailed_description': gigDetails['detailed_description'],
-            }
-          };
-        } else {
-          // Assume meal type
-          // Dynamically extract the product_id key (e.g., spice_id, gadget_id, etc.) and order_type
-          final meal = item['meal'] as Map<String, dynamic>? ?? {};
-          final orderType = meal['order_type']?.toString() ?? 'meal';
-          final productIdEntry = meal.entries.firstWhere(
-            (e) => e.key.endsWith('_id') && e.key != 'chef_id' && e.key != 'producer_id',
-            orElse: () => const MapEntry('product_id', null),
-          );
-          return {
-            'order_type': orderType,
-            'type': orderType, // Map order_type to type as requested
-            // Use the actual id key and value (e.g., 'spice_id': '12')
-            productIdEntry.key: productIdEntry.value?.toString(),
-            'product_id': productIdEntry.value?.toString(), // Always copy to 'product_id' for backend
-            'quantity': (item['quantity'] as num?)?.toInt(),
-            'price': (item['price'] as num?)?.toDouble(),
-            'chef_id': item['selectedchef']?['chefid']?.toString(),
-            'producer_id': item['selectedproducer']?['producer_id']?.toString(),
-            'bestservedwith': item['bestservedwith'] ?? [],
-          };
-        }
-      }).toList();
-
-
-      // Find the first chef_id and producer_id for summary fields
-      String? firstChefId;
-      String? firstProducerId;
-      for (final item in widget.items) {
-        if (item['type'] == 'gig') {
-          final gigDetails = item['gigDetails'] as Map<String, dynamic>? ?? {};
-          if (gigDetails['chef_id'] != null && firstChefId == null) {
-            firstChefId = gigDetails['chef_id']?.toString();
-          }
-          if (gigDetails['producer_id'] != null && firstProducerId == null) {
-            firstProducerId = gigDetails['producer_id']?.toString();
-          }
-        } else {
-          if (item['selectedchef']?['chefid'] != null && firstChefId == null) {
-            firstChefId = item['selectedchef']?['chefid']?.toString();
-          }
-          if (item['selectedproducer']?['producer_id'] != null && firstProducerId == null) {
-            firstProducerId = item['selectedproducer']?['producer_id']?.toString();
-          }
-        }
+    for (final item in widget.items) {
+      // Determine order_type for this item
+      String orderType = 'meal';
+      if (item.containsKey('meal') && item['meal'] is Map && item['meal']['order_type'] != null) {
+        orderType = item['meal']['order_type'].toString();
+      } else if (item['type'] != null) {
+        orderType = item['type'].toString();
       }
 
+      // Prepare order payload for this single item
+      Map<String, dynamic> itemPayload;
+      if (item['type'] == 'gig') {
+        final gigDetails = item['gigDetails'] as Map<String, dynamic>? ?? {};
+        itemPayload = {
+          'user_id': userId.toString(),
+          'chef_id': gigDetails['chef_id'],
+          'producer_id': gigDetails['producer_id'],
+          'gig_details': {
+            'gig_type': gigDetails['gig_type'],
+            'location': gigDetails['location'],
+            'scheduled_date': gigDetails['scheduled_date'],
+            'time': gigDetails['time'],
+            'estimated_duration': gigDetails['estimated_duration'],
+            'number_of_people': gigDetails['number_of_people'],
+            'price': gigDetails['price'],
+            'detailed_description': gigDetails['detailed_description'],
+          }
+        };
+      } else {
+        // Assume meal type
+        final meal = item['meal'] as Map<String, dynamic>? ?? {};
+        final productIdEntry = meal.entries.firstWhere(
+          (e) => e.key.endsWith('_id') && e.key != 'chef_id' && e.key != 'producer_id',
+          orElse: () => const MapEntry('product_id', null),
+        );
+        itemPayload = {
+          'order_type': orderType,
+          'type': orderType,
+          productIdEntry.key: productIdEntry.value?.toString(),
+          'product_id': productIdEntry.value?.toString(),
+          'quantity': (item['quantity'] as num?)?.toInt(),
+          'price': (item['price'] as num?)?.toDouble(),
+          'chef_id': item['selectedchef']?['chefid']?.toString(),
+          'producer_id': item['selectedproducer']?['producer_id']?.toString(),
+          'bestservedwith': item['bestservedwith'] ?? [],
+        };
+      }
+
+      // Create order payload for this single item
       Map<String, dynamic> orderPayload = {
         'order_type': orderType,
         'user_id': userId.toString(),
-        'items': itemsPayload,
+        'items': [itemPayload], // Only one item per order
         'delivery_address': _location.isNotEmpty ? _location : _addressController.text,
         'notes': _notesController.text,
         'payment_mode': _selectedPaymentMethod.toLowerCase(),
-        'total_price': widget.totalPrice,
-        'chef_id': firstChefId,
-        'producer_id': firstProducerId,
+        'total_price': (item['price'] as num?)?.toDouble() ?? 0.0,
+        'chef_id': item['selectedchef']?['chefid']?.toString(),
+        'producer_id': item['selectedproducer']?['producer_id']?.toString(),
       };
 
+      print('Submitting order for item: ' + item.toString());
       print('Order Payload: ' + orderPayload.toString());
 
+      // Submit the order
       final response = await http.post(
         Uri.parse('$apibaseurl/rr/Aorders'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode(orderPayload),
       );
 
-      print('API Response Status: ${response.statusCode}');
-      print('API Response Body: ${response.body}');
-
       if (response.statusCode == 201) {
         final responseData = json.decode(response.body);
         final orderId = responseData['order_id'];
-
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => order_status.OrderStatusScreen(
-              userId: userId,
-              orderIdList: [orderId],
-              orderId: orderId,
-            ),
-          ),
-        );
+        orderIds.add(orderId);
+        totalProcessedPrice += (item['price'] as num?)?.toDouble() ?? 0.0;
+        print('Successfully submitted order $orderId for item: ' + item.toString());
       } else {
-        throw Exception('Failed to place order: ${response.statusCode}');
+        throw Exception('Failed to place order for item: ${item.toString()}. Response: ${response.statusCode}');
       }
-    } catch (e, stack) {
-      print('Order submission error: $e');
-      print('Stack trace: $stack');
-      _showSnackBar('Failed to place order. Please try again.');
-    } finally {
-      setState(() => _isLoading = false);
+    }
+
+    // After all orders are processed
+    if (orderIds.isNotEmpty) {
+      // Navigate to order status screen with all order IDs
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => order_status.OrderStatusScreen(
+            userId: userId!,
+            orderIdList: orderIds.map(int.parse).toList(),
+            orderId: int.parse(orderIds.first), // Show first order ID by default
+          ),
+        ),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Debug log: print what checkout receives as cartItems
-
     return Scaffold(
       drawer: const AppDrawer(),
       appBar: AppBar(
@@ -386,20 +360,19 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                             fontSize: 13,
                                           ),
                                         ),
-
                                       ],
                                     ),
                                     Text(
-                                       () {
-                                         final gigPrice = (item['gigDetails']?['price'] is num)
-                                             ? (item['gigDetails']['price'] as num)
-                                             : (item['price'] ?? 0.0);
-                                         return 'ugx ${gigPrice.toStringAsFixed(2)}';
-                                       }(),
-                                       style: GoogleFonts.poppins(
-                                         color: Colors.teal[700],
-                                       ),
-                                     ),
+                                      () {
+                                        final gigPrice = (item['gigDetails']?['price'] is num)
+                                            ? (item['gigDetails']['price'] as num)
+                                            : (item['price'] ?? 0.0);
+                                        return 'ugx ${gigPrice.toStringAsFixed(2)}';
+                                      }(),
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.teal[700],
+                                      ),
+                                    ),
                                   ],
                                 ),
                                 if (item['gigDetails'] != null && item['gigDetails']['chef_name'] != null && item['gigDetails']['chef_name'].toString().isNotEmpty)
@@ -507,14 +480,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           controller: TextEditingController(text: _location),
                           decoration: InputDecoration(
                             labelText: 'Location',
-                            labelStyle:
-                                GoogleFonts.poppins(color: Colors.teal[400]),
+                            labelStyle: GoogleFonts.poppins(color: Colors.teal[400]),
                             suffixIcon: _isLocationLoading
                                 ? SizedBox(
                                     width: 24.0,
                                     height: 24.0,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2.0),
+                                    child: CircularProgressIndicator(strokeWidth: 2.0),
                                   )
                                 : IconButton(
                                     icon: Icon(Icons.location_on),
@@ -553,7 +524,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           TextFormField(
                             controller: _nameController,
                             decoration: InputDecoration(
-                                labelText: 'Full Name',
+                              labelText: 'Full Name',
                               prefixIcon: Icon(Icons.person),
                             ),
                             style: GoogleFonts.poppins(),
@@ -562,7 +533,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           TextFormField(
                             controller: _notesController,
                             decoration: InputDecoration(
-                                labelText: 'Special Instructions',
+                              labelText: 'Special Instructions',
                               prefixIcon: Icon(Icons.notes),
                             ),
                             maxLines: 3,
@@ -586,8 +557,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.teal[800],
                         foregroundColor: Colors.white,
-                        padding:
-                            EdgeInsets.symmetric(horizontal: 50, vertical: 15),
+                        padding: EdgeInsets.symmetric(horizontal: 50, vertical: 15),
                         textStyle: GoogleFonts.poppins(fontSize: 18),
                       ),
                       child: _isLoading

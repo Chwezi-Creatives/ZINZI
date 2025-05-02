@@ -1,6 +1,6 @@
 plugins {
-    id("com.android.application")  // Make sure the Android application plugin is applied
-    id("kotlin-android")  // For Kotlin support (if using Kotlin)
+    id("com.android.application") version "8.2.1" // Make sure the Android application plugin is applied
+    id("kotlin-android") version "1.9.0" // For Kotlin support (if using Kotlin)
 }
 
 android {

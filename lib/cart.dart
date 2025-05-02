@@ -5,8 +5,8 @@ import 'package:zinzi2/app_drawer_unified.dart'
     as drawer; // Import the unified AppDrawer widget with prefix
 
 import 'package:google_fonts/google_fonts.dart';
-import 'app_drawer_unified.dart'; // May be redundant if drawer.AppDrawer is used
 import 'package:zinzi2/checkout.dart';
+import 'app_drawer_unified.dart'; // May be redundant if drawer.AppDrawer is used
 
 // ***************************************************************
 // *          SINGLE SOURCE OF TRUTH FOR CART & FAVORITES        *
@@ -1110,7 +1110,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
         MaterialPageRoute(
           builder: (context) => CheckoutScreen(
             items: cartItems, // Pass the current snapshot of items
-            totalPrice: totalAmount, // Pass the current total
+            totalPrice: totalAmount, // Pass the rrent total
           ),
         ),
       );

@@ -1,10 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import the dotenv package
-import 'splash.dart'; // Assuming your splash screen is in the 'splash.dart' file
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:provider/provider.dart';
+import 'notifications/notification_provider.dart';
+import '../app_drawer_unified.dart';
 import 'http_overrides.dart';
-import 'widgets/app_drawer.dartp'; // Add this import
+import 'splash.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,14 +31,19 @@ void main() async {
 }
 
 class MyApp extends StatelessWidget {
+  const MyApp({Key? key}) : super(key: key);
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primarySwatch: Colors.teal,
+    return Provider<NotificationProvider>(
+      create: (_) => NotificationProvider(),
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          primarySwatch: Colors.teal,
+        ),
+        home: SplashScreen(),
       ),
-      home: SplashScreen(), // Replace with your starting page
     );
   }
 }

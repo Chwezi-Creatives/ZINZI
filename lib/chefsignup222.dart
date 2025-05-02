@@ -1115,7 +1115,7 @@ class _MultiSelectDialogState extends State<MultiSelectDialog> {
   @override
   void initState() {
     super.initState();
-    selectedItems = Set<String>.from(widget.initialSelectedValues ?? {});
+    selectedItems = Set<String>.from(widget.initialSelectedValues ?? []);
   }
 
   @override
