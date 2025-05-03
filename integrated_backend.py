@@ -25,11 +25,15 @@ import stripe # Keep sync for now
 import requests # Keep sync for now
 
 # --- FastAPI Imports ---
-from fastapi import FastAPI, Request, Depends, HTTPException, status, Body, Query, Path
+from fastapi import FastAPI, Request, Depends, HTTPException, status, Body, Query, Path, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager # For lifespan manager
 from fastapi.responses import ORJSONResponse # Use ORJSON
+import json
+import asyncio
+from typing import Dict, Any
+from notifications import Notifications # Import Notifications class
 
 # --- Configuration Loading ---
 load_dotenv()
@@ -138,6 +142,8 @@ async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
         )
     # Acquire connection from pool; automatically released when block exits
     async with db_pool.acquire() as connection:
+        # Set the session timezone to Africa/Kampala
+        await connection.execute("SET TIMEZONE = 'Africa/Kampala'");
         # Optional: Set transaction isolation level or other session settings here if needed
         # await connection.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
         yield connection
@@ -498,6 +504,47 @@ class AuthenticationAndUsers(BaseRepository):
         if not set_clauses: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields.")
         sql=f"UPDATE user_preferences SET {','.join(set_clauses)} WHERE preference_id=${idx}"; params.append(preference_id)
         await self._execute_query(conn, sql, tuple(params)); logger.info(f"Updated preference ID: {preference_id}")
+
+    async def update_user(self, conn: asyncpg.Connection, user_id: int, updates: Dict[str, Any]) -> bool:
+        """Updates user data in the users table."""
+        updates_lower = lowercase_keys(updates)
+        set_clauses = []
+        params = []
+        idx = 1
+        # Define allowed fields for update based on create_user and list_users
+        allowed = ['name', 'email', 'password', 'is_email_verified', 'user_type', 'image']
+
+        if not updates_lower:
+             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields provided for update.")
+
+        for k, v in updates_lower.items():
+            if k in allowed:
+                # Special handling for password
+                if k == 'password':
+                    hashed_pw = hash_password(v)
+                    set_clauses.append(f"hashed_password=${idx}")
+                    params.append(hashed_pw)
+                else:
+                    set_clauses.append(f"{k}=${idx}")
+                    params.append(v)
+                idx += 1
+
+        if not set_clauses:
+             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields provided for update.")
+
+        sql = f"UPDATE users SET {','.join(set_clauses)} WHERE user_id=${idx} RETURNING user_id"
+        params.append(user_id)
+
+        # Use _execute_query to run the update and check if a row was affected
+        # fetchval with RETURNING user_id will return the user_id if the update affected a row
+        updated_user_id = await self._execute_query(conn, sql, tuple(params), returning_id_column='user_id')
+
+        if updated_user_id == user_id:
+            logger.info(f"Successfully updated user ID: {user_id}")
+            return True
+        else:
+            logger.warning(f"Attempted to update non-existent user ID: {user_id}")
+            return False # User not found or update didn't affect any rows
 
     async def list_preferences(self, conn: asyncpg.Connection, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
         # ... (implementation uses _execute_query with conn) ...
@@ -1176,17 +1223,51 @@ class Supplements(BaseRepository):
         else: logger.warning(f"Attempt delete non-existent supplement ID: {supplement_id}"); return False
 
 
-#orders class starts here, base repo alreay imlemented up there
+#orders class starts here, base repo alreay imlemented up there no need of reimplementing it
+#orders class starts here, base repo alreay imlemented up there no need of reimplementing it
 class Orders(BaseRepository):
     ALLOWED_ORDER_TYPES = {'meal', 'supplement', 'gig', 'herbal', 'gadget', 'spice', 'produce'}
     ALLOWED_ORDER_STATUSES = {'cancelled', 'assigned','anyrider', 'rider_accepted','rider_rejected','delivered', 'shipped', 'preparing', 'confirmed','completed', 'pending', 'accepted', 'dispatched', 'picked up', 'delivering'}
     ALLOWED_PAYMENT_STATUSES = {'failed', 'refunded', 'paid', 'pending', 'completed'}
     ALLOWED_PAYMENT_MODES = {'cash', 'momo', 'mobile money', 'Airtel Card', 'paypal', 'stripe', 'debit card', 'credit card'}
+    
+    async def notify_order_status_change(self, conn: asyncpg.Connection, order: dict, new_status: str):
+        """Notify all concerned parties about order status change."""
+        concerned_parties = []
+        
+        if order['user_id']:
+            concerned_parties.append(('user', order['user_id']))
+        if order['chef_id']:
+            concerned_parties.append(('chef', order['chef_id']))
+        if order['producer_id']:
+            concerned_parties.append(('producer', order['producer_id']))
+        if order['transporter_id']:
+            concerned_parties.append(('transporter', order['transporter_id']))
+        
+        # Create notifications for all concerned parties
+        for role, user_id in concerned_parties:
+            message = f"Order #{order['order_id']} status changed to {new_status}"
+            await notifications.create_notification(
+                conn, user_id, 'order_status_changed', order_id=order['order_id'],
+                chef_id=order['chef_id'] if role == 'chef' else None,
+                producer_id=order['producer_id'] if role == 'producer' else None,
+                transporter_id=order['transporter_id'] if role == 'transporter' else None,
+                message=message,
+                data={'previous_status': order['status'], 'new_status': new_status}
+            )
+        
+        # Add to notification queue for WebSocket broadcast
+        for role, user_id in concerned_parties:
+            manager.notification_queue.put_nowait({
+                'user_id': user_id,
+                'type': 'order_status_changed',
+                'data': {'order_id': order['order_id'], 'status': new_status}
+            })
 
     async def _validate_product_id(self, conn: asyncpg.Connection, product_id: Union[str, int], order_type: str):
         if not product_id:
             if order_type != 'gig':
-                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"product_id required for {order_type} orders.")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"product_id required for {order_type} orders.")
             else: return
         order_type_l = order_type.lower().strip()
         table_map = {'meal': ('meals', 'meal_id'), 'supplement': ('supplements', 'supplement_id'), 'herbal': ('herbals', 'herbal_id'), 'gadget': ('gadgets', 'gadget_id'), 'spice': ('spices', 'spice_id'), 'produce': ('produce', 'produce_id')}
@@ -1296,7 +1377,7 @@ class Orders(BaseRepository):
                 o.gig_details, o.complementary_meals,
                 -- o.created_at, -- REMOVED
                 o.updated_at,      -- KEPT (VERIFY this column exists!)
-                COALESCE( md.meal_name, supd.product_name, hd.product_name, gd.product_name, sd.product_name, prod.product_name, CASE WHEN o.order_type = 'gig' THEN 'Gig Order' ELSE 'Unknown Product' END ) AS product_name,
+                COALESCE( md.meal_name, supd.product_name, hd.product_name, gd.product_name, sd.product_name, prod.product_name, CASE WHEN o.order_type = 'gig' THEN o.gig_details->>'gig_type' ELSE 'Unknown Product' END ) AS product_name,
                 md.ingredients, producer.name AS producer_name, producer.location AS producer_address, chef.name AS chef_name, chef.location AS chef_address, transporter.name AS transporter_name, COALESCE(chef.location, producer.location, '') AS pickup_location
             FROM orders o
             LEFT JOIN MealDetails md ON o.product_id = md.meal_id AND o.order_type = 'meal' LEFT JOIN SupplementDetails supd ON o.product_id = supd.supplement_id AND o.order_type = 'supplement' LEFT JOIN HerbalDetails hd ON o.product_id = hd.herbal_id AND o.order_type = 'herbal' LEFT JOIN GadgetDetails gd ON o.product_id = gd.gadget_id AND o.order_type = 'gadget' LEFT JOIN SpiceDetails sd ON o.product_id = sd.spice_id AND o.order_type = 'spice' LEFT JOIN ProduceDetails prod ON o.product_id = prod.produce_id AND o.order_type = 'produce'
@@ -1331,33 +1412,122 @@ class Orders(BaseRepository):
         return processed_results
 
 
-    async def update_order_status(self, conn: asyncpg.Connection, order_id: int, new_status: str, transporter_id: Optional[int] = None) -> Dict[str, Any]:
+    async def update_order_status(self, conn: asyncpg.Connection, order_id: int, new_status: str, transporter_id: Optional[int] = None, completion_code: Optional[str] = None) -> Dict[str, Any]:
+        # Get the order first
+        order_list = await self.read_orders(conn, order_id=order_id)
+        if not order_list:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+
+        # Get the single order dictionary from the list
+        order = order_list[0]
+
+        order_id_i = order.get('order_id') # Ensure we have the integer order_id from the fetched order
+        if order_id_i is None:
+            logger.error(f"Fetched order for ID {order_id} is missing order_id.")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal error processing order data.")
+
+
         new_status_l = str(new_status).lower().strip()
-        if new_status_l not in self.ALLOWED_ORDER_STATUSES: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid status: '{new_status}'. Allowed: {', '.join(self.ALLOWED_ORDER_STATUSES)}")
-        try: order_id_i = int(order_id)
-        except (ValueError, TypeError): raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid order_id format: '{order_id}'. Must be an integer.")
-        params: List[Any] = []
-        # *** ASSUMPTION: 'updated_at' column exists for status updates ***
-        # If it doesn't exist, remove 'updated_at = NOW()' part too.
+        if new_status_l not in self.ALLOWED_ORDER_STATUSES:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid status: '{new_status}'. Allowed: {', '.join(self.ALLOWED_ORDER_STATUSES)}")
+
+        status_to_update = new_status_l # Default status to update
+
+        # Logic for 'completed' or 'delivered' status updates
+        if new_status_l in ['completed', 'delivered']:
+            if completion_code is None:
+                # External source wants to trigger verification
+                status_to_update = 'verification needed'
+                logger.info(f"Order {order_id_i}: Setting status to 'verification needed' and generating completion code.")
+
+                # Check if a completion code already exists for this order
+                existing_code_sql = "SELECT completion_code FROM order_completions WHERE order_id = $1"
+                existing_code = await conn.fetchval(existing_code_sql, order_id_i)
+
+                if existing_code is None:
+                    # Generate and store a new completion code
+                    generated_code = ''.join(random.choices(string.digits, k=6))
+                    user_id = order.get('user_id')
+                    producer_id = order.get('producer_id')
+                    transporter_id_from_order = order.get('transporter_id')
+                    chefid = order.get('chefid')
+
+                    # Ensure one of the required IDs are present before inserting
+                    # Ensure user_id and order_id are present before inserting
+                    if user_id is not None and order_id_i is not None:
+                        insert_completion_sql = """
+                        INSERT INTO order_completions (order_id, user_id, producer_id, transporter_id, chefid, completion_code)
+                        VALUES ($1, $2, $3, $4, $5, $6)
+                        """
+                        try:
+                            await conn.execute(insert_completion_sql, order_id_i, user_id, producer_id, transporter_id_from_order, chefid, generated_code)
+                            logger.info(f"Completion code generated and stored for Order ID: {order_id_i}")
+                        except asyncpg.PostgresError as e:
+                            logger.error(f"Database error storing completion code for Order ID {order_id_i}: {e}", exc_info=True)
+                            # Log and continue, don't block status update
+                        except Exception as e:
+                            logger.error(f"Unexpected error storing completion code for Order ID {order_id_i}: {e}", exc_info=True)
+                            # Log and continue
+                    else:
+                         logger.warning(f"Missing mandatory IDs (user_id or order_id) to store completion code for Order ID {order_id_i}. User ID: {user_id}")
+                else:
+                    # Completion code already exists, inform the external source
+                    logger.info(f"Order {order_id_i}: Completion code already exists. Informing external source.")
+                    return {"message": f"Completion code already exists for Order ID {order_id_i}. Please ask the customer for the code.", "success": True, "verification_needed": True}
+
+            else:
+                # External source provided a completion code, attempt verification
+                logger.info(f"Order {order_id_i}: Attempting verification with provided code.")
+                stored_code_sql = "SELECT completion_code FROM order_completions WHERE order_id = $1"
+                stored_code = await conn.fetchval(stored_code_sql, order_id_i)
+
+                if stored_code and stored_code == completion_code:
+                    # Codes match, set status to 'completed'
+                    status_to_update = 'completed'
+                    logger.info(f"Order {order_id_i}: Verification successful. Status set to 'completed'.")
+                else:
+                    # Codes do not match or no stored code found
+                    logger.warning(f"Order {order_id_i}: Verification failed. Invalid or missing completion code.")
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or missing completion code for verification.")
+
+        # Prepare the SQL update statement based on the determined status_to_update
         sql_update_parts = ["order_status = $1", "updated_at = NOW()"]
-        params.append(new_status_l)
+        params: List[Any] = [status_to_update]
         param_counter = 2
-        if new_status_l in ['assigned', 'picked up', 'delivering'] and transporter_id is not None:
-             try:
-                 t_id = int(transporter_id)
-                 sql_update_parts.append(f"transporter_id = ${param_counter}")
-                 params.append(t_id); param_counter += 1
-             except (ValueError, TypeError): raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid transporter_id format: '{transporter_id}'. Must be an integer.")
-        elif new_status_l in ['assigned'] and transporter_id is None: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"transporter_id is required when setting status to 'assigned'.")
-        params.append(order_id_i)
-        sql = f"UPDATE orders SET {', '.join(sql_update_parts)} WHERE order_id = ${param_counter} RETURNING order_id"
+
+        # Include transporter_id update if applicable (existing logic)
+        if status_to_update in ['assigned', 'picked up', 'delivering'] and transporter_id is not None:
+            try:
+                t_id = int(transporter_id)
+                sql_update_parts.append(f"transporter_id = ${param_counter}")
+                params.append(t_id); param_counter += 1
+            except (ValueError, TypeError):
+                # This validation should ideally happen earlier, but keeping it here for minimal change
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid transporter_id format: '{transporter_id}'. Must be an integer.")
+        elif status_to_update in ['assigned'] and transporter_id is None:
+            # This validation should also ideally happen earlier
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"transporter_id is required when setting status to 'assigned'.")
+
+
+        params.append(order_id_i) # Add order_id as the last parameter
+
+        sql = f"UPDATE orders SET {','.join(sql_update_parts)} WHERE order_id = ${param_counter} RETURNING order_id"
+
+        # Execute the update query
         updated_id = await self._execute_query(conn, sql, tuple(params), returning_id_column='order_id')
+
         if updated_id == order_id_i:
-            log_msg = f"Order {order_id_i} status updated to '{new_status_l}'"
-            if transporter_id is not None and new_status_l in ['assigned', 'picked up', 'delivering']: log_msg += f" with transporter {transporter_id}"
-            logger.info(log_msg); return {"message": f"Order {order_id_i} status updated", "success": True}
-        elif updated_id is None: logger.warning(f"Attempted to update status for non-existent order_id: {order_id_i}"); raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Order {order_id_i} not found.")
-        else: logger.error(f"Order status update for {order_id_i} returned unexpected ID: {updated_id}"); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order status update failed unexpectedly.")
+            log_msg = f"Order {order_id_i} status updated to '{status_to_update}'"
+            if transporter_id is not None and status_to_update in ['assigned', 'picked up', 'delivering']:
+                log_msg += f" with transporter {transporter_id}"
+            logger.info(log_msg)
+            return {"message": f"Order {order_id_i} status updated to '{status_to_update}'", "success": True}
+        elif updated_id is None:
+            logger.warning(f"Attempted to update status for non-existent order_id: {order_id_i}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Order {order_id_i} not found.")
+        else:
+            logger.error(f"Order status update for {order_id_i} returned unexpected ID: {updated_id}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order status update failed unexpectedly.")
 
     async def delete_order(self, conn: asyncpg.Connection, order_id: int) -> Dict[str, Any]:
         try: order_id_i = int(order_id)
@@ -1367,6 +1537,8 @@ class Orders(BaseRepository):
         deleted_id = await self._execute_query(conn, sql, params, fetch_val=True)
         if deleted_id == order_id_i: logger.info(f"Order {order_id_i} deleted successfully."); return {"message": f"Order {order_id_i} deleted", "success": True}
         else: logger.warning(f"Attempted to delete non-existent order_id: {order_id_i}"); raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Order {order_id_i} not found.")
+
+
 
 # --- Disbursements Class ---
 class Disbursements(BaseRepository):
@@ -1916,13 +2088,260 @@ disbursement_handler = Disbursements()
 supplements_crud = Supplements()
 
 
-# --- FastAPI Endpoints (Updated to use Depends(get_db)) ---
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[int, WebSocket] = {}
+        self.notification_queue = asyncio.Queue()
+        self._retry_count: Dict[int, int] = {}
+        self._max_retries = 3
+        self._retry_delay = 5  # seconds
 
-@app.get('/rr')
+    async def connect(self, websocket: WebSocket, user_id: int):
+        try:
+            await websocket.accept()
+            self.active_connections[user_id] = websocket
+            self._retry_count[user_id] = 0
+            print(f"User {user_id} connected")
+            
+            # Start heartbeat for this connection
+            asyncio.create_task(self._heartbeat(user_id))
+            
+        except Exception as e:
+            print(f"Error connecting user {user_id}: {e}")
+            await websocket.close()
+            self._handle_error(user_id, e)
+
+    async def disconnect(self, user_id: int):
+        if user_id in self.active_connections:
+            try:
+                await self.active_connections[user_id].close()
+                del self.active_connections[user_id]
+                del self._retry_count[user_id]
+                print(f"User {user_id} disconnected")
+            except Exception as e:
+                print(f"Error disconnecting user {user_id}: {e}")
+
+    async def broadcast(self, user_id: int, message: dict):
+        if user_id in self.active_connections:
+            try:
+                await self.active_connections[user_id].send_json(message)
+                print(f"Message sent to user {user_id}")
+                self._retry_count[user_id] = 0  # Reset retry count on successful send
+            except Exception as e:
+                print(f"Error sending message to user {user_id}: {e}")
+                self._handle_error(user_id, e)
+
+    async def _heartbeat(self, user_id: int):
+        """Send periodic heartbeats to maintain connection"""
+        while user_id in self.active_connections:
+            try:
+                await asyncio.sleep(30)  # Send heartbeat every 30 seconds
+                if user_id in self.active_connections:
+                    await self.active_connections[user_id].send_text('ping')
+            except Exception as e:
+                print(f"Heartbeat error for user {user_id}: {e}")
+                self._handle_error(user_id, e)
+                break
+
+    def _handle_error(self, user_id: int, error: Exception):
+        """Handle connection errors with retry logic"""
+        if user_id not in self._retry_count:
+            self._retry_count[user_id] = 0
+
+        self._retry_count[user_id] += 1
+        
+        if self._retry_count[user_id] < self._max_retries:
+            delay = self._retry_delay * self._retry_count[user_id]
+            print(f"Retrying connection for user {user_id} in {delay}s (attempt {self._retry_count[user_id]}/{self._max_retries})")
+            asyncio.create_task(self._retry_connection(user_id, delay))
+        else:
+            print(f"Max retries reached for user {user_id}. Disconnecting.")
+            self.disconnect(user_id)
+
+    async def _retry_connection(self, user_id: int, delay: int):
+        """Attempt to reconnect after a delay"""
+        await asyncio.sleep(delay)
+        if user_id in self.active_connections:
+            try:
+                # Close existing connection first
+                await self.active_connections[user_id].close()
+                del self.active_connections[user_id]
+                
+                # Create new connection
+                websocket = WebSocket(self.active_connections[user_id].url)
+                await self.connect(websocket, user_id)
+            except Exception as e:
+                print(f"Retry failed for user {user_id}: {e}")
+                self._handle_error(user_id, e)
+
+    async def process_notifications(self):
+        """Process notification queue with error handling"""
+        while True:
+            try:
+                notification = await self.notification_queue.get()
+                user_id = notification['user_id']
+                message = {
+                    'type': notification['type'],
+                    'data': notification['data']
+                }
+                
+                if user_id not in self.active_connections:
+                    print(f"No active connection for user {user_id}")
+                    continue
+                
+                await self.broadcast(user_id, message)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"Error processing notification: {e}")
+
+    async def _cleanup_connections(self):
+        """Periodically clean up inactive connections"""
+        while True:
+            await asyncio.sleep(60)  # Clean up every 60 seconds
+            inactive_connections = [user_id for user_id, websocket in self.active_connections.items() if websocket.closed]
+            for user_id in inactive_connections:
+                del self.active_connections[user_id]
+                del self._retry_count[user_id]
+                print(f"Removed inactive connection for user {user_id}")
+
+    async def _process_notification_queue(self):
+        """Process notification queue"""
+        while True:
+            try:
+                notification = await self.notification_queue.get()
+                user_id = notification['user_id']
+                message = {
+                    'type': notification['type'],
+                    'data': notification['data']
+                }
+                
+                if user_id not in self.active_connections:
+                    print(f"No active connection for user {user_id}")
+                    continue
+                
+                await self.broadcast(user_id, message)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"Error processing notification: {e}")
+
+manager = ConnectionManager()
+
+# Initialize notification system
+notifications = Notifications()
+
+# Start notification processor as a background task
+notification_task = asyncio.create_task(notifications.process_notifications())
+
+# Add shutdown handler to the lifespan context manager
+@app.on_event("shutdown")
+async def shutdown_event():
+    # Gracefully shutdown the notification system
+    await notifications.shutdown()
+    # Wait for the notification task to complete
+    if not notification_task.done():
+        notification_task.cancel()
+        try:
+            await notification_task
+        except asyncio.CancelledError:
+            pass
+meal_fetcher = GetAllMeals()
+disbursement_handler = Disbursements()
+supplements_crud = Supplements()
+
+# Start notification processor
+asyncio.create_task(manager.process_notifications())
+
+# Start connection cleanup task
+asyncio.create_task(manager._cleanup_connections())
+
+# Start notification queue processor
+asyncio.create_task(manager._process_notification_queue())
+
+@app.get('/rr') #also used by my health status checking server o see if servr is up and okay
 @alru_cache(maxsize=1)
 async def welcome():
     """Welcome endpoint."""
     return {'message': 'Welcome to ZINZI.'} # Updated name
+
+# === WebSocket Endpoint ===
+@app.websocket("/ws/notifications/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: int):
+    try:
+        await manager.connect(websocket, user_id)
+        
+        while True:
+            try:
+                data = await websocket.receive_text()
+                # Handle any incoming messages if needed
+                if data == 'pong':
+                    continue  # Ignore pong responses
+                    
+                # Process incoming messages
+                message = json.loads(data)
+                if message.get('type') == 'heartbeat':
+                    continue  # Ignore heartbeat messages
+                    
+                # Handle other message types as needed
+                
+            except json.JSONDecodeError:
+                logger.error(f"Invalid JSON received from user {user_id}")
+                continue
+            except Exception as e:
+                logger.error(f"Error processing message from user {user_id}: {e}")
+                break
+                
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for user {user_id}")
+        manager.disconnect(user_id)
+    except Exception as e:
+        logger.error(f"WebSocket error for user {user_id}: {e}")
+        manager.disconnect(user_id)
+
+# === Notification Endpoints ===
+@app.post("/notifications")
+async def create_notification(notification_data: dict, conn: asyncpg.Connection = Depends(get_db)):
+    user_id = notification_data.get('user_id')
+    notification_type = notification_data.get('notification_type')
+    message = notification_data.get('message')
+    data = notification_data.get('data', {})
+    
+    notification_id = await notifications.create_notification(
+        conn, user_id, notification_type, 
+        order_id=notification_data.get('order_id'),
+        chef_id=notification_data.get('chef_id'),
+        producer_id=notification_data.get('producer_id'),
+        transporter_id=notification_data.get('transporter_id'),
+        message=message, data=data
+    )
+    
+    # Add to notification queue for WebSocket broadcast
+    manager.notification_queue.put_nowait({
+        'user_id': user_id,
+        'type': notification_type,
+        'data': data
+    })
+    
+    return {"notification_id": notification_id}
+
+@app.get("/notifications/unread")
+async def get_unread_notifications(user_id: int, conn: asyncpg.Connection = Depends(get_db)):
+    return await notifications.get_unread_notifications(conn, user_id)
+
+@app.put("/notifications/{notification_id}/read")
+async def mark_notification_as_read(notification_id: int, conn: asyncpg.Connection = Depends(get_db)):
+    await notifications.mark_as_read(conn, notification_id)
+    return {"message": "Notification marked as read"}
+
+@app.get("/notifications/settings")
+async def get_notification_settings(user_id: int, conn: asyncpg.Connection = Depends(get_db)):
+    return await notifications.get_notification_settings(conn, user_id)
+
+@app.put("/notifications/settings")
+async def update_notification_settings(user_id: int, settings: dict, conn: asyncpg.Connection = Depends(get_db)):
+    await notifications.update_notification_settings(conn, user_id, settings)
+    return {"message": "Notification settings updated"}
 
 # === USER Endpoints ===
 @app.post('/rr/signup_user', status_code=status.HTTP_201_CREATED)
@@ -1965,6 +2384,22 @@ async def get_user_by_id_endpoint(user_id: int = Path(..., gt=0), conn: asyncpg.
     data = await auth_users.list_users(conn, user_id=user_id) # Pass conn
     if data is None: raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='User not found')
     return {'message': 'User retrieved.', 'data': data}
+
+@app.put('/rr/users/{user_id}')
+async def update_user_endpoint(user_id: int = Path(..., gt=0), updates: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
+    """Endpoint to update a user by ID."""
+    auth_users = AuthenticationAndUsers()
+    try:
+        success = await auth_users.update_user(conn, user_id, updates)
+        if success:
+            return {'message': f'User {user_id} updated successfully.'}
+        else:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'User {user_id} not found.')
+    except HTTPException:
+        raise # Re-raise FastAPI HTTPExceptions
+    except Exception as e:
+        logger.error(f"Unexpected error updating user {user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='An unexpected server error occurred.') from e
 
 @app.delete('/rr/users/{user_id}', status_code=status.HTTP_200_OK)
 async def delete_user_endpoint(user_id: int, conn: asyncpg.Connection = Depends(get_db)):
@@ -2354,6 +2789,45 @@ async def create_order_endpoint(order_data: dict = Body(...), conn: asyncpg.Conn
         logger.error(f"Order creation error: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Order creation internal error.')
 
+@app.get('/rr/get_completion_code/{order_id}')
+async def get_completion_code_endpoint(order_id: int = Path(..., gt=0), user_id: Optional[int] = Query(None), conn: asyncpg.Connection = Depends(get_db)):
+    """
+    Fetches the completion code for a completed or delivered order.
+    Optionally filters by user_id.
+    """
+    sql = """
+    SELECT completion_code
+    FROM order_completions
+    WHERE order_id = $1
+    """
+    params: List[Any] = [order_id]
+    param_counter = 2
+
+    if user_id is not None:
+        sql += f" AND user_id = ${param_counter}"
+        params.append(user_id)
+
+    try:
+        completion_code = await conn.fetchval(sql, *params)
+        if completion_code:
+            log_msg = f"Fetched completion code for Order ID: {order_id}"
+            if user_id is not None:
+                log_msg += f", User ID: {user_id}"
+            logger.info(log_msg)
+            return {"completion_code": completion_code}
+        else:
+            log_msg = f"No completion code found for Order ID: {order_id}"
+            if user_id is not None:
+                log_msg += f", User ID: {user_id}"
+            logger.warning(log_msg)
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Completion code not found for this order and user combination (or order not completed/delivered).")
+    except asyncpg.PostgresError as e:
+        logger.error(f"Database error fetching completion code for Order ID {order_id}, User ID {user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An error occurred while fetching the completion code.") from e
+    except Exception as e:
+        logger.error(f"Unexpected error fetching completion code for Order ID {order_id}, User ID {user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected server error occurred.") from e
+
 @app.get('/rr/orders')
 async def get_orders_endpoint(order_id: Optional[int]=Query(None), chef_id: Optional[int]=Query(None), producer_id: Optional[int]=Query(None), user_id: Optional[int]=Query(None), transporter_id: Optional[int]=Query(None), conn: asyncpg.Connection=Depends(get_db)):
     data = await orders_crud.read_orders(conn=conn, order_id=order_id, chef_id=chef_id, producer_id=producer_id, user_id=user_id, transporter_id=transporter_id) # Pass conn
@@ -2361,10 +2835,25 @@ async def get_orders_endpoint(order_id: Optional[int]=Query(None), chef_id: Opti
 
 @app.patch('/rr/orders/{order_id}/status')
 async def update_order_status_endpoint(order_id: int, status_update: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
-    if 'order_status' not in status_update: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Requires "order_status"')
-    new_status=status_update['order_status']; transporter_id=status_update.get('transporter_id')
-    if str(new_status).lower().strip()=='assigned' and transporter_id is None: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='"assigned" status needs "transporter_id"')
-    result = await orders_crud.update_order_status(conn, order_id, new_status, transporter_id) # Pass conn
+    if 'order_status' not in status_update:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Requires "order_status"')
+
+    new_status = status_update['order_status']
+    transporter_id = status_update.get('transporter_id') # Optional transporter_id
+    completion_code = status_update.get('completion_code') # Optional completion_code
+
+    # Add validation for transporter_id if status is 'assigned'
+    if str(new_status).lower().strip() == 'assigned' and transporter_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='"assigned" status needs "transporter_id"')
+
+    # Assuming orders_crud is an instance of the Orders class
+    result = await orders_crud.update_order_status(
+        conn=conn,
+        order_id=order_id,
+        new_status=new_status,
+        transporter_id=transporter_id,
+        completion_code=completion_code # Pass the optional completion_code
+    )
     # update_order_status now returns dict on success or raises exception
     return result
 
@@ -2382,18 +2871,28 @@ async def create_metric_endpoint(metric_data: dict = Body(...), conn: asyncpg.Co
     return {'message': 'Metric created', 'data': result}
 
 @app.get('/rr/metrics')
-async def get_metrics_endpoint(user_id: Optional[int] = Query(None), conn: asyncpg.Connection = Depends(get_db)):
-    data = await auth_users.list_metrics(conn, user_id=user_id) # Pass conn
-    return {'message': 'Metrics retrieved.', 'data': data}
+async def list_all_metrics_endpoint(conn: asyncpg.Connection = Depends(get_db)):
+    """List all user metrics."""
+    repo = AuthenticationAndUsers()
+    metrics = await repo.list_metrics(conn)
+    return {"metrics": metrics}
+
+@app.get('/rr/metrics/{user_id}')
+async def list_user_metrics_endpoint(user_id: int = Path(..., gt=0), conn: asyncpg.Connection = Depends(get_db)):
+    """List metrics for a specific user by user ID."""
+    repo = AuthenticationAndUsers()
+    metrics = await repo.list_metrics(conn, user_id=user_id)
+    if not metrics:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Metrics not found for user ID {user_id}")
+    return {"metrics": metrics}
 
 @app.put('/rr/metrics/{metric_id}')
 @app.patch('/rr/metrics/{metric_id}')
 async def update_metric_endpoint(metric_id: int, updates: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
-    await auth_users.update_metric(conn, metric_id, updates) # Pass conn
-    updated = await auth_users.list_metrics(conn, user_id=None) # Refetch to check? Or assume success
-    # Find the specific metric if needed to return
-    updated_metric = next((m for m in updated if m.get('metric_id') == metric_id), None)
-    return {'message': 'Metric updated successfully', 'data': updated_metric or f"Metric {metric_id} not found after update"}
+    """Update a user metric by ID."""
+    repo = AuthenticationAndUsers()
+    await repo.update_metric(conn, metric_id, updates)
+    return {"message": f"Metric {metric_id} updated successfully."}
 
 
 @app.delete('/rr/metrics/{metric_id}', status_code=status.HTTP_501_NOT_IMPLEMENTED)
@@ -2407,17 +2906,28 @@ async def create_preference_endpoint(preference_data: dict = Body(...), conn: as
     return {'message': 'Preference created', 'data': result}
 
 @app.get('/rr/preferences')
-async def get_preferences_endpoint(user_id: Optional[int] = Query(None), conn: asyncpg.Connection = Depends(get_db)):
-    data = await auth_users.list_preferences(conn, user_id=user_id) # Pass conn
-    return {'message': 'Preferences retrieved.', 'data': data}
+async def list_all_preferences_endpoint(conn: asyncpg.Connection = Depends(get_db)):
+    """List all user preferences."""
+    repo = AuthenticationAndUsers()
+    preferences = await repo.list_preferences(conn)
+    return {"preferences": preferences}
+
+@app.get('/rr/preferences/{user_id}')
+async def list_user_preferences_endpoint(user_id: int = Path(..., gt=0), conn: asyncpg.Connection = Depends(get_db)):
+    """List preferences for a specific user by user ID."""
+    repo = AuthenticationAndUsers()
+    preferences = await repo.list_preferences(conn, user_id=user_id)
+    if not preferences:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Preferences not found for user ID {user_id}")
+    return {"preferences": preferences}
 
 @app.put('/rr/preferences/{preference_id}')
 @app.patch('/rr/preferences/{preference_id}')
 async def update_preference_endpoint(preference_id: int, updates: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
-    await auth_users.update_preference(conn, preference_id, updates) # Pass conn
-    updated = await auth_users.list_preferences(conn, user_id=None) # Refetch?
-    updated_pref = next((p for p in updated if p.get('preference_id') == preference_id), None)
-    return {'message': 'Preference updated successfully', 'data': updated_pref or f"Preference {preference_id} not found after update"}
+    """Update a user preference by ID."""
+    repo = AuthenticationAndUsers()
+    await repo.update_preference(conn, preference_id, updates)
+    return {"message": f"Preference {preference_id} updated successfully."}
 
 
 @app.delete('/rr/preferences/{preference_id}', status_code=status.HTTP_501_NOT_IMPLEMENTED)
