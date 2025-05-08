@@ -6,11 +6,13 @@ import 'package:zinzi2/chef_net.dart';
 import 'package:zinzi2/nutrition+.dart';
 import 'package:zinzi2/sensei_view.dart';
 import 'Sensei_chat_in_house.dart';
+import 'package:zinzi2/app_drawer_unified.dart'; // Import AppDrawer
 
 class LandingPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: const AppDrawer(), // Add the AppDrawer here
       appBar: AppBar(
         title: Text('Welcome'),
         backgroundColor: Colors.teal[800],

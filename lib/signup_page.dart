@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:zinzi2/user_metrics.dart';
+import 'notifications/fcm_service.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 
@@ -247,6 +248,12 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setInt('user_id', userId);
+        await prefs.setString('user_type', 'User'); // Set user type in SharedPreferences
+        await prefs.setString('user_email', _emailController.text.trim()); // Set user email in SharedPreferences
+        await prefs.setBool('is_logged_in', true); // Set logged in status in SharedPreferences
+
+        // Register FCM token with user info (async, do not await)
+        FCMService.registerTokenWithUserInfo();
 
         // Navigate using the transition method
         Navigator.pushReplacement( // Use pushReplacement if you don't want to go back here

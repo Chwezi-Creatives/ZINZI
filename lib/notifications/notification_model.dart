@@ -1,83 +1,39 @@
-enum NotificationType {
-  order,
-  chef,
-  producer,
-  transporter,
-  social,
-  blog,
-  system,
-}
-
-enum NotificationSeverity {
-  info,
-  warning,
-  error,
-  success,
-}
-
 class NotificationModel {
   final String id;
-  final NotificationType type;
+  final String type;
   final String message;
-  final Map<String, dynamic>? data;
-  final DateTime createdAt;
+  final Map<String, dynamic> data;
+  final DateTime timestamp;
   final bool isRead;
-  final NotificationSeverity severity;
 
   NotificationModel({
     required this.id,
     required this.type,
     required this.message,
-    this.data,
-    required this.createdAt,
+    required this.data,
+    required this.timestamp,
     this.isRead = false,
-    this.severity = NotificationSeverity.info,
   });
 
   factory NotificationModel.fromJson(Map<String, dynamic> json) {
-    final type = json['type'];
-    final severity = json['severity'];
-    
     return NotificationModel(
-      id: json['id'],
-      type: type is int ? NotificationType.values[type] : NotificationType.order,
+      id: json['id'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
+      type: json['type'] ?? 'unknown',
       message: json['message'] ?? '',
-      data: json['data'] is Map ? json['data'] : null,
-      createdAt: DateTime.parse(json['created_at']),
-      isRead: json['is_read'] ?? false,
-      severity: severity is int ? NotificationSeverity.values[severity] : NotificationSeverity.info,
+      data: json['data'] ?? {},
+      timestamp: DateTime.parse(json['timestamp'] ?? DateTime.now().toIso8601String()),
+      isRead: json['isRead'] ?? false,
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
       'id': id,
-      'type': type.index,
+      'type': type,
       'message': message,
       'data': data,
-      'created_at': createdAt.toIso8601String(),
-      'is_read': isRead,
-      'severity': severity.index,
+      'timestamp': timestamp.toIso8601String(),
+      'isRead': isRead,
     };
-  }
-
-  NotificationModel copyWith({
-    String? id,
-    NotificationType? type,
-    String? message,
-    dynamic data,
-    DateTime? createdAt,
-    bool? isRead,
-    NotificationSeverity? severity,
-  }) {
-    return NotificationModel(
-      id: id ?? this.id,
-      type: type ?? this.type,
-      message: message ?? this.message,
-      data: data ?? this.data,
-      createdAt: createdAt ?? this.createdAt,
-      isRead: isRead ?? this.isRead,
-      severity: severity ?? this.severity,
-    );
   }
 }

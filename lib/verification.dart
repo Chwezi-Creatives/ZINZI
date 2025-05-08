@@ -19,7 +19,7 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _codeController = TextEditingController();
   bool _isLoading = false;
-  int? _userId; // Initialize userId as nullable
+  String? _userId; // Initialize userId as nullable string
   bool _isUserIdLoaded = false; // Track whether the user ID has been loaded
 
   @override
@@ -30,7 +30,9 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
 
   Future<void> _loadUserId() async {
     final prefs = await SharedPreferences.getInstance();
-    final loadedUserId = prefs.getInt('user_id');
+    // Try to get user_id as string first, fall back to int for backward compatibility
+    final loadedUserId = prefs.getString('user_id') ?? 
+                       prefs.getInt('user_id')?.toString();
 
     setState(() {
       _userId = loadedUserId; // Set the loaded user ID
@@ -55,11 +57,20 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
     });
 
     try {
+      // Convert user ID to int for the API if needed
+      final userIdInt = int.tryParse(_userId ?? '');
+      
+      if (userIdInt == null) {
+        throw Exception('Invalid user ID format');
+      }
+
       final response = await http.post(
         Uri.parse('$apibaseurl/rr/verify_user'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'user_id': _userId,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'user_id': userIdInt,
           'verification_code': _codeController.text.trim(),
         }),
       );

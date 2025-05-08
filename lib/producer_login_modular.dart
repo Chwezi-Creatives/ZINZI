@@ -4,16 +4,20 @@ import 'package:zinzi2/produ_dash22.dart';
 //import 'package:zinzi2/producer_dash_redesign.dartp';
 import 'base_login_modular.dart'; // Ensure you have the base_login_modular.dart file
 import 'package:shared_preferences/shared_preferences.dart';
+import 'notifications/fcm_service.dart';
 
 class ProducerLoginPageModular extends StatelessWidget {
   const ProducerLoginPageModular({Key? key}) : super(key: key);
 
-  Future<void> saveUserDetails(int producerId, String userType) async {
+  Future<void> saveUserDetails(String producerId, String userType) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setString('producer_id', producerId.toString()); // Save producer_id as a string
+    await prefs.setString('producer_id', producerId); // Already a string
     await prefs.setString('user_type', userType); // Save user_type
+    await prefs.setBool('is_logged_in', true);
     print('Producer ID saved: $producerId');
     print('User Type saved: $userType');
+    // Register FCM token with user info (async, do not await)
+    FCMService.registerTokenWithUserInfo();
   }
 
   @override
@@ -34,7 +38,8 @@ class ProducerLoginPageModular extends StatelessWidget {
         // Save user ID and user type to shared preferences
         SharedPreferences.getInstance().then((prefs) {
           prefs.setString('user_type', 'producer');
-          saveUserDetails(int.parse(userId), userType);
+          prefs.setString('user_id', userId);
+          saveUserDetails(userId, userType);
           // Navigate to the Producer Dashboard after saving user details
           Navigator.pushReplacement(
             context,

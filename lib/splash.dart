@@ -197,7 +197,9 @@ class _SplashScreenState extends State<SplashScreen>
 
     // Check login state
     final prefs = await SharedPreferences.getInstance();
-    final userId = prefs.getInt('user_id');
+    // Try to get user_id as string first, fall back to int for backward compatibility
+    final userId = prefs.getString('user_id') ?? 
+                 prefs.getInt('user_id')?.toString();
     final chefId = prefs.getString('chef_user_id');
     final producerId = prefs.getString('producer_id');
 

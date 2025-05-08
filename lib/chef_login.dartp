@@ -97,7 +97,7 @@ class _LoginPageState extends State<LoginPage>
         }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Login failed. Invalid credentials.')),
+          const SnackBar(content: Text('Login failed. wrong password or name.')),
         );
       }
     } catch (error) {

@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:zinzi2/stake_dash_redesign.dart';
-import 'package:zinzi2/stakeholderdash222.dart';
-import 'stake_dash.dart'; // Ensure this points to the correct dashboard class
+import 'package:zinzi2/stakeholderdash222.dart';// Ensure this points to the correct dashboard class
 import 'base_login_modular.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'notifications/fcm_service.dart';
 
 class StakeholderLoginPageModular extends StatelessWidget {
   const StakeholderLoginPageModular({Key? key}) : super(key: key);
@@ -12,6 +11,9 @@ class StakeholderLoginPageModular extends StatelessWidget {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setString('stakeholder_user_id', userId);
     await prefs.setString('stakeholder_user_type', userType);
+    await prefs.setBool('is_logged_in', true);
+    // Register FCM token with user info (async, do not await)
+    FCMService.registerTokenWithUserInfo();
   }
 
   @override

@@ -8,6 +8,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'orderstatus polls.dart' as order_status;
+import 'package:zinzi2/cart.dart'; // Import ShoppingCart
 
 final String apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 
@@ -256,9 +257,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       if (response.statusCode == 201) {
         final responseData = json.decode(response.body);
         final orderId = responseData['order_id'];
-        orderIds.add(orderId);
+        orderIds.add(orderId.toString());
         totalProcessedPrice += (item['price'] as num?)?.toDouble() ?? 0.0;
         print('Successfully submitted order $orderId for item: ' + item.toString());
+        // Remove the successfully ordered item from the cart
+        ShoppingCart.removeItems([item]);
       } else {
         throw Exception('Failed to place order for item: ${item.toString()}. Response: ${response.statusCode}');
       }

@@ -10,7 +10,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:zinzi2/Transporter_login.dart';
-import 'package:zinzi2/transporter_dash.dart';
+import 'package:zinzi2/transooter_dash_before_mapbox.dart';
+import 'notifications/fcm_service.dart';
 
 // --- Hardcoded Colors ---
 const Color primaryTeal = Color(0xFF00796B);
@@ -282,8 +283,12 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
           if (transporterId != null) {
             final prefs = await SharedPreferences.getInstance();
             await prefs.setString('transporter_id', transporterId.toString());
-            await Future.delayed(
-                const Duration(milliseconds: 100)); // Small delay
+            await prefs.setString('user_type', 'transporter'); // Changed to lowercase for consistency
+            await prefs.setBool('is_logged_in', true);
+await Future.delayed(
+    const Duration(milliseconds: 100)); // Small delay
+// Register FCM token with user info (async, do not await)
+FCMService.registerTokenWithUserInfo();
           }
           if (!mounted) return; // Check mount status again after delay
           _showSnackBar('Signup successful!',
@@ -291,7 +296,7 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
-              builder: (context) => TransporterDashboardScreen(
+              builder: (context) => TransporterDashNew(
                   transporterId: transporterId.toString()), // Pass ID
             ),
           );

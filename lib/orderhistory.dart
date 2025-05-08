@@ -7,9 +7,11 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:intl/intl.dart'; // For date and currency formatting
-import 'dart:async'; // For TimeoutException
+import 'dart:async'; // For TimeoutException, Timer
 import 'package:shimmer/shimmer.dart'; // For loading shimmer
 import 'package:shared_preferences/shared_preferences.dart'; // For Shared Preferences
+import 'package:provider/provider.dart';
+import 'notifications/notification_provider.dart'; // For notification refresh functionality
 
 // --- Environment & API ---
 final String apiBaseUrl = dotenv.env['API_BASE_URL'] ??
@@ -80,6 +82,9 @@ Color _getStatusColor(String? status) {
     case 'cancelled':
     case 'failed':
       return kColorCancelled;
+    // Added specific color for verification needed
+    case 'verification needed':
+      return Colors.blueGrey; // Or use kColorInfo or a custom color
     default:
       return kColorInfo; // Default for unknown or null statuses
   }
@@ -107,45 +112,184 @@ class OrderHistoryScreen extends StatefulWidget {
 }
 
 class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
-  // Initialize Future directly in initState, make it nullable initially
   Future<List<Map<String, dynamic>>>? _orderHistoryFuture;
-  // State map to track expansion per order ID
   final Map<int, bool> _isExpandedMap = {};
+  Timer? _pollingTimer;
+  bool _isRefreshing = false;
+  // Track previous order statuses to detect changes
+  final Map<int, String> _previousOrderStatuses = {};
+
+  // --- State Variables ---
+  // Flag to pause polling when verification dialog is active
+  bool _isVerificationProcessActive = false;
+  // Track which order is currently fetching the verification code for animation
+  int? _loadingVerificationOrderId;
 
   @override
   void initState() {
     super.initState();
-    // Assign the future directly here
     _orderHistoryFuture = _loadInitialHistory();
+    _startPolling();
+    
+    // Listen for notification refreshes
+    final notificationProvider = Provider.of<NotificationProvider>(context, listen: false);
+    notificationProvider.addListener(_handleNotificationRefresh);
   }
 
-  // Helper function to perform async operations needed before fetching
-  Future<List<Map<String, dynamic>>> _loadInitialHistory() async {
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    final notificationProvider = Provider.of<NotificationProvider>(context, listen: false);
+    notificationProvider.removeListener(_handleNotificationRefresh);
+    super.dispose();
+  }
+
+  void _handleNotificationRefresh() {
+    if (!_isRefreshing) {
+      setState(() {
+        _isRefreshing = true;
+      });
+      _refreshHistorySilently().then((_) {
+        if (mounted) {
+          setState(() {
+            _isRefreshing = false;
+          });
+        }
+      });
+    }
+  }
+
+  void _startPolling() {
+    // Cancel existing timer if any
+    _pollingTimer?.cancel();
+    _pollingTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
+      // --- MODIFIED: Only poll if verification process is NOT active ---
+      if (!_isVerificationProcessActive && mounted) {
+        print("Polling for order updates...");
+        // Use _loadInitialHistory which internally calls _fetchOrderHistoryDetails
+        // We want the state update from the fetch, but dialog trigger is now manual
+        _refreshHistorySilently(); // Fetch updates without replacing the main future for the builder
+      } else {
+        print(
+            "Polling skipped: Verification process active or widget not mounted.");
+      }
+    });
+  }
+
+  // Fetch history but update state without rebuilding the entire FutureBuilder
+  Future<void> _refreshHistorySilently() async {
+    if (_isRefreshing) return; // Prevent concurrent refreshes
+    setState(() {
+      _isRefreshing = true;
+    });
+    print("Refreshing order history silently...");
     try {
       final prefs = await SharedPreferences.getInstance();
-      int? userId =
-          prefs.getInt('user_id'); // Assuming user_id is stored as an int
-
-      if (userId == null) {
-        print("User ID not found for order history. User needs to log in.");
-        // Throw a specific error that FutureBuilder can catch
-        throw Exception("User not logged in.");
+      // Get user_id as string
+      String? userId = prefs.getString('user_id');
+      
+      if (userId == null || userId.isEmpty) {
+        // If not found as string, try int for backward compatibility
+        final int? intUserId = prefs.getInt('user_id');
+        if (intUserId != null) {
+          userId = intUserId.toString();
+          // Update to store as string for future use
+          await prefs.setString('user_id', userId);
+        } else {
+          print("Silent Refresh: User ID not found in preferences.");
+          return; // Don't proceed without user ID
+        }
       }
-      // If userId is valid, fetch the details
-      return _fetchOrderHistoryDetails(userId);
+      // Fetch new data but only update state if mounted
+      final freshOrders = await _fetchOrderHistoryDetails(userId);
+      
+      // Check for status changes and trigger dialogs if needed
+      if (mounted) {
+        _checkForStatusChanges(freshOrders);
+        
+        setState(() {
+          // Update the future with latest data
+          _orderHistoryFuture = Future.value(freshOrders);
+        });
+      }
     } catch (e) {
-      // Rethrow any other unexpected errors during initial load
+      print("Error during silent history refresh: $e");
+      // Handle error silently or show a subtle notification if desired
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _loadInitialHistory() async {
+    // Reset loading state on full load/refresh
+    if (mounted) {
+      setState(() {
+        _loadingVerificationOrderId = null;
+        _isVerificationProcessActive = false; // Ensure reset on full refresh
+      });
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // Get user_id as string
+      String? userId = prefs.getString('user_id');
+      
+      if (userId == null || userId.isEmpty) {
+        // If not found as string, try int for backward compatibility
+        final int? intUserId = prefs.getInt('user_id');
+        if (intUserId != null) {
+          userId = intUserId.toString();
+          // Update to store as string for future use
+          await prefs.setString('user_id', userId);
+        } else {
+          print("User ID not found in preferences. User needs to log in.");
+          throw Exception("User not logged in.");
+        }
+      }
+      return await _fetchOrderHistoryDetails(userId);
+    } catch (e) {
       print("Error during initial history load setup: $e");
       throw Exception("Failed to initialize order history: ${e.toString()}");
     }
   }
 
-  // Fetches actual order details (remains mostly the same)
+  // Check for status changes and trigger dialogs if needed
+  void _checkForStatusChanges(List<Map<String, dynamic>> freshOrders) {
+    final Map<int, String> currentStatuses = {};
+    
+    // Build map of current statuses
+    for (final order in freshOrders) {
+      final orderId = order['order_id'] as int?;
+      final status = order['order_status']?.toString();
+      if (orderId != null && status != null) {
+        currentStatuses[orderId] = status;
+      }
+    }
+    
+    // Check for changes and trigger dialogs
+    for (final entry in currentStatuses.entries) {
+      final orderId = entry.key;
+      final newStatus = entry.value;
+      final previousStatus = _previousOrderStatuses[orderId];
+      
+      // If status changed to 'verification needed' and not already showing the dialog
+      if (newStatus == 'verification needed' && 
+          newStatus != previousStatus &&
+          !_isVerificationProcessActive) {
+        // Use postFrameCallback to ensure the dialog is shown after the build is complete
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _handleVerificationRequest(orderId);
+        });
+      }
+    }
+    
+    // Update previous statuses for next comparison
+    _previousOrderStatuses.clear();
+    _previousOrderStatuses.addAll(currentStatuses);
+  }
+
   Future<List<Map<String, dynamic>>> _fetchOrderHistoryDetails(
-      int userId) async {
+      String userId) async {
     List<Map<String, dynamic>> orders = [];
     final uri = Uri.parse('$apiBaseUrl/rr/orders?user_id=$userId');
-    print("Fetching order history from: $uri"); // Debug log
+    print("Fetching order history from: $uri");
 
     try {
       final response = await http.get(uri).timeout(const Duration(seconds: 25));
@@ -154,48 +298,53 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         final data = json.decode(response.body);
         if (data is Map<String, dynamic> && data['data'] is List) {
           final orderDataList = data['data'] as List;
-          orders = orderDataList
-              .whereType<Map<String, dynamic>>() // Ensure items are maps
-              .map((orderData) {
-                // Try parsing order_id safely within the map
-                int? parsedId =
-                    int.tryParse(orderData['order_id']?.toString() ?? '');
-                if (parsedId != null) {
-                  orderData['order_id'] =
-                      parsedId; // Replace original with parsed int
-                } else {
-                  print(
-                      "Warning: Could not parse order_id for order data: $orderData");
-                  // Decide how to handle invalid IDs (e.g., assign a temp negative ID or filter out)
-                  orderData['order_id'] = -1; // Assign temporary invalid ID
-                }
-                return orderData;
-              })
-              .where((order) =>
-                  order['order_id'] != -1) // Filter out items with invalid IDs
-              .toList();
+
+          for (final orderItem in orderDataList) {
+            if (orderItem is Map<String, dynamic>) {
+              final Map<String, dynamic> orderData =
+                  Map<String, dynamic>.from(orderItem);
+              int? parsedId =
+                  int.tryParse(orderData['order_id']?.toString() ?? '');
+              if (parsedId != null) {
+                orderData['order_id'] = parsedId;
+                orders.add(orderData);
+              } else {
+                print(
+                    "Warning: Could not parse order_id, skipping: $orderData");
+              }
+            } else {
+              print(
+                  "Warning: Non-map item in order data list, skipping: $orderItem");
+            }
+          }
+
+          // --- Status Change Detection REMOVED ---
+          // Dialog is now triggered by user tap, not automatically on status change detection here.
         } else {
-          print("Unexpected data format received for order history: $data");
+          print("Unexpected data format received: $data");
           throw Exception('Invalid data format from server.');
         }
       } else {
         print(
-            "Failed to fetch history orders: Status ${response.statusCode}, Body: ${response.body}");
+            "Failed fetch: Status ${response.statusCode}, Body: ${response.body}");
         throw Exception(
             'Failed to load order history (Status: ${response.statusCode}).');
       }
 
-      // Sort orders (newest first)
-      orders.sort((a, b) {
-        DateTime? dateA = DateTime.tryParse(a['order_date'] ?? '');
-        DateTime? dateB = DateTime.tryParse(b['order_date'] ?? '');
-        if (dateA == null && dateB == null) return 0;
-        if (dateA == null) return 1; // Put null dates last
-        if (dateB == null) return -1; // Put null dates last
-        return dateB.compareTo(dateA); // Newest first
-      });
+      if (orders.isNotEmpty) {
+        orders.sort((a, b) {
+          DateTime? dateA =
+              DateTime.tryParse(a['order_date']?.toString() ?? '');
+          DateTime? dateB =
+              DateTime.tryParse(b['order_date']?.toString() ?? '');
+          if (dateA == null && dateB == null) return 0;
+          if (dateA == null) return 1;
+          if (dateB == null) return -1;
+          return dateB.compareTo(dateA);
+        });
+      }
 
-      print("Fetched and sorted ${orders.length} orders."); // Debug log
+      print("Fetched and sorted ${orders.length} orders.");
       return orders;
     } on TimeoutException catch (_) {
       print("Order history request timed out.");
@@ -209,30 +358,206 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     }
   }
 
-  // Method to refresh the fetch
+  // --- NEW: Helper to handle verification tap ---
+  Future<void> _handleVerificationRequest(int orderId) async {
+    // 1. Pause Polling
+    if (mounted) {
+      setState(() {
+        _isVerificationProcessActive = true;
+        // 2. Start Loading Animation for this specific order
+        _loadingVerificationOrderId = orderId;
+      });
+    }
+    print("Verification process started for Order #$orderId. Polling paused.");
+
+    // 3. Show Dialog (which includes fetching the code)
+    await _showCompletionCodeDialog(orderId);
+
+    // NOTE: Polling resumption (_isVerificationProcessActive = false) happens
+    // AFTER the dialog is dismissed (inside _showCompletionCodeDialog's action).
+    // Animation stop (_loadingVerificationOrderId = null) happens just BEFORE
+    // the dialog is shown (inside _showCompletionCodeDialog).
+  }
+
+  // --- MODIFIED: Fetches code AND manages animation/polling state ---
+  Future<void> _showCompletionCodeDialog(int orderId) async {
+    String completionCode = 'N/A';
+    String errorMessage = '';
+    bool codeFetchedSuccessfully = false;
+
+    final uri = Uri.parse('$apiBaseUrl/rr/get_completion_code/$orderId');
+    print("Fetching completion code for Order #$orderId from: $uri");
+
+    try {
+      final response = await http
+          .get(uri)
+          .timeout(const Duration(seconds: 15)); // Slightly longer timeout
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data is Map<String, dynamic> && data['completion_code'] != null) {
+          completionCode = data['completion_code'].toString();
+          codeFetchedSuccessfully = true; // Mark success
+          print("Completion code fetched successfully for Order #$orderId.");
+        } else {
+          errorMessage = 'Invalid response format for completion code.';
+          print("Unexpected completion code response format: $data");
+        }
+      } else {
+        errorMessage =
+            'Failed to fetch completion code (Status: ${response.statusCode}).';
+        print(
+            "Failed to fetch completion code: Status ${response.statusCode}, Body: ${response.body}");
+      }
+    } on TimeoutException catch (_) {
+      errorMessage = 'Request for completion code timed out.';
+      print("Completion code request timed out for Order #$orderId.");
+    } on http.ClientException catch (e) {
+      errorMessage = 'Network error fetching completion code.';
+      print(
+          "Network error fetching completion code for Order #$orderId: ${e.message}");
+    } catch (e) {
+      errorMessage = 'Error fetching completion code: ${e.toString()}';
+      print("Error fetching completion code for Order #$orderId: $e");
+    }
+
+    // --- Stop loading animation BEFORE showing the dialog ---
+    if (mounted) {
+      setState(() {
+        _loadingVerificationOrderId = null;
+      });
+    }
+
+    // --- Show Dialog ---
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false, // User must tap button to close
+        builder: (BuildContext context) {
+          return AlertDialog(
+            backgroundColor: const Color.fromARGB(
+                255, 241, 255, 254), // Added background color
+            title: Text(
+              // Adjust title based on success
+              codeFetchedSuccessfully
+                  ? 'Order #$orderId Ready!'
+                  : 'Order #$orderId Verification',
+              style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.bold, color: kColorPrimaryDark),
+            ),
+            content: SingleChildScrollView(
+              child: ListBody(
+                children: <Widget>[
+                  Text(
+                    errorMessage.isNotEmpty
+                        ? 'Could not retrieve verification code: $errorMessage'
+                        // Updated message for success state
+                        : 'Verification code is ready.',
+                    style: GoogleFonts.poppins(color: kColorTextPrimary),
+                    textAlign: TextAlign.left, // Added text alignment
+                  ),
+                  if (errorMessage.isEmpty && codeFetchedSuccessfully) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      'Verification Code:',
+                      style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.bold,
+                          color:
+                              kColorPrimaryDark), // Changed color to kColorPrimaryDark
+                    ),
+                    SelectableText(
+                      completionCode,
+                      style: GoogleFonts.poppins(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color:
+                              kColorSuccess), // Color is already kColorSuccess, keeping it
+                      textAlign: TextAlign.left,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Provide this code to the rider ONLY after confirming successful delivery.',
+                      style: GoogleFonts.poppins(
+                          fontStyle: FontStyle.italic,
+                          color: kColorTextSecondary,
+                          fontSize: 13),
+                      textAlign: TextAlign.left,
+                    ),
+                  ] else if (errorMessage.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      'Please try again shortly or contact support if the issue persists.',
+                      style: GoogleFonts.poppins(
+                          fontStyle: FontStyle.italic,
+                          color: kColorTextSecondary,
+                          fontSize: 13),
+                      textAlign: TextAlign.left,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actionsAlignment: MainAxisAlignment.center, // Center the button
+            actions: <Widget>[
+              TextButton(
+                style: TextButton.styleFrom(
+                  // backgroundColor: kColorPrimary.withOpacity(0.1), // Removed background color
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                ),
+                child: Text('OK',
+                    style: GoogleFonts.poppins(
+                        color: kColorPrimaryDark,
+                        fontWeight: FontWeight
+                            .bold)), // Changed color to kColorPrimaryDark
+                onPressed: () {
+                  Navigator.of(context).pop(); // Close the dialog first
+                  // --- Resume polling AFTER dialog is closed ---
+                  if (mounted) {
+                    setState(() {
+                      _isVerificationProcessActive = false;
+                    });
+                  }
+                  print("Verification dialog closed. Polling resumed.");
+                  // Optionally trigger a silent refresh now?
+                  // _refreshHistorySilently(); // Or let the next poll cycle handle it
+                },
+              ),
+            ],
+          );
+        },
+      );
+    } else {
+      // If not mounted when dialog should show, ensure polling is resumed
+      // This is a fallback, should ideally not happen if logic is correct
+      _isVerificationProcessActive = false;
+      print("Widget not mounted, ensuring polling is resumed.");
+    }
+  }
+
+  // Method to refresh the fetch (pull-to-refresh)
   Future<void> _refreshHistory() async {
-    print("Refreshing order history...");
-    // Clear expansion state on refresh if desired
-    // _isExpandedMap.clear();
-    setState(() {
-      // Assign a new future by re-running the initial load logic
-      _orderHistoryFuture = _loadInitialHistory();
-    });
-    // Wait for the refresh to complete (optional, useful for showing indicator correctly)
+    print("Refreshing order history via pull-to-refresh...");
+    // Ensure verification state is reset on manual refresh
+    if (mounted) {
+      setState(() {
+        _orderHistoryFuture = _loadInitialHistory(); // Re-run the full load
+      });
+    }
+    // Wait for the refresh to complete (optional, for indicator)
     try {
       await _orderHistoryFuture;
     } catch (e) {
-      // Error during refresh is handled by FutureBuilder, but you could log here
-      print("Error caught during refresh: $e");
+      print("Error caught during manual refresh: $e");
     }
   }
 
   // Helper to navigate to login
   void _navigateToLogin() {
-    // Use pushReplacementNamed to prevent coming back here without logging in
-    Navigator.pushReplacementNamed(
-        context, '/login'); // Ensure '/login' route exists
-    print("Navigating to login screen.");
+    if (mounted) {
+      Navigator.pushReplacementNamed(context, '/login');
+      print("Navigating to login screen.");
+    }
   }
 
   @override
@@ -261,37 +586,56 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
             statusBarIconBrightness: Brightness.light,
           ),
         ),
-        // Use FutureBuilder to handle the Future state
         body: FutureBuilder<List<Map<String, dynamic>>>(
-          future: _orderHistoryFuture, // Use the initialized future
+          future: _orderHistoryFuture,
           builder: (context, snapshot) {
-            // --- Loading State ---
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              print("FutureBuilder: Waiting for order history...");
+            if (snapshot.connectionState == ConnectionState.waiting &&
+                !_isVerificationProcessActive) {
+              // Show shimmer only if not waiting due to verification click
+              print("FutureBuilder: Waiting for initial order history...");
               return _buildLoadingShimmer();
             }
+            // If verification IS active, show the current list underneath (or shimmer if initial load never finished)
+            if (snapshot.connectionState == ConnectionState.waiting &&
+                _isVerificationProcessActive &&
+                !snapshot.hasData) {
+              print(
+                  "FutureBuilder: Waiting (verification active, no data yet)...");
+              return _buildLoadingShimmer(); // Show shimmer if initial load hasn't completed
+            }
 
-            // --- Error State ---
             if (snapshot.hasError) {
               print(
                   "FutureBuilder: Error loading order history: ${snapshot.error}");
-              // Pass the specific error to the error widget
               return _buildErrorWidget(context, snapshot.error);
             }
 
-            // --- Empty or No Data State ---
-            // Check specifically for null or empty list AFTER checking for errors
-            if (!snapshot.hasData || snapshot.data!.isEmpty) {
-              print("FutureBuilder: No order history data found.");
-              return _buildEmptyState(context);
+            // Handle case where snapshot is active/done but has no data (could be empty list or null after error)
+            if (!snapshot.hasData ||
+                snapshot.data == null ||
+                snapshot.data!.isEmpty) {
+              // Check if it was an error state that resulted in no data
+              if (snapshot.connectionState == ConnectionState.done &&
+                  snapshot.error == null) {
+                print(
+                    "FutureBuilder: No order history data found (empty list).");
+                return _buildEmptyState(context);
+              } else if (snapshot.error != null) {
+                // Already handled by snapshot.hasError block, but defensive check
+                return _buildErrorWidget(context, snapshot.error);
+              } else {
+                // Still waiting, but data is null/empty (should ideally be handled by waiting state)
+                print("FutureBuilder: Waiting (snapshot has no data yet)...");
+                // Avoid showing empty state while potentially loading
+                return _buildLoadingShimmer();
+              }
             }
 
             // --- Success State ---
             final orders = snapshot.data!;
-            print(
-                "FutureBuilder: Successfully loaded ${orders.length} orders.");
+            print("FutureBuilder: Displaying ${orders.length} orders.");
             return RefreshIndicator(
-              onRefresh: _refreshHistory, // Use the refresh method
+              onRefresh: _refreshHistory,
               color: kColorPrimary,
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(
@@ -300,9 +644,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                 itemCount: orders.length,
                 itemBuilder: (context, index) {
                   final order = orders[index];
-                  // Ensure order_id is treated as int after potential parsing/filtering
                   final orderId = order['order_id'] as int;
-                  // Use local map to track expansion state
                   final isExpanded = _isExpandedMap[orderId] ?? false;
 
                   return _buildOrderCard(context, order, orderId, isExpanded);
@@ -319,9 +661,14 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
 
   Widget _buildOrderCard(BuildContext context, Map<String, dynamic> order,
       int orderId, bool isExpanded) {
-    final String status = order['order_status'] ?? 'Unknown';
+    final String status =
+        order['order_status']?.toString().toLowerCase() ?? 'unknown';
     final Color statusColor = _getStatusColor(status);
-    final String displayStatus = _getStatusDisplay(status);
+    final String displayStatus = _getStatusDisplay(
+        order['order_status']); // Use original case for display helper
+    final bool needsVerification = status == 'verification needed';
+    final bool isLoadingVerification =
+        _loadingVerificationOrderId == orderId; // Check if THIS card is loading
 
     return Card(
       margin: const EdgeInsets.symmetric(
@@ -334,12 +681,20 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: () {
-          // Toggle expansion state locally
-          setState(() {
-            _isExpandedMap[orderId] = !isExpanded;
-          });
-        },
+        // Disable tap while loading verification for THIS card
+        onTap: isLoadingVerification
+            ? null
+            : () {
+                if (needsVerification) {
+                  // Handle tap for verification
+                  _handleVerificationRequest(orderId);
+                } else {
+                  // Toggle expansion for other statuses
+                  setState(() {
+                    _isExpandedMap[orderId] = !isExpanded;
+                  });
+                }
+              },
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -348,19 +703,35 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
               padding: const EdgeInsets.all(_horizontalPadding),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start, // Align items top
                 children: [
                   Flexible(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        if (order['product_name'] != null &&
+                            order['product_name'].toString().isNotEmpty)
+                          Text(
+                            order['product_name'].toString(),
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: kColorTextPrimary,
+                                ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          ),
                         Text(
-                          'Order #$orderId', // Use the validated integer ID
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                    color: kColorTextPrimary,
-                                  ),
-                          overflow: TextOverflow.ellipsis,
+                          'Order #$orderId',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                color: kColorTextSecondary, // Less prominent
+                                fontWeight: FontWeight.w500,
+                              ),
                         ),
                         const SizedBox(height: 4),
                         Text(
@@ -369,39 +740,75 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                               Theme.of(context).textTheme.bodySmall?.copyWith(
                                     color: kColorTextSecondary,
                                   ),
-                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Chip(
-                    label: Text(
-                      displayStatus,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
+                  // --- MODIFIED: Conditional Status/Loading Indicator ---
+                  Container(
+                    alignment: Alignment.center,
+                    // Give it a minimum size to avoid layout shifts drastically
+                    constraints:
+                        const BoxConstraints(minHeight: 28, minWidth: 60),
+                    child: isLoadingVerification
+                        ? const SizedBox(
+                            // Use SizedBox to constrain the spinner size
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: kColorPrimary,
+                            ),
+                          )
+                        : Row(
+                            // Show icon + chip if not loading
+                            mainAxisSize: MainAxisSize.min, // Keep row tight
+                            children: [
+                              if (needsVerification) // Show warning icon only if verification needed AND not loading
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 4.0),
+                                  child: Icon(
+                                    Icons
+                                        .password_rounded, // Icon suggesting code needed
+                                    color: kColorWarning,
+                                    size: 18,
+                                  ),
+                                ),
+                              Chip(
+                                label: Text(
+                                  displayStatus,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelSmall
+                                      ?.copyWith(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                ),
+                                backgroundColor: statusColor,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
+                                visualDensity: VisualDensity.compact,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            ],
                           ),
-                    ),
-                    backgroundColor: statusColor,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    visualDensity: VisualDensity.compact,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
+                  // --- End Conditional Status/Loading Indicator ---
                 ],
               ),
             ),
 
             // Animated Expansion Section
             AnimatedCrossFade(
-              firstChild: Container(), // Empty container when collapsed
+              firstChild: Container(),
               secondChild: _buildOrderDetails(context, order),
               crossFadeState: isExpanded
                   ? CrossFadeState.showSecond
                   : CrossFadeState.showFirst,
-              duration: const Duration(
-                  milliseconds: 250), // Slightly faster animation
+              duration: const Duration(milliseconds: 250),
               firstCurve: Curves.easeOut,
               secondCurve: Curves.easeIn,
               sizeCurve: Curves.easeInOut,
@@ -411,20 +818,20 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
             Container(
               padding: const EdgeInsets.symmetric(
                   horizontal: _horizontalPadding,
-                  vertical: _verticalPadding / 1.5), // Adjusted padding
+                  vertical: _verticalPadding / 1.5),
               color: Colors.grey.shade100,
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Total:',
+                    'Amount:',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.bold,
                           color: kColorTextSecondary,
                         ),
                   ),
                   Text(
-                    _formatCurrency(order['price']),
+                    _formatCurrency(order['total_price']),
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.bold,
                           color: kColorPrimaryDark,
@@ -433,25 +840,33 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                 ],
               ),
             ),
-            // Expansion Indicator (Subtle)
-            Container(
-              height: 25, // Reduced height
-              color: Colors.grey.shade100, // Match footer background
-              alignment: Alignment.center,
-              child: Icon(
-                isExpanded
-                    ? Icons.keyboard_arrow_up
-                    : Icons.keyboard_arrow_down,
-                color:
-                    kColorTextSecondary.withOpacity(0.6), // More subtle color
-                size: 20,
-              ),
-            ),
+            // Expansion Indicator (only show if not needing verification or loading)
+            if (!needsVerification && !isLoadingVerification)
+              Container(
+                height: 25,
+                color: Colors.grey.shade100,
+                alignment: Alignment.center,
+                child: Icon(
+                  isExpanded
+                      ? Icons.keyboard_arrow_up
+                      : Icons.keyboard_arrow_down,
+                  color: kColorTextSecondary.withOpacity(0.6),
+                  size: 20,
+                ),
+              )
+            else // Provide a similar height empty space if verification needed/loading to maintain layout consistency
+              Container(
+                height: 25,
+                color: Colors.grey.shade100,
+              )
           ],
         ),
       ),
     );
   }
+
+  // --- NO CHANGES needed below this line for the requested features ---
+  // --- (Assuming _buildOrderDetails, _buildDetailRow, _buildLoadingShimmer, etc. are correct) ---
 
   Widget _buildOrderDetails(BuildContext context, Map<String, dynamic> order) {
     // Safely extract items list
@@ -502,31 +917,146 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: itemsList.map((item) {
-                if (item is! Map<String, dynamic>)
+                if (item is! Map<String, dynamic>) {
                   return const SizedBox.shrink(); // Skip invalid items
-                final itemName =
-                    item['meal_name'] ?? item['gig_type'] ?? 'Unknown Item';
-                final quantity = item['quantity'] as int?; // Nullable int
-                final price =
-                    (item['price'] as num?)?.toDouble(); // Nullable double
-
-                String displayString = "- $itemName";
-                if (quantity != null && quantity > 0) {
-                  displayString += " (x$quantity)";
                 }
-                if (price != null) {
-                  // Optional: Show price per item if needed
-                  // displayString += " @ ${_formatCurrency(price)}";
+
+                String itemDisplay = 'Unknown Item';
+                List<Widget> details = [];
+                String? itemType = item['type']?.toString().toLowerCase();
+
+                // Try to get common fields first
+                final quantity = (item['quantity'] as num?)?.toInt() ?? 1;
+                final pricePerUnit = (item['price'] as num?)?.toDouble();
+                final totalPrice =
+                    pricePerUnit != null ? pricePerUnit * quantity : null;
+
+                // Try to find a name/title for any item type
+                final itemName =
+                    item['poduct_name'] ?? // Typo? 'product_name' maybe?
+                        item['product_name'] ??
+                        item['title'] ??
+                        item['meal_name'] ??
+                        item['gig_type'] ??
+                        'Unknown Item';
+
+                itemDisplay = "$itemName";
+                if (quantity > 1) {
+                  itemDisplay += " (x$quantity)";
+                }
+                if (totalPrice != null) {
+                  itemDisplay += " - ${_formatCurrency(totalPrice)}";
+                } else if (pricePerUnit != null) {
+                  itemDisplay += " - ${_formatCurrency(pricePerUnit)}";
+                }
+
+                // Add type-specific details
+                if (itemType == 'meal') {
+                  final chef = item['selectedchef'] as Map<String, dynamic>?;
+                  final bestServedWith = (item['bestservedwith'] as List?)
+                          ?.cast<Map<String, dynamic>>() ??
+                      [];
+
+                  if (chef != null && chef['name'] != null) {
+                    details.add(Text(
+                      'Chef: ${chef['name']}',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: kColorTextSecondary),
+                    ));
+                  }
+
+                  if (bestServedWith.isNotEmpty) {
+                    details.add(Text(
+                      'Served with: ${bestServedWith.map((comp) => comp['name'] ?? comp['title'] ?? 'Unknown').join(', ')}',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: kColorTextSecondary),
+                    ));
+                  }
+                } else if (itemType == 'gig') {
+                  final gigDetails =
+                      item['gigDetails'] as Map<String, dynamic>? ?? {};
+                  final chefName = gigDetails['chef_name'];
+                  final producerName = gigDetails['producer_name'];
+
+                  if (chefName != null && chefName.isNotEmpty) {
+                    details.add(Text(
+                      'Chef: $chefName',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: kColorTextSecondary),
+                    ));
+                  } else if (producerName != null && producerName.isNotEmpty) {
+                    details.add(Text(
+                      'Producer: $producerName',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: kColorTextSecondary),
+                    ));
+                  }
+
+                  // Add other relevant gig details here if needed (e.g., date, time, location)
+                  if (gigDetails['scheduled_date'] != null) {
+                    details.add(Text(
+                      'Date: ${_formatDate(gigDetails['scheduled_date'])}',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: kColorTextSecondary),
+                    ));
+                  }
+                  if (gigDetails['time'] != null) {
+                    details.add(Text(
+                      'Time: ${gigDetails['time']}',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: kColorTextSecondary),
+                    ));
+                  }
+                  if (gigDetails['location'] != null) {
+                    details.add(Text(
+                      'Location: ${gigDetails['location']}',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: kColorTextSecondary),
+                    ));
+                  }
+                }
+                // Add more else if blocks here for other known item types if needed
+
+                // Generic details for any item type if available
+                if (item['description'] != null &&
+                    item['description'].toString().isNotEmpty) {
+                  details.add(Text(
+                    'Description: ${item['description']}',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: kColorTextSecondary),
+                  ));
                 }
 
                 return Padding(
                   padding: const EdgeInsets.only(
                       left: 20.0, top: 4.0), // Indent items
-                  child: Text(
-                    displayString,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: kColorTextPrimary,
-                        ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "- $itemDisplay",
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: kColorTextPrimary,
+                            ),
+                      ),
+                      ...details, // Add specific details below the item name
+                    ],
                   ),
                 );
               }).toList(),
@@ -604,6 +1134,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                   Row(
                     // Shimmer Header
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -627,20 +1158,24 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                               borderRadius: BorderRadius.circular(12))),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  const Divider(height: 1),
-                  const SizedBox(height: 12),
-                  // Shimmer Details
+                  const SizedBox(
+                      height: 16), // Spacing before footer/details area
+                  // Shimmer Footer Area (Mimics total amount row)
                   Container(
-                      width: double.infinity, height: 14, color: Colors.white),
-                  const SizedBox(height: 8),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    color: Colors.white.withOpacity(0.7),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Container(width: 60, height: 14, color: Colors.white),
+                        Container(width: 80, height: 14, color: Colors.white),
+                      ],
+                    ),
+                  ),
                   Container(
-                      width: MediaQuery.of(context).size.width * 0.6,
-                      height: 14,
-                      color: Colors.white), // 60% width
-                  const SizedBox(height: 16),
-                  // Shimmer Footer
-                  Container(height: 35, color: Colors.white.withOpacity(0.7))
+                      height: 25,
+                      color: Colors.white
+                          .withOpacity(0.7)), // Expansion indicator space
                 ],
               ),
             ),
@@ -659,32 +1194,24 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       errorMessage = errorString.replaceFirst("Exception: ", "");
       if (errorMessage.contains("User not logged in")) {
         showLoginButton = true;
-        errorMessage =
-            "Please log in to view your order history."; // User-friendly message
+        errorMessage = "Please log in to view your order history.";
       } else if (errorMessage.contains("Network error")) {
         errorMessage =
             "Could not connect to the server. Please check your internet connection.";
       } else if (errorMessage.contains("timed out")) {
-        errorMessage =
-            "The request took too long to respond. Please try again later.";
+        errorMessage = "The request took too long. Please try again later.";
       }
-      // Keep other specific error messages if needed
     }
 
     return Center(
       child: Padding(
-        padding:
-            const EdgeInsets.all(_horizontalPadding * 1.5), // Reduced padding
+        padding: const EdgeInsets.all(_horizontalPadding * 1.5),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Icon(
-                showLoginButton
-                    ? Icons.login
-                    : Icons.error_outline, // Different icon for login
-                color: kColorError,
-                size: 50),
+            Icon(showLoginButton ? Icons.login : Icons.error_outline,
+                color: kColorError, size: 50),
             const SizedBox(height: _verticalPadding),
             Text(
               showLoginButton ? 'Login Required' : 'Load Failed',
@@ -714,9 +1241,9 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 ),
-                onPressed: _navigateToLogin, // Navigate to login
+                onPressed: _navigateToLogin,
               )
-            else // Show Retry button for other errors
+            else
               ElevatedButton.icon(
                 icon: const Icon(Icons.refresh_rounded),
                 label: const Text('Try Again'),
@@ -728,7 +1255,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 ),
-                onPressed: _refreshHistory, // Call refresh method
+                onPressed: _refreshHistory, // Manual refresh
               ),
           ],
         ),
@@ -744,9 +1271,8 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Icon(Icons.receipt_long_outlined, // More relevant icon
-                color: kColorTextSecondary.withOpacity(0.6),
-                size: 50),
+            Icon(Icons.receipt_long_outlined,
+                color: kColorTextSecondary.withOpacity(0.6), size: 50),
             const SizedBox(height: _verticalPadding),
             Text(
               'No Orders Found',
@@ -757,12 +1283,13 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
             const SizedBox(height: 8),
             Text(
               "You haven't placed any orders yet.\nStart shopping to see your history here!",
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: kColorTextSecondary, height: 1.4), // Added line height
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(color: kColorTextSecondary, height: 1.4),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: _verticalPadding * 1.5),
-            // Optional: Button to go shopping
             ElevatedButton(
               child: const Text('Start Shopping'),
               style: ElevatedButton.styleFrom(
@@ -774,9 +1301,11 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                     const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               ),
               onPressed: () {
-                // TODO: Navigate to your main shopping/home screen
-                Navigator.pushNamedAndRemoveUntil(
-                    context, '/home', (route) => false);
+                // Ensure the home route exists and is named '/home'
+                if (mounted) {
+                  Navigator.pushNamedAndRemoveUntil(
+                      context, '/home', (route) => false);
+                }
               },
             )
           ],

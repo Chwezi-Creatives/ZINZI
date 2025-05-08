@@ -1,28 +1,27 @@
 import 'dart:async';
-
-import 'package:flutter/material.dart';
-// ignore: library_prefixes
-import 'package:zinzi2/app_drawer_unified.dart' as drawer; // Use prefix
-import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:shimmer/shimmer.dart'; // For shimmer effect
+import 'dart:io'; // For File handling
 
-import 'dart:io';
-import 'package:image_picker/image_picker.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // For FilteringTextInputFormatter & SystemUiOverlayStyle
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:zinzi2/user_cache.dart'; // <<< IMPORT UserCache
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart'; // Added for NotificationProvider
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:zinzi2/app_drawer_unified.dart' as drawer; // Use prefix
 import 'package:zinzi2/cache_config.dart'; // <<< IMPORT CacheConfig
+import 'package:zinzi2/notifications/notification_provider.dart'; // Added import
+import 'package:zinzi2/user_cache.dart'; // <<< IMPORT UserCache
 
 // --- UI Constants ---
-const Color primaryTeal = Color(0xFF009688);
-const Color lightTeal = Color(0xFFB2DFDB);
-const Color faintLightTeal = Color(0xFFE0F2F1);
-const Color darkTeal = Color(0xFF00695C);
+const Color primaryTeal = Color(0xFF00796B); // Teal 700 (Matched ChefDash)
+const Color lightTeal = Color(0xFFB2DFDB); // Teal 100
+const Color faintLightTeal = Color(0xFFE0F2F1); // Teal 50
+const Color darkTeal = Color(0xFF004D40); // Teal 900
 const Color whiteColor = Colors.white;
 const Color textOnTeal = Colors.white;
 const Color textOnWhite = Color(0xFF212121);
@@ -31,23 +30,26 @@ const Color cardBackground = Color(0xFFF1F8F8); // Slightly off-white teal tint
 const Color errorColor = Color(0xFFD32F2F);
 const Color starColor = Color(0xFFFFC107); // Amber/Gold
 const Color dividerColor = Color(0xFFE0E0E0);
+const Color textFieldFillColor = Color(0xFFF5F5F5); // Matched ChefDash
 
 // Status Colors (Centralized Definition)
 final Color pendingColor = Colors.orange.shade600;
 final Color acceptedColor = Colors.blue.shade600;
 final Color preparingColor = Colors.deepPurple.shade400;
-final Color dispatchedColor = primaryTeal; // Or Ready for Pickup color
+final Color readyForPickupColor = Colors.blueAccent; // Matched ChefDash
+final Color assignedColor = Colors.blueGrey.shade600; // For assigned rider
+final Color dispatchedColor = primaryTeal; // For dispatched/shipped
+final Color outForDeliveryColor = Colors.purple.shade500; // Matched ChefDash
 final Color deliveredColor = Colors.green.shade600;
+final Color completedColor = Colors.green.shade700; // Slightly darker green
 final Color cancelledColor = Colors.red.shade600;
 final Color defaultStatusColor = Colors.grey.shade600;
-final Color assignedColor = Colors.blueGrey.shade600; // For assigned rider
 
 const Color actionButtonBackground = Color(0xFFE0F2F1); // Faint light teal
 const Color actionButtonForeground = darkTeal;
 const Color destructiveButtonBackground = Color(0xFFFFEBEE); // Light red
 const Color destructiveButtonForeground = Color(0xFFC62828); // Darker red
-const String placeholderImagePath =
-    'assets/images/placeholder_avatar.png'; // Ensure this asset exists
+const String placeholderImagePath = 'assets/images/placeholder_avatar.png'; // Ensure this asset exists
 
 // --- Helper Functions ---
 int _parseInt(dynamic value) {
@@ -84,7 +86,6 @@ String? _getStringSafe(dynamic value) {
   return value?.toString();
 }
 
-// Helper to parse boolean safely (Used in Rider and ProducerProfile)
 bool _parseBoolSafe(dynamic value) {
   if (value == null) return false;
   if (value is bool) return value;
@@ -95,21 +96,21 @@ bool _parseBoolSafe(dynamic value) {
 
 // --- Data Models ---
 
-// Inline Order class based on API data
+// Order Model (Unified)
 class Order {
   final int orderId;
-  final String mealName; // Sometimes product name
+  final String mealName; // Product name
   final DateTime orderDate;
-  final double totalPrice;
+  final double totalPrice; // Use double for price
   final int quantity;
   String orderStatus; // Mutable
-  final String? customerName; // Assuming producerName can be customer name
+  final String? customerName; // Customer (from Producer or Customer field)
   final String? deliveryAddress;
   final String? notes;
-  final String? ingredients;
+  final String? ingredients; // Added from original
   final String? paymentStatus;
-  int? assignedRiderId; // Added for assigning riders
-  String? assignedRiderName; // Added for displaying assigned rider name
+  int? assignedRiderId;
+  String? assignedRiderName;
 
   Order({
     required this.orderId,
@@ -135,10 +136,13 @@ class Order {
     } catch (e) {
       // Fallback for Flask's default format if ISO fails
       try {
-        final apiDateFormat = DateFormat("E, dd MMM yyyy HH:mm:ss 'GMT'", 'en_US');
-        parsedDate = apiDateFormat.parseUtc(json['order_date'] as String).toLocal();
+        final apiDateFormat =
+            DateFormat("E, dd MMM yyyy HH:mm:ss 'GMT'", 'en_US');
+        parsedDate =
+            apiDateFormat.parseUtc(json['order_date'] as String).toLocal();
       } catch (e2) {
-        print("[ProducerDash] Error parsing date: ${json['order_date']} - $e - $e2. Using current time.");
+        print(
+            "[ProducerDash] Error parsing date: ${json['order_date']} - $e - $e2. Using current time.");
         parsedDate = DateTime.now(); // Final fallback
       }
     }
@@ -146,17 +150,21 @@ class Order {
     try {
       final order = Order(
         orderId: _parseInt(json['order_id']),
-        mealName: _getStringSafe(json['product_name']) ?? 'Unknown Product', // Handle potential null
+        mealName:
+            _getStringSafe(json['product_name']) ?? 'Unknown Product',
         orderDate: parsedDate,
         totalPrice: _parseDouble(json['total_price']),
         quantity: _parseInt(json['quantity']),
-        orderStatus: _getStringSafe(json['order_status']) ?? Order.STATUS_PENDING,
+        orderStatus:
+            _getStringSafe(json['order_status']) ?? Order.STATUS_PENDING,
         paymentStatus: _getStringSafe(json['payment_status']),
         notes: _getStringSafe(json['notes']),
         deliveryAddress: _getStringSafe(json['delivery_address']),
-        customerName: _getStringSafe(json['producer_name']) ?? _getStringSafe(json['customer_name']), // Try producer or customer name
+        // Prefer customer_name if available, fallback to producer_name
+        customerName: _getStringSafe(json['customer_name']) ?? _getStringSafe(json['producer_name']),
         ingredients: _getStringSafe(json['ingredients']),
-        assignedRiderId: _parseIntNullable(json['assigned_rider_id'] ?? json['transporter_id']), // Check multiple keys
+        assignedRiderId: _parseIntNullable(json['assigned_rider_id'] ??
+            json['transporter_id']), // Check multiple keys
         assignedRiderName: _getStringSafe(json['assigned_rider_name']),
       );
       return order;
@@ -178,7 +186,7 @@ class Order {
     String? notes,
     String? ingredients,
     String? paymentStatus,
-    ValueGetter<int?>? assignedRiderId, // Use ValueGetter for nullable fields
+    ValueGetter<int?>? assignedRiderId,
     ValueGetter<String?>? assignedRiderName,
   }) {
     return Order(
@@ -193,41 +201,45 @@ class Order {
       notes: notes ?? this.notes,
       ingredients: ingredients ?? this.ingredients,
       paymentStatus: paymentStatus ?? this.paymentStatus,
-      assignedRiderId: assignedRiderId != null ? assignedRiderId() : this.assignedRiderId,
-      assignedRiderName: assignedRiderName != null ? assignedRiderName() : this.assignedRiderName,
+      assignedRiderId:
+          assignedRiderId != null ? assignedRiderId() : this.assignedRiderId,
+      assignedRiderName: assignedRiderName != null
+          ? assignedRiderName()
+          : this.assignedRiderName,
     );
   }
 
-  // Standardized Status Constants
+  // Standardized Status Constants (Ensure these match API expectations)
   static const String STATUS_PENDING = 'Pending';
-  static const String STATUS_ACCEPTED = 'Accepted'; // Producer Accepts
-  static const String STATUS_PREPARING = 'Preparing'; // Producer Prepares (Optional step)
-  static const String STATUS_READY_FOR_PICKUP = 'Ready for Pickup'; // Producer Marks Ready for ANY Rider
-  static const String STATUS_ASSIGNED = 'Assigned'; // Producer Assigns SPECIFIC Rider
-  static const String STATUS_DISPATCHED = 'Dispatched'; // Can mean "Ready" or "Shipped" depending on context
-  static const String STATUS_OUT_FOR_DELIVERY = 'Out for Delivery'; // Set by Rider
-  static const String STATUS_DELIVERED = 'Delivered'; // Set by Rider/Producer
-  static const String STATUS_CANCELLED = 'Cancelled'; // Set by Producer/System
-  static const String STATUS_COMPLETED = 'Completed'; // Often synonymous with Delivered
+  static const String STATUS_ACCEPTED = 'Accepted';
+  static const String STATUS_PREPARING = 'Preparing';
+  static const String STATUS_READY_FOR_PICKUP = 'Ready for Pickup';
+  static const String STATUS_ASSIGNED = 'Assigned';
+  static const String STATUS_DISPATCHED = 'Dispatched'; // Rider picks up
+  static const String STATUS_OUT_FOR_DELIVERY = 'Out for Delivery'; // Rider delivering
+  static const String STATUS_DELIVERED = 'Delivered'; // Rider confirms
+  static const String STATUS_COMPLETED = 'Completed'; // Final state
+  static const String STATUS_CANCELLED = 'Cancelled';
 }
 
-// Inline ProducerProfile class
+// ProducerProfile Model (Unified)
 class ProducerProfile {
   final int producerId;
   final String name;
   final String? email;
   final String? phoneNumber;
   final String? location;
-  final String? image;
+  final String? image; // URL
   final bool isActive;
   final DateTime registrationDate;
   final DateTime? lastLogin;
   final String? producerType;
   final double? rating;
-  final String? reviews;
+  final String? reviews; // Changed from int to String
   final String? userType;
   final bool? isEmailVerified;
-  final List<Map<String, dynamic>>? stock; // Stock field
+  final List<Map<String, dynamic>>? stock; // [{"produce_id": "...", "quantity": ...}]
+  File? localImageFile; // For editing
 
   ProducerProfile({
     required this.producerId,
@@ -245,8 +257,10 @@ class ProducerProfile {
     this.userType,
     this.isEmailVerified,
     this.stock,
+    this.localImageFile,
   });
 
+  // Used for saving to cache
   Map<String, dynamic> toJson() {
     return {
       'producer_id': producerId,
@@ -263,30 +277,54 @@ class ProducerProfile {
       'reviews': reviews,
       'user_type': userType,
       'is_email_verified': isEmailVerified,
-      'stock': stock, // Include stock in JSON serialization
+      // Convert stock to JSON string if API expects string, otherwise keep as list
+      'stock': stock,
     };
+  }
+
+  // Used for sending updates to API
+  Map<String, dynamic> toJsonForUpdate() {
+    return {
+      'name': name,
+      'phone_number': phoneNumber,
+      'location': location,
+      // Image handled separately
+      'is_active': isActive, // Include status in update? Or separate endpoint?
+      // Other fields like producerType, rating, reviews likely not updated here
+      'stock': stock, // Include updated stock list
+    }..removeWhere((key, value) => value == null);
   }
 
   factory ProducerProfile.fromJson(Map<String, dynamic> json) {
     try {
+      // Helper to parse stock robustly
       List<Map<String, dynamic>>? parseStock(dynamic value) {
-        if (value == null) return null; // Keep null if API sends null
+        if (value == null) return null;
         if (value is String) {
           try {
             final decoded = jsonDecode(value);
             if (decoded is List) {
-              // Ensure items are Maps
               return decoded.whereType<Map<String, dynamic>>().toList();
             }
           } catch (e) {
             print("[ProducerDash] Error decoding stock JSON string: $e");
           }
         } else if (value is List) {
-          // Ensure items are Maps
           return value.whereType<Map<String, dynamic>>().toList();
         }
-        print("[ProducerDash] Warning: Unexpected stock format: ${value.runtimeType}. Returning null.");
-        return null; // Return null if format is unexpected
+        print(
+            "[ProducerDash] Warning: Unexpected stock format: ${value.runtimeType}. Returning null.");
+        return null;
+      }
+
+      DateTime? parseDate(String? dateString) {
+        if (dateString == null || dateString.isEmpty) return null;
+        try {
+          return DateTime.parse(dateString);
+        } catch (e) {
+          print("[ProducerDash] Error parsing date string '$dateString': $e");
+          return null;
+        }
       }
 
       final profile = ProducerProfile(
@@ -297,15 +335,11 @@ class ProducerProfile {
         location: _getStringSafe(json['location']),
         image: _getStringSafe(json['image']),
         isActive: _parseBoolSafe(json['is_active']),
-        registrationDate: json['registration_date'] != null
-            ? DateTime.parse(json['registration_date'] as String)
-            : DateTime.now(), // Default to current time if null
-        lastLogin: json['last_login'] != null
-            ? DateTime.parse(json['last_login'] as String)
-            : null,
+        registrationDate: parseDate(json['registration_date']) ?? DateTime.now(), // Fallback
+        lastLogin: parseDate(json['last_login']),
         producerType: _getStringSafe(json['producer_type']),
         rating: _parseDoubleNullable(json['rating']),
-        reviews: _getStringSafe(json['reviews']),
+        reviews: _getStringSafe(json['reviews']), // Parse reviews as string
         userType: _getStringSafe(json['user_type']),
         isEmailVerified: _parseBoolSafe(json['is_email_verified']),
         stock: parseStock(json['stock']),
@@ -326,13 +360,14 @@ class ProducerProfile {
     String? image,
     bool? isActive,
     DateTime? registrationDate,
-    ValueGetter<DateTime?>? lastLogin, // Allow setting to null
+    ValueGetter<DateTime?>? lastLogin,
     String? producerType,
-    ValueGetter<double?>? rating, // Allow setting to null
-    String? reviews,
+    ValueGetter<double?>? rating,
+    ValueGetter<String?>? reviews, // Use String? getter
     String? userType,
     bool? isEmailVerified,
-    ValueGetter<List<Map<String, dynamic>>?>? stock, // Allow setting to null
+    ValueGetter<List<Map<String, dynamic>>?>? stock,
+    ValueGetter<File?>? localImageFile, // Allow updating local file
   }) {
     return ProducerProfile(
       producerId: producerId ?? this.producerId,
@@ -346,24 +381,25 @@ class ProducerProfile {
       lastLogin: lastLogin != null ? lastLogin() : this.lastLogin,
       producerType: producerType ?? this.producerType,
       rating: rating != null ? rating() : this.rating,
-      reviews: reviews ?? this.reviews,
+      reviews: reviews != null ? reviews() : this.reviews,
       userType: userType ?? this.userType,
       isEmailVerified: isEmailVerified ?? this.isEmailVerified,
       stock: stock != null ? stock() : this.stock,
+      localImageFile: localImageFile != null ? localImageFile() : this.localImageFile,
     );
   }
 }
 
-// Inline Product class
+// Product Model (Unified)
 class Product {
-  final String produceId;
+  final String produceId; // Ensure this is the primary key from API
   final String produceName;
   final int? calories;
   final double? carbohydrates;
   final double? fats;
   final double? proteins;
   final int? unitGrams;
-  final String? source;
+  final String? source; // E.g., URL for nutritional info
 
   Product({
     required this.produceId,
@@ -378,10 +414,11 @@ class Product {
 
   factory Product.fromJson(Map<String, dynamic> json) {
     try {
-      // Ensure 'produce_id' exists and is a string
+      // Use 'produce_id' as the primary identifier
       final produceId = _getStringSafe(json['produce_id']);
       if (produceId == null || produceId.isEmpty) {
-         throw FormatException("Missing or invalid 'produce_id' in Product JSON: $json");
+        throw FormatException(
+            "Missing or invalid 'produce_id' in Product JSON: $json");
       }
 
       final product = Product(
@@ -404,7 +441,7 @@ class Product {
   Product copyWith({
     String? produceId,
     String? produceName,
-    ValueGetter<int?>? calories, // Use ValueGetter for nullable
+    ValueGetter<int?>? calories,
     ValueGetter<double?>? carbohydrates,
     ValueGetter<double?>? fats,
     ValueGetter<double?>? proteins,
@@ -415,7 +452,8 @@ class Product {
       produceId: produceId ?? this.produceId,
       produceName: produceName ?? this.produceName,
       calories: calories != null ? calories() : this.calories,
-      carbohydrates: carbohydrates != null ? carbohydrates() : this.carbohydrates,
+      carbohydrates:
+          carbohydrates != null ? carbohydrates() : this.carbohydrates,
       fats: fats != null ? fats() : this.fats,
       proteins: proteins != null ? proteins() : this.proteins,
       unitGrams: unitGrams != null ? unitGrams() : this.unitGrams,
@@ -424,12 +462,12 @@ class Product {
   }
 }
 
-// Inline Rider/Transporter Model (Copied from ChefDash)
+// Rider/Transporter Model (Unified)
 class Rider {
   final int id;
   final String name;
-  final String status; // Keep original status string if needed elsewhere
-  final bool isActive; // NEW: Field for availability based on 'is_active'
+  final String status; // Original status string from API (e.g., 'available', 'busy')
+  final bool isActive; // Derived boolean for simpler UI logic (e.g., from 'is_active' field or status string)
 
   Rider({
     required this.id,
@@ -439,55 +477,88 @@ class Rider {
   });
 
   factory Rider.fromJson(Map<String, dynamic> json) {
+    // Prefer specific rider/transporter keys, fallback to generic 'id'/'name'
+    final riderId = _parseIntNullable(
+        json['rider_id'] ?? json['transporter_id'] ?? json['id']);
+    final riderName = _getStringSafe(
+        json['name'] ?? json['rider_name'] ?? json['transporter_name']);
+
+    if (riderId == null || riderId == 0) {
+      print("[ProducerDash] Warning: Rider ID is missing or invalid in JSON: $json");
+      // Optionally throw an error or return a default/placeholder Rider
+      // For now, defaulting to ID 0 and handling it later if needed
+    }
+
     return Rider(
-      id: _parseIntNullable(json['rider_id'] ?? json['transporter_id'] ?? json['id']) ?? 0,
-      name: _getStringSafe(json['name'] ?? json['rider_name'] ?? json['transporter_name']) ?? 'Unnamed Rider',
+      id: riderId ?? 0, // Default to 0 if null
+      name: riderName ?? 'Unnamed Rider',
       status: _getStringSafe(json['status']) ?? 'unknown',
+      // Use _parseBoolSafe for robust boolean parsing from 'is_active' field
       isActive: _parseBoolSafe(json['is_active']),
     );
   }
 }
 
-// --- API Service ---
+// --- Unified API Service ---
 class ProducerApiService {
-  static final String apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://your-api.example.com';
+  // Use a static final getter for the base URL
+  static final String _apibaseurl =
+      dotenv.env['API_BASE_URL-intranet'] ?? 'https://your-api.example.com';
 
+  // Helper to get Producer ID from SharedPreferences
   static Future<String?> _getProducerId() async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      return prefs.getString('producer_id');
-    } catch (e) {
-      print("[ProducerDash] SharedPreferences error: $e");
-      return null;
-    }
+    final prefs = await SharedPreferences.getInstance();
+    // Try to get producer_id as string first, fall back to int for backward compatibility
+    return prefs.getString('producer_id') ?? 
+           prefs.getInt('producer_id')?.toString();
   }
 
-  // Handles potential nested 'data' key or direct list/map
-  static dynamic _handleApiResponse(dynamic responseData) {
-    if (responseData is Map && responseData.containsKey('data')) {
-      return responseData['data'];
-    } else if (responseData is List) {
-      return responseData; // Already a list
-    } else if (responseData is Map) {
-      // If it's a map but no 'data' key, return the map itself
-      return responseData;
-    }
-    print("[ProducerDash] API response format warning: Got ${responseData.runtimeType}");
-    return null; // Indicate unexpected format
+  // Helper to get Producer ID from SharedPreferences
+  static Future<int?> _getProducerIdInt() async {
+    final prefs = await SharedPreferences.getInstance();
+    // Try to get producer_id as string first, fall back to int for backward compatibility
+    return _parseInt(prefs.getString('producer_id')) ?? prefs.getInt('producer_id');
   }
 
+  // Handles nested 'data' key or direct list/map, more robustly
+  static dynamic _handleApiResponse(dynamic responseBody) {
+     try {
+       final decoded = jsonDecode(responseBody);
+       if (decoded is Map && decoded.containsKey('data')) {
+         return decoded['data']; // Prioritize nested 'data'
+       }
+       // Return the decoded body directly if it's a list or map (and no 'data' key)
+       if (decoded is List || decoded is Map) {
+         return decoded;
+       }
+       print("[ProducerDash] API response format warning: Decoded type is ${decoded.runtimeType}");
+       return null; // Indicate unexpected decoded format
+     } catch (e) {
+       print("[ProducerDash] API response JSON decoding error: $e");
+       return null; // Indicate decoding failure
+     }
+  }
+
+  // Standard Read Headers
   static Map<String, String> _getReadHeaders() {
     return {'Accept': 'application/json'};
   }
 
-  static Map<String, String> _getWriteHeaders({bool requiresAuth = false}) { // Default to false unless specific call needs it
-    String? authToken; // Implement actual token retrieval if needed
+  // Standard Write Headers (with optional auth)
+  static Future<Map<String, String>> _getWriteHeaders(
+      {bool requiresAuth = true}) async {
     Map<String, String> headers = {
       'Content-Type': 'application/json; charset=UTF-8',
       'Accept': 'application/json',
     };
-    if (requiresAuth && authToken != null && authToken.isNotEmpty) {
-      headers['Authorization'] = 'Bearer $authToken';
+    if (requiresAuth) {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('access_token');
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      } else {
+        print("[ProducerDash] Warning: Auth required but no access token found.");
+      }
     }
     return headers;
   }
@@ -495,40 +566,46 @@ class ProducerApiService {
   // --- Profile Methods ---
   static Future<ProducerProfile> fetchProducerProfile() async {
     final producerId = await _getProducerId();
-    if (producerId == null || producerId.isEmpty) {
-      throw Exception('Producer ID not found. Please log in again.');
+    if (producerId == null) {
+      // Log the error for debugging
+      print('[ProducerDash] No producer ID found in SharedPreferences');
+      // Show more detailed error message
+      throw Exception('Producer session expired or not logged in. Please log in again.');
     }
-    final Uri uri = Uri.parse('$apibaseurl/rr/rproducers/$producerId');
+    
+    print('[ProducerDash] Using producer ID: $producerId');
+    
+    // Using /rr/rproducers/{id} - assuming 'r' prefix means 'read'
+    final Uri uri = Uri.parse('$_apibaseurl/rr/rproducers/$producerId');
     print("[ProducerDash] Fetching profile: $uri");
 
     try {
-      final response = await http.get(uri, headers: _getReadHeaders());
+      final response = await http.get(uri, headers: await _getReadHeaders());
       if (response.statusCode == 200) {
-        final dynamic rawData = json.decode(response.body);
-        final dynamic handledData = _handleApiResponse(rawData);
+        final dynamic handledData = _handleApiResponse(response.body);
 
         Map<String, dynamic>? profileMap;
         if (handledData is List && handledData.isNotEmpty) {
-          profileMap = handledData[0] as Map<String, dynamic>;
+          // API might return list containing one producer object
+          if (handledData[0] is Map<String, dynamic>) {
+            profileMap = handledData[0];
+          } else {
+             throw Exception('API response list item is not a valid map.');
+          }
         } else if (handledData is Map<String, dynamic>) {
-           // Check if it's the actual profile map (e.g., has 'producer_id')
-          if (handledData.containsKey('producer_id')) {
+          // API might return the producer object directly
+          if (handledData.containsKey('producer_id')) { // Check for a key field
             profileMap = handledData;
           } else {
-            // Handle cases where 'data' might contain a map but not the profile itself
-             print("[ProducerDash] Warning: Profile map missing expected 'producer_id' key.");
-             throw Exception('Failed to parse profile: API response map missing key.');
+             throw Exception('API response map missing expected keys.');
           }
         }
 
         if (profileMap == null) {
-           print('[ProducerDash] ERROR: Producer profile data is null after handling response.');
-           throw Exception('Producer profile not found in API response.');
+          throw Exception('Producer profile not found or invalid format in API response.');
         }
-
         return ProducerProfile.fromJson(profileMap);
       } else {
-        print('[ProducerDash] Profile fetch failed: ${response.statusCode} ${response.body}');
         throw Exception('Failed to fetch producer profile (Status: ${response.statusCode}).');
       }
     } catch (e, stack) {
@@ -537,17 +614,18 @@ class ProducerApiService {
     }
   }
 
+  // Update Producer Active Status
   static Future<bool> updateProducerStatus(int producerId, bool isActive) async {
-    final Uri uri = Uri.parse('$apibaseurl/rr/producers/$producerId/status');
+    // Using PATCH /rr/producers/{id}/status - assuming this endpoint exists
+    final Uri uri = Uri.parse('$_apibaseurl/rr/producers/$producerId/status');
     print("[ProducerDash] Updating status for $producerId to $isActive at $uri");
     try {
       final response = await http.patch(
         uri,
-        headers: _getWriteHeaders(requiresAuth: false), // Adjust auth if needed
+        headers: await _getWriteHeaders(), // Assumes auth needed
         body: jsonEncode({'is_active': isActive}),
       );
       if (response.statusCode == 200 || response.statusCode == 204) {
-         print("[ProducerDash] Status update successful.");
         return true;
       } else {
         print("[ProducerDash] Error updating producer status: ${response.statusCode} ${response.body}");
@@ -559,24 +637,26 @@ class ProducerApiService {
     }
   }
 
+  // Update Producer Profile Text Fields
   static Future<bool> updateProducerProfile(int producerId,
       {required String name, String? phoneNumber, String? location}) async {
-    final Uri uri = Uri.parse('$apibaseurl/rr/producers/$producerId');
-     print("[ProducerDash] Updating profile for $producerId at $uri");
+    // Using PUT or PATCH to /rr/producers/{id} - Assuming partial updates allowed with PATCH
+    final Uri uri = Uri.parse('$_apibaseurl/rr/producers/$producerId');
+    print("[ProducerDash] Updating profile for $producerId at $uri");
     Map<String, dynamic> payload = {
       'name': name, // Name is required
       if (phoneNumber != null && phoneNumber.isNotEmpty) 'phone_number': phoneNumber,
       if (location != null && location.isNotEmpty) 'location': location,
     };
-     print("[ProducerDash] Update payload: ${jsonEncode(payload)}");
+    payload.removeWhere((key, value) => value == null); // Clean payload
+    print("[ProducerDash] Update payload: ${jsonEncode(payload)}");
     try {
-      final response = await http.put( // Assuming PUT for full/partial update
+      final response = await http.patch( // Use PATCH for partial update
         uri,
-        headers: _getWriteHeaders(requiresAuth: false), // Adjust auth if needed
+        headers: await _getWriteHeaders(), // Assumes auth needed
         body: jsonEncode(payload),
       );
       if (response.statusCode == 200 || response.statusCode == 204) {
-        print("[ProducerDash] Profile update successful.");
         return true;
       } else {
         print("[ProducerDash] Error updating producer profile: ${response.statusCode} ${response.body}");
@@ -588,21 +668,54 @@ class ProducerApiService {
     }
   }
 
+   // Update Producer Profile Image (Placeholder - requires backend implementation)
+   static Future<String?> updateProducerProfileImage(int producerId, File imageFile) async {
+     // This needs a backend endpoint that accepts multipart/form-data
+     final Uri uri = Uri.parse('$_apibaseurl/rr/producers/$producerId/image'); // Example endpoint
+     print("[ProducerDash] Uploading profile image for $producerId to $uri");
+
+     try {
+       var request = http.MultipartRequest('POST', uri); // Or PUT/PATCH
+       request.headers.addAll(await _getWriteHeaders()); // Add auth headers
+       request.files.add(await http.MultipartFile.fromPath(
+         'profile_image', // Field name expected by backend
+         imageFile.path,
+         // contentType: MediaType('image', 'jpeg'), // Optional: Specify content type
+       ));
+       // request.fields['producer_id'] = producerId.toString(); // Add other fields if needed
+
+       var streamedResponse = await request.send();
+       var response = await http.Response.fromStream(streamedResponse);
+
+       if (response.statusCode == 200 || response.statusCode == 201) {
+         final responseData = json.decode(response.body);
+         // Extract the new image URL from the response (adjust key as needed)
+         final newImageUrl = responseData['imageUrl'] ?? responseData['image'];
+         print("[ProducerDash] Image upload successful. New URL: $newImageUrl");
+         return newImageUrl;
+       } else {
+         print("[ProducerDash] Error uploading image: ${response.statusCode} ${response.body}");
+         return null;
+       }
+     } catch (e) {
+       print("[ProducerDash] Exception uploading image: $e");
+       return null;
+     }
+   }
+
   // --- Order Methods ---
   static Future<List<Order>> fetchProducerOrders() async {
     final producerId = await _getProducerId();
-    if (producerId == null || producerId.isEmpty) {
+    if (producerId == null) {
       throw Exception('Producer ID not found. Please log in again.');
     }
-    final Uri uri = Uri.parse('$apibaseurl/rr/orders?producer_id=$producerId');
+    // Using GET /rr/orders?producer_id={id} - common pattern for filtering
+    final Uri uri = Uri.parse('$_apibaseurl/rr/orders?producer_id=$producerId');
     print("[ProducerDash] Fetching orders: $uri");
-
     try {
-      final response = await http.get(uri, headers: _getReadHeaders());
+      final response = await http.get(uri, headers: await _getWriteHeaders());
       if (response.statusCode == 200) {
-        final dynamic rawData = json.decode(response.body);
-        final dynamic handledData = _handleApiResponse(rawData);
-
+        final dynamic handledData = _handleApiResponse(response.body);
         if (handledData is List) {
           final List<Order> orders = handledData
               .map<Order>((orderJson) => Order.fromJson(orderJson))
@@ -610,31 +723,30 @@ class ProducerApiService {
           print("[ProducerDash] Fetched ${orders.length} orders");
           return orders;
         } else {
-          print('[ProducerDash] Orders response format error: expected List, got ${handledData.runtimeType}');
-          return []; // Return empty list if format is wrong
+          print('[ProducerDash] Orders response format error: expected List, got ${handledData?.runtimeType}');
+          return [];
         }
       } else {
-        print('[ProducerDash] Orders fetch failed: ${response.statusCode} ${response.body}');
-        return [];
+        throw Exception('Failed to load orders (Status: ${response.statusCode})');
       }
     } catch (e, stack) {
       print('[ProducerDash] Orders fetch error: $e\n$stack');
-      return [];
+      rethrow;
     }
   }
 
-  // Update Order Status (For Accept, Prepare, Cancel, Ready for Pickup)
+  // Update Order Status (Simple: Accept, Prepare, Cancel, Ready for Pickup)
   static Future<bool> updateOrderStatus(int orderId, String newStatus) async {
-    final Uri uri = Uri.parse('$apibaseurl/rr/orders/$orderId/status');
+    // Using PATCH /rr/orders/{id}/status
+    final Uri uri = Uri.parse('$_apibaseurl/rr/orders/$orderId/status');
     print("[ProducerDash] Updating order $orderId status to $newStatus at $uri");
     try {
       final response = await http.patch(
         uri,
-        headers: _getWriteHeaders(requiresAuth: false), // Adjust auth if needed
+        headers: await _getWriteHeaders(),
         body: jsonEncode({'order_status': newStatus}),
       );
       if (response.statusCode == 200 || response.statusCode == 204) {
-         print("[ProducerDash] Order status update successful.");
         return true;
       } else {
         print("[ProducerDash] Order status update failed: ${response.statusCode} ${response.body}");
@@ -648,19 +760,19 @@ class ProducerApiService {
 
   // Assign Order to Specific Rider
   static Future<bool> assignOrderToRider(int orderId, int riderId, String newStatus) async {
-    final Uri uri = Uri.parse('$apibaseurl/rr/orders/$orderId/status'); // Assume same endpoint
+    // Using PATCH /rr/orders/{id}/status, sending rider ID
+    final Uri uri = Uri.parse('$_apibaseurl/rr/orders/$orderId/status');
     print("[ProducerDash] Assigning order $orderId to rider $riderId, status $newStatus at $uri");
     try {
       final response = await http.patch(
         uri,
-        headers: _getWriteHeaders(requiresAuth: false), // Adjust auth if needed
+        headers: await _getWriteHeaders(),
         body: jsonEncode(<String, dynamic>{
           'order_status': newStatus,
-          'transporter_id': riderId, // Ensure API expects this key
+          'transporter_id': riderId, // Key for rider ID
         }),
       );
       if (response.statusCode == 200 || response.statusCode == 204) {
-        print("[ProducerDash] Rider assignment successful.");
         return true;
       } else {
         print("[ProducerDash] Error assigning order: ${response.statusCode} ${response.body}");
@@ -674,58 +786,49 @@ class ProducerApiService {
 
   // --- Rider Methods ---
   static Future<List<Rider>> fetchAvailableRiders() async {
-    final Uri uri = Uri.parse('$apibaseurl/rr/transporters'); // Endpoint for riders/transporters
+    // Using GET /rr/transporters - assumes this returns all riders/transporters
+    final Uri uri = Uri.parse('$_apibaseurl/rr/transporters');
     print("[ProducerDash] Fetching available riders from: $uri");
     try {
-      final response = await http.get(uri, headers: _getReadHeaders());
+      final response = await http.get(uri, headers: await _getWriteHeaders());
       if (response.statusCode == 200) {
-        final dynamic rawData = json.decode(response.body);
-        final dynamic riderList = _handleApiResponse(rawData);
-
-        if (riderList is List) {
-          if (riderList.isEmpty) {
-             print("[ProducerDash] No riders found.");
-             return [];
-          }
-          final List<Rider> riders = riderList
-              .map((jsonItem) {
-                if (jsonItem is Map<String, dynamic>) {
-                  return Rider.fromJson(jsonItem);
-                } else {
-                  print("[ProducerDash] API Warning: Skipping non-map item in riders list: $jsonItem");
-                  return null;
-                }
+        final dynamic handledData = _handleApiResponse(response.body);
+        if (handledData is List) {
+          final List<Rider> riders = handledData
+              .map<Rider?>((jsonItem) { // Use Rider? to handle parsing errors gracefully
+                 try {
+                   return Rider.fromJson(jsonItem);
+                 } catch (e) {
+                    print("[ProducerDash] Skipping invalid rider item: $jsonItem - Error: $e");
+                    return null; // Skip item if parsing fails
+                 }
               })
-              .whereType<Rider>()
+              .whereType<Rider>() // Filter out nulls
               .toList();
-           print("[ProducerDash] Fetched ${riders.length} riders.");
-           return riders;
+          print("[ProducerDash] Fetched ${riders.length} riders.");
+          return riders;
         } else {
-          print("[ProducerDash] Riders API response format unexpected: Expected List, got ${riderList?.runtimeType}");
+          print("[ProducerDash] Riders API response format unexpected: Expected List, got ${handledData?.runtimeType}");
           return [];
         }
       } else {
-        print("[ProducerDash] Error fetching riders: ${response.statusCode} ${response.body}");
         throw Exception('Failed to load riders (Status code: ${response.statusCode})');
       }
-    } catch (e) {
-      print("[ProducerDash] Exception fetching riders: $e");
-      if (e is Exception) rethrow;
-      throw Exception('Failed to load riders: $e');
+    } catch (e, stack) {
+      print("[ProducerDash] Exception fetching riders: $e\n$stack");
+      rethrow;
     }
   }
 
   // --- Produce and Stock Methods ---
   static Future<List<Product>> fetchProducerProduce() async {
-    // This fetches the MASTER LIST of all possible produce items
-    final Uri uri = Uri.parse('$apibaseurl/rr/produce');
+    // GET /rr/produce - fetches MASTER list of all produce items
+    final Uri uri = Uri.parse('$_apibaseurl/rr/produce');
     print("[ProducerDash] Fetching master produce list: $uri");
     try {
       final response = await http.get(uri, headers: _getReadHeaders());
       if (response.statusCode == 200) {
-        final dynamic rawData = json.decode(response.body);
-        final dynamic handledData = _handleApiResponse(rawData);
-
+        final dynamic handledData = _handleApiResponse(response.body);
         if (handledData is List) {
           final List<Product> produce = handledData
               .map<Product>((prodJson) => Product.fromJson(prodJson))
@@ -733,59 +836,59 @@ class ProducerApiService {
           print("[ProducerDash] Fetched ${produce.length} produce items from master list.");
           return produce;
         } else {
-          print('[ProducerDash] Produce response format error: expected List, got ${handledData.runtimeType}');
+          print('[ProducerDash] Produce response format error: expected List, got ${handledData?.runtimeType}');
           return [];
         }
       } else {
-        print('[ProducerDash] Produce fetch failed: ${response.statusCode} ${response.body}');
-        return [];
+        throw Exception('Failed to fetch produce (Status: ${response.statusCode})');
       }
     } catch (e, stack) {
       print('[ProducerDash] Produce fetch error: $e\n$stack');
-      return [];
+      rethrow;
     }
   }
 
-  // Updates the producer's stock list (PATCH request to producer profile)
+  // Update Producer's Stock List
   static Future<bool> updateProducerStock(int producerId, List<Map<String, dynamic>> stockList) async {
-     final Uri uri = Uri.parse('$apibaseurl/rr/producers/$producerId');
-     print("[ProducerDash] Updating stock for producer $producerId at $uri");
-     // API expects {"stock": [{"produce_id": "...", "quantity": ...}, ...]}
-     final payload = jsonEncode({"stock": stockList});
-     print("[ProducerDash] Stock update payload: $payload");
-     try {
-       final response = await http.patch( // Use PATCH for partial update
-         uri,
-         headers: _getWriteHeaders(requiresAuth: false), // Adjust auth if needed
-         body: payload,
-       );
-       if (response.statusCode == 200 || response.statusCode == 204) {
-         print("[ProducerDash] Stock update successful.");
-         return true;
-       } else {
-         print("Stock update failed: ${response.statusCode} ${response.body}");
-         return false;
-       }
-     } catch (e) {
-       print("Exception updating stock: $e");
-       return false;
-     }
+    // PATCH /rr/producers/{id} - Updating the 'stock' field
+    final Uri uri = Uri.parse('$_apibaseurl/rr/producers/$producerId');
+    print("[ProducerDash] Updating stock for producer $producerId at $uri");
+    // API expects {"stock": [{"produce_id": "...", "quantity": ...}, ...]}
+    final payload = jsonEncode({"stock": stockList});
+    print("[ProducerDash] Stock update payload: $payload");
+    try {
+      final response = await http.patch(
+        uri,
+        headers: await _getWriteHeaders(), // Assumes auth needed
+        body: payload,
+      );
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        return true;
+      } else {
+        print("Stock update failed: ${response.statusCode} ${response.body}");
+        return false;
+      }
+    } catch (e) {
+      print("Exception updating stock: $e");
+      return false;
+    }
   }
 
-
-  // Adds a new produce item to the master list
+  // Add New Produce Item to Master List
   static Future<Product?> addProduce(Map<String, dynamic> produceData) async {
-    final Uri uri = Uri.parse('$apibaseurl/rr/produce');
+    // POST /rr/produce
+    final Uri uri = Uri.parse('$_apibaseurl/rr/produce');
     print("[ProducerDash] Adding new produce item at $uri");
     try {
+      // Prepare payload, parsing types safely
       final payload = {
-        'produce_name': produceData['produce_name'] as String?,
+        'produce_name': _getStringSafe(produceData['produce_name']),
         'calories': _parseIntNullable(produceData['calories']),
         'proteins': _parseDoubleNullable(produceData['proteins']),
         'carbohydrates': _parseDoubleNullable(produceData['carbohydrates']),
         'fats': _parseDoubleNullable(produceData['fats']),
         'unit_grams': _parseIntNullable(produceData['unit_grams']),
-        'source': produceData['source'] as String?,
+        'source': _getStringSafe(produceData['source']),
       };
       payload.removeWhere((key, value) => value == null || (value is String && value.isEmpty));
 
@@ -797,18 +900,16 @@ class ProducerApiService {
 
       final response = await http.post(
         uri,
-        headers: _getWriteHeaders(requiresAuth: false), // Adjust auth if needed
+        headers: await _getWriteHeaders(), // Assumes auth needed
         body: jsonEncode(payload),
       );
 
-      if (response.statusCode == 201) {
-        final dynamic responseData = json.decode(response.body);
-        final dynamic createdProduceData = _handleApiResponse(responseData);
+      if (response.statusCode == 201) { // Expect 201 Created
+        final dynamic createdProduceData = _handleApiResponse(response.body);
         if (createdProduceData is Map<String, dynamic>) {
-           print("[ProducerDash] Add produce successful, received created item.");
           return Product.fromJson(createdProduceData);
         } else {
-           print("[ProducerDash] Add produce succeeded but couldn't parse response body: ${response.body}");
+          print("[ProducerDash] Add produce succeeded but couldn't parse response body: ${response.body}");
           return null;
         }
       } else {
@@ -821,24 +922,25 @@ class ProducerApiService {
     }
   }
 
-  // Updates an existing produce item in the master list
+  // Update Existing Produce Item in Master List
   static Future<bool> updateProduce(String produceId, Map<String, dynamic> produceData) async {
     if (produceId.isEmpty) {
       print("[ProducerDash] Error updating produce: Invalid Produce ID.");
       return false;
     }
-    // Assuming PUT to /rr/uproduce?produce_id={id} based on original code
-    final Uri uri = Uri.parse('$apibaseurl/rr/uproduce?produce_id=$produceId');
-     print("[ProducerDash] Updating produce item $produceId at $uri");
+    // PUT /rr/uproduce?produce_id={id} - Endpoint from original code
+    final Uri uri = Uri.parse('$_apibaseurl/rr/uproduce?produce_id=$produceId');
+    print("[ProducerDash] Updating produce item $produceId at $uri");
     try {
+      // Prepare payload similar to addProduce
       final payload = {
-        'produce_name': produceData['produce_name'] as String?,
+        'produce_name': _getStringSafe(produceData['produce_name']),
         'calories': _parseIntNullable(produceData['calories']),
         'proteins': _parseDoubleNullable(produceData['proteins']),
         'carbohydrates': _parseDoubleNullable(produceData['carbohydrates']),
         'fats': _parseDoubleNullable(produceData['fats']),
         'unit_grams': _parseIntNullable(produceData['unit_grams']),
-        'source': produceData['source'] as String?,
+        'source': _getStringSafe(produceData['source']),
       };
       payload.removeWhere((key, value) => value == null || (value is String && value.isEmpty));
 
@@ -846,16 +948,15 @@ class ProducerApiService {
         print("[ProducerDash] Error updating produce: Produce name cannot be empty.");
         return false;
       }
-       print("[ProducerDash] Update produce payload: ${jsonEncode(payload)}");
+      print("[ProducerDash] Update produce payload: ${jsonEncode(payload)}");
 
-      final response = await http.put(
+      final response = await http.put( // Using PUT as per original endpoint structure
         uri,
-        headers: _getWriteHeaders(requiresAuth: false), // Adjust auth if needed
+        headers: await _getWriteHeaders(), // Assumes auth needed
         body: jsonEncode(payload),
       );
 
       if (response.statusCode == 200 || response.statusCode == 204) {
-         print("[ProducerDash] Update produce successful.");
         return true;
       } else {
         print("[ProducerDash] Error updating produce $produceId: ${response.statusCode} ${response.body}");
@@ -867,22 +968,21 @@ class ProducerApiService {
     }
   }
 
-  // Deletes a produce item from the master list
+  // Delete Produce Item from Master List
   static Future<bool> deleteProduce(String produceId) async {
     if (produceId.isEmpty) {
       print("[ProducerDash] Error deleting produce: Invalid Produce ID.");
       return false;
     }
-    // Assuming DELETE to /rr/uproduce?produce_id={id} based on original code
-    final Uri uri = Uri.parse('$apibaseurl/rr/uproduce?produce_id=$produceId');
-     print("[ProducerDash] Deleting produce item $produceId at $uri");
+    // DELETE /rr/uproduce?produce_id={id} - Endpoint from original code
+    final Uri uri = Uri.parse('$_apibaseurl/rr/uproduce?produce_id=$produceId');
+    print("[ProducerDash] Deleting produce item $produceId at $uri");
     try {
       final response = await http.delete(
         uri,
-        headers: _getWriteHeaders(requiresAuth: false), // Adjust auth if needed
+        headers: await _getWriteHeaders(), // Assumes auth needed
       );
       if (response.statusCode == 200 || response.statusCode == 204) {
-         print("[ProducerDash] Delete produce successful.");
         return true;
       } else {
         print("[ProducerDash] Error deleting produce $produceId: ${response.statusCode} ${response.body}");
@@ -893,12 +993,11 @@ class ProducerApiService {
       return false;
     }
   }
-
 }
 
 // --- Main Widget State ---
 class ProducerDash22 extends StatefulWidget {
-  const ProducerDash22({super.key}); // Removed static key
+  const ProducerDash22({super.key});
 
   @override
   State<ProducerDash22> createState() => _ProducerDash22State();
@@ -910,29 +1009,29 @@ class _ProducerDash22State extends State<ProducerDash22> {
   ProducerProfile? _profile;
   List<Order> _orders = [];
   List<Product> _produce = []; // Holds the MASTER list of all produce items
-  List<Rider> _riders = []; // Holds available riders (fetched on demand)
+  // Rider list not stored globally, fetched on demand by dialog
   bool _isLoading = true; // Combined loading for initial fetch
-  bool _isLoadingProfile = false; // Specific loading for profile
-  bool _isLoadingOrders = false;  // Specific loading for orders
-  bool _isLoadingProduce = false; // Specific loading for produce master list
+  bool _isLoadingProfile = false;
+  bool _isLoadingOrders = false;
+  bool _isLoadingProduce = false;
   String _error = ''; // General error message for combined fetch
-  String _profileFetchError = ''; // Specific error for profile fetch
+  String _profileFetchError = '';
 
-  // Stock Management State (Tracks producer's CURRENT stock based on master list)
-  Set<String> _selectedProduceIds = {}; // IDs of produce items the producer has in stock
-  Map<String, int> _produceQuantities = {}; // Quantity for each selected stock item
+  // Stock Management State
+  Set<String> _selectedProduceIds = {};
+  Map<String, int> _produceQuantities = {};
 
   // Profile Editing State
   bool _isEditingProfile = false;
   late TextEditingController _profileNameController;
   late TextEditingController _profilePhoneController;
   late TextEditingController _profileLocationController;
-  bool _isLoadingLocation = false; // For location fetching
-  bool _isUploadingProfileImage = false; // For image upload
-  String? _uploadedProfileImageUrl; // Temp storage for uploaded URL
+  bool _isLoadingLocation = false;
+  bool _isUploadingProfileImage = false;
+  String? _uploadedProfileImageUrl; // Only used if upload returns URL immediately
 
-  // Produce Item Editing State (For managing the MASTER list)
-  String? _editingProduceId; // ID of the produce item being added/edited
+  // Produce Item Editing State
+  String? _editingProduceId;
   TextEditingController? _produceNameController;
   TextEditingController? _produceCaloriesController;
   TextEditingController? _produceProteinsController;
@@ -941,7 +1040,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
   TextEditingController? _produceUnitGramsController;
   TextEditingController? _produceSourceController;
 
-  // Caching State
+  // Caching State (In-memory for simplicity, persistence done via ApiService methods)
   ProducerProfile? _profileCache;
   DateTime? _profileCacheTimestamp;
 
@@ -949,31 +1048,67 @@ class _ProducerDash22State extends State<ProducerDash22> {
   final GlobalKey<FormState> _produceFormKey = GlobalKey<FormState>();
   final GlobalKey<FormState> _profileFormKey = GlobalKey<FormState>();
 
+  // Polling Timer & Refresh State
+  Timer? _pollingTimer;
+  bool _isRefreshing = false; // Tracks manual refresh or polling refresh
+
+  // Notification Provider (Added)
+  late final NotificationProvider notificationProvider;
+
   @override
   void initState() {
     super.initState();
+    // Initialize text controllers
     _profileNameController = TextEditingController();
     _profilePhoneController = TextEditingController();
     _profileLocationController = TextEditingController();
-    // Fetch data when the widget initializes
+
+    // Get notification provider instance
+    notificationProvider = Provider.of<NotificationProvider>(context, listen: false);
+
+    // Initial data fetch
     _fetchAllData();
+
+    // Start polling for orders
+    _startPolling();
+
+    // Listen for notification refreshes
+    notificationProvider.addListener(_handleNotificationRefresh);
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // This is generally called after initState.
-    // We already call _fetchAllData in initState, so may not need it here
-    // unless dependencies change significantly.
+   @override
+   void dispose() {
+     // Dispose timers and controllers
+     _pollingTimer?.cancel();
+     _profileNameController.dispose();
+     _profilePhoneController.dispose();
+     _profileLocationController.dispose();
+     _disposeProduceEditControllers(); // Dispose produce controllers
+
+     // Remove notification listener
+     notificationProvider.removeListener(_handleNotificationRefresh);
+
+     super.dispose();
+   }
+
+  // Handles refresh triggered by notification
+  void _handleNotificationRefresh() {
+    print("[ProducerDash] Received notification refresh trigger.");
+    if (!_isRefreshing && mounted) {
+      _fetchAllData(forceRefresh: true); // Force refresh data on notification
+    }
   }
 
-  @override
-  void dispose() {
-    _profileNameController.dispose();
-    _profilePhoneController.dispose();
-    _profileLocationController.dispose();
-    _disposeProduceEditControllers();
-    super.dispose();
+  // Starts the periodic timer for fetching orders
+  void _startPolling() {
+    _pollingTimer?.cancel(); // Cancel any existing timer
+    _pollingTimer = Timer.periodic(const Duration(seconds: 30), (timer) { // Increased interval
+      // Only poll if mounted and not currently editing/refreshing manually
+      if (mounted && !_isEditingProfile && !_isRefreshing && _editingProduceId == null) {
+        print("[ProducerDash] Polling for new orders...");
+        _fetchOrdersAndProduce(forceRefresh: false); // Fetch orders/produce without forcing cache invalidation
+      }
+    });
   }
 
   void _disposeProduceEditControllers() {
@@ -984,7 +1119,6 @@ class _ProducerDash22State extends State<ProducerDash22> {
     _produceFatsController?.dispose();
     _produceUnitGramsController?.dispose();
     _produceSourceController?.dispose();
-    // Set controllers to null after disposing
     _produceNameController = null;
     _produceCaloriesController = null;
     _produceProteinsController = null;
@@ -996,35 +1130,30 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
   // --- Data Fetching and Initialization ---
   Future<void> _fetchAllData({bool forceRefresh = false}) async {
-    if (!mounted) return;
+    if (!mounted || _isRefreshing) return; // Prevent concurrent refreshes
     setState(() {
       _isLoading = true; // Show combined loading indicator
+      _isRefreshing = true; // Mark as refreshing
       _error = '';
-      _cancelAllEdits(); // Cancel edits before refresh
+      if (forceRefresh) {
+        _cancelAllEdits(); // Cancel edits only on forced manual refresh
+      }
     });
 
     try {
-      // Fetch profile (cache-first) and other data concurrently
       await Future.wait([
         _initializeProducerProfile(forceRefresh: forceRefresh),
         _fetchOrdersAndProduce(forceRefresh: forceRefresh),
       ]);
-
-      // Check mount status again after async operations
       if (mounted) {
-         // Sync stock selection after all data (profile and produce) is fetched
-         _syncSelectionFromProfile();
-         setState(() {
-           _isLoading = false; // Hide combined loading indicator
-         });
+        _syncSelectionFromProfile(); // Sync stock after data is loaded
       }
     } catch (e, stackTrace) {
       debugPrint("[ProducerDash] Error fetching all data: $e\n$stackTrace");
       if (mounted) {
         setState(() {
-          _isLoading = false;
           _error = 'Failed to load data. Please check connection.';
-          // Clear potentially stale data
+          // Clear potentially stale data on major error
           _profile = null;
           _orders = [];
           _produce = [];
@@ -1032,19 +1161,27 @@ class _ProducerDash22State extends State<ProducerDash22> {
           _produceQuantities.clear();
         });
       }
+    } finally {
+       if (mounted) {
+          setState(() {
+            _isLoading = false; // Hide combined indicator
+            _isRefreshing = false; // Refresh complete
+          });
+       }
     }
   }
 
   // Fetches Orders and Produce (Master List)
   Future<void> _fetchOrdersAndProduce({bool forceRefresh = false}) async {
-    // Simple fetch for now, caching could be added similarly to profile if needed
-    try {
-      if (!mounted) return;
+    // Caching logic could be added here if needed for orders/produce
+    if (mounted) {
       setState(() {
         _isLoadingOrders = true;
         _isLoadingProduce = true;
       });
+    }
 
+    try {
       final results = await Future.wait([
         ProducerApiService.fetchProducerOrders(),
         ProducerApiService.fetchProducerProduce(),
@@ -1068,8 +1205,10 @@ class _ProducerDash22State extends State<ProducerDash22> {
         setState(() {
           _isLoadingOrders = false;
           _isLoadingProduce = false;
-           // Set general error or specific errors if needed
-          _error = _error.isEmpty ? 'Failed to load orders/produce.' : _error;
+          // Set general error only if profile fetch didn't already set one
+          if (_profileFetchError.isEmpty) {
+             _error = _error.isEmpty ? 'Failed to load orders/produce.' : _error;
+          }
         });
       }
     }
@@ -1088,13 +1227,12 @@ class _ProducerDash22State extends State<ProducerDash22> {
     if (!forceRefresh) {
       await _loadProfileCacheFromPrefs();
     } else {
-       // If forcing refresh, clear the in-memory cache variables
       _profileCache = null;
       _profileCacheTimestamp = null;
     }
 
     // 2. Display cached data immediately if available and valid
-    bool shouldFetchFresh = true; // Assume we need to fetch unless cache is valid
+    bool shouldFetchFresh = true;
     if (_profileCache != null && mounted) {
       final now = DateTime.now();
       final bool cacheIsValid = _profileCacheTimestamp != null &&
@@ -1104,29 +1242,30 @@ class _ProducerDash22State extends State<ProducerDash22> {
         print("ProducerDash: Displaying valid cached profile.");
         setState(() {
           _profile = _profileCache;
-          _isLoadingProfile = false; // Stop indicator, data is valid
+          _updateControllersFromProfile(_profile!); // Update controllers
+          _isLoadingProfile = false;
         });
-        shouldFetchFresh = false; // Don't fetch fresh if cache is valid
+        shouldFetchFresh = false;
       } else {
-         print("ProducerDash: Cached profile ${forceRefresh ? 'ignored (force refresh)' : 'expired'}, will fetch fresh data.");
-        // Keep showing stale cache while fetching
+        print("ProducerDash: Cached profile ${forceRefresh ? 'ignored (force refresh)' : 'expired'}, will fetch fresh data.");
         setState(() {
-          _profile = _profileCache; // Show stale data
+          _profile = _profileCache; // Show stale data while fetching
+          _updateControllersFromProfile(_profile!); // Update controllers
         });
       }
     } else if (mounted) {
-       print("ProducerDash: No cached profile found${forceRefresh ? ' (force refresh)' : ''}, fetching...");
+      print("ProducerDash: No cached profile found${forceRefresh ? ' (force refresh)' : ''}, fetching...");
     }
 
     // 3. Fetch fresh data if needed
     if (shouldFetchFresh && mounted) {
-       print("ProducerDash: Fetching fresh profile data...");
+      print("ProducerDash: Fetching fresh profile data...");
       await _fetchProducerProfileAndUpdate();
-    } else if (mounted) {
-       // If we didn't fetch fresh (valid cache), ensure loading indicator is off
-       if (!_isLoadingProfile) { // Double-check if it's already off
-         setState(() => _isLoadingProfile = false);
-       }
+    } else if (mounted && !shouldFetchFresh) {
+      // If we didn't fetch fresh (valid cache), ensure loading indicator is off
+      if (_isLoadingProfile) {
+        setState(() => _isLoadingProfile = false);
+      }
     }
   }
 
@@ -1139,10 +1278,10 @@ class _ProducerDash22State extends State<ProducerDash22> {
         await _saveProfileCacheToPrefs(profile, DateTime.now());
         setState(() {
           _profile = profile;
-          _isLoadingProfile = false; // Done loading profile
+          _updateControllersFromProfile(profile); // Update controllers
+          _isLoadingProfile = false;
           _profileFetchError = '';
-           // Sync stock selection AFTER profile is fetched/updated
-          _syncSelectionFromProfile();
+          _syncSelectionFromProfile(); // Sync stock after profile fetch
         });
       }
     } catch (error, stackTrace) {
@@ -1151,28 +1290,30 @@ class _ProducerDash22State extends State<ProducerDash22> {
         final errorMsg = 'Failed to load profile: $error';
         setState(() {
           _profileFetchError = errorMsg;
-          _isLoadingProfile = false; // Stop profile loading
-           // If there's no cached profile either, set the general error
+          _isLoadingProfile = false;
+          // Only set general error if no cached profile is available
           if (_profile == null) {
-             _error = _error.isEmpty ? errorMsg : _error;
+            _error = _error.isEmpty ? errorMsg : _error;
           }
         });
-         // Show snackbar only if no profile data is available at all
         if (_profile == null) {
           _showErrorSnackBar('Error loading profile.');
+        } else {
+           _showInfoSnackbar("Couldn't update profile, showing last known data.");
         }
       }
     }
   }
 
+  // Load profile from UserCache
   Future<void> _loadProfileCacheFromPrefs() async {
-     print("[ProducerDash] Loading profile cache from Prefs...");
+    print("[ProducerDash] Loading profile cache from Prefs...");
     final cachedJson = await UserCache.getData('producer_profile');
     final timestampStr = await UserCache.getData('producer_profile_cache_timestamp');
-    if (cachedJson is Map<String, dynamic>) { // Check type
+    if (cachedJson is Map<String, dynamic>) {
       try {
         _profileCache = ProducerProfile.fromJson(cachedJson);
-         print("[ProducerDash] Profile cache loaded.");
+        print("[ProducerDash] Profile cache loaded.");
       } catch (e, stack) {
         print('[ProducerDash] Cache parse error: $e\n$stack');
         _profileCache = null;
@@ -1181,51 +1322,67 @@ class _ProducerDash22State extends State<ProducerDash22> {
       }
     } else {
       _profileCache = null;
-       print("[ProducerDash] No valid profile cache found in Prefs.");
+      print("[ProducerDash] No valid profile cache found in Prefs.");
     }
-    if (timestampStr is String) { // Check type
+    if (timestampStr is String) {
       _profileCacheTimestamp = DateTime.tryParse(timestampStr);
     } else {
       _profileCacheTimestamp = null;
     }
   }
 
+  // Save profile to UserCache
   Future<void> _saveProfileCacheToPrefs(ProducerProfile profile, DateTime timestamp) async {
-     print("[ProducerDash] Saving profile to cache...");
+    print("[ProducerDash] Saving profile to cache...");
     await UserCache.saveData('producer_profile', profile.toJson());
     await UserCache.saveData('producer_profile_cache_timestamp', timestamp.toIso8601String());
-     print("[ProducerDash] Profile saved to cache.");
+    _profileCache = profile; // Update in-memory cache as well
+    _profileCacheTimestamp = timestamp;
+    print("[ProducerDash] Profile saved to cache.");
   }
 
+  // Update text controllers from profile data
+  void _updateControllersFromProfile(ProducerProfile profile) {
+     _profileNameController.text = profile.name;
+     _profilePhoneController.text = profile.phoneNumber ?? '';
+     _profileLocationController.text = profile.location ?? '';
+     // Note: Stock (_selectedProduceIds, _produceQuantities) synced separately by _syncSelectionFromProfile
+     // Note: Produce edit controllers (_produceNameController etc.) handled when entering edit mode
+  }
+
+  // Sort orders by status priority then date
   void _sortOrders() {
     _orders.sort((a, b) {
       int statusCompare = _statusPriority(a.orderStatus).compareTo(_statusPriority(b.orderStatus));
       if (statusCompare != 0) return statusCompare;
-      return b.orderDate.compareTo(a.orderDate); // Newest first if status same
+      // If status is the same, sort by newest first
+      return b.orderDate.compareTo(a.orderDate);
     });
   }
 
+  // Assign priority to order statuses for sorting
   int _statusPriority(String status) {
+     // Lower numbers appear first
     switch (status) {
       case Order.STATUS_PENDING: return 0;
       case Order.STATUS_ACCEPTED: return 1;
       case Order.STATUS_PREPARING: return 2;
-      case Order.STATUS_READY_FOR_PICKUP: return 3; // Added
-      case Order.STATUS_ASSIGNED: return 4;          // Added
-      case Order.STATUS_DISPATCHED: return 5;        // Shifted
-      case Order.STATUS_OUT_FOR_DELIVERY: return 6;  // Added
-      case Order.STATUS_DELIVERED: return 7;         // Shifted
-      case Order.STATUS_COMPLETED: return 8;         // Added
-      case Order.STATUS_CANCELLED: return 9;         // Shifted
-      default: return 10;
+      case Order.STATUS_READY_FOR_PICKUP: return 3;
+      case Order.STATUS_ASSIGNED: return 4;
+      case Order.STATUS_DISPATCHED: return 5;
+      case Order.STATUS_OUT_FOR_DELIVERY: return 6;
+      case Order.STATUS_DELIVERED: return 7;
+      case Order.STATUS_COMPLETED: return 8;
+      case Order.STATUS_CANCELLED: return 9;
+      default: return 10; // Unknown statuses last
     }
   }
 
-  // Helper to sync UI selections (_selectedProduceIds, _produceQuantities) from profile stock
+  // Sync stock selection UI from profile data
   void _syncSelectionFromProfile() {
     if (_profile == null) {
       print("[ProducerDash] Cannot sync stock selection: Profile not loaded.");
-      return; // Can't sync if profile isn't loaded
+      return;
     }
     print("[ProducerDash] Syncing stock selection from profile data...");
     final newSelectedIds = <String>{};
@@ -1233,90 +1390,100 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
     if (_profile!.stock != null && _profile!.stock!.isNotEmpty) {
       for (var stockItem in _profile!.stock!) {
-        // Ensure 'produce_id' and 'quantity' exist and are valid types
         final produceId = _getStringSafe(stockItem['produce_id']);
         final quantity = _parseIntNullable(stockItem['quantity']);
 
         if (produceId != null && produceId.isNotEmpty && quantity != null && quantity >= 0) {
-          // Check if this produce ID exists in the master list (_produce)
           if (_produce.any((p) => p.produceId == produceId)) {
             newSelectedIds.add(produceId);
             newQuantities[produceId] = quantity;
           } else {
-             print("[ProducerDash] Warning: Stock item ID '$produceId' not found in master produce list during sync.");
+            print("[ProducerDash] Warning: Stock item ID '$produceId' not found in master produce list during sync.");
           }
         } else {
-           print("[ProducerDash] Warning: Invalid stock item found during sync: $stockItem");
+          print("[ProducerDash] Warning: Invalid stock item found during sync: $stockItem");
         }
       }
     } else {
       print("[ProducerDash] Profile stock is null or empty. Clearing selections.");
     }
 
-    // Update state only if changes occurred to avoid unnecessary rebuilds
+    // Update state only if changes occurred
+    if (!mounted) return; // Check mount status before setState
     if (newSelectedIds != _selectedProduceIds || newQuantities != _produceQuantities) {
-       print("[ProducerDash] Stock sync updated state: ${newSelectedIds.length} items selected.");
+      print("[ProducerDash] Stock sync updated state: ${newSelectedIds.length} items selected.");
       setState(() {
         _selectedProduceIds = newSelectedIds;
         _produceQuantities = newQuantities;
       });
     } else {
-       print("[ProducerDash] Stock sync completed, no changes detected.");
+      print("[ProducerDash] Stock sync completed, no changes detected.");
     }
   }
 
-  // --- Order Action Handlers (Including Rider Assignment) ---
+  // --- Order Action Handlers (Adapted from ChefDash) ---
 
-  // Handles simple status updates like Accept, Prepare, Cancel
+  // Handles simple status updates (Accept, Prepare, Cancel)
   Future<void> _updateSimpleOrderStatus(Order order, String newStatus) async {
     final orderIndex = _findOrderIndex(order.orderId);
-    if (orderIndex == -1) return; // Order not found
+    if (orderIndex == -1) return;
     if (mounted) ScaffoldMessenger.of(context).removeCurrentSnackBar();
 
     final originalStatus = _orders[orderIndex].orderStatus;
+    final originalRiderId = _orders[orderIndex].assignedRiderId;
+    final originalRiderName = _orders[orderIndex].assignedRiderName;
+
     // Optimistic UI Update
     setState(() {
       _orders[orderIndex].orderStatus = newStatus;
-       // Clear rider if status reverts to non-assigned state
-       if ([Order.STATUS_ACCEPTED, Order.STATUS_PREPARING, Order.STATUS_CANCELLED].contains(newStatus)) {
-           _orders[orderIndex] = _orders[orderIndex].copyWith(
-             assignedRiderId: () => null,
-             assignedRiderName: () => null,
-           );
-       }
-      _sortOrders(); // Re-sort after status change
+      // Clear rider if status reverts to non-assigned state
+      if ([Order.STATUS_ACCEPTED, Order.STATUS_PREPARING, Order.STATUS_CANCELLED].contains(newStatus)) {
+        _orders[orderIndex] = _orders[orderIndex].copyWith(
+          assignedRiderId: () => null,
+          assignedRiderName: () => null,
+        );
+      }
+      _sortOrders();
     });
     _showLoadingSnackbar("Updating status to $newStatus...");
 
     try {
       bool success = await ProducerApiService.updateOrderStatus(order.orderId, newStatus);
       _dismissLoadingSnackbar();
-      if (mounted) {
-        if (!success) {
-          _showErrorSnackBar('Failed to update order ${order.orderId} status.');
-          setState(() { // Revert UI on failure
-            _orders[orderIndex].orderStatus = originalStatus;
-            _sortOrders();
-          });
-        } else {
-          _showSuccessSnackbar('Order ${order.orderId} status updated to $newStatus.');
-          _showOrderNextStepDialog(newStatus); // Show guidance
-        }
+      if (!mounted) return;
+
+      if (success) {
+        _showSuccessSnackbar('Order ${order.orderId} status updated to $newStatus.');
+        _showOrderNextStepDialog(newStatus);
+      } else {
+        _showErrorSnackBar('Failed to update order ${order.orderId} status.');
+        setState(() { // Revert UI
+          _orders[orderIndex].orderStatus = originalStatus;
+          _orders[orderIndex] = _orders[orderIndex].copyWith(
+             assignedRiderId: () => originalRiderId,
+             assignedRiderName: () => originalRiderName,
+          );
+          _sortOrders();
+        });
       }
     } catch (e) {
       _dismissLoadingSnackbar();
       print("[ProducerDash] Error updating simple order status: $e");
       if (mounted) {
         _showErrorSnackBar('An error occurred updating status.');
-        setState(() { // Revert UI on exception
+        setState(() { // Revert UI
           _orders[orderIndex].orderStatus = originalStatus;
+           _orders[orderIndex] = _orders[orderIndex].copyWith(
+             assignedRiderId: () => originalRiderId,
+             assignedRiderName: () => originalRiderName,
+          );
           _sortOrders();
         });
       }
     }
   }
 
-  // Handles the "Ready/Assign" action, triggering the rider selection flow
+  // Handles "Ready/Assign" action, triggering rider selection
   Future<void> _handleReadyForShipping(Order order) async {
     if (!mounted) return;
 
@@ -1324,7 +1491,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) {
-        return _RiderSelectionDialog(orderId: order.orderId); // Pass ID
+        return _RiderSelectionDialog(orderId: order.orderId); // Use the producer's rider dialog
       },
     );
 
@@ -1343,54 +1510,54 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
   // Shows confirmation dialog before assigning a specific rider
   Future<void> _showRiderAssignmentConfirmation(Order order, Rider rider) async {
-    if (!mounted) return;
-    final bool? confirm = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          title: Text('Confirm Assignment for Order #${order.orderId}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Assign this order to rider:'),
-              const SizedBox(height: 8),
-              Text('  Name: ${rider.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
-              Text('  Status: ${rider.isActive ? "Active" : "Inactive"} (${rider.status})'), // Show isActive and original status string
-              Text('  ID: ${rider.id}'),
-              if (!rider.isActive)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8.0),
-                  child: Text('Warning: Rider is currently inactive.', style: TextStyle(color: Colors.orange.shade800)),
-                ),
-            ],
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('Cancel'),
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-            ),
-            TextButton(
-              child: Text(rider.isActive ? 'Confirm Assignment' : 'Assign Anyway', style: TextStyle(color: primaryTeal)),
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-            ),
-          ],
-        );
-      },
-    );
+     if (!mounted) return;
+     final bool? confirm = await showDialog<bool>(
+       context: context,
+       builder: (BuildContext dialogContext) {
+         return AlertDialog(
+           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+           title: Text('Confirm Assignment for Order #${order.orderId}'),
+           content: Column(
+             mainAxisSize: MainAxisSize.min,
+             crossAxisAlignment: CrossAxisAlignment.start,
+             children: [
+               const Text('Assign this order to rider:'),
+               const SizedBox(height: 8),
+               Text('  Name: ${rider.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
+               Text('  Status: ${rider.isActive ? "Active" : "Inactive"} (${rider.status})'),
+               Text('  ID: ${rider.id}'),
+               if (!rider.isActive)
+                 Padding(
+                   padding: const EdgeInsets.only(top: 8.0),
+                   child: Text('Warning: Rider is currently inactive.', style: TextStyle(color: Colors.orange.shade800)),
+                 ),
+             ],
+           ),
+           actions: <Widget>[
+             TextButton(
+               child: const Text('Cancel'),
+               onPressed: () => Navigator.of(dialogContext).pop(false),
+             ),
+             TextButton(
+               child: Text(rider.isActive ? 'Confirm Assignment' : 'Assign Anyway', style: TextStyle(color: primaryTeal)),
+               onPressed: () => Navigator.of(dialogContext).pop(true),
+             ),
+           ],
+         );
+       },
+     );
 
-    if (confirm == true) {
-      if (!mounted) return;
-      print("Confirmation received. Assigning Order ${order.orderId} to Rider ${rider.id} (${rider.name})");
-      await _assignSpecificRider(order, rider); // Proceed with assignment
-    } else {
-      print("Rider assignment cancelled by user.");
-      _showInfoSnackbar("Rider assignment cancelled.");
-    }
+     if (confirm == true) {
+       if (!mounted) return;
+       print("Confirmation received. Assigning Order ${order.orderId} to Rider ${rider.id} (${rider.name})");
+       await _assignSpecificRider(order, rider); // Proceed with assignment
+     } else {
+       print("Rider assignment cancelled by user.");
+       _showInfoSnackbar("Rider assignment cancelled.");
+     }
   }
 
-  // Calls API to assign a specific rider (called AFTER confirmation)
+  // Calls API to assign a specific rider (after confirmation)
   Future<void> _assignSpecificRider(Order order, Rider rider) async {
     final orderIndex = _findOrderIndex(order.orderId);
     if (orderIndex == -1) return;
@@ -1402,7 +1569,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
     // Optimistic UI Update
     setState(() {
       _orders[orderIndex] = _orders[orderIndex].copyWith(
-        orderStatus: Order.STATUS_ASSIGNED,
+        orderStatus: Order.STATUS_ASSIGNED, // Set status to Assigned
         assignedRiderId: () => rider.id,
         assignedRiderName: () => rider.name,
       );
@@ -1413,21 +1580,21 @@ class _ProducerDash22State extends State<ProducerDash22> {
     try {
       bool success = await ProducerApiService.assignOrderToRider(order.orderId, rider.id, Order.STATUS_ASSIGNED);
       _dismissLoadingSnackbar();
-      if (mounted) {
-        if (success) {
-          _showSuccessSnackbar('Order ${order.orderId} assigned to ${rider.name}.');
-          _showOrderNextStepDialog(Order.STATUS_ASSIGNED);
-        } else {
-          _showErrorSnackBar('Failed to assign order ${order.orderId} to ${rider.name}.');
-          setState(() { // Revert UI
-            _orders[orderIndex] = _orders[orderIndex].copyWith(
-              orderStatus: originalStatus,
-              assignedRiderId: () => originalRiderId,
-              assignedRiderName: () => originalRiderName,
-            );
-            _sortOrders();
-          });
-        }
+      if (!mounted) return;
+
+      if (success) {
+        _showSuccessSnackbar('Order ${order.orderId} assigned to ${rider.name}.');
+        _showOrderNextStepDialog(Order.STATUS_ASSIGNED);
+      } else {
+        _showErrorSnackBar('Failed to assign order ${order.orderId} to ${rider.name}.');
+        setState(() { // Revert UI
+          _orders[orderIndex] = _orders[orderIndex].copyWith(
+            orderStatus: originalStatus,
+            assignedRiderId: () => originalRiderId,
+            assignedRiderName: () => originalRiderName,
+          );
+          _sortOrders();
+        });
       }
     } catch (e) {
       _dismissLoadingSnackbar();
@@ -1436,10 +1603,10 @@ class _ProducerDash22State extends State<ProducerDash22> {
         _showErrorSnackBar('An error occurred while assigning the rider.');
         setState(() { // Revert UI
           _orders[orderIndex] = _orders[orderIndex].copyWith(
-              orderStatus: originalStatus,
-              assignedRiderId: () => originalRiderId,
-              assignedRiderName: () => originalRiderName,
-            );
+            orderStatus: originalStatus,
+            assignedRiderId: () => originalRiderId,
+            assignedRiderName: () => originalRiderName,
+          );
           _sortOrders();
         });
       }
@@ -1457,34 +1624,33 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
     // Optimistic UI Update
     setState(() {
-       _orders[orderIndex] = _orders[orderIndex].copyWith(
-          orderStatus: Order.STATUS_READY_FOR_PICKUP,
-          assignedRiderId: () => null, // Clear rider
-          assignedRiderName: () => null,
-       );
+      _orders[orderIndex] = _orders[orderIndex].copyWith(
+        orderStatus: Order.STATUS_READY_FOR_PICKUP,
+        assignedRiderId: () => null, // Clear rider
+        assignedRiderName: () => null,
+      );
       _sortOrders();
     });
     _showLoadingSnackbar("Marking order as ready...");
 
     try {
-      // Use the general status update API for this action
       bool success = await ProducerApiService.updateOrderStatus(order.orderId, Order.STATUS_READY_FOR_PICKUP);
       _dismissLoadingSnackbar();
-      if (mounted) {
-        if (success) {
-          _showSuccessSnackbar('Order ${order.orderId} marked as Ready for Pickup.');
-          _showOrderNextStepDialog(Order.STATUS_READY_FOR_PICKUP);
-        } else {
-          _showErrorSnackBar('Failed to mark order ${order.orderId} as Ready for Pickup.');
-          setState(() { // Revert UI
-             _orders[orderIndex] = _orders[orderIndex].copyWith(
-               orderStatus: originalStatus,
-               assignedRiderId: () => originalRiderId,
-               assignedRiderName: () => originalRiderName,
-             );
-            _sortOrders();
-          });
-        }
+      if (!mounted) return;
+
+      if (success) {
+        _showSuccessSnackbar('Order ${order.orderId} marked as Ready for Pickup.');
+        _showOrderNextStepDialog(Order.STATUS_READY_FOR_PICKUP);
+      } else {
+        _showErrorSnackBar('Failed to mark order ${order.orderId} as Ready for Pickup.');
+        setState(() { // Revert UI
+          _orders[orderIndex] = _orders[orderIndex].copyWith(
+            orderStatus: originalStatus,
+            assignedRiderId: () => originalRiderId,
+            assignedRiderName: () => originalRiderName,
+          );
+          _sortOrders();
+        });
       }
     } catch (e) {
       _dismissLoadingSnackbar();
@@ -1492,11 +1658,11 @@ class _ProducerDash22State extends State<ProducerDash22> {
       if (mounted) {
         _showErrorSnackBar('An error occurred while updating order status.');
         setState(() { // Revert UI
-           _orders[orderIndex] = _orders[orderIndex].copyWith(
-               orderStatus: originalStatus,
-               assignedRiderId: () => originalRiderId,
-               assignedRiderName: () => originalRiderName,
-             );
+          _orders[orderIndex] = _orders[orderIndex].copyWith(
+            orderStatus: originalStatus,
+            assignedRiderId: () => originalRiderId,
+            assignedRiderName: () => originalRiderName,
+          );
           _sortOrders();
         });
       }
@@ -1505,7 +1671,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
   // Handles reject confirmation and calls simple status update
   void _showRejectConfirmation(Order order) {
-     if (!mounted) return;
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (BuildContext dialogContext) {
@@ -1521,8 +1687,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
             TextButton(
               child: Text("Reject Order", style: TextStyle(color: errorColor)),
               onPressed: () {
-                Navigator.of(dialogContext).pop(); // Close dialog first
-                _updateSimpleOrderStatus(order, Order.STATUS_CANCELLED); // Call update with Cancelled status
+                Navigator.of(dialogContext).pop();
+                _updateSimpleOrderStatus(order, Order.STATUS_CANCELLED); // Call update
               },
             ),
           ],
@@ -1546,52 +1712,89 @@ class _ProducerDash22State extends State<ProducerDash22> {
     debugPrint('Edit Profile Action Triggered');
     setState(() {
       _isEditingProfile = true;
-      _profileNameController.text = _profile!.name;
-      _profilePhoneController.text = _profile!.phoneNumber ?? '';
-      _profileLocationController.text = _profile!.location ?? '';
+      _updateControllersFromProfile(_profile!); // Ensure controllers match current profile
+       _uploadedProfileImageUrl = null; // Clear any previously uploaded URL placeholder
+       _profile!.localImageFile = null; // Clear local file selection
     });
   }
 
   Future<void> _saveProfileChanges() async {
-    if (_profile == null || !mounted || !_isEditingProfile) return;
-    if (_profileFormKey.currentState?.validate() ?? false) {
-      debugPrint('Save Profile Changes Action Triggered');
-      _showLoadingSnackbar('Saving profile...');
-      try {
-        final String name = _profileNameController.text.trim();
-        final String? phone = _profilePhoneController.text.trim().isEmpty ? null : _profilePhoneController.text.trim();
-        final String? location = _profileLocationController.text.trim().isEmpty ? null : _profileLocationController.text.trim();
+     if (_profile == null || !mounted || !_isEditingProfile) return;
+     if (_profileFormKey.currentState?.validate() ?? false) {
+       debugPrint('Save Profile Changes Action Triggered');
+       _showLoadingSnackbar('Saving profile...');
+       setState(() => _isUploadingProfileImage = true); // Show image loading indicator
 
-        bool success = await ProducerApiService.updateProducerProfile(
-          _profile!.producerId,
-          name: name,
-          phoneNumber: phone,
-          location: location,
-        );
-        _dismissLoadingSnackbar();
-        if (!mounted) return;
+       try {
+          String? finalImageUrl = _profile!.image; // Start with existing image URL
 
-        if (success) {
-          // Fetch the updated profile to reflect changes accurately
-          await _initializeProducerProfile(forceRefresh: true);
-          setState(() {
-            _isEditingProfile = false;
-          });
-          _showSuccessSnackbar('Profile updated successfully.');
-        } else {
-          _showErrorSnackBar('Failed to save profile changes.');
-        }
-      } catch (e) {
-        debugPrint("Error saving profile via API: $e");
-        _dismissLoadingSnackbar();
-        if (mounted) {
-          _showErrorSnackBar('An error occurred while saving profile: $e');
-        }
-      }
-    } else {
-      debugPrint('Profile form validation failed.');
-      _showSnackbar('Please fix errors in the profile form.', isError: true);
-    }
+          // 1. Upload new image if selected
+          if (_profile!.localImageFile != null) {
+             print("Uploading new profile image...");
+             final newImageUrl = await ProducerApiService.updateProducerProfileImage(
+                 _profile!.producerId, _profile!.localImageFile!);
+             if (newImageUrl != null) {
+                finalImageUrl = newImageUrl; // Update URL if upload successful
+                print("Image upload success. New URL: $newImageUrl");
+             } else {
+                // Handle image upload failure (optional: stop save or warn user)
+                print("Image upload failed. Continuing with text updates.");
+                _showErrorSnackBar('Failed to upload profile image. Text changes will still be saved.');
+                // Keep original finalImageUrl
+             }
+          }
+
+          // 2. Update text fields via API
+          final String name = _profileNameController.text.trim();
+          final String? phone = _profilePhoneController.text.trim().isEmpty ? null : _profilePhoneController.text.trim();
+          final String? location = _profileLocationController.text.trim().isEmpty ? null : _profileLocationController.text.trim();
+
+          bool textUpdateSuccess = await ProducerApiService.updateProducerProfile(
+            _profile!.producerId,
+            name: name,
+            phoneNumber: phone,
+            location: location,
+          );
+          // NOTE: Stock updates are handled separately via the Stock tab FAB
+
+          // 3. Handle results
+          if (mounted) {
+             setState(() => _isUploadingProfileImage = false); // Hide image indicator
+             _dismissLoadingSnackbar();
+
+             if (textUpdateSuccess) {
+                // If text update succeeded, update local profile object with new data
+                // *before* forcing a refresh, so UI updates instantly even if refresh fails
+                setState(() {
+                   _profile = _profile!.copyWith(
+                      name: name,
+                      phoneNumber: phone ?? _profile!.phoneNumber, // Keep old if new is null/empty
+                      location: location ?? _profile!.location,
+                      image: finalImageUrl, // Update image URL from upload result
+                      localImageFile: () => null, // Clear local file after successful process
+                   );
+                   _isEditingProfile = false; // Exit edit mode
+                });
+                _showSuccessSnackbar('Profile updated successfully.');
+                // Force a full refresh from the server to ensure consistency
+                await _initializeProducerProfile(forceRefresh: true);
+             } else {
+                _showErrorSnackBar('Failed to save profile text changes.');
+                // Optionally, keep editing mode open or attempt partial refresh
+             }
+          }
+       } catch (e) {
+          debugPrint("Error saving profile: $e");
+          if (mounted) {
+             setState(() => _isUploadingProfileImage = false); // Hide indicator on error
+             _dismissLoadingSnackbar();
+             _showErrorSnackBar('An error occurred while saving profile: $e');
+          }
+       }
+     } else {
+       debugPrint('Profile form validation failed.');
+       _showSnackbar('Please fix errors in the profile form.', isError: true);
+     }
   }
 
   void _cancelProfileEdit() {
@@ -1599,64 +1802,93 @@ class _ProducerDash22State extends State<ProducerDash22> {
     debugPrint('Cancel Profile Edit Action Triggered');
     setState(() {
       _isEditingProfile = false;
-      // Reset controllers to original values if needed, but typically just exiting edit mode is enough
+      if (_profile != null) {
+        _updateControllersFromProfile(_profile!); // Reset controllers
+        _profile!.localImageFile = null; // Clear local image selection
+      }
+       _profileFormKey.currentState?.reset(); // Reset validation state
     });
   }
 
-  Future<void> _handleToggleActiveStatus(bool newStatus) async {
-    if (_profile == null || !mounted || _isEditingProfile) return;
-    debugPrint('Toggle Active Status Action Triggered: New Status = $newStatus');
-    _showLoadingSnackbar('Updating status...');
-    try {
-      bool success = await ProducerApiService.updateProducerStatus(_profile!.producerId, newStatus);
-      _dismissLoadingSnackbar();
-      if (!mounted) return;
-      if (success) {
-        // Update local state immutably
-        setState(() => _profile = _profile!.copyWith(isActive: newStatus));
-        _showSuccessSnackbar('Profile status updated to ${newStatus ? "Active" : "Offline"}.');
-      } else {
-        setState(() {}); // Trigger rebuild to revert switch
-        _showErrorSnackBar('Failed to update status.');
+   Future<void> _handleToggleActiveStatus(bool newStatus) async {
+      if (_profile == null || !mounted || _isEditingProfile) return;
+      debugPrint('Toggle Active Status Action Triggered: New Status = $newStatus');
+
+      final originalStatus = _profile!.isActive;
+      // Optimistic UI update
+      setState(() => _profile = _profile!.copyWith(isActive: newStatus));
+      _showLoadingSnackbar('Updating status...');
+
+      try {
+         bool success = await ProducerApiService.updateProducerStatus(_profile!.producerId, newStatus);
+         _dismissLoadingSnackbar();
+         if (!mounted) return;
+
+         if (success) {
+            _showSuccessSnackbar('Profile status updated to ${newStatus ? "Active" : "Offline"}.');
+            // Save the updated profile (with new status) to cache
+            await _saveProfileCacheToPrefs(_profile!, DateTime.now());
+         } else {
+            // Revert UI on failure
+            setState(() => _profile = _profile!.copyWith(isActive: originalStatus));
+            _showErrorSnackBar('Failed to update status.');
+         }
+      } catch (e) {
+         debugPrint("Error toggling active status via API: $e");
+         _dismissLoadingSnackbar();
+         if (mounted) {
+            // Revert UI on exception
+            setState(() => _profile = _profile!.copyWith(isActive: originalStatus));
+            _showErrorSnackBar('An error occurred updating status: $e');
+         }
       }
-    } catch (e) {
-      debugPrint("Error toggling active status via API: $e");
-      _dismissLoadingSnackbar();
-      if (mounted) {
-        setState(() {}); // Revert switch on error
-        _showErrorSnackBar('An error occurred updating status: $e');
+   }
+
+   // Profile Image Picking
+   Future<void> _pickAndUploadProfileImage() async {
+      if (!_isEditingProfile || !mounted) return;
+      try {
+         final ImagePicker picker = ImagePicker();
+         final XFile? pickedFile = await picker.pickImage(source: ImageSource.gallery);
+
+         if (pickedFile != null) {
+            if (mounted) {
+               setState(() {
+                  _profile = _profile?.copyWith(localImageFile: () => File(pickedFile.path));
+               });
+               // Actual upload happens in _saveProfileChanges
+            }
+         }
+      } catch (e) {
+         print("Error picking image: $e");
+         if (mounted) _showErrorSnackBar("Could not pick image: $e");
       }
-    }
-  }
+   }
 
   // --- Stock and Produce Item Management Handlers ---
 
-  // Triggered by FAB or "Add Produce" button
   void _handleAddProduce() {
     if (_editingProduceId != null || !mounted || _isEditingProfile) return;
     debugPrint('Add Produce Action Triggered');
     final newId = 'TEMP_${DateTime.now().millisecondsSinceEpoch}';
-    final newProduct = Product(produceId: newId, produceName: ''); // Empty product
-    _initializeProduceEditControllers(newProduct);
+    final newProduct = Product(produceId: newId, produceName: '');
+    _initializeProduceEditControllers(newProduct); // Initialize controllers
     setState(() {
-      // Temporarily add to list to show the edit form
-      _produce.add(newProduct);
+      _produce.add(newProduct); // Add temporary item to list
       _produce.sort((a, b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase()));
-      _editingProduceId = newId;
+      _editingProduceId = newId; // Enter edit mode for this item
     });
     _showInfoSnackbar('Fill in details for the new produce item.');
   }
 
-  // Triggered by tapping a produce item card
   void _handleEditProduce(Product product) {
     if (!mounted || _isEditingProfile) return;
     debugPrint('Edit Produce Action Triggered for ID: ${product.produceId}');
-    _cancelAllEdits(exceptProduceId: product.produceId);
-    _initializeProduceEditControllers(product);
-    setState(() => _editingProduceId = product.produceId);
+    _cancelAllEdits(exceptProduceId: product.produceId); // Cancel other edits
+    _initializeProduceEditControllers(product); // Initialize controllers
+    setState(() => _editingProduceId = product.produceId); // Enter edit mode
   }
 
-  // Initializes controllers for the produce edit form
   void _initializeProduceEditControllers(Product product) {
     _produceNameController = TextEditingController(text: product.produceName);
     _produceCaloriesController = TextEditingController(text: product.calories?.toString() ?? '');
@@ -1667,17 +1899,15 @@ class _ProducerDash22State extends State<ProducerDash22> {
     _produceSourceController = TextEditingController(text: product.source ?? '');
   }
 
-  // Saves changes from the produce edit form (calls Add or Update API)
   Future<void> _saveProduceChanges() async {
     if (_editingProduceId == null || !mounted) return;
     if (_produceFormKey.currentState?.validate() ?? false) {
       final String idToSave = _editingProduceId!;
       final int index = _produce.indexWhere((p) => p.produceId == idToSave);
-      if (index == -1) {
-        _cancelProduceEdit();
-        return;
-      }
+      if (index == -1) { _cancelProduceEdit(); return; } // Should not happen
+
       final bool isNewItem = idToSave.startsWith('TEMP_');
+      // Create payload from controllers
       Map<String, dynamic> payload = {
         'produce_name': _produceNameController?.text.trim(),
         'calories': _produceCaloriesController?.text.trim(),
@@ -1698,45 +1928,43 @@ class _ProducerDash22State extends State<ProducerDash22> {
             if (addedProduct != null) {
               setState(() {
                 _produce.removeAt(index); // Remove TEMP
-                _produce.add(addedProduct); // Add real
+                _produce.add(addedProduct); // Add real item from API response
                 _produce.sort((a, b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase()));
-                _editingProduceId = null;
+                _editingProduceId = null; // Exit edit mode
                 _disposeProduceEditControllers();
               });
               _showSuccessSnackbar('Added "${addedProduct.produceName}".');
             } else {
               _showErrorSnackBar('Failed to add produce.');
-              setState(() { // Remove TEMP on failure
-                _produce.removeAt(index);
-                _editingProduceId = null;
-                _disposeProduceEditControllers();
-              });
+              // Remove TEMP on failure to prevent orphaned edit form
+              setState(() { _produce.removeAt(index); _editingProduceId = null; _disposeProduceEditControllers(); });
             }
           }
-        } else { // Update existing
+        } else { // Update existing item
           bool success = await ProducerApiService.updateProduce(idToSave, payload);
           _dismissLoadingSnackbar();
           if (mounted) {
             if (success) {
-              // Update local list immutably
+              // Update local list immutably using copyWith
               final updatedProduct = _produce[index].copyWith(
-                 produceName: payload['produce_name'],
-                 calories: () => _parseIntNullable(payload['calories']),
-                 proteins: () => _parseDoubleNullable(payload['proteins']),
-                 carbohydrates: () => _parseDoubleNullable(payload['carbohydrates']),
-                 fats: () => _parseDoubleNullable(payload['fats']),
-                 unitGrams: () => _parseIntNullable(payload['unit_grams']),
-                 source: () => payload['source'],
+                produceName: payload['produce_name'],
+                calories: () => _parseIntNullable(payload['calories']),
+                proteins: () => _parseDoubleNullable(payload['proteins']),
+                carbohydrates: () => _parseDoubleNullable(payload['carbohydrates']),
+                fats: () => _parseDoubleNullable(payload['fats']),
+                unitGrams: () => _parseIntNullable(payload['unit_grams']),
+                source: () => payload['source'],
               );
               setState(() {
                 _produce[index] = updatedProduct;
-                 _produce.sort((a, b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase()));
-                _editingProduceId = null;
+                _produce.sort((a, b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase()));
+                _editingProduceId = null; // Exit edit mode
                 _disposeProduceEditControllers();
               });
               _showSuccessSnackbar('Updated "${updatedProduct.produceName}".');
             } else {
               _showErrorSnackBar('Failed to update "${payload['produce_name'] ?? 'produce'}".');
+              // Keep edit mode open on failure? Or cancel? Current: Keep open.
             }
           }
         }
@@ -1746,11 +1974,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
         if (mounted) {
           _showErrorSnackBar('An error occurred saving produce: $e');
           if (isNewItem) { // Clean up TEMP item on exception
-            setState(() {
-              _produce.removeAt(index);
-              _editingProduceId = null;
-              _disposeProduceEditControllers();
-            });
+            setState(() { _produce.removeAt(index); _editingProduceId = null; _disposeProduceEditControllers(); });
           }
         }
       }
@@ -1760,14 +1984,14 @@ class _ProducerDash22State extends State<ProducerDash22> {
     }
   }
 
-  // Cancels editing a produce item
   void _cancelProduceEdit() {
     if (!mounted) return;
     debugPrint('Cancel Produce Edit Action Triggered');
     final String? idToCancel = _editingProduceId;
     setState(() {
-      _editingProduceId = null;
-      _disposeProduceEditControllers();
+      _editingProduceId = null; // Exit edit mode
+      _disposeProduceEditControllers(); // Dispose controllers
+      // If cancelling a *new* unsaved item, remove it from the list
       if (idToCancel != null && idToCancel.startsWith('TEMP_')) {
         _produce.removeWhere((p) => p.produceId == idToCancel);
         debugPrint("Removed temporary new produce item on cancel.");
@@ -1775,11 +1999,11 @@ class _ProducerDash22State extends State<ProducerDash22> {
     });
   }
 
-  // Shows confirmation and handles deleting a produce item from the master list
   void _handleDeleteProduce(Product product) {
     if (!mounted || _isEditingProfile || (_editingProduceId != null && _editingProduceId != product.produceId)) return;
     debugPrint('Delete Produce Action Triggered for ID: ${product.produceId}');
-    if (product.produceId.startsWith('TEMP_')) { // Just cancel if it's a TEMP item
+    // If trying to delete a temporary item, just cancel the edit
+    if (product.produceId.startsWith('TEMP_')) {
       _cancelProduceEdit();
       return;
     }
@@ -1790,15 +2014,15 @@ class _ProducerDash22State extends State<ProducerDash22> {
           backgroundColor: whiteColor.withOpacity(0.95),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
           title: const Row(children: [Icon(Icons.warning_amber_rounded, color: errorColor), SizedBox(width: 10), Text('Confirm Deletion')]),
-          content: Text('Permanently delete "${product.produceName}" from the system?\nThis cannot be undone.', style: const TextStyle(color: subtleText)),
+          content: Text('Permanently delete "${product.produceName}" from the system?\nThis also removes it from your stock. This cannot be undone.', style: const TextStyle(color: subtleText)),
           actions: <Widget>[
             TextButton(style: TextButton.styleFrom(foregroundColor: subtleText), child: const Text('Cancel'), onPressed: () => Navigator.of(ctx).pop()),
             ElevatedButton.icon(
               icon: const Icon(Icons.delete_forever_outlined, size: 16), label: const Text('Delete'),
               style: ElevatedButton.styleFrom(backgroundColor: destructiveButtonBackground, foregroundColor: destructiveButtonForeground, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
               onPressed: () {
-                Navigator.of(ctx).pop();
-                _performDeleteProduce(product);
+                Navigator.of(ctx).pop(); // Close dialog
+                _performDeleteProduce(product); // Call delete function
               },
             ),
           ],
@@ -1807,7 +2031,6 @@ class _ProducerDash22State extends State<ProducerDash22> {
     );
   }
 
-  // Performs the actual deletion API call and updates state
   Future<void> _performDeleteProduce(Product product) async {
     _showLoadingSnackbar('Deleting "${product.produceName}"...');
     try {
@@ -1817,12 +2040,20 @@ class _ProducerDash22State extends State<ProducerDash22> {
         if (success) {
           final deletedName = product.produceName;
           setState(() {
+            // Remove from master list
             _produce.removeWhere((p) => p.produceId == product.produceId);
-            // Remove from stock selection as well
+            // Remove from current stock selection
             _selectedProduceIds.remove(product.produceId);
             _produceQuantities.remove(product.produceId);
+            // Exit edit mode if this was the item being edited
+            if (_editingProduceId == product.produceId) {
+               _editingProduceId = null;
+               _disposeProduceEditControllers();
+            }
           });
           _showSuccessSnackbar('Deleted "$deletedName".');
+          // Optionally trigger a stock update API call if needed after delete
+          // _updateProducerStock(); // Or prompt user
         } else {
           _showErrorSnackBar('Failed to delete "${product.produceName}".');
         }
@@ -1836,27 +2067,24 @@ class _ProducerDash22State extends State<ProducerDash22> {
     }
   }
 
-  // Updates the producer's stock via API call
+  // Updates the producer's stock via API call (Triggered by FAB)
   Future<void> _updateProducerStock() async {
     if (_profile == null) {
       _showErrorSnackBar('Profile not loaded. Cannot update stock.');
       return;
     }
-    // Prepare stock list in the format API expects: [{"produce_id": ..., "quantity": ...}]
+    // Prepare stock list: [{"produce_id": ..., "quantity": ...}]
     final stockList = _selectedProduceIds.map((id) {
-       // Ensure quantity is valid (non-null, non-negative)
-       final quantity = _produceQuantities[id];
-       if (quantity == null || quantity < 0) {
-         print("[ProducerDash] Warning: Invalid quantity ($quantity) for produce ID $id. Skipping.");
-         return null; // Skip items with invalid quantity
-       }
-       return {'produce_id': id, 'quantity': quantity};
-    }).whereType<Map<String, dynamic>>().toList(); // Filter out nulls
+      final quantity = _produceQuantities[id];
+      // Only include items with a valid ID and non-negative quantity
+      if (quantity != null && quantity >= 0) {
+        return {'produce_id': id, 'quantity': quantity};
+      }
+      return null;
+    }).whereType<Map<String, dynamic>>().toList();
 
-    if (stockList.isEmpty) {
-      _showInfoSnackbar('No items selected or quantities set to update stock.');
-      return;
-    }
+    // Optional: Check if stockList is identical to profile.stock to avoid unnecessary calls
+    // This requires careful comparison of the lists/maps.
 
     _showLoadingSnackbar('Updating stock...');
     try {
@@ -1867,8 +2095,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
           _showSuccessSnackbar('Stock updated successfully.');
           // Refresh profile to get latest stock state from backend
           await _initializeProducerProfile(forceRefresh: true);
-           // Sync UI selection AFTER profile refresh completes
-           _syncSelectionFromProfile();
+          // No need to call _syncSelectionFromProfile here, as the refresh will trigger it.
         } else {
           _showErrorSnackBar('Failed to update stock. Please try again.');
         }
@@ -1891,12 +2118,13 @@ class _ProducerDash22State extends State<ProducerDash22> {
       didCancel = true;
     }
     if (_editingProduceId != null && _editingProduceId != exceptProduceId) {
-      if (_editingProduceId!.startsWith('TEMP_')) {
-        _produce.removeWhere((p) => p.produceId == _editingProduceId);
-        debugPrint("Removed temporary produce item due to action/switch.");
-      }
+       final idToCancel = _editingProduceId;
       _editingProduceId = null;
       _disposeProduceEditControllers();
+      if (idToCancel != null && idToCancel.startsWith('TEMP_')) {
+        _produce.removeWhere((p) => p.produceId == idToCancel);
+        debugPrint("Removed temporary produce item due to action/switch.");
+      }
       didCancel = true;
     }
     if (didCancel) {
@@ -1907,20 +2135,30 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
   // --- Location Fetching ---
   Future<void> _getCurrentLocation() async {
-     // Only allow fetching if editing profile
-    if (!_isEditingProfile || !mounted) return;
+    if (!_isEditingProfile || !mounted) return; // Only fetch when editing
     setState(() => _isLoadingLocation = true);
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) throw Exception('Location services are disabled.');
+
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) throw Exception('Location permissions denied.');
+        if (permission == LocationPermission.denied) {
+          throw Exception('Location permissions denied.');
+        }
       }
-      if (permission == LocationPermission.deniedForever) throw Exception('Location permissions permanently denied.');
-      Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-      String displayAddress = "Lat: ${position.latitude.toStringAsFixed(4)}, Lon: ${position.longitude.toStringAsFixed(4)}";
+      if (permission == LocationPermission.deniedForever) {
+        throw Exception('Location permissions permanently denied. Please enable in settings.');
+      }
+
+      Position position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 15) // Add timeout
+      );
+      String displayAddress = "Lat: ${position.latitude.toStringAsFixed(4)}, Lon: ${position.longitude.toStringAsFixed(4)}"; // Fallback
+
+      // Reverse Geocode (Optional, using geocode.maps.co - check terms)
       try {
         final apiUrl = 'https://geocode.maps.co/reverse?lat=${position.latitude}&lon=${position.longitude}';
         final response = await http.get(Uri.parse(apiUrl)).timeout(const Duration(seconds: 10));
@@ -1928,12 +2166,13 @@ class _ProducerDash22State extends State<ProducerDash22> {
           final data = json.decode(response.body);
           displayAddress = data['display_name'] ?? displayAddress;
         } else {
-           _showInfoSnackbar('Could not fetch address.');
+          _showInfoSnackbar('Could not fetch readable address.');
         }
       } catch (e) {
         print("Reverse geocoding failed: $e");
-         _showInfoSnackbar('Could not fetch address.');
+        _showInfoSnackbar('Could not fetch readable address.');
       }
+
       if (mounted) {
         setState(() => _profileLocationController.text = displayAddress);
         _showSuccessSnackbar('Location Acquired!');
@@ -1963,10 +2202,9 @@ class _ProducerDash22State extends State<ProducerDash22> {
       ),
     );
   }
-
   void _showErrorSnackBar(String message) => _showSnackbar(message, isError: true, durationSeconds: 4);
   void _showSuccessSnackbar(String message) => _showSnackbar(message, isError: false);
-  void _showInfoSnackbar(String message) => _showSnackbar(message, isError: false, durationSeconds: 2); // Use normal style for info
+  void _showInfoSnackbar(String message) => _showSnackbar(message, isError: false, durationSeconds: 2);
 
   void _showLoadingSnackbar(String message) {
     if (!mounted) return;
@@ -1978,7 +2216,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
           Text(message, style: const TextStyle(color: Colors.white, fontSize: 14)),
         ]),
         backgroundColor: Colors.black.withOpacity(0.8),
-        duration: const Duration(minutes: 1),
+        duration: const Duration(minutes: 1), // Show until dismissed
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 50.0),
         padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 15.0),
@@ -1986,11 +2224,11 @@ class _ProducerDash22State extends State<ProducerDash22> {
       ),
     );
   }
-
   void _dismissLoadingSnackbar() {
     if (mounted) ScaffoldMessenger.of(context).removeCurrentSnackBar();
   }
 
+  // Show guidance dialog after order status update
   void _showOrderNextStepDialog(String newStatus) {
      if (!mounted) return;
     String message; String title; IconData icon;
@@ -2007,24 +2245,24 @@ class _ProducerDash22State extends State<ProducerDash22> {
       default: title = "Order Updated"; message = "Order status updated to '$newStatus'."; icon = Icons.info_outline;
     }
     showDialog(context: context, builder: (ctx) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       title: Row(children: [Icon(icon, color: primaryTeal), const SizedBox(width: 8), Text(title)]),
       content: Text(message),
       actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text("OK"))],
     ));
   }
 
-
   // --- Build Method and UI Widgets ---
   @override
   Widget build(BuildContext context) {
     // Determine AppBar Avatar Image
     ImageProvider? appBarAvatarImage;
-    if (_isLoadingProfile || _profile == null) {
+    if (_isLoadingProfile && _profile == null) {
       appBarAvatarImage = const AssetImage(placeholderImagePath);
-    } else if (_profile!.image != null && _profile!.image!.isNotEmpty) {
+    } else if (_profile?.image != null && _profile!.image!.isNotEmpty) {
       try {
         Uri.parse(_profile!.image!); // Validate URL
-        appBarAvatarImage = CachedNetworkImageProvider(_profile!.image!); // Use Cached provider
+        appBarAvatarImage = CachedNetworkImageProvider(_profile!.image!);
       } catch (e) {
         debugPrint("Invalid URL for AppBar image: ${_profile!.image}");
         appBarAvatarImage = const AssetImage(placeholderImagePath);
@@ -2034,9 +2272,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
     }
 
     return Scaffold(
-      // Use the unified drawer with prefix
-      drawer: drawer.AppDrawer(invokedBy: 'producer_dashboard'),
-      backgroundColor: Colors.grey[100], // Light grey background for contrast
+      drawer: drawer.AppDrawer(invokedBy: 'producer_dashboard'), // Use the unified drawer
+      backgroundColor: Colors.grey[100], // Light background
       appBar: AppBar(
         backgroundColor: primaryTeal,
         elevation: 2.0,
@@ -2046,9 +2283,11 @@ class _ProducerDash22State extends State<ProducerDash22> {
         actions: [
           // Refresh Button
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: _isRefreshing
+               ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: whiteColor, strokeWidth: 2,))
+               : const Icon(Icons.refresh),
             tooltip: 'Refresh Data',
-            onPressed: () => _fetchAllData(forceRefresh: true),
+            onPressed: _isRefreshing ? null : () => _fetchAllData(forceRefresh: true),
           ),
           // Profile Avatar in AppBar
           if (!_isLoadingProfile && _profile != null)
@@ -2060,30 +2299,29 @@ class _ProducerDash22State extends State<ProducerDash22> {
                 backgroundImage: appBarAvatarImage,
                  onBackgroundImageError: (exception, stackTrace) {
                    debugPrint("Error loading app bar avatar: $exception");
-                   // No need to setState here, fallback is handled by initial logic
                  },
                 child: appBarAvatarImage is AssetImage ? const Icon(Icons.person, color: Colors.grey, size: 24) : null,
               ),
             ),
-          // Logout Button
+          // Logout Button (Placeholder Action)
           IconButton(
             icon: const Icon(Icons.logout_outlined, color: textOnTeal),
             tooltip: 'Logout',
             onPressed: () {
               debugPrint("Logout tapped");
               _showSnackbar('Logout action simulated.', isError: false);
-              // TODO: Navigator.pushReplacementNamed(context, '/login');
+              // Navigator.pushReplacementNamed(context, '/login'); // Uncomment for real logout
             },
           ),
           const SizedBox(width: 8),
         ],
       ),
-      body: _buildBodyContent(), // Main content based on state
+      body: _buildBodyContent(),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) {
           if (index != _currentIndex && mounted) {
-            _cancelAllEdits();
+            _cancelAllEdits(); // Cancel edits when switching tabs
             setState(() => _currentIndex = index);
           }
         },
@@ -2097,7 +2335,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
         items: [
           _buildBottomNavItem(Icons.account_circle_outlined, Icons.account_circle, 'Profile', 0),
           _buildBottomNavItem(Icons.receipt_long_outlined, Icons.receipt_long, 'Orders', 1),
-          _buildBottomNavItem(Icons.inventory_2_outlined, Icons.inventory_2, 'Stock', 2), // Stock Management Tab
+          _buildBottomNavItem(Icons.inventory_2_outlined, Icons.inventory_2, 'Stock', 2),
         ],
       ),
       floatingActionButton: _buildFloatingActionButton(),
@@ -2105,6 +2343,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
     );
   }
 
+  // Build Bottom Nav Item
   BottomNavigationBarItem _buildBottomNavItem(IconData icon, IconData activeIcon, String label, int index) {
      bool isSelected = _currentIndex == index;
     return BottomNavigationBarItem(
@@ -2113,16 +2352,17 @@ class _ProducerDash22State extends State<ProducerDash22> {
     );
   }
 
+  // Build Icon for Bottom Nav
   Widget _buildNavItemIcon(IconData iconData, bool isSelected) {
      final icon = Icon(
       iconData,
       color: isSelected ? primaryTeal : subtleText.withOpacity(0.8),
       size: 24,
     );
-    // Removed the background circle for a cleaner look
     return SizedBox(width: 32, height: 32, child: Center(child: icon));
   }
 
+  // Get AppBar Title based on current tab and edit state
   String _getAppBarTitle() {
     switch (_currentIndex) {
       case 0: return _isEditingProfile ? 'Edit Profile' : 'Producer Profile';
@@ -2132,23 +2372,26 @@ class _ProducerDash22State extends State<ProducerDash22> {
     }
   }
 
+  // Build Floating Action Button based on current tab and state
   Widget? _buildFloatingActionButton() {
-    if (_isEditingProfile || _editingProduceId != null) return null; // No FAB during edits
+    // No FAB during profile or produce editing
+    if (_isEditingProfile || _editingProduceId != null) return null;
 
     switch (_currentIndex) {
-      case 0: // Profile Tab
+      case 0: // Profile Tab -> Edit FAB
         return FloatingActionButton.small(
           onPressed: (_profile == null || _isLoadingProfile) ? null : _handleEditProfile,
           tooltip: 'Edit Profile',
           backgroundColor: (_profile == null || _isLoadingProfile) ? Colors.grey : primaryTeal,
           foregroundColor: textOnTeal,
           child: const Icon(Icons.edit_outlined, size: 20),
-          heroTag: 'fab_profile_edit',
+          heroTag: 'fab_profile_edit', // Unique heroTag
         );
-      case 1: // Orders Tab
-        return null; // No FAB for orders
-      case 2: // Produce/Stock Tab
+      case 1: // Orders Tab -> No FAB
+        return null;
+      case 2: // Produce/Stock Tab -> Update Stock or Add Produce FAB
         if (_selectedProduceIds.isNotEmpty) {
+          // Show Update Stock if items are selected
           return FloatingActionButton.extended(
             onPressed: _updateProducerStock,
             tooltip: 'Update Stock Levels',
@@ -2156,42 +2399,47 @@ class _ProducerDash22State extends State<ProducerDash22> {
             label: const Text("Update Stock"),
             backgroundColor: darkTeal,
             foregroundColor: textOnTeal,
-            heroTag: 'fab_stock_update',
+            heroTag: 'fab_stock_update', // Unique heroTag
           );
         } else {
+          // Show Add Produce if no items are selected
           return FloatingActionButton(
             onPressed: _handleAddProduce,
             tooltip: 'Add New Produce Item',
             backgroundColor: primaryTeal,
             foregroundColor: textOnTeal,
             child: const Icon(Icons.add),
-            heroTag: 'fab_produce_add',
+            heroTag: 'fab_produce_add', // Unique heroTag
           );
         }
       default: return null;
     }
   }
 
+  // Build Body Content based on loading/error state and current tab index
   Widget _buildBodyContent() {
-    if (_isLoading) {
+    if (_isLoading && _profile == null && _orders.isEmpty && _produce.isEmpty) {
+      // Show loading only if truly initializing and no data is available yet
       return const Center(child: CircularProgressIndicator(color: primaryTeal));
     }
     if (_error.isNotEmpty) {
+      // Show general error view if fetching failed critically
       return _buildErrorView();
     }
-    // Use IndexedStack to preserve tab state
+    // Use IndexedStack to preserve state of each tab
     return IndexedStack(
       index: _currentIndex,
       children: [
         _buildProfileTab(),
         _buildOrdersTab(),
-        _buildProduceTab(), // Handles both stock selection and produce editing
+        _buildProduceTab(),
       ],
     );
   }
 
+  // Build General Error View
   Widget _buildErrorView() {
-    return Center(child: Padding(padding: const EdgeInsets.all(20.0), child: Card(
+     return Center(child: Padding(padding: const EdgeInsets.all(20.0), child: Card(
       color: whiteColor.withOpacity(0.9), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 2,
       child: Padding(padding: const EdgeInsets.all(25.0), child: Column(
         mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -2211,20 +2459,19 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
   // --- Profile Tab UI ---
   Widget _buildProfileTab() {
-     // Show loading specifically for profile if it's still loading
+    // Show loading specifically for profile if it's still loading and no cached data shown
     if (_isLoadingProfile && _profile == null) {
       return const Center(child: CircularProgressIndicator(color: primaryTeal));
     }
-     // Show error specific to profile fetch if it occurred and no cached data
+    // Show error specific to profile fetch if it occurred and no cached data
     if (_profileFetchError.isNotEmpty && _profile == null) {
-      return _buildProfileErrorView(); // Specific error view for profile
+      return _buildProfileErrorView();
     }
-     // If profile is loaded (or cache is available)
+    // If profile is loaded (or cache is available)
     if (_profile != null) {
-       // Show editing UI or display UI
       return _isEditingProfile ? _buildProfileEditView(_profile!) : _buildProfileDisplayView(_profile!);
     }
-    // Fallback empty state if profile is null and no error (shouldn't happen often)
+    // Fallback empty state (should rarely happen if error handling is correct)
     return _buildEmptyState(
       'Profile Unavailable',
       'Could not load profile details. Pull down to refresh.',
@@ -2232,6 +2479,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
     );
   }
 
+  // Build Profile Specific Error View
   Widget _buildProfileErrorView() {
      return Center(child: Padding(padding: const EdgeInsets.all(20.0), child: Card(
       color: whiteColor.withOpacity(0.9), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 2,
@@ -2253,158 +2501,150 @@ class _ProducerDash22State extends State<ProducerDash22> {
     )));
   }
 
-
+  // Build Profile Display View
   Widget _buildProfileDisplayView(ProducerProfile profile) {
-    final dateFormat = DateFormat('MMM d, yyyy, hh:mm a');
-    // Use CachedNetworkImageProvider for better performance and error handling
-    final profileAvatarImage = (profile.image != null && profile.image!.isNotEmpty)
-        ? CachedNetworkImageProvider(profile.image!)
-        : const AssetImage(placeholderImagePath) as ImageProvider;
+     final dateFormat = DateFormat('MMM d, yyyy, hh:mm a');
+     final profileAvatarImage = (profile.image != null && profile.image!.isNotEmpty)
+         ? CachedNetworkImageProvider(profile.image!)
+         : const AssetImage(placeholderImagePath) as ImageProvider;
 
-    return RefreshIndicator(
-      onRefresh: () => _fetchAllData(forceRefresh: true),
-      child: ListView(
-        padding: const EdgeInsets.all(16.0),
-        children: [
-          // Profile Header Card
-          Card(
-            elevation: 2.0, color: cardBackground.withOpacity(0.95), margin: const EdgeInsets.only(bottom: 16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
-            child: Padding(padding: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 16.0), child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center, children: [
-                CircleAvatar(
-                  radius: 45, backgroundColor: lightTeal.withOpacity(0.5),
-                  backgroundImage: profileAvatarImage,
-                  onBackgroundImageError: (_, __) => debugPrint('Error loading profile network image'),
-                   // Show icon if it's the placeholder asset
-                  child: profileAvatarImage is AssetImage ? const Icon(Icons.person, size: 40, color: Colors.grey) : null,
-                ),
-                const SizedBox(width: 18),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(profile.name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: darkTeal)),
-                  if (profile.producerType != null && profile.producerType!.isNotEmpty)
-                    Padding(padding: const EdgeInsets.only(top: 2.0), child: Text(profile.producerType!, style: const TextStyle(fontSize: 14, color: subtleText))),
-                  if (profile.rating != null && profile.rating! > 0)
-                    Padding(padding: const EdgeInsets.only(top: 8.0), child: Row(children: [
-                      const Icon(Icons.star_rounded, color: starColor, size: 18), const SizedBox(width: 4),
-                      Text(profile.rating!.toStringAsFixed(1), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textOnWhite)),
-                      if (profile.reviews != null && profile.reviews!.isNotEmpty && profile.reviews!.toLowerCase() != 'none') ...[
-                        const SizedBox(width: 6), Text('(${profile.reviews} reviews)', style: const TextStyle(fontSize: 12, color: subtleText)),
-                      ],
-                    ])),
-                ])),
-              ],
-            )),
-          ),
-          // Active Status Card
+     return RefreshIndicator(
+       onRefresh: () => _fetchAllData(forceRefresh: true),
+       color: primaryTeal,
+       child: ListView(
+         padding: const EdgeInsets.all(16.0),
+         children: [
+           // Profile Header Card
            Card(
-            elevation: 1, margin: const EdgeInsets.only(bottom: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), child: SwitchListTile(
-              value: profile.isActive, onChanged: _isEditingProfile ? null : _handleToggleActiveStatus,
-              title: const Text('Active Status', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: darkTeal)),
-              subtitle: Text(profile.isActive ? 'Visible to customers' : 'Not currently visible', style: const TextStyle(fontSize: 13, color: subtleText)),
-              secondary: Icon(profile.isActive ? Icons.check_circle_outline_rounded : Icons.power_settings_new_outlined, color: profile.isActive ? Colors.green.shade600 : Colors.orange.shade700, size: 28),
-              activeColor: primaryTeal, inactiveThumbColor: Colors.grey.shade400, inactiveTrackColor: Colors.grey.shade200, contentPadding: EdgeInsets.zero,
-            )),
-          ),
-          // Info Section
-          _buildProfileSectionCard(title: 'Contact & Details', icon: Icons.info_outline_rounded, children: [
-            _buildDetailItem(Icons.email_outlined, 'Email', profile.email ?? ''),
-            _buildDetailItem(Icons.phone_outlined, 'Phone', profile.phoneNumber ?? ''),
-            _buildDetailItem(Icons.location_on_outlined, 'Location', profile.location ?? ''),
-            _buildDetailItem(Icons.calendar_today_rounded, 'Registered', dateFormat.format(profile.registrationDate)),
-             if (profile.lastLogin != null)
-                 _buildDetailItem(Icons.access_time_rounded, 'Last Login', dateFormat.format(profile.lastLogin!)),
-             if (profile.isEmailVerified != null)
-                 _buildDetailItem(Icons.verified_outlined, 'Email Verified', profile.isEmailVerified! ? 'Yes' : 'No'),
-            _buildDetailItem(Icons.person_outline_rounded, 'User Type', profile.userType ?? 'N/A'),
-            _buildDetailItem(Icons.category_outlined, 'Producer Type', profile.producerType ?? 'N/A'),
-          ]),
-          const SizedBox(height: 80), // Space for FAB
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProfileEditView(ProducerProfile profile) {
-    return Form(
-      key: _profileFormKey,
-      child: ListView(
-        padding: const EdgeInsets.all(16.0),
-        children: [
-          // --- Profile Image Handling (Placeholder/Example) ---
-          Center(
-            child: Stack(
-              alignment: Alignment.bottomRight,
-              children: [
-                CircleAvatar(
-                  radius: 60,
-                  backgroundColor: lightTeal.withOpacity(0.3),
-                   backgroundImage: (_uploadedProfileImageUrl != null)
-                       ? CachedNetworkImageProvider(_uploadedProfileImageUrl!) // Show uploaded if available
-                       : ((profile.image != null && profile.image!.isNotEmpty)
-                           ? CachedNetworkImageProvider(profile.image!) // Show current
-                           : const AssetImage(placeholderImagePath) as ImageProvider), // Fallback
-                   onBackgroundImageError: (_, __) {}, // Handle errors silently in background
-                   child: _isUploadingProfileImage
-                       ? const CircularProgressIndicator(color: primaryTeal)
-                       : null,
-                ),
-                Material( // Button to pick image
-                   color: primaryTeal, shape: const CircleBorder(), elevation: 2,
-                   child: InkWell(
-                      customBorder: const CircleBorder(), onTap: _pickAndUploadProfileImage, // TODO: Implement image picker
-                      child: const Padding(padding: EdgeInsets.all(8.0), child: Icon(Icons.camera_alt, color: whiteColor, size: 20)),
-                   ),
+             elevation: 2.0, color: cardBackground.withOpacity(0.95), margin: const EdgeInsets.only(bottom: 16),
+             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
+             child: Padding(padding: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 16.0), child: Row(
+               crossAxisAlignment: CrossAxisAlignment.center, children: [
+                 CircleAvatar(
+                   radius: 45, backgroundColor: lightTeal.withOpacity(0.5),
+                   backgroundImage: profileAvatarImage,
+                   onBackgroundImageError: (_, __) => debugPrint('Error loading profile network image'),
+                   child: profileAvatarImage is AssetImage ? const Icon(Icons.person, size: 40, color: Colors.grey) : null,
                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          // --- Editable Fields ---
-          _buildEditableItem(_profileNameController, 'Producer Name *', Icons.person_outline_rounded, validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null),
-          _buildEditableItem(_profilePhoneController, 'Phone Number', Icons.phone_outlined, keyboardType: TextInputType.phone),
-          _buildEditableItem(_profileLocationController, 'Location / Service Area', Icons.location_on_outlined, maxLines: 2),
-          // Location Fetch Button
-          Padding(padding: const EdgeInsets.only(top: 4.0, left: 40), // Align with text field input
-            child: TextButton.icon(
-              onPressed: _isLoadingLocation ? null : _getCurrentLocation,
-              icon: _isLoadingLocation ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.my_location_rounded, size: 18),
-              label: Text(_isLoadingLocation ? 'Fetching...' : 'Get Current Location'),
-              style: TextButton.styleFrom(foregroundColor: primaryTeal, textStyle: const TextStyle(fontSize: 13)),
-            ),
-          ),
-          const SizedBox(height: 24),
-          // --- Action Buttons ---
-          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-            TextButton(onPressed: _cancelProfileEdit, child: const Text('Cancel', style: TextStyle(color: subtleText)), style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8))),
-            const SizedBox(width: 12),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.save_outlined, size: 18), label: const Text('Save Changes'),
-              style: ElevatedButton.styleFrom(backgroundColor: primaryTeal, foregroundColor: textOnTeal, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-              onPressed: _saveProfileChanges,
-            ),
-          ]),
-          const SizedBox(height: 80), // Space for bottom nav/FAB
-        ],
-      ),
-    );
+                 const SizedBox(width: 18),
+                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                   Text(profile.name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: darkTeal)),
+                   if (profile.producerType != null && profile.producerType!.isNotEmpty)
+                     Padding(padding: const EdgeInsets.only(top: 2.0), child: Text(profile.producerType!, style: const TextStyle(fontSize: 14, color: subtleText))),
+                   if (profile.rating != null && profile.rating! > 0)
+                     Padding(padding: const EdgeInsets.only(top: 8.0), child: Row(children: [
+                       const Icon(Icons.star_rounded, color: starColor, size: 18), const SizedBox(width: 4),
+                       Text(profile.rating!.toStringAsFixed(1), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textOnWhite)),
+                       if (profile.reviews != null && profile.reviews!.isNotEmpty && profile.reviews!.toLowerCase() != 'none') ...[
+                         const SizedBox(width: 6), Text('(${profile.reviews} reviews)', style: const TextStyle(fontSize: 12, color: subtleText)),
+                       ],
+                     ])),
+                 ])),
+               ],
+             )),
+           ),
+           // Active Status Card
+           Card(
+             elevation: 1, margin: const EdgeInsets.only(bottom: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+             child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), child: SwitchListTile(
+               value: profile.isActive, onChanged: _isEditingProfile ? null : _handleToggleActiveStatus,
+               title: const Text('Active Status', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: darkTeal)),
+               subtitle: Text(profile.isActive ? 'Visible to customers' : 'Not currently visible', style: const TextStyle(fontSize: 13, color: subtleText)),
+               secondary: Icon(profile.isActive ? Icons.check_circle_outline_rounded : Icons.power_settings_new_outlined, color: profile.isActive ? Colors.green.shade600 : Colors.orange.shade700, size: 28),
+               activeColor: primaryTeal, inactiveThumbColor: Colors.grey.shade400, inactiveTrackColor: Colors.grey.shade200, contentPadding: EdgeInsets.zero,
+             )),
+           ),
+           // Info Section
+           _buildProfileSectionCard(title: 'Contact & Details', icon: Icons.info_outline_rounded, children: [
+             _buildDetailItem(Icons.email_outlined, 'Email', profile.email),
+             _buildDetailItem(Icons.phone_outlined, 'Phone', profile.phoneNumber),
+             _buildDetailItem(Icons.location_on_outlined, 'Location', profile.location),
+             _buildDetailItem(Icons.calendar_today_rounded, 'Registered', dateFormat.format(profile.registrationDate)),
+             if (profile.lastLogin != null) _buildDetailItem(Icons.access_time_rounded, 'Last Login', dateFormat.format(profile.lastLogin!)),
+             if (profile.isEmailVerified != null) _buildDetailItem(Icons.verified_outlined, 'Email Verified', profile.isEmailVerified! ? 'Yes' : 'No'),
+             _buildDetailItem(Icons.person_outline_rounded, 'User Type', profile.userType),
+             _buildDetailItem(Icons.category_outlined, 'Producer Type', profile.producerType),
+           ]),
+           const SizedBox(height: 80), // Space for FAB
+         ],
+       ),
+     );
   }
 
-  // Placeholder for image picking logic
-  Future<void> _pickAndUploadProfileImage() async {
-    // TODO: Implement image picking using image_picker
-    // TODO: Implement image uploading to your backend/storage
-    // TODO: Update _uploadedProfileImageUrl state on success
-     _showInfoSnackbar("Image editing coming soon!");
-    // setState(() => _isUploadingProfileImage = true);
-    // await Future.delayed(Duration(seconds: 2)); // Simulate upload
-    // setState(() {
-    //   _uploadedProfileImageUrl = "https://via.placeholder.com/150/009688/FFFFFF/?text=NewPic"; // Example URL
-    //   _isUploadingProfileImage = false;
-    // });
+  // Build Profile Edit View
+  Widget _buildProfileEditView(ProducerProfile profile) {
+     // Determine image to display: local file > uploaded temp > network > placeholder
+     ImageProvider displayImage;
+     if (profile.localImageFile != null) {
+        displayImage = FileImage(profile.localImageFile!);
+     } else if (_uploadedProfileImageUrl != null) {
+        displayImage = CachedNetworkImageProvider(_uploadedProfileImageUrl!);
+     } else if (profile.image != null && profile.image!.isNotEmpty) {
+        displayImage = CachedNetworkImageProvider(profile.image!);
+     } else {
+        displayImage = const AssetImage(placeholderImagePath);
+     }
+
+     return Form(
+       key: _profileFormKey,
+       child: ListView(
+         padding: const EdgeInsets.all(16.0),
+         children: [
+           // Profile Image Handling
+           Center(
+             child: Stack(
+               alignment: Alignment.bottomRight,
+               children: [
+                 CircleAvatar(
+                   radius: 60,
+                   backgroundColor: lightTeal.withOpacity(0.3),
+                   backgroundImage: displayImage,
+                   onBackgroundImageError: (_, __) {}, // Handle errors silently
+                   child: _isUploadingProfileImage ? const CircularProgressIndicator(color: primaryTeal) : null,
+                 ),
+                 Material(
+                    color: primaryTeal, shape: const CircleBorder(), elevation: 2,
+                    child: InkWell(
+                       customBorder: const CircleBorder(), onTap: _pickAndUploadProfileImage,
+                       child: const Padding(padding: EdgeInsets.all(8.0), child: Icon(Icons.camera_alt, color: whiteColor, size: 20)),
+                    ),
+                  ),
+               ],
+             ),
+           ),
+           const SizedBox(height: 24),
+           // Editable Fields
+           _buildEditableItem(_profileNameController, 'Producer Name *', Icons.person_outline_rounded, validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null),
+           _buildEditableItem(_profilePhoneController, 'Phone Number', Icons.phone_outlined, keyboardType: TextInputType.phone),
+           _buildEditableItem(_profileLocationController, 'Location / Service Area', Icons.location_on_outlined, maxLines: 2),
+           // Location Fetch Button
+           Padding(padding: const EdgeInsets.only(top: 4.0, left: 40),
+             child: TextButton.icon(
+               onPressed: _isLoadingLocation ? null : _getCurrentLocation,
+               icon: _isLoadingLocation ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.my_location_rounded, size: 18),
+               label: Text(_isLoadingLocation ? 'Fetching...' : 'Get Current Location'),
+               style: TextButton.styleFrom(foregroundColor: primaryTeal, textStyle: const TextStyle(fontSize: 13)),
+             ),
+           ),
+           const SizedBox(height: 24),
+           // Action Buttons
+           Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+             TextButton(onPressed: _cancelProfileEdit, child: const Text('Cancel', style: TextStyle(color: subtleText)), style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8))),
+             const SizedBox(width: 12),
+             ElevatedButton.icon(
+               icon: _isUploadingProfileImage ? const SizedBox(width:18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: whiteColor)) : const Icon(Icons.save_outlined, size: 18),
+               label: Text(_isUploadingProfileImage ? 'Saving...' : 'Save Changes'),
+               style: ElevatedButton.styleFrom(backgroundColor: primaryTeal, foregroundColor: textOnTeal, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+               onPressed: _isUploadingProfileImage ? null : _saveProfileChanges, // Disable while saving/uploading
+             ),
+           ]),
+           const SizedBox(height: 80), // Space for bottom nav/FAB
+         ],
+       ),
+     );
   }
 
+  // Build Profile Section Card
   Widget _buildProfileSectionCard({required String title, required IconData icon, required List<Widget> children}) {
      return Card(elevation: 1.0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)), color: whiteColor.withOpacity(0.9), margin: const EdgeInsets.only(bottom: 16), child: Padding(
       padding: const EdgeInsets.all(12.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -2415,14 +2655,19 @@ class _ProducerDash22State extends State<ProducerDash22> {
     ));
   }
 
-  Widget _buildDetailItem(IconData icon, String label, String value) {
+  // Build Profile Detail Item Row
+  Widget _buildDetailItem(IconData icon, String label, String? value) {
+     final displayValue = (value == null || value.trim().isEmpty) ? 'Not provided' : value;
+     final displayColor = (value == null || value.trim().isEmpty) ? subtleText.withOpacity(0.7) : subtleText;
+
     return Padding(padding: const EdgeInsets.symmetric(vertical: 4.0), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Icon(icon, size: 15, color: primaryTeal.withOpacity(0.9)), const SizedBox(width: 10),
       SizedBox(width: 90, child: Text('$label:', style: const TextStyle(fontWeight: FontWeight.w600, color: textOnWhite, fontSize: 13))),
-      Expanded(child: Text(value.isEmpty ? 'Not provided' : value, style: TextStyle(color: value.isEmpty ? subtleText.withOpacity(0.7) : subtleText, fontSize: 13), softWrap: true)),
+      Expanded(child: Text(displayValue, style: TextStyle(color: displayColor, fontSize: 13), softWrap: true)),
     ]));
   }
 
+  // Build Editable Item Row (TextFormField)
   Widget _buildEditableItem(TextEditingController controller, String label, IconData icon, {int maxLines = 1, TextInputType keyboardType = TextInputType.text, String? Function(String?)? validator}) {
     return Padding(padding: const EdgeInsets.symmetric(vertical: 6.0), child: TextFormField(
       controller: controller,
@@ -2433,25 +2678,22 @@ class _ProducerDash22State extends State<ProducerDash22> {
         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0), borderSide: BorderSide(color: dividerColor)),
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0), borderSide: const BorderSide(color: primaryTeal, width: 1.5)),
         labelStyle: const TextStyle(color: subtleText, fontSize: 13), floatingLabelStyle: const TextStyle(color: primaryTeal),
-         errorStyle: const TextStyle(fontSize: 11, color: errorColor), // Added error style
+        errorStyle: const TextStyle(fontSize: 11, color: errorColor),
       ),
       style: const TextStyle(color: textOnWhite, fontSize: 13),
       maxLines: maxLines, keyboardType: keyboardType,
-      validator: validator, // Use the provided validator
+      validator: validator,
       autovalidateMode: AutovalidateMode.onUserInteraction,
     ));
   }
 
-
   // --- Orders Tab UI ---
   Widget _buildOrdersTab() {
-    // Show loading specific to orders if applicable
     if (_isLoadingOrders && _orders.isEmpty) {
-       return const Center(child: CircularProgressIndicator(color: primaryTeal));
+      return const Center(child: CircularProgressIndicator(color: primaryTeal));
     }
-     // Show general error if orders failed to load (and no profile error shown)
     if (_error.isNotEmpty && _profileFetchError.isEmpty && _orders.isEmpty) {
-      return _buildErrorView(); // Use the general error view
+      return _buildErrorView();
     }
 
     return RefreshIndicator(
@@ -2461,25 +2703,22 @@ class _ProducerDash22State extends State<ProducerDash22> {
         padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 80.0),
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
-          // No summary section shown if no orders
-          if (_orders.isNotEmpty) ...[
-             _buildOrdersListSection(),
-          ] else if (!_isLoading) ...[
-             // Show empty state only when not loading and orders list is empty
+          if (_orders.isNotEmpty)
+             _buildOrdersListSection()
+          else if (!_isLoading) // Show empty state only when not loading
              _buildEmptyState(
                'No Orders Yet',
                'New customer orders will appear here.',
                icon: Icons.receipt_long_outlined,
-             ),
-          ] else ...[
-             // If still loading but list is empty (initial load scenario)
+             )
+          else // Still loading but list is empty (initial load)
              const Center(child: Padding(padding: EdgeInsets.all(32.0), child: CircularProgressIndicator(color: primaryTeal))),
-          ]
         ],
       ),
     );
   }
 
+  // Build Orders List Section
   Widget _buildOrdersListSection() {
     return ListView.builder(
       shrinkWrap: true,
@@ -2488,91 +2727,91 @@ class _ProducerDash22State extends State<ProducerDash22> {
       itemBuilder: (context, index) {
         return Padding(
           padding: EdgeInsets.only(bottom: (index == _orders.length - 1) ? 0 : 12.0),
-          child: _buildOrderItem(_orders[index]), // Use the modified card builder
+          child: _buildOrderItem(_orders[index]),
         );
       },
     );
   }
 
-  // Modified Order Item Card with Expansion Tile and Actions
+  // Build Individual Order Item Card
   Widget _buildOrderItem(Order order) {
-    final DateFormat dateFormat = DateFormat('MMM d, hh:mm a');
-    final statusColor = _getStatusColor(order.orderStatus);
-    final statusIcon = _getStatusIcon(order.orderStatus);
+     final DateFormat dateFormat = DateFormat('MMM d, hh:mm a');
+     final statusColor = _getStatusColor(order.orderStatus);
+     final statusIcon = _getStatusIcon(order.orderStatus);
 
-    return Card(
-      margin: EdgeInsets.zero,
-      elevation: 1.5,
-      color: whiteColor.withOpacity(0.9),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10.0),
-        side: BorderSide(color: statusColor.withOpacity(0.4), width: 1),
-      ),
-      child: ExpansionTile(
-        key: PageStorageKey<int>(order.orderId), // Preserve expanded state
-        tilePadding: const EdgeInsets.fromLTRB(12.0, 8.0, 12.0, 8.0),
-        childrenPadding: EdgeInsets.zero,
-        expandedAlignment: Alignment.topLeft,
-        expandedCrossAxisAlignment: CrossAxisAlignment.start,
-        iconColor: subtleText,
-        collapsedIconColor: subtleText,
-        leading: Tooltip(
-          message: order.orderStatus,
-          child: CircleAvatar(
-            radius: 18,
-            backgroundColor: statusColor.withOpacity(0.15),
-            child: Icon(statusIcon, color: statusColor, size: 18),
-          ),
-        ),
-        title: Text(
-          order.mealName, // Product name
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: textOnWhite),
-          maxLines: 2, overflow: TextOverflow.ellipsis,
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 3.0),
-          child: Text(
-            '#${order.orderId} • ${dateFormat.format(order.orderDate.toLocal())}',
-            style: const TextStyle(fontSize: 12, color: subtleText),
-          ),
-        ),
-        trailing: Column(
-          mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text(
-              NumberFormat.currency(symbol: 'UGX ', decimalDigits: 0).format(order.totalPrice), // Format price
-              style: const TextStyle(fontWeight: FontWeight.bold, color: darkTeal, fontSize: 13),
-            ),
-            const SizedBox(height: 2),
-            Text('${order.quantity} item${order.quantity > 1 ? 's' : ''}', style: const TextStyle(fontSize: 11, color: subtleText)),
-          ],
-        ),
-        children: [
-          Divider(height: 1, color: dividerColor.withOpacity(0.7)),
-          Padding(padding: const EdgeInsets.all(12.0), child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _buildOrderDetailItem('Customer', order.customerName ?? 'Unknown'),
-              _buildOrderDetailItem('Status', order.orderStatus, color: statusColor),
-              _buildOrderDetailItem('Payment', order.paymentStatus ?? 'Unknown'),
-              if (order.notes != null && order.notes!.isNotEmpty)
-                _buildOrderDetailItem('Notes', order.notes!),
-              if (order.deliveryAddress != null && order.deliveryAddress!.isNotEmpty)
-                _buildOrderDetailItem('Delivery To', order.deliveryAddress!),
-               // Show Assigned Rider if available
+     return Card(
+       margin: EdgeInsets.zero,
+       elevation: 1.5,
+       color: whiteColor.withOpacity(0.9),
+       shape: RoundedRectangleBorder(
+         borderRadius: BorderRadius.circular(10.0),
+         side: BorderSide(color: statusColor.withOpacity(0.4), width: 1),
+       ),
+       child: ExpansionTile(
+         key: PageStorageKey<int>(order.orderId), // Preserve expanded state
+         tilePadding: const EdgeInsets.fromLTRB(12.0, 8.0, 12.0, 8.0),
+         childrenPadding: EdgeInsets.zero,
+         expandedAlignment: Alignment.topLeft,
+         expandedCrossAxisAlignment: CrossAxisAlignment.start,
+         iconColor: subtleText,
+         collapsedIconColor: subtleText,
+         leading: Tooltip(
+           message: order.orderStatus,
+           child: CircleAvatar(
+             radius: 18,
+             backgroundColor: statusColor.withOpacity(0.15),
+             child: Icon(statusIcon, color: statusColor, size: 18),
+           ),
+         ),
+         title: Text(
+           order.mealName,
+           style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: textOnWhite),
+           maxLines: 2, overflow: TextOverflow.ellipsis,
+         ),
+         subtitle: Padding(
+           padding: const EdgeInsets.only(top: 3.0),
+           child: Text(
+             '#${order.orderId} • ${dateFormat.format(order.orderDate.toLocal())}',
+             style: const TextStyle(fontSize: 12, color: subtleText),
+           ),
+         ),
+         trailing: Column(
+           mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
+             Text(
+               NumberFormat.currency(symbol: 'UGX ', decimalDigits: 0).format(order.totalPrice),
+               style: const TextStyle(fontWeight: FontWeight.bold, color: darkTeal, fontSize: 13),
+             ),
+             const SizedBox(height: 2),
+             Text('${order.quantity} item${order.quantity > 1 ? 's' : ''}', style: const TextStyle(fontSize: 11, color: subtleText)),
+           ],
+         ),
+         children: [
+           Divider(height: 1, color: dividerColor.withOpacity(0.7)),
+           Padding(padding: const EdgeInsets.all(12.0), child: Column(
+             crossAxisAlignment: CrossAxisAlignment.start, children: [
+               _buildOrderDetailItem('Customer', order.customerName ?? 'Unknown'),
+               _buildOrderDetailItem('Status', order.orderStatus, color: statusColor),
+               _buildOrderDetailItem('Payment', order.paymentStatus ?? 'Unknown'),
+               if (order.notes != null && order.notes!.isNotEmpty)
+                 _buildOrderDetailItem('Notes', order.notes!),
+               if (order.deliveryAddress != null && order.deliveryAddress!.isNotEmpty)
+                 _buildOrderDetailItem('Delivery To', order.deliveryAddress!),
                if (order.assignedRiderId != null)
-                  _buildOrderDetailItem(
-                    'Assigned Rider',
-                    '${order.assignedRiderName ?? 'ID: ${order.assignedRiderId}'}',
-                     color: assignedColor // Use specific color for rider
-                  ),
-              const SizedBox(height: 12),
-              _buildOrderActions(order), // Action buttons
-            ],
-          )),
-        ],
-      ),
-    );
+                 _buildOrderDetailItem(
+                   'Assigned Rider',
+                   '${order.assignedRiderName ?? 'ID: ${order.assignedRiderId}'}',
+                    color: assignedColor
+                 ),
+               const SizedBox(height: 12),
+               _buildOrderActions(order), // Action buttons
+             ],
+           )),
+         ],
+       ),
+     );
   }
 
+  // Build Order Detail Item Row
   Widget _buildOrderDetailItem(String label, String value, {Color? color}) {
     return Padding(padding: const EdgeInsets.symmetric(vertical: 3.0), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       SizedBox(width: 80, child: Text('$label:', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: textOnWhite))),
@@ -2580,13 +2819,13 @@ class _ProducerDash22State extends State<ProducerDash22> {
     ]));
   }
 
-  // Builds action buttons based on status, including Dispatch/Assign
+  // Build Order Action Buttons based on status
   Widget _buildOrderActions(Order order) {
-    List<Widget> buttons = [];
-    String status = order.orderStatus;
+     List<Widget> buttons = [];
+     String status = order.orderStatus;
 
-    // Common Reject/Cancel action (visible in most active states)
-     bool canCancel = ![Order.STATUS_DELIVERED, Order.STATUS_COMPLETED, Order.STATUS_CANCELLED, Order.STATUS_OUT_FOR_DELIVERY]
+     // Common Reject/Cancel action
+     bool canCancel = ![Order.STATUS_DELIVERED, Order.STATUS_COMPLETED, Order.STATUS_CANCELLED, Order.STATUS_OUT_FOR_DELIVERY, Order.STATUS_DISPATCHED]
                         .contains(status);
      if (canCancel) {
         buttons.add(_actionButton('Cancel', () => _showRejectConfirmation(order), isDestructive: true));
@@ -2597,26 +2836,18 @@ class _ProducerDash22State extends State<ProducerDash22> {
         buttons.add(_actionButton('Accept', () => _updateSimpleOrderStatus(order, Order.STATUS_ACCEPTED)));
         break;
       case Order.STATUS_ACCEPTED:
-      case Order.STATUS_PREPARING: // Allow preparing or directly assigning from Accepted/Preparing state
+      case Order.STATUS_PREPARING:
          buttons.add(_actionButton('Ready / Assign', () => _handleReadyForShipping(order), isPrimary: true));
-         // Optional: Add a separate "Start Preparing" button if needed
-         // if (status == Order.STATUS_ACCEPTED) {
-         //   buttons.add(_actionButton('Start Prep', () => _updateSimpleOrderStatus(order, Order.STATUS_PREPARING)));
-         // }
         break;
       case Order.STATUS_READY_FOR_PICKUP:
-         // Optionally show info that it's waiting for ANY rider
          buttons.add(Padding(padding: const EdgeInsets.symmetric(vertical: 8.0), child: Text("Waiting for rider...", style: TextStyle(fontSize: 12, color: subtleText, fontStyle: FontStyle.italic))));
-         // Allow re-assigning a specific rider even if marked as ready for any? (Optional)
          buttons.add(_actionButton('Assign Specific', () => _handleReadyForShipping(order)));
          break;
       case Order.STATUS_ASSIGNED:
-         // Optionally show assigned rider info here too or just rely on the details section
          buttons.add(Padding(padding: const EdgeInsets.symmetric(vertical: 8.0), child: Text("Rider Assigned", style: TextStyle(fontSize: 12, color: assignedColor, fontWeight: FontWeight.w500))));
-         // Allow changing assigned rider? (More complex flow)
-         // buttons.add(_actionButton('Re-assign', () => _handleReadyForShipping(order)));
+         // Allow re-assignment? (Could add button here)
         break;
-      // No more actions typically initiated by Producer after Assignment/Ready
+      // No more producer actions after assignment/dispatch typically
       case Order.STATUS_DISPATCHED:
       case Order.STATUS_OUT_FOR_DELIVERY:
       case Order.STATUS_DELIVERED:
@@ -2628,34 +2859,24 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
     if (buttons.isEmpty) return const SizedBox.shrink();
 
-    // Use Wrap for button layout
     return Wrap(
-      spacing: 8.0,
-      runSpacing: 8.0,
-      alignment: WrapAlignment.end,
-      children: buttons,
+      spacing: 8.0, runSpacing: 8.0, alignment: WrapAlignment.end, children: buttons,
     );
   }
 
-   // Helper for creating styled action buttons consistently
+  // Build Styled Action Button
   Widget _actionButton(String label, VoidCallback onPressed, {bool isPrimary = false, bool isDestructive = false}) {
      Color bgColor = actionButtonBackground;
      Color fgColor = actionButtonForeground;
-     if (isPrimary) {
-        bgColor = primaryTeal;
-        fgColor = textOnTeal;
-     } else if (isDestructive) {
-        bgColor = destructiveButtonBackground;
-        fgColor = destructiveButtonForeground;
-     }
+     if (isPrimary) { bgColor = primaryTeal; fgColor = textOnTeal; }
+     else if (isDestructive) { bgColor = destructiveButtonBackground; fgColor = destructiveButtonForeground; }
 
     return ElevatedButton(
       onPressed: onPressed,
       style: ElevatedButton.styleFrom(
-        backgroundColor: bgColor,
-        foregroundColor: fgColor,
+        backgroundColor: bgColor, foregroundColor: fgColor,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        elevation: isPrimary ? 1 : 0, // Add slight elevation for primary action
+        elevation: isPrimary ? 1 : 0,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
       ),
@@ -2663,14 +2884,11 @@ class _ProducerDash22State extends State<ProducerDash22> {
     );
   }
 
-
   // --- Produce/Stock Tab UI ---
   Widget _buildProduceTab() {
-     // Show loading specific to produce if applicable
     if (_isLoadingProduce && _produce.isEmpty) {
        return const Center(child: CircularProgressIndicator(color: primaryTeal));
     }
-     // Show general error if produce failed to load
      if (_error.isNotEmpty && _profileFetchError.isEmpty && _produce.isEmpty) {
         return _buildErrorView();
      }
@@ -2682,44 +2900,46 @@ class _ProducerDash22State extends State<ProducerDash22> {
         padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 80.0),
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
-          // Conditionally show edit form or stock list
+          // Show edit form or stock list
           if (_editingProduceId != null)
-            _buildProduceEditSection() // Edit form for ONE produce item
+            _buildProduceEditSection()
           else
-            _buildStockSelectionSection(), // List for selecting MULTIPLE stock items
+            _buildStockSelectionSection(),
 
+          // Spacer at bottom if editing form is shown
           if (_editingProduceId != null) const SizedBox(height: 100),
         ],
       ),
     );
   }
 
+  // Build Stock Selection Section
   Widget _buildStockSelectionSection() {
-     if (_produce.isEmpty && !_isLoading) {
+    if (_produce.isEmpty && !_isLoading) {
       return _buildEmptyState(
         'No Produce Items Found',
         'Tap the (+) button below to add the first produce item.',
         icon: Icons.eco_outlined,
       );
     }
-    // Use the refined list builder for stock selection
-    return _buildProduceListForStock();
+    return _buildProduceListForStock(); // Refined list builder for stock
   }
 
+  // Build Produce Edit Section (Form)
   Widget _buildProduceEditSection() {
     if (_editingProduceId == null) return const SizedBox.shrink();
+    // Find the product being edited (could be TEMP or existing)
     final productToEdit = _produce.firstWhere((p) => p.produceId == _editingProduceId, orElse: () {
       print("Error: Product with ID $_editingProduceId not found for editing.");
       WidgetsBinding.instance.addPostFrameCallback((_) => _cancelProduceEdit());
-      return Product(produceId: 'invalid', produceName: 'Error');
+      return Product(produceId: 'invalid', produceName: 'Error'); // Placeholder
     });
-    if (productToEdit.produceId == 'invalid') return const SizedBox.shrink();
-    return _buildProduceEditForm(productToEdit); // Show the edit form
+    if (productToEdit.produceId == 'invalid') return const SizedBox.shrink(); // Return empty if not found
+    return _buildProduceEditForm(productToEdit);
   }
 
-   // Builds the list for selecting/managing stock quantities
+  // Build the List for Selecting Stock and Quantities
   Widget _buildProduceListForStock() {
-     // Filter out temporary items from stock selection view
      final availableProduce = _produce.where((p) => !p.produceId.startsWith('TEMP_')).toList();
 
     if (availableProduce.isEmpty && !_isLoadingProduce) {
@@ -2735,7 +2955,6 @@ class _ProducerDash22State extends State<ProducerDash22> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text("Select Available Stock", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: darkTeal)),
-              // Optional: Button to clear all selections
               if (_selectedProduceIds.isNotEmpty) TextButton(
                   onPressed: () => setState(() { _selectedProduceIds.clear(); _produceQuantities.clear(); }),
                   child: Text("Clear All", style: TextStyle(fontSize: 12, color: subtleText)),
@@ -2754,7 +2973,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
               return Column(children: [
                 CheckboxListTile(
                   title: Text(product.produceName, style: TextStyle(fontSize: 14, color: textOnWhite)),
-                   subtitle: product.unitGrams != null ? Text("${product.calories ?? '-'} kcal / ${product.unitGrams}g", style: TextStyle(fontSize: 11, color: subtleText)) : null, // Show basic info
+                  subtitle: product.unitGrams != null ? Text("${product.calories ?? '-'} kcal / ${product.unitGrams}g", style: TextStyle(fontSize: 11, color: subtleText)) : null,
                   value: isSelected,
                   onChanged: (bool? selected) => setState(() {
                     if (selected == true) {
@@ -2766,18 +2985,20 @@ class _ProducerDash22State extends State<ProducerDash22> {
                     }
                   }),
                   controlAffinity: ListTileControlAffinity.leading, dense: true, activeColor: primaryTeal,
-                   secondary: IconButton( // Add Edit button here
+                  secondary: IconButton(
                      icon: Icon(Icons.edit_note_outlined, size: 20, color: subtleText),
                      tooltip: 'Edit Produce Item Details',
-                     onPressed: () => _handleEditProduce(product),
+                     onPressed: () => _handleEditProduce(product), // Allow editing from stock list
                    ),
                 ),
+                // Quantity input shown only when selected
                 if (isSelected) Padding(
                   padding: const EdgeInsets.only(left: 56.0, right: 16.0, bottom: 12.0),
                   child: Row(children: [
                     const Text("Quantity:", style: TextStyle(fontSize: 13, color: subtleText)), const SizedBox(width: 12),
                     SizedBox(width: 80, height: 40, child: TextFormField(
-                      key: ValueKey(product.produceId), initialValue: _produceQuantities[product.produceId]?.toString() ?? '1',
+                      key: ValueKey(product.produceId), // Ensure widget rebuilds correctly
+                      initialValue: _produceQuantities[product.produceId]?.toString() ?? '1',
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 10), border: OutlineInputBorder(), hintText: "0", hintStyle: TextStyle(fontSize: 13)),
                       style: const TextStyle(fontSize: 14, color: textOnWhite),
@@ -2790,10 +3011,9 @@ class _ProducerDash22State extends State<ProducerDash22> {
                       autovalidateMode: AutovalidateMode.onUserInteraction,
                     )),
                     const Spacer(),
-                    // Optional Delete Button (use with caution on stock screen)
-                     IconButton(
+                    IconButton( // Delete Button (Master List Deletion)
                        icon: Icon(Icons.delete_outline_rounded, size: 20, color: errorColor.withOpacity(0.7)),
-                       tooltip: 'Delete Produce Item',
+                       tooltip: 'Delete Produce Item from System',
                        onPressed: () => _handleDeleteProduce(product),
                      ),
                   ]),
@@ -2803,54 +3023,64 @@ class _ProducerDash22State extends State<ProducerDash22> {
             },
           )),
         ),
-        // Moved Update Stock button to FAB
+        // Update Stock button moved to FAB
       ],
     );
   }
 
-  // Builds the form for adding/editing a produce item
+  // Build the Form for Adding/Editing a Produce Item
   Widget _buildProduceEditForm(Product product) {
-    final bool isNewItem = product.produceId.startsWith('TEMP_');
-    return Card(
-      elevation: 3.0, color: whiteColor.withOpacity(0.98), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0), side: BorderSide(color: primaryTeal, width: 1.5)), margin: const EdgeInsets.only(bottom: 16.0),
-      child: Padding(padding: const EdgeInsets.all(16.0), child: Form(key: _produceFormKey, child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-          Text(isNewItem ? 'Add New Produce Item' : 'Edit "${product.produceName}"', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: darkTeal)), const SizedBox(height: 16),
-          TextFormField(controller: _produceNameController, decoration: _inputDecoration('Produce Name *'), style: const TextStyle(fontSize: 14, color: textOnWhite), validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null, autovalidateMode: AutovalidateMode.onUserInteraction), const SizedBox(height: 12),
-          Row(children: [
-            Expanded(child: TextFormField(controller: _produceCaloriesController, decoration: _inputDecoration('Calories (kcal)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], validator: _validateOptionalNumber, autovalidateMode: AutovalidateMode.onUserInteraction)), const SizedBox(width: 10),
-            Expanded(child: TextFormField(controller: _produceUnitGramsController, decoration: _inputDecoration('Unit (g)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], validator: _validateOptionalNumber, autovalidateMode: AutovalidateMode.onUserInteraction)),
-          ]), const SizedBox(height: 12),
-          Row(children: [
-            Expanded(child: TextFormField(controller: _produceProteinsController, decoration: _inputDecoration('Proteins (g)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: const TextInputType.numberWithOptions(decimal: true), inputFormatters: [_decimalInputFormatter(1)], validator: _validateOptionalNumber, autovalidateMode: AutovalidateMode.onUserInteraction)), const SizedBox(width: 10),
-            Expanded(child: TextFormField(controller: _produceCarbsController, decoration: _inputDecoration('Carbs (g)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: const TextInputType.numberWithOptions(decimal: true), inputFormatters: [_decimalInputFormatter(1)], validator: _validateOptionalNumber, autovalidateMode: AutovalidateMode.onUserInteraction)), const SizedBox(width: 10),
-            Expanded(child: TextFormField(controller: _produceFatsController, decoration: _inputDecoration('Fats (g)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: const TextInputType.numberWithOptions(decimal: true), inputFormatters: [_decimalInputFormatter(1)], validator: _validateOptionalNumber, autovalidateMode: AutovalidateMode.onUserInteraction)),
-          ]), const SizedBox(height: 12),
-          TextFormField(controller: _produceSourceController, decoration: _inputDecoration('Source URL (optional)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: TextInputType.url, maxLines: 1, validator: (v) => (v != null && v.isNotEmpty && (Uri.tryParse(v) == null || !Uri.tryParse(v)!.isAbsolute)) ? 'Invalid URL' : null, autovalidateMode: AutovalidateMode.onUserInteraction), const SizedBox(height: 20),
-          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-            TextButton(onPressed: _cancelProduceEdit, child: const Text('Cancel', style: TextStyle(color: subtleText)), style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8))), const SizedBox(width: 12),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.save_outlined, size: 18), label: Text(isNewItem ? 'Add Item' : 'Save Changes'),
-              style: ElevatedButton.styleFrom(backgroundColor: primaryTeal, foregroundColor: textOnTeal, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-              onPressed: _saveProduceChanges,
-            ),
-          ]),
-        ],
-      ))),
-    );
+     final bool isNewItem = product.produceId.startsWith('TEMP_');
+     return Card(
+       elevation: 3.0, color: whiteColor.withOpacity(0.98), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0), side: BorderSide(color: primaryTeal, width: 1.5)), margin: const EdgeInsets.only(bottom: 16.0),
+       child: Padding(padding: const EdgeInsets.all(16.0), child: Form(key: _produceFormKey, child: Column(
+         crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+           Text(isNewItem ? 'Add New Produce Item' : 'Edit "${product.produceName}"', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: darkTeal)), const SizedBox(height: 16),
+           TextFormField(controller: _produceNameController, decoration: _inputDecoration('Produce Name *'), style: const TextStyle(fontSize: 14, color: textOnWhite), validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null, autovalidateMode: AutovalidateMode.onUserInteraction), const SizedBox(height: 12),
+           Row(children: [
+             Expanded(child: TextFormField(controller: _produceCaloriesController, decoration: _inputDecoration('Calories (kcal)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], validator: _validateOptionalNumber, autovalidateMode: AutovalidateMode.onUserInteraction)), const SizedBox(width: 10),
+             Expanded(child: TextFormField(controller: _produceUnitGramsController, decoration: _inputDecoration('Unit (g)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], validator: _validateOptionalNumber, autovalidateMode: AutovalidateMode.onUserInteraction)),
+           ]), const SizedBox(height: 12),
+           Row(children: [
+             Expanded(child: TextFormField(controller: _produceProteinsController, decoration: _inputDecoration('Proteins (g)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: const TextInputType.numberWithOptions(decimal: true), inputFormatters: [_decimalInputFormatter(1)], validator: _validateOptionalNumber, autovalidateMode: AutovalidateMode.onUserInteraction)), const SizedBox(width: 10),
+             Expanded(child: TextFormField(controller: _produceCarbsController, decoration: _inputDecoration('Carbs (g)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: const TextInputType.numberWithOptions(decimal: true), inputFormatters: [_decimalInputFormatter(1)], validator: _validateOptionalNumber, autovalidateMode: AutovalidateMode.onUserInteraction)), const SizedBox(width: 10),
+             Expanded(child: TextFormField(controller: _produceFatsController, decoration: _inputDecoration('Fats (g)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: const TextInputType.numberWithOptions(decimal: true), inputFormatters: [_decimalInputFormatter(1)], validator: _validateOptionalNumber, autovalidateMode: AutovalidateMode.onUserInteraction)),
+           ]), const SizedBox(height: 12),
+           TextFormField(controller: _produceSourceController, decoration: _inputDecoration('Source URL (optional)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: TextInputType.url, maxLines: 1, validator: (v) => (v != null && v.isNotEmpty && (Uri.tryParse(v) == null || !Uri.tryParse(v)!.isAbsolute)) ? 'Invalid URL' : null, autovalidateMode: AutovalidateMode.onUserInteraction), const SizedBox(height: 20),
+           Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+             // Add delete button here ONLY if it's an existing item
+             if (!isNewItem)
+                TextButton(
+                  onPressed: () => _handleDeleteProduce(product),
+                  child: const Text('Delete Item', style: TextStyle(color: errorColor)),
+                  style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8)),
+                ),
+              const Spacer(), // Push other buttons right
+              TextButton(onPressed: _cancelProduceEdit, child: const Text('Cancel', style: TextStyle(color: subtleText)), style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8))), const SizedBox(width: 12),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.save_outlined, size: 18), label: Text(isNewItem ? 'Add Item' : 'Save Changes'),
+                style: ElevatedButton.styleFrom(backgroundColor: primaryTeal, foregroundColor: textOnTeal, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                onPressed: _saveProduceChanges,
+              ),
+           ]),
+         ],
+       ))),
+     );
   }
 
+  // Input Decoration Helper for Produce Form
   InputDecoration _inputDecoration(String label) {
-    return InputDecoration(
-      labelText: label, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0)),
-      contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10), isDense: true,
-      labelStyle: const TextStyle(color: subtleText, fontSize: 13), floatingLabelStyle: const TextStyle(color: primaryTeal),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0), borderSide: const BorderSide(color: primaryTeal, width: 1.5)),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0), borderSide: BorderSide(color: dividerColor.withOpacity(0.8))),
-       errorStyle: const TextStyle(fontSize: 11, color: errorColor), // Ensure error style is defined
-    );
+     return InputDecoration(
+       labelText: label, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0)),
+       contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10), isDense: true,
+       labelStyle: const TextStyle(color: subtleText, fontSize: 13), floatingLabelStyle: const TextStyle(color: primaryTeal),
+       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0), borderSide: const BorderSide(color: primaryTeal, width: 1.5)),
+       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0), borderSide: BorderSide(color: dividerColor.withOpacity(0.8))),
+       errorStyle: const TextStyle(fontSize: 11, color: errorColor),
+     );
   }
 
+  // Validator for Optional Numeric Fields
   String? _validateOptionalNumber(String? value) {
     if (value != null && value.isNotEmpty) {
       if (double.tryParse(value) == null) return 'Invalid #';
@@ -2858,19 +3088,33 @@ class _ProducerDash22State extends State<ProducerDash22> {
     } return null;
   }
 
+  // Input Formatter for Decimal Numbers
   TextInputFormatter _decimalInputFormatter(int decimalPlaces) {
     String dp = decimalPlaces > 0 ? '{0,$decimalPlaces}' : '';
     return FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d' + dp));
   }
 
+  // Build Empty State Widget
   Widget _buildEmptyState(String title, String subtitle, {required IconData icon}) {
-    return Center(child: Padding(padding: const EdgeInsets.symmetric(vertical: 40.0, horizontal: 20.0), child: Column(
-      mainAxisAlignment: MainAxisAlignment.center, mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 64, color: subtleText.withOpacity(0.5)), const SizedBox(height: 16),
-        Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: textOnWhite), textAlign: TextAlign.center), const SizedBox(height: 8),
-        Text(subtitle, style: const TextStyle(fontSize: 14, color: subtleText), textAlign: TextAlign.center),
-      ],
-    )));
+     return Center(child: Padding(padding: const EdgeInsets.symmetric(vertical: 40.0, horizontal: 20.0), child: Column(
+       mainAxisAlignment: MainAxisAlignment.center, mainAxisSize: MainAxisSize.min, children: [
+         Icon(icon, size: 64, color: subtleText.withOpacity(0.5)), const SizedBox(height: 16),
+         Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: textOnWhite), textAlign: TextAlign.center), const SizedBox(height: 8),
+         Text(subtitle, style: const TextStyle(fontSize: 14, color: subtleText), textAlign: TextAlign.center),
+         // Optional: Add a refresh button to empty states
+         const SizedBox(height: 20),
+         ElevatedButton.icon(
+           icon: const Icon(Icons.refresh, size: 18),
+           label: const Text('Refresh'),
+           style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.grey[300],
+              foregroundColor: Colors.grey[700],
+              elevation: 0,
+           ),
+           onPressed: () => _fetchAllData(forceRefresh: true),
+         ),
+       ],
+     )));
   }
 
   // --- Status Color and Icon Helpers ---
@@ -2879,12 +3123,12 @@ class _ProducerDash22State extends State<ProducerDash22> {
       case Order.STATUS_PENDING: return pendingColor;
       case Order.STATUS_ACCEPTED: return acceptedColor;
       case Order.STATUS_PREPARING: return preparingColor;
-      case Order.STATUS_READY_FOR_PICKUP: return dispatchedColor; // Reuse dispatch color for ready
+      case Order.STATUS_READY_FOR_PICKUP: return readyForPickupColor;
       case Order.STATUS_ASSIGNED: return assignedColor;
       case Order.STATUS_DISPATCHED: return dispatchedColor;
-      case Order.STATUS_OUT_FOR_DELIVERY: return primaryTeal; // Use teal for out for delivery
+      case Order.STATUS_OUT_FOR_DELIVERY: return outForDeliveryColor;
       case Order.STATUS_DELIVERED: return deliveredColor;
-      case Order.STATUS_COMPLETED: return deliveredColor; // Same as delivered
+      case Order.STATUS_COMPLETED: return completedColor;
       case Order.STATUS_CANCELLED: return cancelledColor;
       default: return defaultStatusColor;
     }
@@ -2895,23 +3139,22 @@ class _ProducerDash22State extends State<ProducerDash22> {
       case Order.STATUS_PENDING: return Icons.pending_actions_outlined;
       case Order.STATUS_ACCEPTED: return Icons.check_circle_outline_rounded;
       case Order.STATUS_PREPARING: return Icons.kitchen_outlined;
-      case Order.STATUS_READY_FOR_PICKUP: return Icons.inventory_2_outlined; // Box icon
-      case Order.STATUS_ASSIGNED: return Icons.person_pin_circle_outlined; // Assigned person icon
+      case Order.STATUS_READY_FOR_PICKUP: return Icons.inventory_2_outlined;
+      case Order.STATUS_ASSIGNED: return Icons.person_pin_circle_outlined;
       case Order.STATUS_DISPATCHED: return Icons.local_shipping_outlined;
-      case Order.STATUS_OUT_FOR_DELIVERY: return Icons.two_wheeler_rounded; // Rider icon
+      case Order.STATUS_OUT_FOR_DELIVERY: return Icons.two_wheeler_rounded;
       case Order.STATUS_DELIVERED: return Icons.done_all_rounded;
       case Order.STATUS_COMPLETED: return Icons.celebration_outlined;
       case Order.STATUS_CANCELLED: return Icons.cancel_outlined;
       default: return Icons.help_outline_rounded;
     }
   }
-
 } // End of _ProducerDash22State
 
-
-// --- Rider Selection Dialog (Copied from ChefDash, adapted) ---
+// --- Rider Selection Dialog ---
 class _RiderSelectionDialog extends StatefulWidget {
-  final int orderId; // Pass order ID for context if needed
+  final int orderId;
+  // Removed ApiService parameter, using static methods now
 
   const _RiderSelectionDialog({required this.orderId});
 
@@ -2933,7 +3176,7 @@ class _RiderSelectionDialogState extends State<_RiderSelectionDialog> {
   Future<void> _fetchRiders() async {
     if (mounted) setState(() { _isLoading = true; _errorMessage = null; });
     try {
-      // Use the static method from ProducerApiService
+      // Use static method from ProducerApiService
       final riders = await ProducerApiService.fetchAvailableRiders();
       if (mounted) {
         riders.sort((a, b) { // Sort: Active first, then alphabetically
@@ -2960,7 +3203,7 @@ class _RiderSelectionDialogState extends State<_RiderSelectionDialog> {
         IconButton(icon: const Icon(Icons.refresh), onPressed: _isLoading ? null : _fetchRiders, tooltip: 'Refresh Rider List', visualDensity: VisualDensity.compact, padding: EdgeInsets.zero),
       ]),
       content: SizedBox(
-        width: double.maxFinite, height: MediaQuery.of(context).size.height * 0.5, // Constrain size
+        width: double.maxFinite, height: MediaQuery.of(context).size.height * 0.5,
         child: _buildContent(),
       ),
       actions: <Widget>[
@@ -2990,6 +3233,7 @@ class _RiderSelectionDialogState extends State<_RiderSelectionDialog> {
         final rider = _allRiders[index];
         final bool isAvailable = rider.isActive;
         final Color tileColor = isAvailable ? Theme.of(context).dialogBackgroundColor : Colors.grey.shade200;
+        // Use textOnWhite for text color in dialog for better readability
         final Color textColor = isAvailable ? textOnWhite : Colors.grey.shade600;
         final Color iconColor = isAvailable ? primaryTeal : Colors.grey.shade500;
 
@@ -2999,7 +3243,7 @@ class _RiderSelectionDialogState extends State<_RiderSelectionDialog> {
           child: ListTile(
             leading: CircleAvatar(backgroundColor: iconColor.withOpacity(0.1), child: Icon(Icons.two_wheeler, color: iconColor, size: 20)),
             title: Text(rider.name, style: TextStyle(color: textColor, fontWeight: isAvailable ? FontWeight.normal : FontWeight.w300)),
-            subtitle: Text(isAvailable ? 'Status: Active' : 'Status: Inactive (${rider.status})', style: TextStyle(color: textColor.withOpacity(0.7))), // Show original status too
+            subtitle: Text(isAvailable ? 'Status: Active' : 'Status: Inactive (${rider.status})', style: TextStyle(color: textColor.withOpacity(0.7))),
             trailing: isAvailable ? const Icon(Icons.chevron_right) : const Icon(Icons.block, color: Colors.grey, size: 18),
             onTap: () {
               // Pop immediately with the rider object (confirmation happens outside)

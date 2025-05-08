@@ -1,6 +1,55 @@
 # Project-level configuration.
-cmake_minimum_required(VERSION 3.14)
-project(zinzi2 LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.10)
+project(zinzi2 VERSION 1.0.0 LANGUAGES CXX)
+
+# Force v143 toolset
+set(CMAKE_GENERATOR_TOOLSET "v143" CACHE STRING "" FORCE)
+
+# Set C++ standard
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Add Windows SDK include directories
+include_directories("${CMAKE_SOURCE_DIR}/windows/flutter/ephemeral")
+include_directories("${CMAKE_SOURCE_DIR}/windows/flutter/ephemeral/.plugin_symlinks")
+include_directories("${CMAKE_SOURCE_DIR}/windows/flutter/ephemeral/.plugin_symlinks/flutter_local_notifications_windows")
+
+# Enable Windows SDK
+set(CMAKE_SYSTEM_VERSION 10.0)
+set(CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION 10.0)
+
+# Set C++ runtime and flags
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc /MD /std:c++17")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /MD")
+
+# Add necessary Windows libraries
+link_libraries(
+    kernel32
+    user32
+    gdi32
+    winspool
+    comdlg32
+    advapi32
+    shell32
+    ole32
+    oleaut32
+    uuid
+    odbc32
+    odbccp32
+    "${CMAKE_SOURCE_DIR}/windows/flutter/ephemeral/windows_sdk/um/x64/atl.lib"
+    "${CMAKE_SOURCE_DIR}/windows/flutter/ephemeral/windows_sdk/shared/x64/atl.lib"
+    msvcrt
+)
+
+# Add include directories
+include_directories(
+    "${CMAKE_SOURCE_DIR}/windows/flutter/ephemeral"
+    "${CMAKE_SOURCE_DIR}/windows/flutter/ephemeral/.plugin_symlinks"
+    "${CMAKE_SOURCE_DIR}/windows/flutter/ephemeral/.plugin_symlinks/flutter_local_notifications_windows"
+    "${CMAKE_SOURCE_DIR}/windows/flutter/ephemeral/windows_sdk"
+    "${CMAKE_SOURCE_DIR}/windows/flutter/ephemeral/windows_sdk/um"
+    "${CMAKE_SOURCE_DIR}/windows/flutter/ephemeral/windows_sdk/shared"
+)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.

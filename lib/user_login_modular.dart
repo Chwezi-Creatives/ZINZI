@@ -4,14 +4,18 @@ import 'package:zinzi2/dashboard_page.dart'; // Ensure this is the correct impor
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi2/onboard.dart';
 import 'package:zinzi2/profile.dart';
+import 'notifications/fcm_service.dart';
 
 class UserLoginPageModular extends StatelessWidget {
   const UserLoginPageModular({Key? key}) : super(key: key);
 
-  Future<void> saveUserDetails(int userId, String userType) async {
+  Future<void> saveUserDetails(String userId, String userType) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('user_id', userId);
+    await prefs.setString('user_id', userId); // Store as string
     await prefs.setString('user_type', userType);
+    await prefs.setBool('is_logged_in', true);
+    // Register FCM token with user info (async, do not await)
+    FCMService.registerTokenWithUserInfo();
   }
 
   @override
@@ -32,7 +36,7 @@ class UserLoginPageModular extends StatelessWidget {
         final bool verified = loginData['verified'] ?? false; // Default to false if null
 
             // Save user ID and user type to shared preferences
-            saveUserDetails(int.parse(userId), userType);
+            saveUserDetails(userId, userType); // userId is already a string
             // Navigate to the User Dashboard after saving user details
             Navigator.pushReplacement(
               context,

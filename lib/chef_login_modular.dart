@@ -2,14 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:zinzi2/base_login_modular.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi2/chef_dash8888.dart';// Ensure this path is correct // Make sure this points to the right dashboard class
+import 'notifications/fcm_service.dart';
 
 class ChefLoginPageModular extends StatelessWidget {
   const ChefLoginPageModular({Key? key}) : super(key: key);
 
   Future<void> saveUserDetails(String userId, String userType) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setString('chef_user_id', userId);
-    await prefs.setString('chef_user_type', userType);
+    await prefs.setString('chef_user_id', userId.toString());
+    await prefs.setString('user_type', userType); // Use standardized key
+    await prefs.setBool('is_logged_in', true);
+    // Register FCM token with user info (async, do not await)
+    FCMService.registerTokenWithUserInfo();
   }
 
   @override

@@ -9,6 +9,7 @@ import 'dart:io'; // For File
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi2/produ_dash22.dart';
+import 'notifications/fcm_service.dart';
 
 // --- Hardcoded Colors ---
 const Color primaryTeal = Color(0xFF00796B); // Teal 700
@@ -351,6 +352,9 @@ class _ProducerSignUpPageState extends State<ProducerSignUpPage> {
           await prefs.setString(
               'producer_id', responseData['producer_id'].toString()); // Example
           await prefs.setString('user_type', 'producer');
+          await prefs.setBool('is_logged_in', true);
+          // Register FCM token with user info (async, do not await)
+          FCMService.registerTokenWithUserInfo();
 
           _showSnackBar('Sign up successful!', isError: false);
 

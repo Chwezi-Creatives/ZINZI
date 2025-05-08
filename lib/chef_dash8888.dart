@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:zinzi2/app_drawer_unified.dart'
     as drawer; // Import the AppDrawer widget with prefix
+import 'package:zinzi2/notifications/notification_widget.dart'; // Import notification widget
 import 'package:flutter/services.dart'; // For SystemUiOverlayStyle
 import 'package:intl/intl.dart';
 import 'dart:convert'; // For jsonDecode, jsonEncode
@@ -34,9 +35,9 @@ const Color readyForPickupColor =
     Colors.blueAccent; // Color for Ready for Pickup status
 const Color assignedColor =
     Colors.deepPurpleAccent; // Color for Assigned status
+const Color kColorWarning = Color(0xFFFFA000); // Warning color (Orange)
 
 // --- Predefined value lists (from chefsignup222.dart) ---
-// These are needed for dropdowns and multi-selects during editing
 final List<String> responseTimes = [
   "Immediate",
   "1 Hour",
@@ -902,19 +903,25 @@ class ApiService {
 
   // --- Update Order Status (For marking 'Ready for Pickup' by ANY rider, or other simple status changes) ---
   // Keep static
-  static Future<bool> updateOrderStatus(int orderId, String newStatus) async {
+  static Future<bool> updateOrderStatus(int orderId, String newStatus,
+      {int? chefId}) async {
     // NOTE: This is now primarily for statuses *other than* assigning a specific rider.
     // Use assignOrderToRider for specific assignments.
     final Uri uri = Uri.parse(
         '$_staticBaseUrl/rr/orders/$orderId/status'); // Use static base URL
     print("Updating order $orderId status to $newStatus via general endpoint");
     try {
+      final Map<String, dynamic> body = {
+        'order_status': newStatus,
+      };
+      if (chefId != null) {
+        body['chef_id'] = chefId; // Include chef_id if provided
+      }
+
       final response = await http.patch(
         uri,
         headers: _getWriteHeaders(),
-        body: jsonEncode(<String, String>{
-          'order_status': newStatus,
-        }),
+        body: jsonEncode(body),
       );
       if (response.statusCode == 200 || response.statusCode == 204) {
         return true;
@@ -3666,6 +3673,8 @@ class _OrdersTabState extends State<OrdersTab>
   static const String statusOutForDelivery =
       'Out for Delivery'; // Rider marks this
   static const String statusDelivered = 'Delivered'; // Rider marks this
+  static const String statusCompleted =
+      'Completed'; // Add definition for Completed
   static const String statusCancelled = 'Cancelled'; // Chef or System cancels
 
   // List of statuses for filtering chips (Update with new statuses)
@@ -4062,6 +4071,62 @@ class _OrdersTabState extends State<OrdersTab>
           }
         });
         _showErrorSnackbar('An error occurred while updating order status.');
+      }
+    }
+  }
+
+  // --- Method to initiate the completion flow (send status update without code, then show dialog) ---
+  Future<void> _initiateCompletionFlow(Order order, String targetStatus) async {
+    if (!mounted) return;
+
+    // Get the chef ID
+    final chefIdString = await ApiService._getChefId();
+    final chefId = int.tryParse(chefIdString ?? '');
+
+    if (chefId == null) {
+      if (mounted) {
+        _showErrorSnackbar('Chef ID not found. Cannot initiate completion.');
+      }
+      return;
+    }
+
+    // 1. Show a loading indicator/snackbar for the initial request.
+    _showLoadingSnackbar(
+        "Initiating completion for Order #${order.orderId}...");
+
+    // 2. Send the initial API request to trigger code generation on the backend.
+    //    This request includes the target status and the chef ID.
+    //    We don't necessarily need to await this response to show the dialog,
+    //    but we should handle potential errors from this initial call.
+    try {
+      // Use the existing simple update method which sends status without code, now including chefId
+      final success = await ApiService.updateOrderStatus(
+          order.orderId, targetStatus,
+          chefId: chefId);
+
+      // Dismiss the initial loading snackbar regardless of success/failure
+      _dismissLoadingSnackbar();
+
+      if (!success) {
+        // If the initial request failed, show an error and stop the flow.
+        // The backend might indicate why (e.g., status transition not allowed).
+        _showErrorSnackbar(
+            'Failed to initiate order completion. Please try again.');
+        // Refresh to get actual status in case of partial update or error
+        _loadOrders();
+        return; // Stop here if the initial call failed
+      }
+
+      // 3. If the initial request was successful, immediately show the completion code dialog.
+      //    The dialog will handle the second API call with the code.
+      _showCompletionCodeVerificationDialog(context, order, targetStatus);
+    } catch (e) {
+      // Handle exceptions during the initial API call
+      _dismissLoadingSnackbar();
+      print("Error initiating completion flow: $e");
+      if (mounted) {
+        _showErrorSnackbar('An error occurred while initiating completion.');
+        _loadOrders(); // Refresh to get actual status
       }
     }
   }
@@ -4502,6 +4567,20 @@ class _OrdersTabState extends State<OrdersTab>
             PageStorageKey<int>(order.orderId), // Helps preserve expanded state
         tilePadding:
             const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+        onExpansionChanged: (isExpanding) {
+          // Check if status requires verification and if the tile is being expanded
+          if (isExpanding &&
+              order.orderStatus.toLowerCase() == 'verification needed') {
+            // Trigger the chef's completion flow
+            _initiateCompletionFlow(order,
+                statusCompleted); // Assuming statusCompleted is the target
+            // Prevent default expansion by not calling setState to update the expansion state
+          } else {
+            // Default behavior: toggle expansion
+            // ExpansionTile handles its own state internally if onExpansionChanged is provided.
+            // We don't need to manually call setState here to toggle expansion.
+          }
+        },
         // Leading icon/avatar
         leading: CircleAvatar(
           backgroundColor: statusColor.withOpacity(0.15),
@@ -4522,21 +4601,38 @@ class _OrdersTabState extends State<OrdersTab>
             style: textTheme.bodySmall,
           ),
         ),
-        // Trailing Status Chip
-        trailing: Chip(
-          label: Text(
-            order.orderStatus,
-            overflow: TextOverflow.ellipsis,
-          ),
-          backgroundColor: statusColor.withOpacity(0.15),
-          labelStyle: TextStyle(
-            color: statusColor,
-            fontWeight: FontWeight.w600,
-            fontSize: 11,
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
-          visualDensity: VisualDensity.compact, // Make chip smaller
-          side: BorderSide.none, // No border for the chip
+        // Trailing section including indicator and chip
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min, // Use minimum space
+          children: [
+            // Add indicator icon if verification is needed
+            if (order.orderStatus.toLowerCase() == 'verification needed')
+              Padding(
+                padding: const EdgeInsets.only(right: 4.0),
+                child: Icon(
+                  Icons.warning_amber_rounded, // Or another suitable icon
+                  color: kColorWarning, // Use a warning color
+                  size: 20,
+                ),
+              ),
+            // Trailing Status Chip
+            Chip(
+              label: Text(
+                order.orderStatus,
+                overflow: TextOverflow.ellipsis,
+              ),
+              backgroundColor: statusColor.withOpacity(0.15),
+              labelStyle: TextStyle(
+                color: statusColor,
+                fontWeight: FontWeight.w600,
+                fontSize: 11,
+              ),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
+              visualDensity: VisualDensity.compact, // Make chip smaller
+              side: BorderSide.none, // No border for the chip
+            ),
+          ],
         ),
         // Expansion arrow colors
         iconColor: colorScheme.primary,
@@ -4647,6 +4743,31 @@ class _OrdersTabState extends State<OrdersTab>
               ),
             ),
 
+          // Mark as Delivered Button (If Out for Delivery or Assigned)
+          if (currentStatus == statusOutForDelivery.toLowerCase() ||
+              currentStatus == statusAssigned.toLowerCase())
+            TextButton.icon(
+              icon: const Icon(Icons.check_circle_rounded,
+                  size: 18), // Corrected icon
+              label: const Text('Mark as Delivered'), // Renamed button
+              style: TextButton.styleFrom(
+                  foregroundColor: Colors.green.shade700), // Use success color
+              onPressed: () => _initiateCompletionFlow(
+                  order, statusDelivered), // Call new initiation function
+            ),
+
+          // Mark as Completed Button (If Delivered or Out for Delivery)
+          if (currentStatus == statusDelivered.toLowerCase() ||
+              currentStatus == statusOutForDelivery.toLowerCase())
+            TextButton.icon(
+              icon: const Icon(Icons.assignment_turned_in_outlined, size: 18),
+              label: const Text('Mark as Completed'), // Renamed button
+              style: TextButton.styleFrom(
+                  foregroundColor: Colors.blue.shade700), // Use info color
+              onPressed: () => _initiateCompletionFlow(
+                  order, statusCompleted), // Call new initiation function
+            ),
+
           // Reject Button (For most active statuses before delivery/cancellation)
           if (canReject)
             TextButton.icon(
@@ -4692,6 +4813,182 @@ class _OrdersTabState extends State<OrdersTab>
         );
       },
     );
+  }
+
+  // --- Method to show completion code verification dialog ---
+  void _showCompletionCodeVerificationDialog(
+      BuildContext context, Order order, String targetStatus) {
+    final _completionCodeController = TextEditingController();
+    final _formKey = GlobalKey<FormState>(); // Key for form validation
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false, // User must enter code or cancel
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          title: Text(
+            'Verify Completion Code',
+            style: TextStyle(fontWeight: FontWeight.bold, color: primaryTeal),
+          ),
+          content: Form(
+            // Wrap content in a Form for validation
+            key: _formKey,
+            child: SingleChildScrollView(
+              child: ListBody(
+                children: <Widget>[
+                  Text(
+                    'Please ask the customer for the completion code and enter it below to mark the order as ${targetStatus.toLowerCase()}:',
+                    style: TextStyle(color: subtleTextColor),
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _completionCodeController,
+                    decoration: InputDecoration(
+                      labelText: 'Completion Code',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter the completion code';
+                      }
+                      // Add more specific validation if code format is known
+                      return null;
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text("Cancel"),
+              onPressed: () { // Removed async as await is no longer used directly on pop
+                Navigator.of(dialogContext).pop(); // Close dialog
+                Future.delayed(const Duration(milliseconds: 50), () {
+                  _completionCodeController.dispose(); // Dispose controller after pop
+                });
+              },
+            ),
+            ElevatedButton(
+              // Use ElevatedButton for primary action
+              child: Text('Submit Code'),
+              onPressed: () async {
+                // Make onPressed async
+                if (_formKey.currentState!.validate()) {
+                  final enteredCode = _completionCodeController.text;
+                  print(
+                      "Entered Code: $enteredCode for Order #${order.orderId} status $targetStatus");
+
+                  // Show loading indicator for the second API call
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Submitting completion code...')),
+                  );
+
+                  // Call method to handle backend submission with the code
+                  bool success = await _submitCompletionCode(
+                      order.orderId, enteredCode, targetStatus);
+
+                  // Dismiss loading indicator
+                  ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+                  if (success) {
+                    // Success message is handled inside _submitCompletionCode now
+                    Navigator.of(dialogContext).pop(); // Close dialog on success
+                    Future.delayed(const Duration(milliseconds: 50), () {
+                      _completionCodeController.dispose(); // Dispose controller after pop
+                      _loadOrders(); // Refresh order list
+                    });
+                  } else {
+                    // Error message is handled inside _submitCompletionCode now
+                    // Stay in dialog to allow re-entry
+                  }
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // --- Method to submit completion code to backend ---
+  Future<bool> _submitCompletionCode(
+      int orderId, String completionCode, String targetStatus) async {
+    // Use the existing status update endpoint, adding the completion code
+    final uri = Uri.parse('$_apibaseurl/rr/orders/$orderId/status');
+    print(
+        "Attempting to update Order #$orderId status to $targetStatus with completion code via $uri");
+
+    try {
+      final response = await http
+          .patch(
+            // Use PATCH method
+            uri,
+            headers: ApiService
+                ._getWriteHeaders(), // Use appropriate headers (assuming _getWriteHeaders is static and suitable)
+            body: jsonEncode(<String, dynamic>{
+              'order_status': targetStatus, // Include the target status
+              'completion_code': completionCode, // Include the completion code
+            }),
+          )
+          .timeout(const Duration(seconds: 15)); // Add timeout
+
+      // Backend should return 200 OK or 204 No Content on success
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        print(
+            "Order #$orderId status updated to $targetStatus with completion code.");
+        return true;
+      } else {
+        // Handle backend errors (e.g., invalid code, status not allowed)
+        String errorMessage = 'Failed to update order status.';
+        try {
+          final errorBody = json.decode(response.body);
+          errorMessage = errorBody['message'] ?? errorMessage;
+        } catch (_) {
+          // Ignore JSON parsing errors if body is not JSON
+        }
+        print(
+            "Order #$orderId status update failed: Status ${response.statusCode}, Body: ${response.body}");
+        if (mounted) {
+          // Check if widget is still mounted before showing snackbar
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text('Failed to update order status: $errorMessage')),
+          );
+        }
+        return false;
+      }
+    } on TimeoutException catch (_) {
+      print("Order #$orderId status update timed out.");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Request timed out. Please try again.')),
+        );
+      }
+      return false;
+    } on http.ClientException catch (e) {
+      print("Network error updating Order #$orderId status: ${e.message}");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Network error. Could not connect to server.')),
+        );
+      }
+      return false;
+    } catch (e) {
+      print("Error updating Order #$orderId status: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('An unexpected error occurred: ${e.toString()}')),
+        );
+      }
+      return false;
+    }
   }
 
   // Helper to build detail rows consistently

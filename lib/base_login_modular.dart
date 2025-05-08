@@ -72,6 +72,7 @@ class _LoginPageModularState extends State<LoginPageModular>
   }
 
   Future<void> _login() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
 
     try {
@@ -84,6 +85,8 @@ class _LoginPageModularState extends State<LoginPageModular>
         }),
       );
 
+      if (!mounted) return;
+
       if (response.statusCode == 200) {
         var responseData = json.decode(response.body);
         if (responseData is Map<String, dynamic> && responseData.containsKey('data')) {
@@ -93,26 +96,33 @@ class _LoginPageModularState extends State<LoginPageModular>
           final bool verified = data['verified'] as bool? ?? false; // Extract verified status, default to false if null
 
           // Pass extracted data to the success callback
-          widget.onLoginSuccess({
-            'userId': userId,
-            'userType': userType,
-            'verified': verified,
-          });
+          if (mounted) {
+            widget.onLoginSuccess({
+              'userId': userId,
+              'userType': userType,
+              'verified': verified,
+            });
+          }
         } else {
           _showError('Invalid data structure in response.');
         }
       } else {
-        _showError('Login failed. Invalid credentials.');
+        _showError('Login failed. wrong password or name.');
       }
     } catch (e) {
       _showError('An error occurred. Please try again later.');
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   @override

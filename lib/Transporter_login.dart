@@ -4,8 +4,8 @@ import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi2/transooter_dash_before_mapbox.dart';
-import 'package:zinzi2/transporter_dash.dart';
 import 'package:zinzi2/transporter_signup.dart';
+import 'notifications/fcm_service.dart';
 //import 'transoorter_dash_new.dartp'; // being tested for now
 
 // --- Hardcoded Colors (Copied) ---
@@ -75,12 +75,18 @@ class _TransporterLoginPageState extends State<TransporterLoginPage> {
              final String transporterId = data['transporter_id'].toString();
              final String userType = 'transporter'; // Hardcoded for this page
              final bool verified = data['verified'] as bool? ?? false;
+             final String email = data['email'] as String? ?? '';
+             final String transporterName = data['transporter_name'] as String? ?? '';
 
              // Save to SharedPreferences
              SharedPreferences prefs = await SharedPreferences.getInstance();
              await prefs.setString('transporter_id', transporterId);
-             await prefs.setString('transporter_user_type', userType);
-             await prefs.setBool('transporter_verified', verified); // Save verified status
+             await prefs.setString('transporter_email', email);
+             await prefs.setString('transporter_name', transporterName);
+             await prefs.setString('user_type', userType);
+             await prefs.setBool('is_logged_in', true);
+             // Register FCM token with user info (async, do not await)
+             FCMService.registerTokenWithUserInfo();
 
              await Future.delayed(const Duration(milliseconds: 100)); // Small delay
 
@@ -104,7 +110,7 @@ class _TransporterLoginPageState extends State<TransporterLoginPage> {
            String errorMessage = 'Login failed.';
            try {
              final responseData = json.decode(response.body);
-             errorMessage = responseData['message'] ?? responseData['error'] ?? 'Invalid credentials (Code: ${response.statusCode})';
+             errorMessage = responseData['message'] ?? responseData['error'] ?? 'wrong password or name (Code: ${response.statusCode})';
            } catch (_) {}
            _showErrorSnackBar(errorMessage);
          }

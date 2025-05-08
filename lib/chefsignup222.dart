@@ -9,6 +9,7 @@ import 'dart:io'; // For File
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:zinzi2/chef_dash8888.dart'; //Ensure this imports your Chef Dashboard
+import 'notifications/fcm_service.dart'; // Import FCM service
 
 // --- Consistent Color Palette ---
 const Color primaryTeal = Color(0xFF00796B); // Teal 700
@@ -375,8 +376,11 @@ class _ChefSignUpPageBetterNewState extends State<ChefSignUpPageBetterNew> {
 
         if (chefID != null && userType != null) {
           final prefs = await SharedPreferences.getInstance();
-          await prefs.setInt('ChefID', chefID);
-          await prefs.setString('UserType', userType);
+          await prefs.setString('chef_user_id', chefID.toString());
+          await prefs.setString('chef_user_type', userType);
+          await prefs.setBool('is_logged_in', true);
+          // Register FCM token with user info (async, do not await)
+          FCMService.registerTokenWithUserInfo(); // Register FCM token with user info (async, do not await)
           print('Saved ChefID: $chefID, UserType: $userType');
         }
 

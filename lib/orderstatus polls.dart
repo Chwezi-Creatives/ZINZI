@@ -7,10 +7,10 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:intl/intl.dart';
 import 'package:zinzi2/app_drawer_unified.dart';
-
 import 'package:google_fonts/google_fonts.dart';
-
 import 'package:audioplayers/audioplayers.dart';
+import 'package:provider/provider.dart';
+import 'notifications/notification_provider.dart';
 
 // --- Environment & API ---
 // Ensure you have initialized dotenv in your main.dart: await dotenv.load(fileName: ".env");
@@ -48,6 +48,53 @@ class OrderStatusScreen extends StatefulWidget {
 }
 
 class _OrderStatusScreenState extends State<OrderStatusScreen> {
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  Timer? _pollingTimer;
+  int? _selectedOrderId;
+  bool _isOrderInfoExpanded = false;
+  bool _isLoading = true;
+  bool _isRefreshing = false;
+  final Map<int, Map<String, dynamic>> _ordersMap = {};
+  final Map<int, String> _previousOrderStatuses = {};
+  bool _isVerificationProcessActive = false;
+  int? _loadingVerificationOrderId;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedOrderId = widget.orderIdList.contains(widget.orderId) ? widget.orderId : (widget.orderIdList.isNotEmpty ? widget.orderIdList.first : null);
+    _fetchOrders();
+    _startPolling();
+    
+    // Listen for notification refreshes
+    final notificationProvider = Provider.of<NotificationProvider>(context, listen: false);
+    notificationProvider.addListener(_handleNotificationRefresh);
+  }
+
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    final notificationProvider = Provider.of<NotificationProvider>(context, listen: false);
+    notificationProvider.removeListener(_handleNotificationRefresh);
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
+  void _handleNotificationRefresh() {
+    if (!_isRefreshing) {
+      setState(() {
+        _isRefreshing = true;
+      });
+      _fetchOrders().then((_) {
+        if (mounted) {
+          setState(() {
+            _isRefreshing = false;
+          });
+        }
+      });
+    }
+  }
+
   // Helper to build the complementary meals row
   Widget _buildComplementaryMealsRow(dynamic complementaryMealsRaw) {
     if (complementaryMealsRaw == null || complementaryMealsRaw.toString().trim().isEmpty) {
@@ -70,7 +117,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
       }
       // Extract names, strip extra slashes/spaces
       final names = mealsList
-        .map((item) => (item is Map && item['name'] != null) ? item['name'].toString().replaceAll(RegExp(r'[\\/]+'), '').trim() : null)
+        .map((item) => (item is Map && item['name'] != null) ? item['name'].toString().replaceAll(RegExp(r'[\/]+'), '').trim() : null)
         .where((name) => name != null && name.isNotEmpty)
         .toList();
       if (names.isEmpty) return const SizedBox.shrink();
@@ -81,37 +128,222 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
     }
   }
 
-  final Map<int, Map<String, dynamic>> _ordersMap = {};
-  
-  final AudioPlayer _audioPlayer = AudioPlayer();
-  Timer? _pollingTimer;
-  int? _selectedOrderId;
-  bool _isOrderInfoExpanded = false;
-  bool _isLoading = true; // Added loading state
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedOrderId = widget.orderIdList.contains(widget.orderId) ? widget.orderId : (widget.orderIdList.isNotEmpty ? widget.orderIdList.first : null);
-    _fetchOrders();
-    _startPolling();
-  }
-
   void _startPolling() {
-    _pollingTimer = Timer.periodic(const Duration(seconds: 10), (timer) { // Increased polling interval
-      _fetchOrders();
+    _pollingTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      if (!_isVerificationProcessActive) {
+        _fetchOrders();
+      } else {
+        print("Polling skipped - verification dialog active");
+      }
     });
   }
 
+  // Check for status changes and trigger verification dialog if needed
+  void _checkForStatusChanges(Map<int, Map<String, dynamic>> updatedOrders) {
+    final Map<int, String> currentStatuses = {};
+    
+    // Build map of current statuses
+    for (final entry in updatedOrders.entries) {
+      final orderId = entry.key;
+      final status = entry.value['order_status']?.toString();
+      if (status != null) {
+        currentStatuses[orderId] = status;
+      }
+    }
+    
+    // Check for changes and trigger dialogs
+    for (final entry in currentStatuses.entries) {
+      final orderId = entry.key;
+      final newStatus = entry.value;
+      final previousStatus = _previousOrderStatuses[orderId];
+      
+      // If status changed to 'verification needed' and not already showing the dialog
+      if (newStatus == 'verification needed' && 
+          newStatus != previousStatus &&
+          !_isVerificationProcessActive) {
+        // Use postFrameCallback to ensure the dialog is shown after the build is complete
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _handleVerificationRequest(orderId);
+        });
+      }
+    }
+    
+    // Update previous statuses for next comparison
+    _previousOrderStatuses.clear();
+    _previousOrderStatuses.addAll(currentStatuses);
+  }
+
+  // Handle verification request (called on tap or status change)
+  Future<void> _handleVerificationRequest(int orderId) async {
+    if (mounted) {
+      setState(() {
+        _isVerificationProcessActive = true;
+        _loadingVerificationOrderId = orderId;
+      });
+    }
+    
+    print("Verification process started for Order #$orderId. Polling paused.");
+    
+    // Show the verification dialog
+    await _showCompletionCodeDialog(orderId);
+  }
+  
+  // Show completion code dialog
+  Future<void> _showCompletionCodeDialog(int orderId) async {
+    String completionCode = 'N/A';
+    String errorMessage = '';
+    bool codeFetchedSuccessfully = false;
+
+    final uri = Uri.parse('$apiBaseUrl/rr/get_completion_code/$orderId');
+    print("Fetching completion code for Order #$orderId from: $uri");
+
+    try {
+      final response = await http
+          .get(uri)
+          .timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data is Map<String, dynamic> && data['completion_code'] != null) {
+          completionCode = data['completion_code'].toString();
+          codeFetchedSuccessfully = true;
+          print("Completion code fetched successfully for Order #$orderId.");
+        } else {
+          errorMessage = 'Invalid response format for completion code.';
+          print("Unexpected completion code response format: $data");
+        }
+      } else {
+        errorMessage = 'Failed to fetch completion code (Status: ${response.statusCode}).';
+        print("Failed to fetch completion code: Status ${response.statusCode}, Body: ${response.body}");
+      }
+    } on TimeoutException catch (_) {
+      errorMessage = 'Request for completion code timed out.';
+      print("Completion code request timed out for Order #$orderId.");
+    } on http.ClientException catch (e) {
+      errorMessage = 'Network error fetching completion code.';
+      print("Network error fetching completion code for Order #$orderId: ${e.message}");
+    } catch (e) {
+      errorMessage = 'Error fetching completion code: ${e.toString()}';
+      print("Error fetching completion code for Order #$orderId: $e");
+    }
+
+    // Stop loading animation before showing the dialog
+    if (mounted) {
+      setState(() {
+        _loadingVerificationOrderId = null;
+      });
+    }
+
+    // Show the dialog
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            backgroundColor: const Color.fromARGB(255, 241, 255, 254),
+            title: Text(
+              codeFetchedSuccessfully
+                  ? 'Order #$orderId Ready!'
+                  : 'Order #$orderId Verification',
+              style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.bold, 
+                  color: kColorPrimary),
+            ),
+            content: SingleChildScrollView(
+              child: ListBody(
+                children: <Widget>[
+                  Text(
+                    errorMessage.isNotEmpty
+                        ? 'Could not retrieve verification code: $errorMessage'
+                        : 'Verification code is ready.',
+                    style: GoogleFonts.poppins(color: kColorTextPrimary),
+                    textAlign: TextAlign.left,
+                  ),
+                  if (errorMessage.isEmpty && codeFetchedSuccessfully) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      'Verification Code:',
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.bold,
+                        color: kColorPrimary,
+                      ),
+                    ),
+                    SelectableText(
+                      completionCode,
+                      style: GoogleFonts.poppins(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: kColorStatusActive,
+                      ),
+                      textAlign: TextAlign.left,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Provide this code to the rider ONLY after confirming successful delivery.',
+                      style: GoogleFonts.poppins(
+                        fontStyle: FontStyle.italic,
+                        color: kColorTextSecondary,
+                        fontSize: 13,
+                      ),
+                      textAlign: TextAlign.left,
+                    ),
+                  ] else if (errorMessage.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      'Please try again shortly or contact support if the issue persists.',
+                      style: GoogleFonts.poppins(
+                        fontStyle: FontStyle.italic,
+                        color: kColorTextSecondary,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  // Resume polling when dialog is dismissed
+                  if (mounted) {
+                    setState(() {
+                      _isVerificationProcessActive = false;
+                    });
+                  }
+                },
+                child: Text(
+                  'CLOSE',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    color: kColorPrimary,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      );
+    }
+  }
+
   Future<void> _fetchOrders() async {
+    if (_isRefreshing) return; // Prevent concurrent refreshes
+    
     if (widget.orderIdList.isEmpty) {
-       if (mounted) { // Check if widget is still in the tree
+      if (mounted) {
         setState(() {
           _isLoading = false;
+          _isRefreshing = false;
         });
       }
       return;
     }
+    
+    setState(() {
+      _isRefreshing = true;
+    });
 
     // Fetch details for all orders in the list concurrently
     final fetchFutures = widget.orderIdList.map((orderId) async {
@@ -186,6 +418,9 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
           }
           _isLoading = false; // Mark loading as complete
         });
+        
+        // Check for status changes that should trigger verification dialog
+        _checkForStatusChanges(updatedOrders);
       }
     } else {
        // Even if no data *changed*, ensure loading state is off after first fetch attempt
@@ -199,6 +434,34 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
 
 
   void _playStatusChangeSound() async {
+    if (_isRefreshing) return; // Prevent sound during refresh
+    
+    try {
+      await _audioPlayer.play(AssetSource('sounds/chime.mp3'));
+    } catch (e) {
+      print("Error playing status change sound: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRefreshing = false;
+        });
+      }
+    }
+    if (_isRefreshing) return; // Prevent sound during refresh
+    
+    try {
+      await _audioPlayer.play(AssetSource('sounds/chime.mp3'));
+    } catch (e) {
+      print("Error playing status change sound: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRefreshing = false;
+        });
+      }
+    }
+    if (_isRefreshing) return; // Prevent sound during refresh
+    // Play sound only if status changed during normal operation
     try {
       // Consider adding a debounce mechanism if status changes can happen very rapidly
       await _audioPlayer.play(AssetSource('sounds/chime.mp3')); // Ensure path is correct in pubspec.yaml
@@ -207,12 +470,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    _pollingTimer?.cancel();
-    _audioPlayer.dispose();
-    super.dispose();
-  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -481,6 +739,10 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
     final order =
         _selectedOrderId != null ? _ordersMap[_selectedOrderId] : null;
     if (order == null) return Container();
+    
+    // Check if verification is needed and if this order is loading verification
+    final bool needsVerification = order['order_status']?.toString() == 'verification needed';
+    final bool isLoadingVerification = _loadingVerificationOrderId == _selectedOrderId;
 
     // --- MODIFICATION START ---
     // Determine product name based on order_type
@@ -606,6 +868,40 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                       _buildInfoRow('Quantity', quantity),
                       _buildInfoRow('Total Price', '$totalPrice UGX'),
                       _buildInfoRow('Order Status', orderStatus),
+                      if (needsVerification) ...[
+                        const SizedBox(height: 16),
+                        Center(
+                          child: ElevatedButton(
+                            onPressed: isLoadingVerification 
+                                ? null 
+                                : () => _handleVerificationRequest(_selectedOrderId!),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: kColorPrimary,
+                              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: isLoadingVerification
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : Text(
+                                    'VERIFY DELIVERY',
+                                    style: GoogleFonts.poppins(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      ],
 
                       // Display complementary meals if present
                       _buildComplementaryMealsRow(order['complementary_meals']),

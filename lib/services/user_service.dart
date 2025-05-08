@@ -4,9 +4,11 @@ class UserService {
   static const String _userIdKey = 'user_id';
   static const String _userTypeKey = 'user_type';
 
-  Future<int?> getUserId() async {
+  Future<String?> getUserId() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_userIdKey);
+    // Try to get user ID as string first, fall back to int for backward compatibility
+    return prefs.getString(_userIdKey) ?? 
+           prefs.getInt(_userIdKey)?.toString();
   }
 
   Future<String?> getUserType() async {

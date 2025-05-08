@@ -3,10 +3,10 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi2/onboard.dart';
-import 'package:zinzi2/recommend_meals.dart';
 import 'dashboard_page.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'Profile.dart';
+import 'notifications/fcm_service.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 
@@ -78,13 +78,18 @@ class _LoginPageState extends State<LoginPage>
 
           final prefs = await SharedPreferences.getInstance();
           await prefs.setInt('user_id', userId);
+          await prefs.setString('user_type', data['user_type'] ?? '');
+          await prefs.setString('user_email', data['email'] ?? '');
+          await prefs.setBool('is_logged_in', true);
+          // Register FCM token with user info (async, do not await)
+          FCMService.registerTokenWithUserInfo();
 
           // Navigate to the dashboard with a custom transition
           Navigator.pushReplacement(
             context,
             PageRouteBuilder(
               pageBuilder: (context, animation, secondaryAnimation) =>
-                   LandingPage(),
+                  LandingPage(),
               transitionsBuilder:
                   (context, animation, secondaryAnimation, child) {
                 const curve = Curves.easeInOut;
@@ -114,7 +119,7 @@ class _LoginPageState extends State<LoginPage>
         }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Login failed. Invalid credentials.')),
+          const SnackBar(content: Text('wrong password or username.')),
         );
       }
     } catch (error) {
