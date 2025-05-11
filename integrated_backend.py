@@ -1,5 +1,4 @@
-# Cspell:disable
-
+# --- AuthenticationAndUsers Class (Updated for asyncpg pool) ---
 import os
 import json
 import random
@@ -25,15 +24,20 @@ import stripe # Keep sync for now
 import requests # Keep sync for now
 
 # --- FastAPI Imports ---
-from fastapi import FastAPI, Request, Depends, HTTPException, status, Body, Query, Path, WebSocket, WebSocketDisconnect
+import fcm_service
+from fastapi import FastAPI, Request, Depends, HTTPException, status, Body, Query, Path
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware import Middleware
+from fastapi.staticfiles import StaticFiles # Import StaticFiles
 from contextlib import asynccontextmanager # For lifespan manager
-from fastapi.responses import ORJSONResponse # Use ORJSON
+from fastapi.responses import ORJSONResponse, FileResponse # Use ORJSON, Import FileResponse
 import json
 import asyncio
-from typing import Dict, Any
-from notifications import Notifications # Import Notifications class
+from typing import Dict, Any, Optional, List
+
+# Import notification service
+from services.notification_service import notification_service
 
 # --- Configuration Loading ---
 load_dotenv()
@@ -117,10 +121,30 @@ async def lifespan(app: FastAPI):
 # Use the lifespan manager
 app = FastAPI(
     title="ZINZI",
+    # Enable CORS for all origins
+    middleware=[
+        Middleware(
+            CORSMiddleware,
+            allow_origins=["*"],  # Allows all origins
+            allow_credentials=True,
+            allow_methods=["*"],  # Allows all methods
+            allow_headers=["*"],  # Allows all headers
+        )
+    ],
     description="Robust ZINZI backend.",
     lifespan=lifespan,
     default_response_class=ORJSONResponse # Fast JSON response class
 )
+
+# --- Request Path Logger Middleware ---
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logger.info(f"Incoming request: {request.method} {request.url.path}")
+    response = await call_next(request)
+    return response
+
+# Mount static files directory
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # --- CORS Middleware ---
 app.add_middleware(
@@ -243,7 +267,113 @@ class BaseRepository:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database operation failed: {e}") from e
         except Exception as e:
             logger.error(f"Unexpected Error during DB operation: {e} | SQL: {sql} | Params: {log_params}", exc_info=True)
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected server error occurred during database operation.") from e
+async def calculate_meal_calories(self, conn: asyncpg.Connection, meal_id: str) -> Optional[float]:
+        """
+        Calculates the total calories for a given meal ID.
+        Fetches meal ingredients, then fetches nutritional data for those ingredients,
+        and finally calculates the total calories.
+        """
+        logger.info(f"Calculating calories for meal ID: {meal_id}")
+        try:
+            # 1. Fetch meal ingredients
+            meal_query = "SELECT ingredients FROM meals WHERE meal_id = $1"
+            meal_row = await conn.fetchrow(meal_query, meal_id)
+
+            if not meal_row or not meal_row['ingredients']:
+                logger.warning(f"Meal with ID {meal_id} not found or has no ingredients.")
+                return None
+
+            ingredients_str = meal_row['ingredients']
+            # Assuming ingredients_str is a comma-separated string of produce names
+            ingredient_names = [name.strip() for name in ingredients_str.split(',') if name.strip()]
+
+            if not ingredient_names:
+                logger.warning(f"Meal with ID {meal_id} has an empty ingredient list.")
+                return 0.0
+
+            # 2. Fetch nutritional data for ingredients (produce)
+            produce_data_cache = await self._fetch_produce_data(conn, ingredient_names)
+
+
+            if not produce_data_cache and ingredient_names:
+                logger.warning(f"Could not fetch nutritional data for ingredients {ingredient_names} of meal ID {meal_id}.")
+                # Decide if this should return 0 or None or raise an error
+                # Returning 0.0 assuming missing data means 0 calories for that ingredient
+                pass # Continue with calculation, missing ingredients will have 0 calories
+
+
+            # 3. Calculate total calories
+            total_calories = 0.0
+            # Assuming ingredients_str format like "ingredient1, ingredient2, ..."
+            # And produce_data_cache has {'ingredient_name': {'calories': X}}
+            ingredient_list = [name.strip() for name in ingredients_str.split(',') if name.strip()]
+            for ingredient_name in ingredient_list:
+                 # Get calorie information from cache, default to 0 if not found
+                 ingredient_info = produce_data_cache.get(ingredient_name)
+                 if ingredient_info and 'calories' in ingredient_info:
+                      try:
+                           total_calories += float(ingredient_info['calories'])
+                      except (ValueError, TypeError):
+                           logger.warning(f"Invalid calorie value for ingredient '{ingredient_name}': {ingredient_info.get('calories')}. Skipping.")
+
+
+            logger.info(f"Calculated total calories for meal ID {meal_id}: {total_calories}")
+            return total_calories
+
+        except asyncpg.PostgresError as e:
+            logger.error(f"Database error calculating calories for meal {meal_id}: {e}", exc_info=True)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error calculating meal calories.") from e
+        except Exception as e:
+            logger.error(f"Unexpected error calculating calories for meal {meal_id}: {e}", exc_info=True)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred calculating meal calories.") from e
+async def _fetch_produce_data(self, conn: asyncpg.Connection, produce_names: List[str]) -> Dict[str, Dict]:
+        """Fetches nutritional data for a list of produce names."""
+        logger.debug(f"Fetching produce data for names: {produce_names}")
+        if not produce_names: return {}
+        # Assuming 'produce' table has 'name' and 'calories' columns
+        query = "SELECT name, calories FROM produce WHERE name = ANY($1::text[])"
+        try:
+            rows = await conn.fetch(query, produce_names)
+            produce_data = {row['name']: dict(row) for row in rows}
+            logger.debug(f"Fetched produce data: {produce_data}")
+            return produce_data
+        except Exception as e:
+            logger.error(f"Error fetching produce data: {e}", exc_info=True)
+            return {} # Return empty dict on error
+def _calculate_meal_nutrition(self, ingredients_str: Optional[str], produce_data_cache: Dict[str, Dict]) -> Dict[str, float]:
+        """Calculates nutritional information for a meal based on ingredients and produce data."""
+        logger.debug(f"Calculating nutrition for ingredients: {ingredients_str}")
+        nutri={"calories":0.0,"proteins":0.0,"carbohydrates":0.0,"fats":0.0,"fiber":0.0,"sugars":0.0,"cholesterol":0.0,"total_grams":0.0}
+        if not ingredients_str or not isinstance(ingredients_str, str): return nutri
+
+        # Assuming ingredients_str is a comma-separated string of produce names
+        names=[n.strip().lower() for n in ingredients_str.split(",") if n.strip()]
+
+        for name_lower in names:
+            data=produce_data_cache.get(name_lower)
+            if data:
+                try:
+                    # Assuming produce_data_cache has {'produce_name': {'calories': X, 'unit_grams': Y, ...}}
+                    grams=data.get('unit_grams',0.0)
+                    nutri["calories"]+=float(data.get('calories',0.0) or 0.0)
+                    nutri["proteins"]+=float(data.get('proteins',0.0) or 0.0)
+                    nutri["carbohydrates"]+=float(data.get('carbohydrates',0.0) or 0.0)
+                    nutri["fats"]+=float(data.get('fats',0.0) or 0.0)
+                    nutri["fiber"]+=float(data.get('fiber',0.0) or 0.0)
+                    nutri["sugars"]+=float(data.get('sugars',0.0) or 0.0)
+                    nutri["cholesterol"]+=float(data.get('cholesterol',0.0) or 0.0)
+                    nutri["total_grams"]+=float(grams or 0.0)
+                except (TypeError, ValueError) as e:
+                    logger.warning(f"NutriCalc Error for ingredient '{name_lower}'. Data: {data}, Error: {e}")
+            else:
+                logger.warning(f"Nutritional data missing for ingredient '{name_lower}'. Skipping.")
+
+        # Round nutritional values for cleaner output
+        for k in nutri:
+            nutri[k]=round(nutri[k],1)
+
+        logger.debug(f"Calculated nutrition: {nutri}")
+        return nutri
 
 
 # --- AuthenticationAndUsers Class (Updated for asyncpg pool) ---
@@ -352,7 +482,7 @@ class AuthenticationAndUsers(BaseRepository):
 
     async def list_users(self, conn: asyncpg.Connection, user_id: Optional[int] = None) -> Optional[Union[List[Dict[str, Any]], Dict[str, Any]]]:
         # ... (implementation uses _execute_query with conn) ...
-        sql = "SELECT user_id, name, email, registration_date, is_email_verified, user_type, last_login, image FROM users"
+        sql = "SELECT user_id, name, email, registration_date, location, phone_number, is_email_verified, user_type, last_login, image FROM users"
         params = []
         if user_id is not None:
             sql += " WHERE user_id = $1"
@@ -382,7 +512,7 @@ class AuthenticationAndUsers(BaseRepository):
             result = await self._execute_query(conn, sql, params, fetch_one=True)
             if not result:
                 logger.warning(f"Login failed: Identifier '{identifier}' not found.")
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid credentials or account not found.')
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name or account not found.')
             user_id = result['user_id']; stored_hashed_password = result['hashed_password']; user_type = result.get('user_type', 'user'); is_verified = result.get('is_email_verified', False)
             stored_hashed_pw_bytes = stored_hashed_password.encode('utf-8') if isinstance(stored_hashed_password, str) else stored_hashed_password
             if not isinstance(stored_hashed_pw_bytes, bytes):
@@ -396,7 +526,7 @@ class AuthenticationAndUsers(BaseRepository):
                 return {'message': 'Login successful', 'data': {'user_id': user_id, 'user_type': user_type, 'verified': is_verified}}
             else:
                 logger.warning(f"Login failed: Invalid password for identifier '{identifier}'.")
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid credentials.')
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
         except HTTPException: raise
         except asyncpg.PostgresError as e: logger.error(f"DB error login '{identifier}': {e}"); raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Login unavailable.') from e
         except Exception as e: logger.error(f"Unexpected error login '{identifier}': {e}", exc_info=True); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Unexpected login error.') from e
@@ -424,15 +554,121 @@ class AuthenticationAndUsers(BaseRepository):
         if metric_id: logger.info(f"Created metric ID: {metric_id}"); return {"metric_id": metric_id}
         else: raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Metric creation failed.")
 
-    async def update_metric(self, conn: asyncpg.Connection, metric_id: int, updates: Dict[str, Any]):
-        # ... (implementation uses _execute_query with conn) ...
-        updates_lower=lowercase_keys(updates); set_clauses=[]; params=[]; idx=1; allowed=['age_range','weight','height','cholesterol_level','sys_bp','dia_bp','pulse','sex','activity_level']
-        if not updates_lower: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No updates.")
-        for k,v in updates_lower.items():
-             if k in allowed: set_clauses.append(f"{k}=${idx}"); params.append(v); idx+=1
-        if not set_clauses: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields.")
-        sql=f"UPDATE user_metrics SET {','.join(set_clauses)} WHERE metric_id=${idx}"; params.append(metric_id)
-        await self._execute_query(conn, sql, tuple(params)); logger.info(f"Updated metric ID: {metric_id}")
+    async def update_metric(self, conn: asyncpg.Connection, user_id: int, updates: Dict[str, Any]):
+        # Update independent fields for latest metric row for this user
+        updates_lower = lowercase_keys(updates)
+        set_clauses = []
+        params = []
+        idx = 1
+        allowed = ['age_range','weight','height','bmi','ideal_weight','daily_calories','cholesterol_level','sys_bp','dia_bp','pulse','sex','activity_level']
+        if not updates_lower:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No updates.")
+        # Strictly map and validate update keys
+        unknown_keys = [k for k in updates_lower if k not in allowed]
+        if unknown_keys:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown or misspelled fields: {', '.join(unknown_keys)}. Allowed fields: {', '.join(allowed)}.")
+        # Define expected types for each field
+        field_types = {
+            'age_range': str,
+            'weight': float,
+            'height': float,
+            'bmi': float,
+            'ideal weight': float,
+            'daily calories': float,
+            'cholesterol_level': float,
+            'sys_bp': float,
+            'dia_bp': float,
+            'pulse': float,
+            'sex': str,
+            'activity_level': str,
+        }
+        # Log the update payload and types for debugging
+        logger.info(f"update_metric: updates_lower={updates_lower}")
+        for k, v in updates_lower.items():
+            logger.info(f"Field '{k}': value={v} (type={type(v)})")
+        for k in allowed:
+            if k in updates_lower:
+                set_clauses.append(f"{k}=${idx}")
+                v = updates_lower[k]
+                # Strict validation for string fields
+                if k in ['age_range', 'sex', 'activity_level']:
+                    if v is not None and not isinstance(v, str):
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Field '{k}' must be a string, got {type(v).__name__}: {v}")
+                # Cast to correct type if not None
+                if v is not None and k in field_types:
+                    try:
+                        v = field_types[k](v)
+                    except Exception:
+                        # Fallback: leave as is if casting fails
+                        pass
+                params.append(v)
+                idx += 1
+        if not set_clauses:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields.")
+        # Patch all user_metrics rows for this user_id (no ordering, no subquery)
+        sql = f"UPDATE user_metrics SET {', '.join(set_clauses)} WHERE user_id = ${idx}"
+        params.append(user_id)
+        await self._execute_query(conn, sql, tuple(params))
+        logger.info(f"Updated metrics for user_id: {user_id}")
+
+        # Fetch any (first) metric row for this user_id to get dependent fields
+        metric_row = await conn.fetchrow(
+            "SELECT weight, height, age_range, sex, activity_level FROM user_metrics WHERE user_id = $1 LIMIT 1",
+            user_id
+        )
+        if not metric_row:
+            logger.warning(f"Metric row not found for dependent update for user_id: {user_id}")
+            return
+        weight = metric_row['weight']
+        height = metric_row['height']
+        age_range = metric_row['age_range']
+        sex = metric_row['sex']
+        activity_level = metric_row['activity_level']
+
+        # Compute dependent values using CalculationLogic
+        calc = CalculationLogic()
+        bmi = calc.calculate_bmi(weight, height)
+        bmr = calc.calculate_bmr(weight, height, age_range, sex)
+        ideal_weight = calc.calculate_ideal_weight(height, sex)
+        daily_calories = calc.calculate_daily_calories(bmr, activity_level)
+        bmi_category = calc.calculate_bmi_category(bmi)
+
+        # Patch all user_metrics rows for this user_id with dependent fields
+        dep_sql = """
+            UPDATE user_metrics SET 
+                bmi = $1,
+                bmr = $2,
+                ideal_weight = $3,
+                daily_calories = $4,
+                bmi_category = $5
+            WHERE user_id = $6
+        """
+        # Ensure correct types for asyncpg (floats for numbers, str for category)
+        # Cast dependent fields to correct types based on DB schema
+        # Numerical: bmi, bmr, ideal_weight, daily_calories; Text: bmi_category
+        await conn.execute(
+            dep_sql,
+            float(bmi) if bmi is not None else None,
+            float(bmr) if bmr is not None else None,
+            str(ideal_weight) if ideal_weight is not None else None,  # ensure string
+            float(daily_calories) if daily_calories is not None else None,
+            str(bmi_category) if bmi_category is not None else None,
+            user_id
+        )
+        logger.info(f"Recomputed dependent fields for user_id: {user_id} (all metric rows)")
+
+        # Always insert a new entry in metrics_history whenever weight is updated
+        if 'weight' in updates_lower:
+            try:
+                # Use the new weight value from the update, not the possibly unchanged value from the DB
+                weight_f = float(updates_lower['weight'])
+                await conn.execute(
+                    "INSERT INTO metrics_history (user_id, weight, logged_at) VALUES ($1, $2, NOW())",
+                    user_id, weight_f
+                )
+                logger.info(f"Logged new weight {weight_f} for user {user_id} in metrics_history (logged_at).")
+            except Exception as e:
+                logger.warning(f"Failed to log weight in metrics_history: {e}")
 
     async def list_metrics(self, conn: asyncpg.Connection, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
         # ... (implementation uses _execute_query with conn) ...
@@ -512,7 +748,7 @@ class AuthenticationAndUsers(BaseRepository):
         params = []
         idx = 1
         # Define allowed fields for update based on create_user and list_users
-        allowed = ['name', 'email', 'password', 'is_email_verified', 'user_type', 'image']
+        allowed = ['name', 'email', 'location', 'phone_number' , 'password', 'is_email_verified', 'user_type', 'image']
 
         if not updates_lower:
              raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields provided for update.")
@@ -555,6 +791,24 @@ class AuthenticationAndUsers(BaseRepository):
              processed = [];
              for row in preferences: p_pref=dict(row); p_pref['food_restrictions']=deserialize_list(p_pref.get('food_restrictions','')); p_pref['cuisine_preferences']=deserialize_list(p_pref.get('cuisine_preferences','')); processed.append(p_pref)
              return processed
+async def list_calorie_history(self, conn: asyncpg.Connection, user_id: int) -> List[Dict[str, Any]]:
+        """Lists calorie history entries for a given user ID."""
+        logger.info(f"Fetching calorie history for user ID: {user_id}")
+        sql = "SELECT calories, last_updated FROM calories_history WHERE user_id = $1 ORDER BY last_updated DESC"
+        params = (user_id,)
+        try:
+            history = await self._execute_query(conn, sql, params, fetch_all=True)
+            processed_history = []
+            for entry in history:
+                p_entry = dict(entry)
+                if isinstance(p_entry.get('last_updated'), (datetime, date)):
+                    p_entry['last_updated'] = p_entry['last_updated'].isoformat()
+                processed_history.append(p_entry)
+            logger.info(f"Fetched {len(processed_history)} calorie history entries for user ID: {user_id}")
+            return processed_history
+        except Exception as e:
+            logger.error(f"Error fetching calorie history for user {user_id}: {e}", exc_info=True)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error fetching calorie history.")
         return []
 
 # --- Other Classes (Chefs, Producers, etc. Updated for asyncpg pool) ---
@@ -668,7 +922,7 @@ class Chefs(BaseRepository):
         sql = "SELECT chefid, hashed_password, user_type, is_email_verified FROM chefs WHERE lower(name) = lower($1) OR lower(email) = lower($2)"
         params = (identifier.lower(), identifier.lower())
         result = await self._execute_query(conn, sql, params, fetch_one=True)
-        if not result: logger.warning(f"Chef login fail: '{identifier}'"); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid credentials.')
+        if not result: logger.warning(f"Chef login fail: '{identifier}'"); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
         chef_id = result['chefid']; stored_hash = result['hashed_password']; user_type = result['user_type']; is_verified = result['is_email_verified']
         stored_hash_bytes = stored_hash.encode() if isinstance(stored_hash, str) else stored_hash
         if not isinstance(stored_hash_bytes, bytes): logger.error(f"Bad hash type chef {chef_id}"); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Login error.')
@@ -679,7 +933,7 @@ class Chefs(BaseRepository):
             # try: await self._execute_query(conn, update_sql, (chef_id,))
             # except Exception as update_err: logger.error(f"Failed last_login update chef {chef_id}: {update_err}")
             return {'message': 'Login successful', 'data': {'chef_id': chef_id, 'user_type': user_type, 'verified': is_verified}}
-        else: logger.warning(f"Chef login fail pwd: '{identifier}'."); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid credentials.')
+        else: logger.warning(f"Chef login fail pwd: '{identifier}'."); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
 
     async def delete_chef(self, conn: asyncpg.Connection, chef_id: int):
         # ... (uses conn for fetchval via _execute_query) ...
@@ -773,7 +1027,7 @@ class Producers(BaseRepository):
         sql = "SELECT producer_id, hashed_password, user_type, is_email_verified FROM producers WHERE lower(name) = lower($1) OR lower(email) = lower($2)"
         params = (identifier.lower(), identifier.lower())
         result = await self._execute_query(conn, sql, params, fetch_one=True)
-        if not result: logger.warning(f"Producer login fail: '{identifier}'"); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid credentials.')
+        if not result: logger.warning(f"Producer login fail: '{identifier}'"); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
         producer_id=result['producer_id']; stored_hash=result['hashed_password']; user_type=result['user_type']; is_verified=result['is_email_verified']
         stored_hash_bytes = stored_hash.encode() if isinstance(stored_hash, str) else stored_hash
         if not isinstance(stored_hash_bytes, bytes): logger.error(f"Bad hash producer {producer_id}"); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Login error.')
@@ -781,7 +1035,7 @@ class Producers(BaseRepository):
              logger.info(f"Producer login success '{identifier}', ID: {producer_id}")
              # Optional: update last_login
              return {'message':'Login successful', 'data':{'producer_id':producer_id, 'user_type':user_type, 'verified':is_verified}}
-        else: logger.warning(f"Producer login fail pwd: '{identifier}'."); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid credentials.')
+        else: logger.warning(f"Producer login fail pwd: '{identifier}'."); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
 
     async def delete_producer(self, conn: asyncpg.Connection, producer_id: int):
         # ... (uses conn for fetchval via _execute_query) ...
@@ -843,7 +1097,7 @@ class Transporters(BaseRepository):
         sql="SELECT transporter_id, hashed_password, user_type, is_email_verified FROM transporters WHERE lower(name)=lower($1) OR lower(email)=lower($2)"
         params=(identifier.lower(), identifier.lower())
         result = await self._execute_query(conn, sql, params, fetch_one=True)
-        if not result: logger.warning(f"Transporter login fail: '{identifier}'"); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid credentials.')
+        if not result: logger.warning(f"Transporter login fail: '{identifier}'"); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
         transporter_id=result['transporter_id']; stored_hash=result['hashed_password']; user_type=result.get('user_type','transporter'); is_verified=result.get('is_email_verified',True) # Assume verified if column missing
         stored_hash_bytes = stored_hash.encode() if isinstance(stored_hash, str) else stored_hash
         if not isinstance(stored_hash_bytes, bytes): logger.error(f"Bad hash transporter {transporter_id}"); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Login error.')
@@ -851,7 +1105,7 @@ class Transporters(BaseRepository):
             logger.info(f"Transporter login success '{identifier}', ID: {transporter_id}")
             # Optional: update last_login
             return {'message':'Login successful', 'data':{'transporter_id':transporter_id, 'user_type':user_type, 'verified':is_verified}}
-        else: logger.warning(f"Transporter login fail pwd: '{identifier}'."); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid credentials.')
+        else: logger.warning(f"Transporter login fail pwd: '{identifier}'."); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
 
     async def delete_transporter(self, conn: asyncpg.Connection, transporter_id: int):
         # ... (uses conn for fetchval via _execute_query) ...
@@ -916,7 +1170,7 @@ class Stakeholders(BaseRepository):
         sql="SELECT stakeholder_id, hashed_password, user_type, is_email_verified FROM stakeholders WHERE lower(name)=lower($1) OR lower(email)=lower($2)"
         params=(identifier.lower(), identifier.lower())
         result = await self._execute_query(conn, sql, params, fetch_one=True)
-        if not result: raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid credentials.')
+        if not result: raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
         stakeholder_id=result['stakeholder_id']; stored_hash=result['hashed_password']; user_type=result.get('user_type','stakeholder'); is_verified=result.get('is_email_verified',False)
         stored_hash_bytes = stored_hash.encode() if isinstance(stored_hash, str) else stored_hash
         if not isinstance(stored_hash_bytes, bytes): raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Login error.')
@@ -924,7 +1178,7 @@ class Stakeholders(BaseRepository):
             logger.info(f"Stakeholder login success '{identifier}', ID: {stakeholder_id}")
             # Optional: update last_login
             return {'message':'Login successful', 'data':{'stakeholder_id':stakeholder_id, 'user_type':user_type, 'verified':is_verified}}
-        else: raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid credentials.')
+        else: raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
 
     async def delete_stakeholder(self, conn: asyncpg.Connection, stakeholder_id: int):
         # ... (uses conn for fetchval via _execute_query) ...
@@ -1223,62 +1477,115 @@ class Supplements(BaseRepository):
         else: logger.warning(f"Attempt delete non-existent supplement ID: {supplement_id}"); return False
 
 
-#orders class starts here, base repo alreay imlemented up there no need of reimplementing it
-#orders class starts here, base repo alreay imlemented up there no need of reimplementing it
-class Orders(BaseRepository):
+#orders class starts here, base repo already implemented up there no need of reimplementing it
+import asyncpg # For asyncpg.Connection, asyncpg.PostgresError
+import json
+import logging # Assuming logger is an instance of logging.Logger and configured
+import random
+import string
+from datetime import datetime, date
+from typing import List, Dict, Any, Optional, Union, Tuple
+from fastapi import HTTPException, status # Or from starlette.exceptions import HTTPException and from starlette.status import ...
+
+# Assume BaseRepository is defined elsewhere and provides self._execute_query
+# Assume notification_service and fcm_service are defined/imported and provide their respective methods
+# Example: logger = logging.getLogger(__name__)
+
+
+# Ensure BaseRepository is defined before this class, e.g.:
+# class BaseRepository:
+#     async def _execute_query(self, conn, query, params=None, fetch_all=False, fetch_val=False, returning_id_column=None):
+#         # Implementation
+#         pass
+
+class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
     ALLOWED_ORDER_TYPES = {'meal', 'supplement', 'gig', 'herbal', 'gadget', 'spice', 'produce'}
-    ALLOWED_ORDER_STATUSES = {'cancelled', 'assigned','anyrider', 'rider_accepted','rider_rejected','delivered', 'shipped', 'preparing', 'confirmed','completed', 'pending', 'accepted', 'dispatched', 'picked up', 'delivering'}
+    ALLOWED_ORDER_STATUSES = {
+        'cancelled', 'assigned', 'anyrider', 'rider_accepted', 'rider_rejected',
+        'delivered', 'shipped', 'preparing', 'confirmed', 'completed', 'pending',
+        'accepted', 'dispatched', 'picked up', 'delivering', 'verification needed' # Added 'verification needed'
+    }
     ALLOWED_PAYMENT_STATUSES = {'failed', 'refunded', 'paid', 'pending', 'completed'}
-    ALLOWED_PAYMENT_MODES = {'cash', 'momo', 'mobile money', 'Airtel Card', 'paypal', 'stripe', 'debit card', 'credit card'}
-    
-    async def notify_order_status_change(self, conn: asyncpg.Connection, order: dict, new_status: str):
-        """Notify all concerned parties about order status change."""
-        concerned_parties = []
-        
-        if order['user_id']:
-            concerned_parties.append(('user', order['user_id']))
-        if order['chef_id']:
-            concerned_parties.append(('chef', order['chef_id']))
-        if order['producer_id']:
-            concerned_parties.append(('producer', order['producer_id']))
-        if order['transporter_id']:
-            concerned_parties.append(('transporter', order['transporter_id']))
-        
-        # Create notifications for all concerned parties
-        for role, user_id in concerned_parties:
-            message = f"Order #{order['order_id']} status changed to {new_status}"
-            await notifications.create_notification(
-                conn, user_id, 'order_status_changed', order_id=order['order_id'],
-                chef_id=order['chef_id'] if role == 'chef' else None,
-                producer_id=order['producer_id'] if role == 'producer' else None,
-                transporter_id=order['transporter_id'] if role == 'transporter' else None,
-                message=message,
-                data={'previous_status': order['status'], 'new_status': new_status}
+    ALLOWED_PAYMENT_MODES = {
+        'cash', 'momo', 'mobile money', 'Airtel Card', 'paypal', 'stripe',
+        'debit card', 'credit card'
+    }
+
+    async def _send_order_notification(self, conn: asyncpg.Connection, user_id: str, user_type: str, order_id: str, new_status: str, notification_type: str):
+        """
+        Send order-related notification to a specific user type.
+
+        Args:
+            conn: Database connection
+            user_id: User's UUID (can be user_id, chefid, producer_id, transporter_id)
+            user_type: Type of user ('user', 'chef', 'producer', 'transporter')
+            order_id: Order ID
+            new_status: New order status
+            notification_type: Type of notification
+        """
+        try:
+            # Get user's FCM tokens filtered by user_type (async)
+            tokens = await notification_service.get_fcm_tokens(conn, user_id, user_type=user_type)
+
+            if not tokens:
+                logger.warning(f"No FCM tokens found for user {user_id} with type {user_type}")
+                return
+
+            # Send notification using FCM service (async)
+            # Assuming fcm_service.send_bulk_notifications exists
+            response = await fcm_service.send_bulk_notifications(
+                conn,
+                tokens,  # List of dicts with 'id' and 'token'
+                order_id,
+                new_status,
+                notification_type # This notification_type is passed to FCM service
             )
-        
-        # Add to notification queue for WebSocket broadcast
-        for role, user_id in concerned_parties:
-            manager.notification_queue.put_nowait({
-                'user_id': user_id,
-                'type': 'order_status_changed',
-                'data': {'order_id': order['order_id'], 'status': new_status}
-            })
+
+            # Log the notification (sync or async as currently implemented)
+            # Assuming notification_service.log_notification exists
+            notification_id = await notification_service.log_notification(
+                conn,
+                user_id=user_id,
+                token=tokens[0]['token'], # Log with the first token found for this user_type
+                notification_type=notification_type,
+                title=f"Order Status Update ({user_type.capitalize()})", # Example: Add user type to title
+                body=f"Order {order_id} status updated to {new_status} for your role as {user_type}.", # Example: Add user type to body
+                data={
+                    'order_id': order_id,
+                    'status': new_status,
+                    'type': notification_type,
+                    'user_type': user_type # Include user_type in data payload
+                }
+            )
+
+            if notification_id:
+                logger.info(f"Notification sent successfully for order {order_id} to user {user_id} ({user_type})")
+            else:
+                logger.error(f"Failed to log notification for order {order_id} to user {user_id} ({user_type})")
+
+        except Exception as e:
+            logger.error(f"Error sending order notification to user {user_id} ({user_type}): {str(e)}", exc_info=True)
 
     async def _validate_product_id(self, conn: asyncpg.Connection, product_id: Union[str, int], order_type: str):
         if not product_id:
             if order_type != 'gig':
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"product_id required for {order_type} orders.")
-            else: return
+            else:
+                return
         order_type_l = order_type.lower().strip()
         table_map = {'meal': ('meals', 'meal_id'), 'supplement': ('supplements', 'supplement_id'), 'herbal': ('herbals', 'herbal_id'), 'gadget': ('gadgets', 'gadget_id'), 'spice': ('spices', 'spice_id'), 'produce': ('produce', 'produce_id')}
-        if order_type_l == 'gig': return
-        if order_type_l not in table_map: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid order_type: '{order_type}'.")
+        if order_type_l == 'gig':
+            return
+        if order_type_l not in table_map:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid order_type: '{order_type}'.")
         table_name, id_column = table_map[order_type_l]
         sql = f"SELECT {id_column} FROM {table_name} WHERE {id_column}::text = $1::text"
         try:
             result = await conn.fetchval(sql, str(product_id))
-            if result is None: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid product_id: '{product_id}' for type '{order_type}'. Product not found.")
-        except (ValueError, TypeError) as e: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid product_id format: '{product_id}'. Error: {e}") from e
+            if result is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid product_id: '{product_id}' for type '{order_type}'. Product not found.")
+        except (ValueError, TypeError) as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid product_id format: '{product_id}'. Error: {e}") from e
 
     async def create_order(self, conn: asyncpg.Connection, user_id: int, order_type: str,
                            items: Optional[List[Dict]] = None,
@@ -1290,81 +1597,139 @@ class Orders(BaseRepository):
                            quantity: Optional[int] = None,
                            transporter_id: Optional[int] = None, transaction_id: Optional[str] = None
                            ) -> Dict[str, Any]:
-        order_type_l = str(order_type).lower().strip()
-        gig_details_json: Optional[str] = None
-        complementary_meals_data: Optional[List[Dict]] = None
-        complementary_meals_serialized_json: Optional[str] = None
-        derived_product_id = product_id
-        derived_chef_id = chef_id
-        derived_producer_id = producer_id
-        calculated_quantity = 0
-        calculated_total_price = 0.0
-        if not user_id: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id is required.")
-        if order_type_l not in self.ALLOWED_ORDER_TYPES: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid order_type: '{order_type}'.")
-        if not items or not isinstance(items, list) or len(items) == 0: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="items list cannot be empty.")
-        first_item = items[0]
+        """
+        Create a new order and send notification to the user.
+        """
         try:
-            if order_type_l == 'gig':
-                gig_details = first_item.get('gig_details', {})
-                if not gig_details or not isinstance(gig_details, dict): raise ValueError("Valid gig_details dictionary required within items for gig orders.")
-                gig_details_json = json.dumps(gig_details)
-                derived_product_id = None
-                derived_chef_id = first_item.get('chef_id', chef_id)
-                derived_producer_id = first_item.get('producer_id', producer_id)
-                calculated_quantity = first_item.get('quantity', 1)
-                calculated_total_price = float(first_item.get('price', 0.0)) * calculated_quantity
-            else:
-                item_product_id = first_item.get('product_id')
-                if not derived_product_id and item_product_id: derived_product_id = item_product_id
-                if not derived_product_id: raise ValueError(f"product_id is required for order_type '{order_type_l}', either directly or in items.")
-                await self._validate_product_id(conn, derived_product_id, order_type_l)
-                derived_chef_id = first_item.get('chef_id', derived_chef_id)
-                derived_producer_id = first_item.get('producer_id', derived_producer_id)
-                calculated_quantity = int(first_item.get('quantity', 1))
-                item_price = float(first_item.get('price', 0.0))
-                calculated_total_price = item_price * calculated_quantity
-                complementary_meals_data = first_item.get('bestservedwith')
-                if complementary_meals_data:
-                    if not isinstance(complementary_meals_data, list): raise ValueError("'bestservedwith' must be a list of objects.")
-                    try:
-                        complementary_meals_serialized_json = json.dumps(complementary_meals_data)
-                        logger.debug(f"Serialized complementary_meals: {complementary_meals_serialized_json}")
-                    except TypeError as e:
-                        logger.error(f"Failed to serialize complementary_meals data: {complementary_meals_data}", exc_info=True)
-                        raise ValueError(f"Invalid data in 'bestservedwith', cannot serialize to JSON: {e}")
-            final_total_price = total_price if total_price is not None else calculated_total_price
-            final_quantity = quantity if quantity is not None else calculated_quantity
-            order_status_l = str(order_status).lower().strip()
-            payment_status_l = str(payment_status).lower().strip()
-            payment_mode_l = str(payment_mode).lower().strip()
-            if order_status_l not in self.ALLOWED_ORDER_STATUSES: raise ValueError(f"Invalid order_status: '{order_status}'.")
-            if payment_status_l not in self.ALLOWED_PAYMENT_STATUSES: raise ValueError(f"Invalid payment_status: '{payment_status}'.")
-            is_airtel = payment_mode_l == 'airtel card'
-            if not is_airtel and payment_mode_l not in self.ALLOWED_PAYMENT_MODES: raise ValueError(f"Invalid payment_mode: '{payment_mode}'.")
-            if is_airtel: payment_mode_l = 'Airtel Card'
-            delivery_address_s = delivery_address or "Not specified"
-            notes_s = notes or "No special instructions"
-            price_f = float(final_total_price)
-            paid_f = float(amount_paid)
-            qty_i = int(final_quantity)
-            user_id_i = int(user_id)
-            prod_id_s = str(derived_product_id) if derived_product_id is not None else None
-            chef_id_i = int(derived_chef_id) if derived_chef_id is not None else None
-            producer_id_i = int(derived_producer_id) if derived_producer_id is not None else None
-            transporter_id_i = int(transporter_id) if transporter_id is not None else None
-        except (ValueError, TypeError, KeyError) as e: logger.warning(f"Invalid order data provided: {e}. Payload: {items}", exc_info=True); raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid order data: {e}") from e
-        except json.JSONDecodeError as e: logger.warning(f"Invalid JSON in gig_details: {e}. Payload: {items}", exc_info=True); raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid JSON format in gig_details: {e}") from e
-        except HTTPException as e: raise e
-        except Exception as e: logger.error(f"Unexpected error processing order data: {e}", exc_info=True); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Server error processing order data: {e}") from e
-        sql = """
-            INSERT INTO orders ( user_id, order_type, product_id, chef_id, producer_id, transporter_id, order_date, delivery_address, order_status, total_price, notes, payment_status, payment_mode, amount_paid, transaction_id, quantity, gig_details, complementary_meals )
-            VALUES ($1,$2,$3,$4,$5,$6, NOW(), $7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING order_id """
-        params: Tuple[Any, ...] = ( user_id_i, order_type_l, prod_id_s, chef_id_i, producer_id_i, transporter_id_i, delivery_address_s, order_status_l, price_f, notes_s, payment_status_l, payment_mode_l, paid_f, transaction_id, qty_i, gig_details_json, complementary_meals_serialized_json )
-        order_id = await self._execute_query(conn, sql, params, returning_id_column='order_id')
-        if order_id: logger.info(f"Order created successfully for user {user_id_i} with order_id {order_id}"); return {"message": "Order created", "order_id": order_id, "success": True}
-        else: logger.error(f"Order creation attempt failed for user {user_id_i} (no ID returned, but no DB exception caught). Check query logic and DB triggers."); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order creation failed unexpectedly (no ID returned).")
+            order_type_l = str(order_type).lower().strip()
+            gig_details_json: Optional[str] = None
+            complementary_meals_serialized_json: Optional[str] = None
+            derived_product_id = product_id
+            derived_chef_id = chef_id
+            derived_producer_id = producer_id
+            calculated_quantity = 0
+            calculated_total_price = 0.0
 
-    # *** CORRECTED read_orders method ***
+            if not user_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id is required.")
+            if order_type_l not in self.ALLOWED_ORDER_TYPES:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid order_type: '{order_type}'.")
+            if not items or not isinstance(items, list) or len(items) == 0:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="items list cannot be empty.")
+
+            first_item = items[0]
+            try:
+                if order_type_l == 'gig':
+                    gig_details = first_item.get('gig_details', {})
+                    if not gig_details or not isinstance(gig_details, dict):
+                        raise ValueError("Valid gig_details dictionary required within items for gig orders.")
+                    gig_details_json = json.dumps(gig_details)
+                    derived_product_id = None # Gigs don't have a product_id in the traditional sense
+                    derived_chef_id = first_item.get('chef_id', chef_id)
+                    derived_producer_id = first_item.get('producer_id', producer_id)
+                    calculated_quantity = first_item.get('quantity', 1) # Default to 1 if not provided
+                    calculated_total_price = float(first_item.get('price', 0.0)) * calculated_quantity
+                else:
+                    item_product_id = first_item.get('product_id')
+                    if not derived_product_id and item_product_id:
+                        derived_product_id = item_product_id
+                    if not derived_product_id:
+                        raise ValueError(f"product_id is required for order_type '{order_type_l}', either directly or in items.")
+                    await self._validate_product_id(conn, derived_product_id, order_type_l)
+
+                    derived_chef_id = first_item.get('chef_id', derived_chef_id)
+                    derived_producer_id = first_item.get('producer_id', derived_producer_id)
+                    calculated_quantity = int(first_item.get('quantity', 1)) # Default to 1
+                    item_price = float(first_item.get('price', 0.0))
+                    calculated_total_price = item_price * calculated_quantity
+
+                    complementary_meals_data = first_item.get('bestservedwith')
+                    if complementary_meals_data:
+                        if not isinstance(complementary_meals_data, list):
+                            raise ValueError("'bestservedwith' must be a list of objects.")
+                        try:
+                            complementary_meals_serialized_json = json.dumps(complementary_meals_data)
+                            logger.debug(f"Serialized complementary_meals: {complementary_meals_serialized_json}")
+                        except TypeError as e:
+                            logger.error(f"Failed to serialize complementary_meals data: {complementary_meals_data}", exc_info=True)
+                            raise ValueError(f"Invalid data in 'bestservedwith', cannot serialize to JSON: {e}")
+
+                final_total_price = total_price if total_price is not None else calculated_total_price
+                final_quantity = quantity if quantity is not None else calculated_quantity
+                order_status_l = str(order_status).lower().strip()
+                payment_status_l = str(payment_status).lower().strip()
+                payment_mode_l = str(payment_mode).lower().strip()
+
+                if order_status_l not in self.ALLOWED_ORDER_STATUSES:
+                    raise ValueError(f"Invalid order_status: '{order_status}'. Allowed: {self.ALLOWED_ORDER_STATUSES}")
+                if payment_status_l not in self.ALLOWED_PAYMENT_STATUSES:
+                    raise ValueError(f"Invalid payment_status: '{payment_status}'. Allowed: {self.ALLOWED_PAYMENT_STATUSES}")
+
+                is_airtel = payment_mode_l == 'airtel card'
+                if not is_airtel and payment_mode_l not in self.ALLOWED_PAYMENT_MODES:
+                    raise ValueError(f"Invalid payment_mode: '{payment_mode}'. Allowed: {self.ALLOWED_PAYMENT_MODES}")
+                if is_airtel:
+                    payment_mode_l = 'Airtel Card' # Normalize
+
+                delivery_address_s = delivery_address or "Not specified"
+                notes_s = notes or "No special instructions"
+                price_f = float(final_total_price)
+                paid_f = float(amount_paid)
+                qty_i = int(final_quantity)
+                user_id_i = int(user_id)
+                prod_id_s = str(derived_product_id) if derived_product_id is not None else None
+                chef_id_i = int(derived_chef_id) if derived_chef_id is not None else None
+                producer_id_i = int(derived_producer_id) if derived_producer_id is not None else None
+                transporter_id_i = int(transporter_id) if transporter_id is not None else None
+
+            except (ValueError, TypeError, KeyError) as e:
+                logger.warning(f"Invalid order data provided: {e}. Payload: {items}", exc_info=True)
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid order data: {e}") from e
+            except json.JSONDecodeError as e:
+                logger.warning(f"Invalid JSON in gig_details: {e}. Payload: {items}", exc_info=True)
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid JSON format in gig_details: {e}") from e
+            except HTTPException: # Re-raise specific HTTP exceptions
+                raise
+            except Exception as e: # Catch other unexpected errors
+                logger.error(f"Unexpected error processing order data: {e}", exc_info=True)
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Server error processing order data: {e}") from e
+
+            sql = """
+                INSERT INTO orders (
+                    user_id, order_type, product_id, chef_id, producer_id, transporter_id,
+                    order_date, delivery_address, order_status, total_price, notes,
+                    payment_status, payment_mode, amount_paid, transaction_id, quantity,
+                    gig_details, complementary_meals
+                )
+                VALUES ($1,$2,$3,$4,$5,$6, NOW(), $7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+                RETURNING order_id
+            """
+            params: Tuple[Any, ...] = (
+                user_id_i, order_type_l, prod_id_s, chef_id_i, producer_id_i, transporter_id_i,
+                delivery_address_s, order_status_l, price_f, notes_s, payment_status_l,
+                payment_mode_l, paid_f, transaction_id, qty_i, gig_details_json,
+                complementary_meals_serialized_json
+            )
+            order_id = await self._execute_query(conn, sql, params, returning_id_column='order_id')
+
+            if order_id:
+                logger.info(f"Order created successfully for user {user_id_i} with order_id {order_id}")
+                await self._send_order_notification(conn, str(user_id_i), 'user', str(order_id), order_status_l, 'order_created_user')
+                if chef_id_i is not None:
+                    await self._send_order_notification(conn, str(chef_id_i), 'chef', str(order_id), order_status_l, 'order_created_chef')
+                if producer_id_i is not None:
+                    await self._send_order_notification(conn, str(producer_id_i), 'producer', str(order_id), order_status_l, 'order_created_producer')
+                return {"message": "Order created", "order_id": order_id, "success": True}
+            else:
+                logger.error(f"Order creation attempt failed for user {user_id_i} (no ID returned).")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order creation failed unexpectedly (no ID returned).")
+
+        except Exception as e: # Catch-all for other exceptions like DB connection issues
+            logger.error(f"Error creating order for user {user_id}: {str(e)}", exc_info=True)
+            if not isinstance(e, HTTPException): # Avoid re-wrapping HTTPExceptions
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred: {str(e)}")
+            raise
+
     async def read_orders(self, conn: asyncpg.Connection, order_id=None, chef_id=None, producer_id=None, user_id=None, transporter_id=None) -> List[Dict[str, Any]]:
         logger.info(f"Reading orders with criteria: order_id={order_id}, chef_id={chef_id}, producer_id={producer_id}, user_id={user_id}, transporter_id={transporter_id}")
         sql = """
@@ -1375,171 +1740,245 @@ class Orders(BaseRepository):
                 o.order_date, o.delivery_address, o.order_status, o.total_price, o.notes,
                 o.payment_status, o.payment_mode, o.amount_paid, o.transaction_id, o.quantity,
                 o.gig_details, o.complementary_meals,
-                -- o.created_at, -- REMOVED
-                o.updated_at,      -- KEPT (VERIFY this column exists!)
+                o.updated_at, -- Ensure this column exists in your 'orders' table
                 COALESCE( md.meal_name, supd.product_name, hd.product_name, gd.product_name, sd.product_name, prod.product_name, CASE WHEN o.order_type = 'gig' THEN o.gig_details->>'gig_type' ELSE 'Unknown Product' END ) AS product_name,
                 md.ingredients, producer.name AS producer_name, producer.location AS producer_address, chef.name AS chef_name, chef.location AS chef_address, transporter.name AS transporter_name, COALESCE(chef.location, producer.location, '') AS pickup_location
             FROM orders o
-            LEFT JOIN MealDetails md ON o.product_id = md.meal_id AND o.order_type = 'meal' LEFT JOIN SupplementDetails supd ON o.product_id = supd.supplement_id AND o.order_type = 'supplement' LEFT JOIN HerbalDetails hd ON o.product_id = hd.herbal_id AND o.order_type = 'herbal' LEFT JOIN GadgetDetails gd ON o.product_id = gd.gadget_id AND o.order_type = 'gadget' LEFT JOIN SpiceDetails sd ON o.product_id = sd.spice_id AND o.order_type = 'spice' LEFT JOIN ProduceDetails prod ON o.product_id = prod.produce_id AND o.order_type = 'produce'
-            LEFT JOIN producers producer ON o.producer_id = producer.producer_id LEFT JOIN chefs chef ON o.chef_id = chef.chefid LEFT JOIN transporters transporter ON o.transporter_id = transporter.transporter_id
-            WHERE 1=1 """
+            LEFT JOIN MealDetails md ON o.product_id = md.meal_id AND o.order_type = 'meal'
+            LEFT JOIN SupplementDetails supd ON o.product_id = supd.supplement_id AND o.order_type = 'supplement'
+            LEFT JOIN HerbalDetails hd ON o.product_id = hd.herbal_id AND o.order_type = 'herbal'
+            LEFT JOIN GadgetDetails gd ON o.product_id = gd.gadget_id AND o.order_type = 'gadget'
+            LEFT JOIN SpiceDetails sd ON o.product_id = sd.spice_id AND o.order_type = 'spice'
+            LEFT JOIN ProduceDetails prod ON o.product_id = prod.produce_id AND o.order_type = 'produce'
+            LEFT JOIN producers producer ON o.producer_id = producer.producer_id
+            LEFT JOIN chefs chef ON o.chef_id = chef.chefid -- Make sure join column 'chef.chefid' is correct
+            LEFT JOIN transporters transporter ON o.transporter_id = transporter.transporter_id
+            WHERE 1=1
+        """
         params_list: List[Any] = []
         param_index = 1
-        def _safe_int(val, field_name="ID"):
+        def _safe_int(val, field_name="ID"): # Helper nested function
             if val is None: return None
             try: return int(val)
-            except (ValueError, TypeError): logger.warning(f"Invalid integer format for filter '{field_name}': '{val}'."); raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid format for {field_name}: '{val}'. Expected an integer.")
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid integer format for filter '{field_name}': '{val}'.")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid format for {field_name}: '{val}'. Expected an integer.")
         try:
-            if order_id is not None: sql += f" AND o.order_id = ${param_index}"; params_list.append(_safe_int(order_id, "order_id")); param_index += 1
-            if chef_id is not None: sql += f" AND o.chef_id = ${param_index}"; params_list.append(_safe_int(chef_id, "chef_id")); param_index += 1
-            if producer_id is not None: sql += f" AND o.producer_id = ${param_index}"; params_list.append(_safe_int(producer_id, "producer_id")); param_index += 1
-            if user_id is not None: sql += f" AND o.user_id = ${param_index}"; params_list.append(_safe_int(user_id, "user_id")); param_index += 1
-            if transporter_id is not None: sql += f" AND o.transporter_id = ${param_index}"; params_list.append(_safe_int(transporter_id, "transporter_id")); param_index += 1
-        except HTTPException: raise
-        sql += " ORDER BY o.order_date DESC"
-        params_tuple = tuple(params_list)
-        results = await self._execute_query(conn, sql, params_tuple, fetch_all=True)
-        if not results: logger.info("No orders found matching criteria."); return []
-        processed_results: List[Dict[str, Any]] = []
-        for order_record in results:
-            processed_order = dict(order_record)
-            for key, value in processed_order.items():
-                if isinstance(value, (datetime, date)):
-                    if key in processed_order and value is not None: processed_order[key] = value.isoformat()
-                    elif value is None: processed_order[key] = None
-            processed_results.append(processed_order)
-        logger.info(f"Retrieved and processed {len(processed_results)} orders.")
-        return processed_results
+            if order_id is not None:
+                sql += f" AND o.order_id = ${param_index}"
+                params_list.append(_safe_int(order_id, "order_id"))
+                param_index += 1
+            if chef_id is not None:
+                sql += f" AND o.chef_id = ${param_index}"
+                params_list.append(_safe_int(chef_id, "chef_id"))
+                param_index += 1
+            if producer_id is not None:
+                sql += f" AND o.producer_id = ${param_index}"
+                params_list.append(_safe_int(producer_id, "producer_id"))
+                param_index += 1
+            if user_id is not None:
+                sql += f" AND o.user_id = ${param_index}"
+                params_list.append(_safe_int(user_id, "user_id"))
+                param_index += 1
+            if transporter_id is not None:
+                sql += f" AND o.transporter_id = ${param_index}"
+                params_list.append(_safe_int(transporter_id, "transporter_id"))
+                param_index += 1
+
+            sql += " ORDER BY o.order_date DESC"
+            params_tuple = tuple(params_list)
+            results = await self._execute_query(conn, sql, params_tuple, fetch_all=True)
+
+            if not results:
+                logger.info("No orders found matching criteria.")
+                return []
+
+            processed_results: List[Dict[str, Any]] = []
+            for order_record in results:
+                processed_order = dict(order_record) # Convert asyncpg.Record to dict
+                for key, value in processed_order.items():
+                    if isinstance(value, (datetime, date)) and value is not None:
+                        processed_order[key] = value.isoformat()
+                    # gig_details and complementary_meals might be JSON strings from DB,
+                    # try to parse them if they are not None
+                    if key in ['gig_details', 'complementary_meals'] and isinstance(value, str):
+                        try:
+                            processed_order[key] = json.loads(value)
+                        except json.JSONDecodeError:
+                            logger.warning(f"Failed to parse JSON for {key} in order {processed_order.get('order_id')}")
+                            # Keep as string or set to None/Error, depending on desired behavior
+                processed_results.append(processed_order)
+
+            logger.info(f"Retrieved and processed {len(processed_results)} orders.")
+            return processed_results
+
+        except HTTPException: # Re-raise specific HTTP exceptions from _safe_int
+            raise
+        except Exception as e:
+            logger.error(f"Error querying orders: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error querying orders: {str(e)}")
 
 
     async def update_order_status(self, conn: asyncpg.Connection, order_id: int, new_status: str, transporter_id: Optional[int] = None, completion_code: Optional[str] = None) -> Dict[str, Any]:
-        # Get the order first
-        order_list = await self.read_orders(conn, order_id=order_id)
-        if not order_list:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+        try:
+            order_list = await self.read_orders(conn, order_id=order_id)
+            if not order_list:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+            order = order_list[0]
 
-        # Get the single order dictionary from the list
-        order = order_list[0]
+            original_order_id = order.get('order_id')
+            if original_order_id is None: # Should not happen if read_orders works
+                logger.error(f"Fetched order for ID {order_id} is missing 'order_id' field.")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal error processing order data.")
 
-        order_id_i = order.get('order_id') # Ensure we have the integer order_id from the fetched order
-        if order_id_i is None:
-            logger.error(f"Fetched order for ID {order_id} is missing order_id.")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal error processing order data.")
+            new_status_l = str(new_status).lower().strip()
+            if new_status_l not in self.ALLOWED_ORDER_STATUSES:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid status: '{new_status}'. Allowed: {', '.join(self.ALLOWED_ORDER_STATUSES)}")
 
+            status_to_update = new_status_l
 
-        new_status_l = str(new_status).lower().strip()
-        if new_status_l not in self.ALLOWED_ORDER_STATUSES:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid status: '{new_status}'. Allowed: {', '.join(self.ALLOWED_ORDER_STATUSES)}")
+            if new_status_l in ['completed', 'delivered']:
+                if completion_code is None: # Initiating verification
+                    status_to_update = 'verification needed'
+                    logger.info(f"Order {original_order_id}: Setting status to 'verification needed'. Checking/Generating completion code.")
+                    existing_code = await conn.fetchval("SELECT completion_code FROM order_completions WHERE order_id = $1", original_order_id)
+                    if existing_code is None:
+                        generated_code = ''.join(random.choices(string.digits, k=6))
+                        user_id_from_order = order.get('user_id')
+                        producer_id_from_order = order.get('producer_id')
+                        transporter_id_from_order = order.get('transporter_id')
+                        chef_id_from_order = order.get('chef_id') # Consistent with read_orders
 
-        status_to_update = new_status_l # Default status to update
+                        if user_id_from_order is not None: # user_id is primary for notification logic
+                            insert_sql = """
+                                INSERT INTO order_completions (order_id, user_id, producer_id, transporter_id, chefid, completion_code)
+                                VALUES ($1, $2, $3, $4, $5, $6)
+                            """
+                            try:
+                                await conn.execute(insert_sql, original_order_id, user_id_from_order, producer_id_from_order, transporter_id_from_order, chef_id_from_order, generated_code)
+                                logger.info(f"Completion code generated and stored for Order ID: {original_order_id}")
+                                # Potentially notify user about the code, or the system requesting verification
+                            except asyncpg.PostgresError as e:
+                                logger.error(f"DB error storing completion code for Order ID {original_order_id}: {e}", exc_info=True)
+                                # Decide if this failure should block the status update to 'verification needed'
+                            except Exception as e: # Catch other errors
+                                logger.error(f"Unexpected error storing completion code for Order ID {original_order_id}: {e}", exc_info=True)
+                        else:
+                            logger.warning(f"Cannot store completion code for Order ID {original_order_id}: missing user_id.")
+                    # If code exists, 'verification needed' is still set, user/system must provide it.
+                    # The return message below is for when code already exists AND this endpoint is called to GENERATE a new one.
+                    # else:
+                    #    return {"message": f"Completion code process already initiated for Order ID {original_order_id}. Awaiting verification.", "success": True, "verification_needed": True}
 
-        # Logic for 'completed' or 'delivered' status updates
-        if new_status_l in ['completed', 'delivered']:
-            if completion_code is None:
-                # External source wants to trigger verification
-                status_to_update = 'verification needed'
-                logger.info(f"Order {order_id_i}: Setting status to 'verification needed' and generating completion code.")
-
-                # Check if a completion code already exists for this order
-                existing_code_sql = "SELECT completion_code FROM order_completions WHERE order_id = $1"
-                existing_code = await conn.fetchval(existing_code_sql, order_id_i)
-
-                if existing_code is None:
-                    # Generate and store a new completion code
-                    generated_code = ''.join(random.choices(string.digits, k=6))
-                    user_id = order.get('user_id')
-                    producer_id = order.get('producer_id')
-                    transporter_id_from_order = order.get('transporter_id')
-                    chefid = order.get('chefid')
-
-                    # Ensure one of the required IDs are present before inserting
-                    # Ensure user_id and order_id are present before inserting
-                    if user_id is not None and order_id_i is not None:
-                        insert_completion_sql = """
-                        INSERT INTO order_completions (order_id, user_id, producer_id, transporter_id, chefid, completion_code)
-                        VALUES ($1, $2, $3, $4, $5, $6)
-                        """
-                        try:
-                            await conn.execute(insert_completion_sql, order_id_i, user_id, producer_id, transporter_id_from_order, chefid, generated_code)
-                            logger.info(f"Completion code generated and stored for Order ID: {order_id_i}")
-                        except asyncpg.PostgresError as e:
-                            logger.error(f"Database error storing completion code for Order ID {order_id_i}: {e}", exc_info=True)
-                            # Log and continue, don't block status update
-                        except Exception as e:
-                            logger.error(f"Unexpected error storing completion code for Order ID {order_id_i}: {e}", exc_info=True)
-                            # Log and continue
+                else: # Verifying provided code
+                    logger.info(f"Order {original_order_id}: Attempting verification with provided code.")
+                    stored_code = await conn.fetchval("SELECT completion_code FROM order_completions WHERE order_id = $1", original_order_id)
+                    if stored_code and stored_code == completion_code:
+                        status_to_update = 'completed' # Or 'delivered', based on original new_status_l
+                        logger.info(f"Order {original_order_id}: Verification successful. Status set to '{status_to_update}'.")
                     else:
-                         logger.warning(f"Missing mandatory IDs (user_id or order_id) to store completion code for Order ID {order_id_i}. User ID: {user_id}")
-                else:
-                    # Completion code already exists, inform the external source
-                    logger.info(f"Order {order_id_i}: Completion code already exists. Informing external source.")
-                    return {"message": f"Completion code already exists for Order ID {order_id_i}. Please ask the customer for the code.", "success": True, "verification_needed": True}
+                        logger.warning(f"Order {original_order_id}: Verification failed. Invalid or missing completion code. Provided: '{completion_code}', Stored: '{stored_code}'")
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or missing completion code for verification.")
 
-            else:
-                # External source provided a completion code, attempt verification
-                logger.info(f"Order {order_id_i}: Attempting verification with provided code.")
-                stored_code_sql = "SELECT completion_code FROM order_completions WHERE order_id = $1"
-                stored_code = await conn.fetchval(stored_code_sql, order_id_i)
+            update_fields = ["order_status = $1", "updated_at = NOW()"]
+            params_update: List[Any] = [status_to_update]
+            current_param_idx = 2 # Starts at $2
 
-                if stored_code and stored_code == completion_code:
-                    # Codes match, set status to 'completed'
-                    status_to_update = 'completed'
-                    logger.info(f"Order {order_id_i}: Verification successful. Status set to 'completed'.")
-                else:
-                    # Codes do not match or no stored code found
-                    logger.warning(f"Order {order_id_i}: Verification failed. Invalid or missing completion code.")
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or missing completion code for verification.")
+            if status_to_update in ['assigned', 'picked up', 'delivering'] and transporter_id is not None:
+                try:
+                    t_id = int(transporter_id)
+                    update_fields.append(f"transporter_id = ${current_param_idx}")
+                    params_update.append(t_id)
+                    current_param_idx += 1
+                except (ValueError, TypeError):
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid transporter_id format: '{transporter_id}'. Must be an integer.")
+            elif status_to_update == 'assigned' and transporter_id is None: # Stricter check
+                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="transporter_id is required when setting status to 'assigned'.")
 
-        # Prepare the SQL update statement based on the determined status_to_update
-        sql_update_parts = ["order_status = $1", "updated_at = NOW()"]
-        params: List[Any] = [status_to_update]
-        param_counter = 2
+            params_update.append(original_order_id) # For WHERE clause
+            sql_update = f"UPDATE orders SET {', '.join(update_fields)} WHERE order_id = ${current_param_idx} RETURNING order_id"
+            updated_id = await self._execute_query(conn, sql_update, tuple(params_update), returning_id_column='order_id')
 
-        # Include transporter_id update if applicable (existing logic)
-        if status_to_update in ['assigned', 'picked up', 'delivering'] and transporter_id is not None:
-            try:
-                t_id = int(transporter_id)
-                sql_update_parts.append(f"transporter_id = ${param_counter}")
-                params.append(t_id); param_counter += 1
-            except (ValueError, TypeError):
-                # This validation should ideally happen earlier, but keeping it here for minimal change
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid transporter_id format: '{transporter_id}'. Must be an integer.")
-        elif status_to_update in ['assigned'] and transporter_id is None:
-            # This validation should also ideally happen earlier
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"transporter_id is required when setting status to 'assigned'.")
+            if updated_id == original_order_id:
+                log_msg = f"Order {original_order_id} status updated to '{status_to_update}'"
+                if transporter_id is not None and status_to_update in ['assigned', 'picked up', 'delivering']:
+                    log_msg += f" with transporter {transporter_id}"
+                logger.info(log_msg)
+
+                # Notifications
+                user_id_to_notify = order.get('user_id')
+                chef_id_to_notify = order.get('chef_id')
+                producer_id_to_notify = order.get('producer_id')
+                # Determine which transporter ID to use for notification
+                transporter_id_for_notification = transporter_id if status_to_update == 'assigned' and transporter_id is not None else order.get('transporter_id')
 
 
-        params.append(order_id_i) # Add order_id as the last parameter
+                if user_id_to_notify:
+                    await self._send_order_notification(conn, str(user_id_to_notify), 'user', str(original_order_id), status_to_update, 'order_status_changed_user')
+                if chef_id_to_notify:
+                    await self._send_order_notification(conn, str(chef_id_to_notify), 'chef', str(original_order_id), status_to_update, 'order_status_changed_chef')
+                if producer_id_to_notify:
+                    await self._send_order_notification(conn, str(producer_id_to_notify), 'producer', str(original_order_id), status_to_update, 'order_status_changed_producer')
+                if transporter_id_for_notification:
+                    notif_type = 'order_assigned_transporter' if status_to_update == 'assigned' else 'order_status_changed_transporter'
+                    await self._send_order_notification(conn, str(transporter_id_for_notification), 'transporter', str(original_order_id), status_to_update, notif_type)
+                
+# If order is completed/delivered and is a meal, calculate and store calories
+                if status_to_update in ['completed', 'delivered'] and order.get('order_type') == 'meal':
+                    meal_id = order.get('product_id') # For meal orders, product_id is the meal_id
+                    user_id_for_calories = order.get('user_id')
+                    if meal_id and user_id_for_calories is not None:
+                        try:
+                            calculated_calories = await self.calculate_meal_calories(conn, str(meal_id))
+                            if calculated_calories is not None:
+                                # Insert into calories_history table
+                                insert_calories_sql = """
+                                    INSERT INTO calories_history (user_id, calories, last_updated)
+                                    VALUES ($1, $2, NOW())
+                                """
+                                await conn.execute(insert_calories_sql, user_id_for_calories, calculated_calories)
+                                logger.info(f"Logged {calculated_calories} calories for user {user_id_for_calories} from completed meal order {original_order_id}")
+                            else:
+                                logger.warning(f"Could not calculate calories for meal ID {meal_id} from completed order {original_order_id}.")
+                        except Exception as e:
+                            logger.error(f"Error calculating or logging calories for order {original_order_id}: {e}", exc_info=True)
+                    else:
+                        logger.warning(f"Skipping calorie logging for order {original_order_id}: missing meal_id ({meal_id}) or user_id ({user_id_for_calories}).")
+                # Specific return for verification needed state if initiated by this call
+                if status_to_update == 'verification needed' and new_status_l in ['completed', 'delivered'] and completion_code is None:
+                     return {"message": f"Order {original_order_id} status set to 'verification needed'. Customer needs to provide code.", "success": True, "verification_needed": True}
 
-        sql = f"UPDATE orders SET {','.join(sql_update_parts)} WHERE order_id = ${param_counter} RETURNING order_id"
+                return {"message": f"Order {original_order_id} status updated to '{status_to_update}'", "success": True}
+            elif updated_id is None: # Should have been caught by read_orders if order didn't exist
+                logger.warning(f"Order {original_order_id} not found for status update, though it was read initially.")
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Order {original_order_id} not found during update.")
+            else: # Should not happen if RETURNING order_id is used correctly
+                logger.error(f"Order status update for {original_order_id} returned unexpected ID: {updated_id}")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order status update failed unexpectedly.")
 
-        # Execute the update query
-        updated_id = await self._execute_query(conn, sql, tuple(params), returning_id_column='order_id')
-
-        if updated_id == order_id_i:
-            log_msg = f"Order {order_id_i} status updated to '{status_to_update}'"
-            if transporter_id is not None and status_to_update in ['assigned', 'picked up', 'delivering']:
-                log_msg += f" with transporter {transporter_id}"
-            logger.info(log_msg)
-            return {"message": f"Order {order_id_i} status updated to '{status_to_update}'", "success": True}
-        elif updated_id is None:
-            logger.warning(f"Attempted to update status for non-existent order_id: {order_id_i}")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Order {order_id_i} not found.")
-        else:
-            logger.error(f"Order status update for {order_id_i} returned unexpected ID: {updated_id}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order status update failed unexpectedly.")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error updating order status for order_id {order_id}: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred: {str(e)}")
 
     async def delete_order(self, conn: asyncpg.Connection, order_id: int) -> Dict[str, Any]:
-        try: order_id_i = int(order_id)
-        except (ValueError, TypeError): raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid order_id format: '{order_id}'. Must be an integer.")
+        try:
+            order_id_i = int(order_id) # Ensure it's an int
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid order_id format: '{order_id}'. Must be an integer.")
+
         sql = "DELETE FROM orders WHERE order_id = $1 RETURNING order_id"
         params = (order_id_i,)
-        deleted_id = await self._execute_query(conn, sql, params, fetch_val=True)
-        if deleted_id == order_id_i: logger.info(f"Order {order_id_i} deleted successfully."); return {"message": f"Order {order_id_i} deleted", "success": True}
-        else: logger.warning(f"Attempted to delete non-existent order_id: {order_id_i}"); raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Order {order_id_i} not found.")
+        deleted_id = await self._execute_query(conn, sql, params, fetch_val=True) # Assumes fetch_val returns the value of the first column of the first row, or None
 
-
-
+        if deleted_id == order_id_i:
+            logger.info(f"Order {order_id_i} deleted successfully.")
+            return {"message": f"Order {order_id_i} deleted", "success": True}
+        else: # This means RETURNING order_id did not return the expected ID, implying row was not found or not deleted
+            logger.warning(f"Attempted to delete order_id: {order_id_i}, but it was not found or not deleted.")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Order {order_id_i} not found or could not be deleted.")
+        
 # --- Disbursements Class ---
 class Disbursements(BaseRepository):
     # Methods updated to accept 'conn'
@@ -1734,35 +2173,8 @@ class BaseMealRecommender:
              metrics=metrics_list[0]; metrics['sex']=metrics.get('sex','male').strip().lower(); metrics['activity_level']=metrics.get('activity_level','sedentary').strip().lower(); return metrics
         except Exception as e: logger.error(f"Error fetch metrics user {self.user_id}: {e}", exc_info=True); return None
 
-    async def _fetch_produce_data(self, conn: asyncpg.Connection, produce_names: List[str]) -> Dict[str, Dict]:
-        # ... (implementation uses _produce_crud with conn) ...
-        if not produce_names: return {}
-        try:
-            all_produce=await self._produce_crud.list_produce(conn) # Pass conn
-            produce_dict={};
-            if all_produce:
-                lookup={str(p['produce_name']).lower():p for p in all_produce if p and p.get('produce_name')}
-                for name_req in produce_names:
-                    name_lower=name_req.strip().lower()
-                    if name_lower in lookup:
-                        p_data=lookup[name_lower]; produce_dict[name_lower]={"calories":float(p_data.get('calories',0.0) or 0.0),"unit_grams":float(p_data.get('unit_grams',100.0) or 100.0),"cholesterol":float(p_data.get('cholesterol',0.0) or 0.0),"carbohydrates":float(p_data.get('carbohydrates',0.0) or 0.0),"proteins":float(p_data.get('proteins',0.0) or 0.0),"fats":float(p_data.get('fats',0.0) or 0.0),"fiber":float(p_data.get('fiber',0.0) or 0.0),"sugars":float(p_data.get('sugars',0.0) or 0.0)}
-            return produce_dict
-        except Exception as e: logger.error(f"Error fetch produce data user {self.user_id}: {e}", exc_info=True); return {}
 
     # _calculate_meal_nutrition remains synchronous helper
-    def _calculate_meal_nutrition(self, ingredients_str: Optional[str], produce_data_cache: Dict[str, Dict]) -> Dict[str, float]:
-        # ... (implementation unchanged) ...
-        nutri={"calories":0.0,"proteins":0.0,"carbohydrates":0.0,"fats":0.0,"fiber":0.0,"sugars":0.0,"cholesterol":0.0,"total_grams":0.0}
-        if not ingredients_str or not isinstance(ingredients_str, str): return nutri
-        names=[n.strip().lower() for n in ingredients_str.split(",") if n.strip()]
-        for name_lower in names:
-            data=produce_data_cache.get(name_lower)
-            if data:
-                try: grams=data.get('unit_grams',0.0); nutri["calories"]+=float(data.get('calories',0.0) or 0.0); nutri["proteins"]+=float(data.get('proteins',0.0) or 0.0); nutri["carbohydrates"]+=float(data.get('carbohydrates',0.0) or 0.0); nutri["fats"]+=float(data.get('fats',0.0) or 0.0); nutri["fiber"]+=float(data.get('fiber',0.0) or 0.0); nutri["sugars"]+=float(data.get('sugars',0.0) or 0.0); nutri["cholesterol"]+=float(data.get('cholesterol',0.0) or 0.0); nutri["total_grams"]+=float(grams or 0.0)
-                except (TypeError, ValueError) as e: logger.warning(f"NutriCalc Error '{name_lower}', User:{self.user_id}. Data: {data}, Err: {e}")
-            else: logger.warning(f"NutriData miss '{name_lower}', User:{self.user_id}.")
-        for k in nutri: nutri[k]=round(nutri[k],1)
-        return nutri
 
 class MealRecommendation1(BaseMealRecommender):
     async def fetch_all_meals_with_ingredients(self, conn: asyncpg.Connection):
@@ -2077,187 +2489,24 @@ herbals_crud = Herbals()
 meals_crud = Meals()
 produce_crud = Produce()
 producers_crud = Producers()
+@app.get('/rr/users/{user_id}/calorie_history')
+async def get_user_calorie_history_endpoint(user_id: int = Path(..., gt=0), conn: asyncpg.Connection = Depends(get_db)):
+    """Endpoint to list calorie history for a user by ID."""
+    auth_repo = AuthenticationAndUsers()
+    return await auth_repo.list_calorie_history(conn, user_id)
 gadgets_crud = Gadgets()
 spices_crud = Spices()
 stakeholders_crud = Stakeholders()
-orders_crud = Orders()
+orders_crud = Orders()  # Uses the async Orders class defined in this file
 transporters_crud = Transporters()
 calc_logic = CalculationLogic() # Doesn't need DB
 meal_fetcher = GetAllMeals()
 disbursement_handler = Disbursements()
 supplements_crud = Supplements()
-
-
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: Dict[int, WebSocket] = {}
-        self.notification_queue = asyncio.Queue()
-        self._retry_count: Dict[int, int] = {}
-        self._max_retries = 3
-        self._retry_delay = 5  # seconds
-
-    async def connect(self, websocket: WebSocket, user_id: int):
-        try:
-            await websocket.accept()
-            self.active_connections[user_id] = websocket
-            self._retry_count[user_id] = 0
-            print(f"User {user_id} connected")
-            
-            # Start heartbeat for this connection
-            asyncio.create_task(self._heartbeat(user_id))
-            
-        except Exception as e:
-            print(f"Error connecting user {user_id}: {e}")
-            await websocket.close()
-            self._handle_error(user_id, e)
-
-    async def disconnect(self, user_id: int):
-        if user_id in self.active_connections:
-            try:
-                await self.active_connections[user_id].close()
-                del self.active_connections[user_id]
-                del self._retry_count[user_id]
-                print(f"User {user_id} disconnected")
-            except Exception as e:
-                print(f"Error disconnecting user {user_id}: {e}")
-
-    async def broadcast(self, user_id: int, message: dict):
-        if user_id in self.active_connections:
-            try:
-                await self.active_connections[user_id].send_json(message)
-                print(f"Message sent to user {user_id}")
-                self._retry_count[user_id] = 0  # Reset retry count on successful send
-            except Exception as e:
-                print(f"Error sending message to user {user_id}: {e}")
-                self._handle_error(user_id, e)
-
-    async def _heartbeat(self, user_id: int):
-        """Send periodic heartbeats to maintain connection"""
-        while user_id in self.active_connections:
-            try:
-                await asyncio.sleep(30)  # Send heartbeat every 30 seconds
-                if user_id in self.active_connections:
-                    await self.active_connections[user_id].send_text('ping')
-            except Exception as e:
-                print(f"Heartbeat error for user {user_id}: {e}")
-                self._handle_error(user_id, e)
-                break
-
-    def _handle_error(self, user_id: int, error: Exception):
-        """Handle connection errors with retry logic"""
-        if user_id not in self._retry_count:
-            self._retry_count[user_id] = 0
-
-        self._retry_count[user_id] += 1
-        
-        if self._retry_count[user_id] < self._max_retries:
-            delay = self._retry_delay * self._retry_count[user_id]
-            print(f"Retrying connection for user {user_id} in {delay}s (attempt {self._retry_count[user_id]}/{self._max_retries})")
-            asyncio.create_task(self._retry_connection(user_id, delay))
-        else:
-            print(f"Max retries reached for user {user_id}. Disconnecting.")
-            self.disconnect(user_id)
-
-    async def _retry_connection(self, user_id: int, delay: int):
-        """Attempt to reconnect after a delay"""
-        await asyncio.sleep(delay)
-        if user_id in self.active_connections:
-            try:
-                # Close existing connection first
-                await self.active_connections[user_id].close()
-                del self.active_connections[user_id]
-                
-                # Create new connection
-                websocket = WebSocket(self.active_connections[user_id].url)
-                await self.connect(websocket, user_id)
-            except Exception as e:
-                print(f"Retry failed for user {user_id}: {e}")
-                self._handle_error(user_id, e)
-
-    async def process_notifications(self):
-        """Process notification queue with error handling"""
-        while True:
-            try:
-                notification = await self.notification_queue.get()
-                user_id = notification['user_id']
-                message = {
-                    'type': notification['type'],
-                    'data': notification['data']
-                }
-                
-                if user_id not in self.active_connections:
-                    print(f"No active connection for user {user_id}")
-                    continue
-                
-                await self.broadcast(user_id, message)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                print(f"Error processing notification: {e}")
-
-    async def _cleanup_connections(self):
-        """Periodically clean up inactive connections"""
-        while True:
-            await asyncio.sleep(60)  # Clean up every 60 seconds
-            inactive_connections = [user_id for user_id, websocket in self.active_connections.items() if websocket.closed]
-            for user_id in inactive_connections:
-                del self.active_connections[user_id]
-                del self._retry_count[user_id]
-                print(f"Removed inactive connection for user {user_id}")
-
-    async def _process_notification_queue(self):
-        """Process notification queue"""
-        while True:
-            try:
-                notification = await self.notification_queue.get()
-                user_id = notification['user_id']
-                message = {
-                    'type': notification['type'],
-                    'data': notification['data']
-                }
-                
-                if user_id not in self.active_connections:
-                    print(f"No active connection for user {user_id}")
-                    continue
-                
-                await self.broadcast(user_id, message)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                print(f"Error processing notification: {e}")
-
-manager = ConnectionManager()
-
-# Initialize notification system
-notifications = Notifications()
-
-# Start notification processor as a background task
-notification_task = asyncio.create_task(notifications.process_notifications())
-
-# Add shutdown handler to the lifespan context manager
-@app.on_event("shutdown")
-async def shutdown_event():
-    # Gracefully shutdown the notification system
-    await notifications.shutdown()
-    # Wait for the notification task to complete
-    if not notification_task.done():
-        notification_task.cancel()
-        try:
-            await notification_task
-        except asyncio.CancelledError:
-            pass
 meal_fetcher = GetAllMeals()
 disbursement_handler = Disbursements()
 supplements_crud = Supplements()
 
-# Start notification processor
-asyncio.create_task(manager.process_notifications())
-
-# Start connection cleanup task
-asyncio.create_task(manager._cleanup_connections())
-
-# Start notification queue processor
-asyncio.create_task(manager._process_notification_queue())
 
 @app.get('/rr') #also used by my health status checking server o see if servr is up and okay
 @alru_cache(maxsize=1)
@@ -2265,83 +2514,9 @@ async def welcome():
     """Welcome endpoint."""
     return {'message': 'Welcome to ZINZI.'} # Updated name
 
-# === WebSocket Endpoint ===
-@app.websocket("/ws/notifications/{user_id}")
-async def websocket_endpoint(websocket: WebSocket, user_id: int):
-    try:
-        await manager.connect(websocket, user_id)
-        
-        while True:
-            try:
-                data = await websocket.receive_text()
-                # Handle any incoming messages if needed
-                if data == 'pong':
-                    continue  # Ignore pong responses
-                    
-                # Process incoming messages
-                message = json.loads(data)
-                if message.get('type') == 'heartbeat':
-                    continue  # Ignore heartbeat messages
-                    
-                # Handle other message types as needed
-                
-            except json.JSONDecodeError:
-                logger.error(f"Invalid JSON received from user {user_id}")
-                continue
-            except Exception as e:
-                logger.error(f"Error processing message from user {user_id}: {e}")
-                break
-                
-    except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for user {user_id}")
-        manager.disconnect(user_id)
-    except Exception as e:
-        logger.error(f"WebSocket error for user {user_id}: {e}")
-        manager.disconnect(user_id)
-
-# === Notification Endpoints ===
-@app.post("/notifications")
-async def create_notification(notification_data: dict, conn: asyncpg.Connection = Depends(get_db)):
-    user_id = notification_data.get('user_id')
-    notification_type = notification_data.get('notification_type')
-    message = notification_data.get('message')
-    data = notification_data.get('data', {})
-    
-    notification_id = await notifications.create_notification(
-        conn, user_id, notification_type, 
-        order_id=notification_data.get('order_id'),
-        chef_id=notification_data.get('chef_id'),
-        producer_id=notification_data.get('producer_id'),
-        transporter_id=notification_data.get('transporter_id'),
-        message=message, data=data
-    )
-    
-    # Add to notification queue for WebSocket broadcast
-    manager.notification_queue.put_nowait({
-        'user_id': user_id,
-        'type': notification_type,
-        'data': data
-    })
-    
-    return {"notification_id": notification_id}
-
-@app.get("/notifications/unread")
-async def get_unread_notifications(user_id: int, conn: asyncpg.Connection = Depends(get_db)):
-    return await notifications.get_unread_notifications(conn, user_id)
-
-@app.put("/notifications/{notification_id}/read")
-async def mark_notification_as_read(notification_id: int, conn: asyncpg.Connection = Depends(get_db)):
-    await notifications.mark_as_read(conn, notification_id)
-    return {"message": "Notification marked as read"}
-
-@app.get("/notifications/settings")
-async def get_notification_settings(user_id: int, conn: asyncpg.Connection = Depends(get_db)):
-    return await notifications.get_notification_settings(conn, user_id)
-
-@app.put("/notifications/settings")
-async def update_notification_settings(user_id: int, settings: dict, conn: asyncpg.Connection = Depends(get_db)):
-    await notifications.update_notification_settings(conn, user_id, settings)
-    return {"message": "Notification settings updated"}
+@app.get("/favicon.ico", include_in_schema=False)
+async def get_favicon():
+    return FileResponse("static/favicon.ico")
 
 # === USER Endpoints ===
 @app.post('/rr/signup_user', status_code=status.HTTP_201_CREATED)
@@ -2385,7 +2560,7 @@ async def get_user_by_id_endpoint(user_id: int = Path(..., gt=0), conn: asyncpg.
     if data is None: raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='User not found')
     return {'message': 'User retrieved.', 'data': data}
 
-@app.put('/rr/users/{user_id}')
+@app.patch('/rr/users/{user_id}')
 async def update_user_endpoint(user_id: int = Path(..., gt=0), updates: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
     """Endpoint to update a user by ID."""
     auth_users = AuthenticationAndUsers()
@@ -2538,6 +2713,252 @@ async def update_transporter_status_endpoint(transporter_id: int, status_update:
     return {'message': f'Transporter {transporter_id} status updated'}
 
 # === STAKEHOLDER Endpoints ===
+
+# === NOTIFICATION Endpoints ===
+@app.post("/rr/notifications/tokens")
+async def register_fcm_token(
+    token_data: dict = Body(...),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Register or update an FCM token for a user.
+    
+    Args:
+        token_data: {"token": str, "platform": str}
+        conn: Database connection
+    
+    Returns:
+        dict: Success message
+    """
+    try:
+        user_id = token_data.get("user_id")
+        token = token_data.get("token")
+        platform = token_data.get("platform")
+        user_type = token_data.get("user_type", "user") # Extract user_type, default to 'user'
+
+        if not all([user_id, token, platform]):
+            raise HTTPException(status_code=400, detail="Missing required fields (user_id, token, platform)")
+
+        success = await notification_service.store_fcm_token(
+            conn,
+            user_id,
+            token,
+            platform,
+            user_type
+        )
+        
+        if success:
+            return {"message": "Token registered successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to register token")
+    except Exception as e:
+        logger.error(f"Error registering FCM token: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/rr/notifications/tokens")
+async def get_fcm_tokens(
+    platform: Optional[str] = None,
+    user_id: Optional[str] = Query(None),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Get FCM tokens for a user.
+    
+    Args:
+        platform: Optional platform filter
+        user_id: User's UUID
+        conn: Database connection
+    
+    Returns:
+        List[dict]: List of FCM tokens
+    """
+    try:
+        if not user_id:
+            raise HTTPException(status_code=400, detail="user_id is required")
+            
+        tokens = await notification_service.get_fcm_tokens(conn, user_id, platform)
+        return tokens
+    except Exception as e:
+        logger.error(f"Error getting FCM tokens: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/rr/notifications/tokens/{token_id}")
+async def deactivate_fcm_token(
+    token_id: int,
+    user_id: Optional[str] = Query(None),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Deactivate an FCM token.
+    
+    Args:
+        token_id: ID of the token to deactivate
+        user_id: User's UUID
+        conn: Database connection
+    
+    Returns:
+        dict: Success message
+    """
+    try:
+        if not user_id:
+            raise HTTPException(status_code=400, detail="user_id is required")
+            
+        success = await notification_service.deactivate_fcm_token(conn, token_id)
+        
+        if success:
+            return {"message": "Token deactivated successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to deactivate token")
+    except Exception as e:
+        logger.error(f"Error deactivating FCM token: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/rr/notifications/subscriptions")
+async def subscribe_to_topic(
+    subscription_data: dict = Body(...),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Subscribe a user to a notification topic.
+    
+    Args:
+        subscription_data: {"user_id": str, "topic": str}
+        conn: Database connection
+    
+    Returns:
+        dict: Success message
+    """
+    try:
+        user_id = subscription_data.get("user_id")
+        topic = subscription_data.get("topic")
+        
+        if not all([user_id, topic]):
+            raise HTTPException(status_code=400, detail="Missing required fields")
+            
+        success = await notification_service.subscribe_to_topic(
+            conn,
+            user_id=user_id,
+            topic=topic
+        )
+        
+        if success:
+            return {"message": "Subscribed to topic successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to subscribe to topic")
+    except Exception as e:
+        logger.error(f"Error subscribing to topic: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/rr/notifications/subscriptions/{topic}")
+async def unsubscribe_from_topic(
+    topic: str,
+    user_id: Optional[str] = Query(None),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Unsubscribe a user from a notification topic.
+    
+    Args:
+        topic: Topic name
+        user_id: User's UUID
+        conn: Database connection
+    
+    Returns:
+        dict: Success message
+    """
+    try:
+        if not user_id:
+            raise HTTPException(status_code=400, detail="user_id is required")
+            
+        success = await notification_service.unsubscribe_from_topic(
+            conn,
+            user_id=user_id,
+            topic=topic
+        )
+        
+        if success:
+            return {"message": "Unsubscribed from topic successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to unsubscribe from topic")
+    except Exception as e:
+        logger.error(f"Error unsubscribing from topic: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/rr/notifications/send")
+async def send_notification(
+    notification_data: dict = Body(...),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Send a notification to a user.
+    
+    Args:
+        notification_data: {"user_id": str, "type": str, "title": str, "body": str, "data": dict}
+        conn: Database connection
+    
+    Returns:
+        dict: Notification ID
+    """
+    try:
+        user_id = notification_data.get("user_id")
+        notification_type = notification_data.get("type")
+        title = notification_data.get("title")
+        body = notification_data.get("body")
+        data = notification_data.get("data", {})
+        
+        if not all([user_id, notification_type, title, body]):
+            raise HTTPException(status_code=400, detail="Missing required fields")
+            
+        # Get tokens for the user
+        tokens = await notification_service.get_fcm_tokens(conn, user_id)
+        
+        if not tokens:
+            raise HTTPException(status_code=400, detail="No active tokens found")
+            
+        # Log the notification
+        notification_id = await notification_service.log_notification(
+            conn,
+            user_id=user_id,
+            token=tokens[0]["token"],  # Use the first active token
+            notification_type=notification_type,
+            title=title,
+            body=body,
+            data=data
+        )
+        
+        if not notification_id:
+            raise HTTPException(status_code=500, detail="Failed to log notification")
+            
+        return {"notification_id": notification_id}
+    except Exception as e:
+        logger.error(f"Error sending notification: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/rr/notifications/history")
+async def get_notification_history(
+    limit: int = Query(50, ge=1),
+    user_id: Optional[str] = Query(None),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Get notification history for a user.
+    
+    Args:
+        limit: Maximum number of notifications to return
+        user_id: User's UUID
+        conn: Database connection
+    
+    Returns:
+        List[dict]: List of notification history items
+    """
+    try:
+        if not user_id:
+            raise HTTPException(status_code=400, detail="user_id is required")
+            
+        return await notification_service.get_notification_history(conn, user_id, limit)
+    except Exception as e:
+        logger.error(f"Error getting notification history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 @app.post('/rr/create_stakeholders', status_code=status.HTTP_201_CREATED)
 async def add_stakeholder_endpoint(stakeholder_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
     return await stakeholders_crud.create_stakeholder(conn, stakeholder_data) # Pass conn
@@ -2886,13 +3307,13 @@ async def list_user_metrics_endpoint(user_id: int = Path(..., gt=0), conn: async
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Metrics not found for user ID {user_id}")
     return {"metrics": metrics}
 
-@app.put('/rr/metrics/{metric_id}')
-@app.patch('/rr/metrics/{metric_id}')
-async def update_metric_endpoint(metric_id: int, updates: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
-    """Update a user metric by ID."""
+@app.put('/rr/metrics/{user_id}')
+@app.patch('/rr/metrics/{user_id}')
+async def update_metric_endpoint(user_id: int, updates: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
+    """Update a user metric by user ID."""
     repo = AuthenticationAndUsers()
-    await repo.update_metric(conn, metric_id, updates)
-    return {"message": f"Metric {metric_id} updated successfully."}
+    await repo.update_metric(conn, user_id, updates)
+    return {"message": f"Metric for user {user_id} updated successfully."}
 
 
 @app.delete('/rr/metrics/{metric_id}', status_code=status.HTTP_501_NOT_IMPLEMENTED)
