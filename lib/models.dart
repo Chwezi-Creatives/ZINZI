@@ -328,6 +328,19 @@ class Product {
     this.unitGrams,
   });
 
+  Map<String, dynamic> toJson() {
+    return {
+      'produce_id': produceId,
+      'produce_name': produceName,
+      'calories': calories,
+      'carbohydrates': carbohydrates,
+      'proteins': proteins,
+      'fats': fats,
+      'source': source,
+      'unit_grams': unitGrams,
+    };
+  }
+
   factory Product.fromJson(Map<String, dynamic> json) {
     double? tryParseDouble(dynamic value) {
       if (value == null) return null;

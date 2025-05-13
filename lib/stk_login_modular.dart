@@ -11,6 +11,8 @@ class StakeholderLoginPageModular extends StatelessWidget {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setString('stakeholder_user_id', userId);
     await prefs.setString('stakeholder_user_type', userType);
+    await prefs.setString('user_id', userId); // Standard key for splash
+    await prefs.setString('user_type', userType); // Standard key for splash
     await prefs.setBool('is_logged_in', true);
     // Register FCM token with user info (async, do not await)
     FCMService.registerTokenWithUserInfo();

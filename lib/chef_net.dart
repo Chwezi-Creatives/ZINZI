@@ -92,7 +92,7 @@ class ChooseChefNetwork extends StatefulWidget {
     if (!cacheValid) {
       try {
         final apiBaseUrl = dotenv.env['API_BASE_URL'] ?? dotenv.env['API_BASE_URL-intranet'] ?? 'https://your.default.api.url/api';
-        final response = await http.get(Uri.parse('apiBaseUrl/rr/rchefs')).timeout(const Duration(seconds: 15));
+        final response = await http.get(Uri.parse('$apiBaseUrl/rr/rchefs')).timeout(const Duration(seconds: 15));
         if (response.statusCode == 200) {
           final dataList = jsonDecode(response.body);
           await UserCache.saveData(kCacheKeyChefs, dataList);
@@ -149,7 +149,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
   // --- Caching Logic (Copied from Source) ---
 
   Future<void> _loadChefsFromCacheOrFetch() async {
-    if (!mounted) return;
+    if (!context.mounted) return;
 
     setState(() {
       isLoading = true; // Show initial loading shimmer
@@ -158,51 +158,63 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
 
     final prefs = await SharedPreferences.getInstance();
     final String? cachedData = prefs.getString(kCacheKeyChefs);
-    final int? cachedTimestampMillis = prefs.getInt(kCacheKeyTimestamp);
+    final String? cachedTimestampString = prefs.getString(kCacheKeyTimestamp);
+    print('[ChefNet] Cached timestamp string: $cachedTimestampString');
+    if (cachedData != null && cachedTimestampString != null) {
+      print('[ChefNet] Cache found, checking validity...');
+      DateTime? cachedTimestamp;
+      try {
+        cachedTimestamp = DateTime.parse(cachedTimestampString);
+      } catch (e) {
+        print('[ChefNet] Invalid cache timestamp: $cachedTimestampString, error: $e');
+      }
+      if (cachedTimestamp != null) {
+        print('[ChefNet] Cache timestamp: $cachedTimestamp');
+        final DateTime now = DateTime.now();
+        print('[ChefNet] Now: $now');
+        if (now.difference(cachedTimestamp) < kCacheDuration) {
+          print("Cache valid, loading chefs from cache.");
+          try {
+            final List<dynamic> cachedListRaw = json.decode(cachedData);
+            if (cachedListRaw is List) {
+              List<Map<String, dynamic>> cachedList =
+                  List<Map<String, dynamic>>.from(
+                      cachedListRaw.whereType<Map<String, dynamic>>());
+              print('[ChefNet] Loaded ${cachedList.length} chefs from cache');
+              if (cachedList.isNotEmpty) {
+                print('[ChefNet] First chef from cache: ' + cachedList.first.toString());
+              }
+              _sortChefList(cachedList); // Sort cached data
 
-    bool cacheValid = false;
-    if (cachedData != null && cachedTimestampMillis != null) {
-      final DateTime cachedTimestamp =
-          DateTime.fromMillisecondsSinceEpoch(cachedTimestampMillis);
-      final DateTime now = DateTime.now();
-      cacheValid = now.difference(cachedTimestamp) < kCacheDuration;
-
-      if (cacheValid) {
-        print("Cache valid, loading chefs from cache.");
-        try {
-          final List<dynamic> cachedListRaw = json.decode(cachedData);
-          if (cachedListRaw is List) {
-            List<Map<String, dynamic>> cachedList =
-                List<Map<String, dynamic>>.from(
-                    cachedListRaw.whereType<Map<String, dynamic>>());
-            _sortChefList(cachedList); // Sort cached data
-
-            if (mounted) {
-              setState(() {
-                chefs = cachedList; // Assign sorted list
-                allFetchedChefs =
-                    List.from(chefs); // Update allFetchedChefs as well
-                _extractCuisineTypes(); // Extract types from cached data
-                _applyFilters(); // Apply filters to cached data
-                isLoading = false; // Hide shimmer
-              });
+              if (mounted) {
+                setState(() {
+                  chefs = cachedList; // Assign sorted list
+                  allFetchedChefs =
+                      List.from(chefs); // Update allFetchedChefs as well
+                  _extractCuisineTypes(); // Extract types from cached data
+                  _applyFilters(); // Apply filters to cached data
+                  isLoading = false; // Hide shimmer
+                });
+              }
+              // Optional: Trigger background fetch to update cache silently
+              fetchChefs(
+                  isBackground:
+                      true); // Always fetch in background if cache is valid
+              return; // Exit after loading from cache
+            } else {
+              print(
+                  "Cached data format error: Expected a List, got ${cachedListRaw.runtimeType}");
+              await _clearCache(prefs); // Clear corrupted cache
             }
-            // Optional: Trigger background fetch to update cache silently
-            fetchChefs(
-                isBackground:
-                    true); // Always fetch in background if cache is valid
-            return; // Exit after loading from cache
-          } else {
-            print(
-                "Cached data format error: Expected a List, got ${cachedListRaw.runtimeType}");
-            await _clearCache(prefs); // Clear corrupted cache
+          } catch (e) {
+            print("Error decoding or processing cached chefs: $e");
+            await _clearCache(prefs); // Clear potentially corrupted cache
           }
-        } catch (e) {
-          print("Error decoding or processing cached chefs: $e");
-          await _clearCache(prefs); // Clear potentially corrupted cache
+        } else {
+          print("Cache expired, fetching fresh data.");
         }
       } else {
-        print("Cache expired, fetching fresh data.");
+        print("Cache timestamp missing or invalid, fetching fresh data.");
       }
     } else {
       print("No cache found, fetching fresh data.");
@@ -230,8 +242,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
       final String dataToStore =
           json.encode(sortedList); // Store the sorted list
       await prefs.setString(kCacheKeyChefs, dataToStore);
-      await prefs.setInt(
-          kCacheKeyTimestamp, DateTime.now().millisecondsSinceEpoch);
+      await prefs.setString(kCacheKeyTimestamp, DateTime.now().toIso8601String());
       print("Sorted chefs data saved to cache.");
     } catch (e) {
       print("Error saving chefs to cache: $e");
@@ -246,6 +257,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
 
   // --- Sorting Logic (Copied from Source) ---
   void _sortChefList(List<Map<String, dynamic>> listToSort) {
+  print('[ChefNet] _sortChefList called. List length: ${listToSort.length}');
     listToSort.sort((a, b) {
       // Attempt to parse the sort field (e.g., 'created_at')
       DateTime? dateA = _parseDate(a[kChefSortField]);
@@ -281,7 +293,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
 
   // isBackground: If true, fetches data without showing the main loading shimmer.
   Future<void> fetchChefs({bool isBackground = false}) async {
-    if (!mounted) return;
+    if (!context.mounted) return;
 
     // Only show main shimmer if not a background fetch and not already loading cache
     if (!isBackground) {
@@ -307,7 +319,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
       final response = await http
           .get(Uri.parse(url))
           .timeout(const Duration(seconds: 20)); // Increased timeout slightly
-      if (!mounted) return;
+      if (!context.mounted) return;
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> responseData = json.decode(response.body);
@@ -332,6 +344,10 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
               chefs = validChefs; // Assign sorted list
               allFetchedChefs =
                   List.from(chefs); // Keep a copy of the latest fetch
+              print('[ChefNet] Loaded ${chefs.length} chefs from API');
+              if (chefs.isNotEmpty) {
+                print('[ChefNet] First chef from API: ' + chefs.first.toString());
+              }
               _extractCuisineTypes(); // Re-extract cuisines from fresh data
               _applyFilters(); // Apply filters to fresh data
               fetchError = null; // Clear any previous error
@@ -427,18 +443,30 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
 
   // Applies search query and active category filter to the 'chefs' list (Copied from Source)
   void _applyFilters() {
+    print('[ChefNet] _applyFilters called. Query: ' +
+        _searchController.text +
+        ', ActiveFilter: ' +
+        activeFilter);
     final query = _searchController.text.toLowerCase().trim();
     // Filter the *currently displayed* chefs list if not empty,
     // otherwise filter the full list from last fetch/cache.
     // Both 'chefs' and 'allFetchedChefs' should be sorted now.
     final listToFilter = chefs.isNotEmpty ? chefs : allFetchedChefs;
+    print('[ChefNet] Filtering list. chefs.length: ${chefs.length}, allFetchedChefs.length: ${allFetchedChefs.length}');
 
-    if (!mounted) return;
+    if (!context.mounted) return;
 
     setState(() {
+      print('[ChefNet] Setting filteredChefs for display. Query empty: ${query.isEmpty}, ActiveFilter: $activeFilter');
       if (query.isEmpty && activeFilter == 'All') {
         // No filters active, show all chefs from the current source
         filteredChefs = List.from(listToFilter);
+        print('[ChefNet] FilteredChefs updated. Count: ${filteredChefs.length}');
+        if (filteredChefs.isNotEmpty) {
+          print('[ChefNet] First filtered chef: ' + filteredChefs.first.toString());
+        } else {
+          print('[ChefNet] FilteredChefs is empty after filtering.');
+        }
       } else {
         // Apply filters
         filteredChefs = listToFilter.where((chef) {
@@ -489,15 +517,18 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
   }
 
   void _applyCategoryFilter(String category) {
-    if (!mounted) return;
+  print('[ChefNet] _applyCategoryFilter called with: $category');
+    if (!context.mounted) return;
     setState(() {
       activeFilter = category;
+      print('[ChefNet] Category filter set to: $category');
       _applyFilters(); // Re-apply all filters (search + new category)
     });
   }
 
   void _clearFiltersAndSearch() {
-    if (!mounted) return;
+  print('[ChefNet] _clearFiltersAndSearch called');
+    if (!context.mounted) return;
     _searchController
         .clear(); // This will trigger the listener -> _applyFilters
     setState(() {
@@ -537,7 +568,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
                 GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 20)),
         centerTitle: true,
         backgroundColor: kColorSurface,
-        foregroundColor: kColorTextPrimary,
+        foregroundColor: kColorPrimaryDarkest,
         elevation: 1.0,
         actions: [
           // Refresh button uses the new _refreshIconController and fetchChefs from source
@@ -707,6 +738,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
   // --- Build Widgets for Different States (Kept from Target) ---
 
   Widget _buildLoadingShimmerList() {
+    print('[ChefNet] Showing loading shimmer list');
     return Shimmer.fromColors(
         baseColor: kShimmerBaseColor,
         highlightColor: kShimmerHighlightColor,
@@ -767,6 +799,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
   }
 
   Widget _buildErrorState(String message) {
+    print('[ChefNet] Showing error state: ' + message);
     return Center(
         child: Padding(
             padding: const EdgeInsets.all(24.0),
@@ -811,6 +844,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
   }
 
   Widget _buildEmptyState() {
+    print('[ChefNet] Showing empty state (no chefs to display)');
     final bool isFiltering = activeFilter != 'All' ||
         _searchController.text.isNotEmpty; // Uses state from source
     return Center(
@@ -867,6 +901,8 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
   }
 
   Widget _buildChefListView() {
+    print('[ChefNet] _buildChefListView called. filteredChefs.length: '
+        + filteredChefs.length.toString());
     // Uses filteredChefs which is updated by _applyFilters (derived from sorted 'chefs')
     return RefreshIndicator(
         color: kColorPrimary,
@@ -889,6 +925,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
   // Builds individual chef card (Kept from Target)
   Widget _buildChefCard(
       BuildContext context, Map<String, dynamic> chef, int index, Key key) {
+    print('[ChefNet] _buildChefCard: index=$index, chef=${chef['name'] ?? chef.toString()}');
     final chefName = chef['name']?.toString() ?? 'Unknown Chef';
     final chefImage = chef['image']?.toString(); // Keep as nullable string
     final chefId = chef['chefid']?.toString() ??
@@ -968,9 +1005,11 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
                     },
                     splashColor: kColorPrimaryLight.withOpacity(0.1),
                     highlightColor: kColorPrimaryLightest.withOpacity(0.5),
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
+                    child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [ 
                           // --- Image Section with Placeholder ---
                           Stack(children: [
                             AspectRatio(
@@ -1163,7 +1202,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
                                               fontStyle: FontStyle.italic))
                                     ]
                                   ]))
-                        ])))));
+                        ]))))));
   }
 
   // Helper to build the placeholder image (Kept from Target)
@@ -1219,8 +1258,23 @@ class ChefDetailScreen extends StatelessWidget {
   Future<bool> _isUserLoggedIn() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      // Check if user_id (an int) exists and is not null
-      return prefs.getInt('user_id') != null;
+      final Object? rawUserId = prefs.get('user_id');
+      print('[ChefNet] _isUserLoggedIn: rawUserId= ${rawUserId.runtimeType}: $rawUserId');
+      if (rawUserId == null) return false;
+      if (rawUserId is int) {
+        return true;
+      } else if (rawUserId is String) {
+        if (rawUserId.isNotEmpty) {
+          // Optionally check if string is int-like
+          final parsed = int.tryParse(rawUserId);
+          print('[ChefNet] _isUserLoggedIn: user_id string parses to int? $parsed');
+          return true;
+        }
+        return false;
+      } else {
+        print('[ChefNet] _isUserLoggedIn: user_id is unexpected type: ${rawUserId.runtimeType}');
+        return false;
+      }
     } catch (e) {
       print("Error checking login status: $e");
       return false; // Assume not logged in on error
@@ -1689,7 +1743,7 @@ class ChefDetailScreen extends StatelessWidget {
                     print(
                         "Returned from CreateGigScreen. Gig not added (cancelled or failed).");
                     // Optionally show a message if needed, e.g., booking cancelled
-                    // if (context.mounted) {
+                    // if (mounted) {
                     //   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Booking cancelled.')));
                     // }
                   }

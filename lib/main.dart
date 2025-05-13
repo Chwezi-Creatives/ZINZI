@@ -27,19 +27,37 @@ void main() async {
   print("HTTP Overrides set");
 
   try {
-    // Only initialize Firebase for mobile platforms
-    if (!kIsWeb) {
-      await Firebase.initializeApp();
-      print("Firebase initialized");
-      
-      // Initialize Firebase Messaging only for mobile
-      await FCMService.initialize();
-      print("Firebase Messaging initialized");
+    if (kIsWeb) {
+      await Firebase.initializeApp(
+        options: FirebaseOptions(
+          apiKey: "AIzaSyAtPIxFkbzNtZ8_9ADNmb_6IriS_0jD4kE",
+          authDomain: "zinzi-fcm2.firebaseapp.com",
+          projectId: "zinzi-fcm2",
+          storageBucket: "zinzi-fcm2.firebasestorage.app",
+          messagingSenderId: "140229310127",
+          appId: "1:140229310127:web:05f48494c489bd048b065a",
+          measurementId: "G-HFLZEDCKZN",
+        ),
+      );
+      print("Firebase initialized (web)");
     } else {
-      print("Skipping Firebase initialization for web");
+      await Firebase.initializeApp();
+      print("Firebase initialized (mobile)");
+    }
+
+    // Request notification permissions for web and iOS
+    if (kIsWeb) {
+      await FCMService.initialize();
+      print("FCMService initialized (web)");
+    } else if (Platform.isIOS) {
+      await FCMService.initialize();
+      print("FCMService initialized (iOS)");
+    } else {
+      await FCMService.initialize();
+      print("FCMService initialized (Android)");
     }
   } catch (e) {
-    print("Error initializing Firebase: $e");
+    print("Error initializing Firebase/FCM: $e");
   }
 
   // Initialize drawer data

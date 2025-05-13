@@ -84,6 +84,7 @@ class _TransporterLoginPageState extends State<TransporterLoginPage> {
              await prefs.setString('transporter_email', email);
              await prefs.setString('transporter_name', transporterName);
              await prefs.setString('user_type', userType);
+await prefs.setString('user_id', transporterId); // Standard key for splash
              await prefs.setBool('is_logged_in', true);
              // Register FCM token with user info (async, do not await)
              FCMService.registerTokenWithUserInfo();
@@ -112,24 +113,39 @@ class _TransporterLoginPageState extends State<TransporterLoginPage> {
              final responseData = json.decode(response.body);
              errorMessage = responseData['message'] ?? responseData['error'] ?? 'wrong password or name (Code: ${response.statusCode})';
            } catch (_) {}
-           _showErrorSnackBar(errorMessage);
+           if (!mounted) return;
+            _showErrorSnackBar(errorMessage);
          }
        } catch (e) {
          print("Login Exception: $e");
          if (mounted) {
            setState(() => _isLoading = false);
-           _showErrorSnackBar('An error occurred during login: $e');
+           if (!mounted) return;
+            _showErrorSnackBar('An error occurred during login: $e');
          }
        }
        // --- End Actual API Call ---
        
     } else {
-       _showSnackBar('Please enter email and password.', isError: true);
+       if (!mounted) return;
+     _showSnackBar('Please enter email and password.', isError: true);
     }
   }
 
   // --- Helper for SnackBar ---
-  void _showSnackBar(String message, {bool isError = false}) { ScaffoldMessenger.of(context).removeCurrentSnackBar(); ScaffoldMessenger.of(context).showSnackBar( SnackBar( content: Text(message), backgroundColor: isError ? errorColor : accentTeal, behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)), margin: const EdgeInsets.all(10), ), ); }
+  void _showSnackBar(String message, {bool isError = false}) {
+  if (!mounted) return;
+  ScaffoldMessenger.of(context).removeCurrentSnackBar();
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(message),
+      backgroundColor: isError ? errorColor : accentTeal,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      margin: const EdgeInsets.all(10),
+    ),
+  );
+}
   void _showErrorSnackBar(String message) { _showSnackBar(message, isError: true); }
 
 

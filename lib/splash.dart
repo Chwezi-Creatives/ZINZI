@@ -1,15 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:zinzi2/onboard.dart';
 import 'package:zinzi2/signup_or_login.dart'; // Assuming this is your login/signup choice page
 import 'package:google_fonts/google_fonts.dart'; // For custom fonts
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/onboard.dart';
+import 'package:zinzi2/nutri_detail.dart';
+import 'package:zinzi2/chef_net.dart';
+
 import 'package:zinzi2/chef_dash8888.dart';
 import 'package:zinzi2/produ_dash22.dart';
+import 'package:zinzi2/transooter_dash_before_mapbox.dart';
+import 'package:zinzi2/stakeholderdash222.dart';
 import 'package:zinzi2/allmeals.dart';
 import 'package:zinzi2/meal_detail.dart';
 import 'package:zinzi2/cache_config.dart'; // Import CacheConfig
 import 'package:zinzi2/user_cache.dart'; // Import UserCache
+import 'package:zinzi2/orderhistory.dart'; // Import OrderHistoryScreen for preloading
 
 // --- Hardcoded Color Scheme (Shades of Teal and White/Off-White) ---
 const Color kColorPrimaryDark = Color(0xFF004D40); // Darkest Teal
@@ -30,7 +36,10 @@ class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  _SplashScreenState createState() => _SplashScreenState();
+  @override
+  _SplashScreenState createState() {
+    return _SplashScreenState();
+  }
 }
 
 class _SplashScreenState extends State<SplashScreen>
@@ -107,118 +116,81 @@ class _SplashScreenState extends State<SplashScreen>
 
   // Decide where to go after splash based on login state and preloading
   Future<void> _preloadAndNavigate() async {
-    if (mounted) {
-      setState(() {
-        _isPreloading = true;
-      });
-    }
-
-    // Start the animation delay and the data preloading concurrently
-    final animationDelay = Future.delayed(const Duration(milliseconds: 3000));
-    final preloadTasks = <Future>[];
-    preloadTasks.add(AllMealsScreen.loadMealsCacheFromPrefs());
-    preloadTasks.add(MealDetailScreen.loadChefsCacheFromUserCache());
-    preloadTasks.add(MealDetailScreen.loadProducersCacheFromUserCache());
-
-    // Add fetching and saving logic if cache is invalid
-    final now = DateTime.now();
-
-    // Check and fetch/save Chefs if cache is invalid
-    final dynamic chefsTimestampData =
-        await UserCache.getData('chefs_list_cache_timestamp');
-    DateTime? chefsCacheTimestamp;
-    if (chefsTimestampData is String) {
-      try {
-        chefsCacheTimestamp = DateTime.parse(chefsTimestampData);
-      } catch (_) {}
-    }
-    final bool chefsCacheValid = chefsCacheTimestamp != null &&
-        now.difference(chefsCacheTimestamp) <
-            CacheConfig.chefProducerDetailCacheDuration;
-
-    if (!chefsCacheValid) {
-      print("Splash: Chef cache invalid, fetching...");
-      preloadTasks.add(ApiService.fetchChefsStatic().then((fetchedChefs) async {
-        if (fetchedChefs != null) {
-          await MealDetailScreen.saveChefsCacheToUserCache(fetchedChefs);
-          print("Splash: Fetched and saved new chef cache.");
-        } else {
-          print("Splash: Failed to fetch new chef cache.");
-        }
-      }).catchError((e) {
-        print("Splash: Error fetching chefs: $e");
-      }));
-    } else {
-      print("Splash: Chef cache is valid.");
-    }
-
-    // Check and fetch/save Producers if cache is invalid
-    final dynamic producersTimestampData =
-        await UserCache.getData('producers_list_cache_timestamp');
-    DateTime? producersCacheTimestamp;
-    if (producersTimestampData is String) {
-      try {
-        producersCacheTimestamp = DateTime.parse(producersTimestampData);
-      } catch (_) {}
-    }
-    final bool producersCacheValid = producersCacheTimestamp != null &&
-        now.difference(producersCacheTimestamp) <
-            CacheConfig.chefProducerDetailCacheDuration;
-
-    if (!producersCacheValid) {
-      print("Splash: Producer cache invalid, fetching...");
-      preloadTasks
-          .add(ApiService.fetchProducersStatic().then((fetchedProducers) async {
-        if (fetchedProducers != null) {
-          await MealDetailScreen.saveProducersCacheToUserCache(
-              fetchedProducers);
-          print("Splash: Fetched and saved new producer cache.");
-        } else {
-          print("Splash: Failed to fetch new producer cache.");
-        }
-      }).catchError((e) {
-        print("Splash: Error fetching producers: $e");
-      }));
-    } else {
-      print("Splash: Producer cache is valid.");
-    }
-
-    // Wait for both the animation delay and all preload tasks to complete
-    await Future.wait([animationDelay, ...preloadTasks]);
-
-    if (mounted) {
-      setState(() {
-        _isPreloading = false;
-      });
-    }
-
-    // Add a small delay to allow UI to update
-    await Future.delayed(const Duration(milliseconds: 200));
-
-    // Check login state
+    if (mounted) setState(() => _isPreloading = true);
     final prefs = await SharedPreferences.getInstance();
-    // Try to get user_id as string first, fall back to int for backward compatibility
-    final userId = prefs.getString('user_id') ?? 
-                 prefs.getInt('user_id')?.toString();
-    final chefId = prefs.getString('chef_user_id');
-    final producerId = prefs.getString('producer_id');
 
-    await Future.delayed(const Duration(milliseconds: 300));
+    // Efficiently fetch user_id (int or String)
+    int? userId;
+    final rawUserId = prefs.get('user_id');
+    if (rawUserId is int) {
+      userId = rawUserId;
+    } else if (rawUserId is String) {
+      userId = int.tryParse(rawUserId);
+    }
 
+    // Efficiently fetch user_type
+    String? userType = prefs.getString('user_type');
+    // Normalize userType for case and whitespace
+    final normalizedUserType = userType?.trim().toLowerCase();
+
+    // Debug log for splash extraction
+    debugPrint('[SPLASH] rawUserId: '
+        '[36m'
+        '[1m'
+        '[0m' + rawUserId.toString() +
+        ', userType: ' + (userType ?? 'null') +
+        ', normalizedUserType: ' + (normalizedUserType ?? 'null'));
+
+    // Decide next screen based on login state and user type
     Widget nextScreen;
-    if (userId != null) {
-      nextScreen = LandingPage(); // Assumed to be defined elsewhere
-    } else if (chefId != null) {
-      nextScreen = ChefDash88new(); // Assumed to be defined elsewhere
-    } else if (producerId != null) {
-      nextScreen = ProducerDash22();
+    if (userId != null && normalizedUserType != null && normalizedUserType.isNotEmpty) {
+      switch (normalizedUserType) {
+        case 'chef':
+          nextScreen = ChefDash88new();
+          break;
+        case 'producer':
+          nextScreen = ProducerDash22();
+          break;
+        case 'transporter':
+          nextScreen = TransporterDashNew(transporterId: userId.toString());
+          break;
+        case 'stakeholder':
+          nextScreen = stakeholderdas2222();
+          break;
+        case 'user':
+          nextScreen = LandingPage();
+          break;
+        default:
+          nextScreen = AllMealsScreen();
+          break;
+      }
     } else {
       nextScreen = SignUpOrLoginPage();
     }
 
+    // Parallelized preload/caching logic for fastest splash
+    final preloadFutures = [
+      OrderHistoryScreen.preloadCacheForSplash(),
+      ProducerDash22.preloadCacheForSplash(),
+      AllMealsScreen.loadMealsCacheFromPrefs(),
+      MealDetailScreen.loadChefsCacheFromUserCache(),
+      MealDetailScreen.loadProducersCacheFromUserCache(),
+      Nutri_DetailPage.preloadProducersCacheForSplash(),
+      ChooseChefNetwork.preloadCacheForSplash(),
+    ];
+    if (userType == 'transporter' && userId != null) {
+      preloadFutures.add(TransporterDashNew.preloadCacheForSplash(userId.toString()));
+    }
+    await Future.wait(preloadFutures.map((f) => f.catchError((e) {
+      debugPrint('Preload error: \$e');
+    })));
+    await Future.delayed(const Duration(milliseconds: 0));
+
     if (mounted) {
+      setState(() => _isPreloading = false);
       _navigateWithSlideTransition(context, nextScreen);
     }
+    return;
   }
 
   @override
@@ -294,12 +266,7 @@ class _SplashScreenState extends State<SplashScreen>
                           ),
                           const SizedBox(height: 50),
                           ElevatedButton(
-                            onPressed: _isPreloading
-                                ? null
-                                : () {
-                                    _navigateWithSlideTransition(
-                                        context, SignUpOrLoginPage());
-                                  },
+                            onPressed: null,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: kColorPrimary,
                               foregroundColor: kColorTextOnPrimary,

@@ -1,12 +1,15 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'dart:math'; // Import for min function
+import 'widgets/custom_group_container.dart';
+// import 'dart:math'; // Unused import for min function
 import 'dart:async'; // Import for TimeoutException
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:geolocator/geolocator.dart';
+// import 'notifications/fcm_service.dart'; // Removed duplicate, one below is fine
 import 'package:zinzi2/allmeals.dart';
 // import 'package:zinzi2/blogview.dart'; // Not used directly here
 // import 'package:zinzi2/cart.dart' as cart; // Not used directly here
@@ -18,6 +21,7 @@ import 'package:zinzi2/signup_or_Login.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:zinzi2/user_cache.dart'; // Import UserCache
+import 'package:zinzi2/notifications/fcm_service.dart'; // Import FCMService
 import 'package:zinzi2/app_drawer_unified.dart';
 import 'package:zinzi2/cache_config.dart'; // Import CacheConfig
 import 'package:shimmer/shimmer.dart'; // For loading effect
@@ -72,21 +76,28 @@ class ProfilePage extends StatefulWidget {
     }
     if (!cacheValid) {
       try {
-        final apiBaseUrl = dotenv.env['API_BASE_URL'] ??
+        final apiBaseUrlForPreload = dotenv.env['API_BASE_URL'] ?? // Use a different var name to avoid confusion if needed
             dotenv.env['API_BASE_URL-intranet'] ??
             'https://default.url';
         int? userId = prefs.getInt('user_id');
         if (userId != null) {
           final response = await http
               .get(Uri.parse(
-                  '$apiBaseUrl/rr/rusers/$userId')) // Assuming /rr/rusers endpoint
+                  '$apiBaseUrlForPreload/rr/rusers/$userId')) // Assuming /rr/rusers endpoint
               .timeout(const Duration(seconds: 10));
           if (response.statusCode == 200) {
             final responseData = json.decode(response.body);
             Map<String, dynamic>? userMap =
                 _parseUserResponseStatic(responseData);
-            if (userMap != null) {
-              await UserCache.saveData('user_details_cache', userMap);
+            if (userMap != null && userMap['user_id'] != null) {
+              // Ensure correct keys for cache
+              final cacheUserMap = {
+                'name': userMap['name'] ?? '',
+                'email': userMap['email'] ?? '',
+                'user_id': userMap['user_id']?.toString() ?? '',
+                ...userMap // preserve other keys as well
+              };
+              await UserCache.saveData('user_details_cache', cacheUserMap);
               await prefs.setInt('user_details_cache_timestamp',
                   DateTime.now().millisecondsSinceEpoch);
               print('[Splash][Profile] preload cache updated.');
@@ -136,6 +147,11 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage>
     with SingleTickerProviderStateMixin {
+  // --- Location Fetching State ---
+  bool _isFetchingLocation = false;
+  int _locationHintDots = 0;
+  Timer? _locationHintTimer;
+
   // --- User Identification ---
   int? _userId;
   String? _userType;
@@ -155,6 +171,7 @@ class _ProfilePageState extends State<ProfilePage>
   // --- Image State ---
   String? _profileImagePath;
   String? _profileImageUrl;
+  final ImagePicker _picker = ImagePicker();
 
   // --- Section Editing State ---
   bool _isEditingUserDetails = false;
@@ -260,6 +277,8 @@ class _ProfilePageState extends State<ProfilePage>
     _heightCmController.dispose();
     _heightFeetController.dispose();
     _heightInchesController.dispose();
+    // Dispose location hint timer if active
+    _locationHintTimer?.cancel();
     super.dispose();
   }
 
@@ -281,7 +300,8 @@ class _ProfilePageState extends State<ProfilePage>
   Future<void> _initializeProfile() async {
     setState(() => _isLoading = true);
     await _loadUserIdAndType();
-    await _loadImageFromPrefs();
+    await _loadImageFromPrefs(); // Load local image path first
+
     if (_userId != null) {
       final prefs = await SharedPreferences.getInstance();
       final cachedData = await UserCache.getData('user_details_cache');
@@ -289,21 +309,35 @@ class _ProfilePageState extends State<ProfilePage>
           prefs.getInt('user_details_cache_timestamp');
       final now = DateTime.now();
 
+      bool isUserDetailsCacheComplete(Map<String, dynamic>? data) {
+        if (data == null) return false;
+        final requiredKeys = ['name', 'email', 'user_id'];
+        for (final key in requiredKeys) {
+          if (data[key] == null || data[key].toString().trim().isEmpty) {
+            return false;
+          }
+        }
+        return true;
+      }
+
       bool isCacheValid = cachedData != null &&
           cachedTimestampMillis != null &&
           now.difference(
                   DateTime.fromMillisecondsSinceEpoch(cachedTimestampMillis)) <
               CacheConfig.profileCacheDuration;
 
-      if (isCacheValid) {
+      if (isCacheValid && isUserDetailsCacheComplete(cachedData)) {
         print("[Profile] Using cached user details.");
-        _updateStateWithUserDetails(Map<String, dynamic>.from(cachedData!));
-        setState(() => _isLoading = false); // Stop main loading indicator
-        // Fetch metrics and preferences in the background regardless
+        _updateStateWithUserDetails(cachedData!);
+        setState(() {
+          _isLoading = false;
+          _isLoadingUserDetails = false;
+        });
+        // Fetch metrics and preferences in the background if details are from cache
         _fetchMetrics();
         _fetchPreferences();
       } else {
-        print("[Profile] Cache invalid or missing. Fetching all data.");
+        print("[Profile] Cache incomplete or invalid. Fetching fresh user details.");
         await _fetchData(); // Fetches all details, metrics, prefs
       }
     } else {
@@ -328,7 +362,6 @@ class _ProfilePageState extends State<ProfilePage>
 
   Future<void> _loadUserIdAndType() async {
     final prefs = await SharedPreferences.getInstance();
-    // Try to get user_id as string first, fall back to int for backward compatibility
     final userIdStr = prefs.getString('user_id');
     _userId = userIdStr != null ? int.tryParse(userIdStr) : prefs.getInt('user_id');
     _userType = prefs.getString('user_type');
@@ -338,10 +371,8 @@ class _ProfilePageState extends State<ProfilePage>
   Future<void> _fetchData() async {
     if (!mounted) return;
     setState(() {
-      _isLoading = _userDetails
-          .isEmpty; // Show overall shimmer only if no details loaded yet
+      _isLoading = _userDetails.isEmpty;
       _fetchError = '';
-      // Reset individual loading flags for refresh effect
       _isLoadingUserDetails = true;
       _isLoadingMetrics = true;
       _isLoadingPreferences = true;
@@ -349,18 +380,16 @@ class _ProfilePageState extends State<ProfilePage>
     _startRefreshAnimation();
 
     try {
-      // Fetch data concurrently
       await Future.wait([
         _fetchUserDetails(),
-        _fetchMetrics(),
-        _fetchPreferences(),
+        _fetchMetrics(forceRefresh: true),
+        _fetchPreferences(forceRefresh: true),
       ]);
     } catch (e) {
       if (mounted) {
         print("Error during concurrent data fetch: $e");
         setState(() {
           _fetchError = "Failed to load profile data. Please try again.";
-          // Ensure loading flags are false even on error
           _isLoadingUserDetails = false;
           _isLoadingMetrics = false;
           _isLoadingPreferences = false;
@@ -370,8 +399,7 @@ class _ProfilePageState extends State<ProfilePage>
     } finally {
       if (mounted) {
         setState(() {
-          _isLoading = false; // Hide overall loading indicator
-          // Individual flags are set to false within their respective fetchers' finally blocks
+          _isLoading = false;
         });
         _stopRefreshAnimation();
       }
@@ -385,44 +413,52 @@ class _ProfilePageState extends State<ProfilePage>
       if (mounted) setState(() => _isLoadingUserDetails = false);
       return;
     }
-    final url =
-        '$apiBaseUrl/rr/rusers/$_userId'; // Assuming /rr/rusers endpoint
+    final url = '$apiBaseUrl/rr/rusers/$_userId';
     print('[Profile] API fetch: Fetching user details... from URL: $url');
     try {
       final response =
           await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
       print("User Details Response: ${response.statusCode} - ${response.body}");
       if (!mounted) return;
+
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
         Map<String, dynamic>? userMap = _parseUserResponse(responseData);
         if (userMap != null) {
+          final cacheUserMap = {
+            'name': userMap['name'] ?? '',
+            'email': userMap['email'] ?? '',
+            'user_id': userMap['user_id']?.toString() ?? '',
+            ...userMap
+          };
           _updateStateWithUserDetails(userMap);
-          await UserCache.saveData('user_details_cache', userMap);
+          await UserCache.saveData('user_details_cache', cacheUserMap);
           final prefs = await SharedPreferences.getInstance();
           await prefs.setInt('user_details_cache_timestamp',
               DateTime.now().millisecondsSinceEpoch);
         } else {
-          print("User details parsing failed or data empty: $responseData");
-          // Consider setting default user details state here
-          _userDetails = {}; // Example reset
+          print('Failed to parse user details from API response: $responseData');
+          _userDetails = {}; // Clear or set to default on parse failure
         }
       } else {
         print('Failed to fetch user details. Status: ${response.statusCode}');
-        _userDetails = {}; // Example reset
+        _userDetails = {}; // Clear or set to default on API error
+        if (response.statusCode == 401 || response.statusCode == 403) {
+          _fetchError = "Unauthorized. Please log in again.";
+          _logout(); // Or redirect to login
+        }
       }
     } on TimeoutException {
       print("Timeout fetching user details.");
-      _userDetails = {}; // Example reset
+      if (mounted) _userDetails = {};
     } catch (error) {
       print("Error fetching user details: $error");
-      _userDetails = {}; // Example reset
+      if (mounted) _userDetails = {};
     } finally {
       if (mounted) setState(() => _isLoadingUserDetails = false);
     }
   }
 
-  // Instance parser method using the static one
   Map<String, dynamic>? _parseUserResponse(dynamic responseData) {
     return ProfilePage._parseUserResponseStatic(responseData);
   }
@@ -437,11 +473,10 @@ class _ProfilePageState extends State<ProfilePage>
         'Phone_Number': userData['phone_number'] ?? 'N/A',
         'Location': userData['location'] ?? 'N/A',
         'Registration_Date': userData['registration_date'] ?? 'N/A',
-        'image': userData['image'] ?? userData['image'], // Check both keys
+        'image': userData['image'],
       };
-      _profileImageUrl = _userDetails['image'];
+      _profileImageUrl = _userDetails['image']; // This comes from API
 
-      // Pre-fill controllers only if not currently editing this section
       if (!_isEditingUserDetails) {
         _userDetailsNameController.text = _userDetails['Name'] ?? '';
         _userDetailsEmailController.text = _userDetails['Email'] ?? '';
@@ -450,473 +485,425 @@ class _ProfilePageState extends State<ProfilePage>
       }
     });
   }
+  // *** END OF CORRECTED _updateStateWithUserDetails ***
 
-  Future<void> _fetchMetrics() async {
+  // *** START OF RECONSTRUCTED/MISSING METHODS ***
+  Future<void> _fetchMetrics({bool forceRefresh = false}) async {
     if (_userId == null) {
       if (mounted) setState(() => _isLoadingMetrics = false);
       return;
     }
+    if (mounted) setState(() => _isLoadingMetrics = true);
+
+    final prefs = await SharedPreferences.getInstance();
+    final cachedMetrics = await UserCache.getData('user_metrics_cache');
+    final cachedTimestamp = prefs.getInt('user_metrics_cache_timestamp');
+    final now = DateTime.now();
+
+    if (!forceRefresh &&
+        cachedMetrics != null &&
+        cachedTimestamp != null &&
+        now.difference(DateTime.fromMillisecondsSinceEpoch(cachedTimestamp)) <
+            CacheConfig.metricsCacheDuration) {
+      print("Using cached metrics data");
+      print("Metrics Data Structure (from cache): ${json.encode(cachedMetrics)}");
+      _updateStateWithMetrics(cachedMetrics);
+      if (mounted) setState(() => _isLoadingMetrics = false);
+      return;
+    }
+
+    print('[Profile] API fetch: Fetching user metrics...');
     final url = '$apiBaseUrl/rr/metrics/$_userId';
-    print("Fetching Metrics from URL: $url");
     try {
       final response =
           await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
-      print("Metrics Response: ${response.statusCode} - ${response.body}");
       if (!mounted) return;
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        // Updated parsing logic based on logs
-        if (responseData is Map<String, dynamic> &&
-            responseData.containsKey('metrics') &&
-            responseData['metrics'] is List &&
-            (responseData['metrics'] as List).isNotEmpty &&
-            responseData['metrics'][0] is Map) {
-          final metrics = Map<String, dynamic>.from(responseData['metrics'][0]);
-          _updateStateWithMetrics(metrics);
+        print("Metrics Data Structure (from API): ${json.encode(responseData)}");
+        
+        // Extract metrics from response - handle the nested 'metrics' array structure
+        Map<String, dynamic> metricsMap = {};
+        if (responseData.containsKey('metrics') && responseData['metrics'] is List && responseData['metrics'].isNotEmpty) {
+          // Get the first metrics entry from the array
+          metricsMap = Map<String, dynamic>.from(responseData['metrics'][0]);
+          print("Extracted metrics: ${json.encode(metricsMap)}");
+          _updateStateWithMetrics(metricsMap);
+          await UserCache.saveData('user_metrics_cache', metricsMap);
+          await prefs.setInt('user_metrics_cache_timestamp', now.millisecondsSinceEpoch);
+        } else if (responseData.containsKey('data')) {
+          metricsMap = Map<String, dynamic>.from(responseData['data']);
+          _updateStateWithMetrics(metricsMap);
+          await UserCache.saveData('user_metrics_cache', metricsMap);
+          await prefs.setInt('user_metrics_cache_timestamp', now.millisecondsSinceEpoch);
         } else {
-          print(
-              "Metrics data parsing failed or empty (expected structure not found): $responseData");
-          _setDefaultMetricsState();
+          print("Metrics Data Structure (from API): ${json.encode(responseData)}");
+          _updateStateWithMetrics(responseData);
         }
       } else {
-        print('Could not fetch metrics. Status: ${response.statusCode}');
-        _setDefaultMetricsState(); // Set defaults on error
+        print('Failed to fetch metrics. Status: ${response.statusCode}');
+        _userMetrics = {}; // Default or clear
       }
     } on TimeoutException {
       print("Timeout fetching metrics.");
-      _setDefaultMetricsState(); // Set defaults on timeout
+      if (mounted) _userMetrics = {};
     } catch (error) {
       print("Error fetching metrics: $error");
-      _setDefaultMetricsState(); // Set defaults on error
+      if (mounted) _userMetrics = {};
     } finally {
       if (mounted) setState(() => _isLoadingMetrics = false);
     }
   }
 
-  void _setDefaultMetricsState() {
+  void _updateStateWithMetrics(Map<String, dynamic> metricsData) {
     if (!mounted) return;
     setState(() {
       _userMetrics = {
-        'age_range': 'N/A',
-        'sex': 'N/A',
-        'height': 'N/A',
-        'weight': 'N/A',
-        'bmi': 'N/A',
-        'activity_level': 'N/A',
-        'cholesterol_level': 'N/A',
-        'sys_bp': 'N/A',
-        'dia_bp': 'N/A',
-        'pulse': 'N/A',
-        'ideal_weight': 'N/A',
-        'bmi_category': 'N/A',
-        'bmr': 'N/A',
-        'daily_calories': 'N/A',
-        'recorded_at': 'N/A',
-      };
-      // Reset editing state variables if not editing
-      if (!_isEditingMetrics) {
-        _selectedAgeRange = null;
-        _selectedSex = null;
-        _selectedActivityLevel = null;
-        _weightController.clear();
-        _heightCmController.clear();
-        _heightFeetController.clear();
-        _heightInchesController.clear();
-        _weightKg = 0;
-        _heightCm = 0;
-        _weightUnit = 'kg';
-        _weightSelection = [true, false];
-        _heightUnit = 'cm';
-        _heightSelection = [true, false];
-      }
-    });
-  }
-
-  void _updateStateWithMetrics(Map<String, dynamic> metrics) {
-    if (!mounted) return;
-    // Safely parse numeric values
-    double? fetchedHeightCm = _tryParseDouble(metrics['height']);
-    double? fetchedWeightKg = _tryParseDouble(metrics['weight']);
-    String calculatedBmi = _calculateBmi(fetchedHeightCm, fetchedWeightKg);
-
-    setState(() {
-      _userMetrics = {
-        'age_range': metrics['age_range'] ?? 'N/A',
-        'sex': metrics['sex'] ?? 'N/A',
-        'height': fetchedHeightCm?.toString() ?? 'N/A',
-        'weight': fetchedWeightKg?.toString() ?? 'N/A',
-        'bmi': metrics['bmi']?.toString() ?? calculatedBmi, // Prefer API BMI
-        'activity_level': metrics['activity_level'] ?? 'N/A',
-        'cholesterol_level': metrics['cholesterol_level']?.toString() ?? 'N/A',
-        'sys_bp': metrics['sys_bp']?.toString() ?? 'N/A',
-        'dia_bp': metrics['dia_bp']?.toString() ?? 'N/A',
-        'pulse': metrics['pulse']?.toString() ?? 'N/A',
-        'ideal_weight': metrics['ideal_weight']?.toString() ?? 'N/A',
-        'bmi_category': metrics['bmi_category'] ?? 'N/A',
-        'bmr': metrics['bmr']?.toString() ?? 'N/A',
-        'daily_calories': metrics['daily_calories']?.toString() ?? 'N/A',
-        'recorded_at': metrics['recorded_at'] ?? 'N/A',
+        'age_range': metricsData['age_range'] ?? 'N/A',
+        'sex': metricsData['sex'] ?? 'N/A',
+        'weight': metricsData['weight']?.toString() ?? 'N/A',
+        'height': metricsData['height']?.toString() ?? 'N/A',
+        'activity_level': metricsData['activity_level'] ?? 'N/A',
+        'bmi': metricsData['bmi']?.toString() ?? 'N/A',
+        'bmi_category': metricsData['bmi_category'] ?? 'N/A',
+        'ideal_weight': metricsData['ideal_weight']?.toString() ?? 'N/A',
+        'bmr': metricsData['bmr']?.toString() ?? 'N/A',
+        'daily_calories': metricsData['daily_calories']?.toString() ?? 'N/A',
+        'cholesterol_level': metricsData['cholesterol_level'] ?? 'N/A',
+        'sys_bp': metricsData['sys_bp']?.toString() ?? 'N/A',
+        'dia_bp': metricsData['dia_bp']?.toString() ?? 'N/A',
+        'pulse': metricsData['pulse']?.toString() ?? 'N/A',
+        'recorded_at': metricsData['recorded_at'] ?? 'N/A',
       };
 
-      // Update internal state for editing (only if not currently editing)
       if (!_isEditingMetrics) {
-        _selectedAgeRange = _userMetrics['age_range'] != 'N/A'
-            ? _userMetrics['age_range']
-            : null;
-        if (_selectedAgeRange != null &&
-            !_ageRanges.contains(_selectedAgeRange)) _selectedAgeRange = null;
+        _selectedAgeRange = _userMetrics['age_range'] != 'N/A' ? _userMetrics['age_range'] : null;
+        if (_selectedAgeRange != null && !_ageRanges.contains(_selectedAgeRange)) _selectedAgeRange = null;
 
-        _selectedSex =
-            _userMetrics['sex'] != 'N/A' ? _userMetrics['sex'] : null;
-        if (_selectedSex != null && !_sexs.contains(_selectedSex))
-          _selectedSex = null;
+        _selectedSex = _userMetrics['sex'] != 'N/A' ? _userMetrics['sex'] : null;
+        if (_selectedSex != null && !_sexs.contains(_selectedSex)) _selectedSex = null;
+        
+        _selectedActivityLevel = _userMetrics['activity_level'] != 'N/A' ? _userMetrics['activity_level'] : null;
+        if (_selectedActivityLevel != null && !_activityLevels.contains(_selectedActivityLevel)) _selectedActivityLevel = null;
 
-        _selectedActivityLevel = _userMetrics['activity_level'] != 'N/A'
-            ? _userMetrics['activity_level']
-            : null;
-        if (_selectedActivityLevel != null &&
-            !_activityLevels.contains(_selectedActivityLevel))
-          _selectedActivityLevel = null;
-
-        _weightKg = fetchedWeightKg ?? 0;
+        _weightKg = _tryParseDouble(_userMetrics['weight']) ?? 0;
+        _heightCm = _tryParseDouble(_userMetrics['height']) ?? 0;
         _updateWeightControllerBasedOnUnit();
-
-        _heightCm = fetchedHeightCm ?? 0;
         _updateHeightControllerBasedOnUnit();
       }
     });
   }
 
-  Future<void> _fetchPreferences() async {
+  Future<void> _fetchPreferences({bool forceRefresh = false}) async {
     if (_userId == null) {
       if (mounted) setState(() => _isLoadingPreferences = false);
       return;
     }
+    if (mounted) setState(() => _isLoadingPreferences = true);
+
+    final prefs = await SharedPreferences.getInstance();
+    final cachedPrefs = await UserCache.getData('user_preferences_cache');
+    final cachedTimestamp = prefs.getInt('user_preferences_cache_timestamp');
+    final now = DateTime.now();
+
+    if (!forceRefresh &&
+        cachedPrefs != null &&
+        cachedTimestamp != null &&
+        now.difference(DateTime.fromMillisecondsSinceEpoch(cachedTimestamp)) <
+            CacheConfig.preferencesCacheDuration) {
+      print("[Profile] Using cached user preferences.");
+      print("Preferences Data Structure (from cache): ${json.encode(cachedPrefs)}");
+      _updateStateWithPreferences(cachedPrefs);
+      if (mounted) setState(() => _isLoadingPreferences = false);
+      return;
+    }
+    
+    print('[Profile] API fetch: Fetching user preferences...');
     final url = '$apiBaseUrl/rr/preferences/$_userId';
-    print("Fetching Preferences from URL: $url");
     try {
       final response =
           await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
-      print("Preferences Response: ${response.statusCode} - ${response.body}");
       if (!mounted) return;
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        // Updated parsing logic based on logs
-        if (responseData is Map<String, dynamic> &&
-            responseData.containsKey('preferences') &&
-            responseData['preferences'] is List &&
-            (responseData['preferences'] as List).isNotEmpty &&
-            responseData['preferences'][0] is Map) {
-          final preferences =
-              Map<String, dynamic>.from(responseData['preferences'][0]);
-          _updateStateWithPreferences(preferences);
+        print("Preferences Data Structure (from API): ${json.encode(responseData)}");
+        
+        // Extract preferences from response - handle the nested 'preferences' array structure
+        Map<String, dynamic> prefsMap = {};
+        if (responseData.containsKey('preferences') && responseData['preferences'] is List && responseData['preferences'].isNotEmpty) {
+          // Get the first preferences entry from the array
+          prefsMap = Map<String, dynamic>.from(responseData['preferences'][0]);
+          print("Extracted preferences: ${json.encode(prefsMap)}");
+          _updateStateWithPreferences(prefsMap);
+          await UserCache.saveData('user_preferences_cache', prefsMap);
+          await prefs.setInt('user_preferences_cache_timestamp', now.millisecondsSinceEpoch);
+        } else if (responseData.containsKey('data')) {
+          prefsMap = Map<String, dynamic>.from(responseData['data']);
+          _updateStateWithPreferences(prefsMap);
+          await UserCache.saveData('user_preferences_cache', prefsMap);
+          await prefs.setInt('user_preferences_cache_timestamp', now.millisecondsSinceEpoch);
         } else {
-          print(
-              "Preferences data parsing failed or empty (expected structure not found): $responseData");
-          _setDefaultPreferencesState();
+          print("Preferences Data Structure (from API): ${json.encode(responseData)}");
+          _updateStateWithPreferences(responseData);
         }
       } else {
-        print('Could not fetch preferences. Status: ${response.statusCode}');
-        _setDefaultPreferencesState();
+        print('Failed to fetch preferences. Status: ${response.statusCode}');
+        _userPreferences = {};
       }
     } on TimeoutException {
       print("Timeout fetching preferences.");
-      _setDefaultPreferencesState();
+      if (mounted) _userPreferences = {};
     } catch (error) {
       print("Error fetching preferences: $error");
-      _setDefaultPreferencesState();
+      if (mounted) _userPreferences = {};
     } finally {
       if (mounted) setState(() => _isLoadingPreferences = false);
     }
   }
 
-  void _setDefaultPreferencesState() {
-    if (!mounted) return;
+  void _updateStateWithPreferences(Map<String, dynamic> prefData) {
+     if (!mounted) return;
     setState(() {
       _userPreferences = {
-        'goals': 'N/A',
-        'diet_type': 'N/A',
-        'food_restrictions': 'N/A', // Display as string
-        'cuisine_preferences': 'N/A', // Display as string
-      };
-      // Reset editing state variables if not editing
-      if (!_isEditingPreferences) {
-        _selectedGoal = null;
-        _selectedDietType = null;
-        _selectedFoodRestriction = null; // Set to null initially
-      }
-    });
-  }
-
-  // Helper function to safely convert potential list/string to string
-  String _listToString(dynamic value,
-      {String defaultValue = 'N/A', String emptyValue = 'None'}) {
-    if (value == null) return defaultValue;
-    if (value is List) {
-      if (value.isEmpty) return emptyValue;
-      return value
-          .where((item) => item != null && item.toString().isNotEmpty)
-          .join(', ');
-    }
-    String strValue = value.toString();
-    if (strValue.startsWith('[') && strValue.endsWith(']')) {
-      try {
-        List<dynamic> list = json.decode(strValue);
-        if (list.isEmpty) return emptyValue;
-        return list
-            .where((item) => item != null && item.toString().isNotEmpty)
-            .join(', ');
-      } catch (e) {
-        String content = strValue.substring(1, strValue.length - 1);
-        return content.isEmpty
-            ? emptyValue
-            : content; // Return content or emptyValue
-      }
-    }
-    // If it's just a plain string or number, return it, or defaultValue if empty
-    return strValue.isNotEmpty ? strValue : defaultValue;
-  }
-
-  // Helper function to get the first item from a list or string representation
-  String? _getFirstItemFromListOrString(dynamic value) {
-    if (value == null) return null;
-    List<String> items = [];
-    if (value is List) {
-      items = List<String>.from(
-          value.map((e) => e.toString()).where((s) => s.isNotEmpty));
-    } else {
-      // Use helper, defaulting to empty string if N/A to avoid "N/A" being split
-      String strValue = _listToString(value, defaultValue: '', emptyValue: '');
-      if (strValue.isNotEmpty && strValue != 'None') {
-        items = strValue
-            .split(',')
-            .map((s) => s.trim())
-            .where((s) => s.isNotEmpty)
-            .toList();
-      }
-    }
-    return items.isNotEmpty ? items.first : null;
-  }
-
-  void _updateStateWithPreferences(Map<String, dynamic> preferences) {
-    if (!mounted) return;
-    setState(() {
-      dynamic rawRestrictions = preferences['food_restrictions'];
-      dynamic rawCuisines = preferences['cuisine_preferences'];
-
-      _userPreferences = {
-        'goals': preferences['goals'] ?? 'N/A',
-        'diet_type': preferences['diet_type'] ?? 'N/A',
-        'food_restrictions': _listToString(rawRestrictions, emptyValue: 'None'),
-        'cuisine_preferences':
-            _listToString(rawCuisines, emptyValue: 'Not Set'),
+        'goals': prefData['goals'] ?? 'N/A',
+        'diet_type': prefData['diet_type'] ?? 'N/A',
+        'food_restrictions': _listToString(prefData['food_restrictions'], emptyValue: 'None'),
+        'cuisine_preferences': _listToString(prefData['cuisine_preferences'], emptyValue: 'N/A'),
       };
 
       if (!_isEditingPreferences) {
-        _selectedGoal = _userPreferences['goals'] != 'N/A'
-            ? _userPreferences['goals']
-            : null;
-        if (_selectedGoal != null && !_goalsOptions.contains(_selectedGoal))
-          _selectedGoal = null;
+        _selectedGoal = _userPreferences['goals'] != 'N/A' ? _userPreferences['goals'] : null;
+         if (_selectedGoal != null && !_goalsOptions.contains(_selectedGoal)) _selectedGoal = null;
 
-        _selectedDietType = _userPreferences['diet_type'] != 'N/A'
-            ? _userPreferences['diet_type']
-            : null;
-        if (_selectedDietType != null &&
-            !_dietTypeOptions.contains(_selectedDietType))
-          _selectedDietType = null;
+        _selectedDietType = _userPreferences['diet_type'] != 'N/A' ? _userPreferences['diet_type'] : null;
+        if (_selectedDietType != null && !_dietTypeOptions.contains(_selectedDietType)) _selectedDietType = null;
 
-        // For single-select dropdown, take the first restriction if available
-        String? firstRestriction =
-            _getFirstItemFromListOrString(rawRestrictions);
-        // Check if the extracted first item is a valid option in our dropdown list
-        _selectedFoodRestriction = (firstRestriction != null &&
-                _foodRestrictionsOptions.contains(firstRestriction))
-            ? firstRestriction
-            // If no valid first item, check if the display string ended up as 'None'
-            : (_userPreferences['food_restrictions'] == 'None' ? 'None' : null);
-
-        // Final validity check: if selected value is not null AND not in options, reset to null
-        if (_selectedFoodRestriction != null &&
-            !_foodRestrictionsOptions.contains(_selectedFoodRestriction)) {
+        String? currentRestrictionDisplay = _userPreferences['food_restrictions'];
+        if (currentRestrictionDisplay == 'None') {
+            _selectedFoodRestriction = 'None';
+        } else if (currentRestrictionDisplay != null && currentRestrictionDisplay != 'N/A') {
+            String firstItem = currentRestrictionDisplay.split(',').first.trim();
+            _selectedFoodRestriction = _foodRestrictionsOptions.contains(firstItem) ? firstItem : null;
+        } else {
+            _selectedFoodRestriction = null;
+        }
+        if (_selectedFoodRestriction != null && !_foodRestrictionsOptions.contains(_selectedFoodRestriction)) {
           _selectedFoodRestriction = null;
         }
       }
     });
   }
 
-  // --- Image Handling ---
+  String _listToString(dynamic listOrString, {String emptyValue = 'N/A'}) {
+    if (listOrString == null) return emptyValue;
+    if (listOrString is List) {
+      if (listOrString.isEmpty) return emptyValue;
+      return listOrString.join(', ');
+    }
+    if (listOrString is String) {
+      return listOrString.isEmpty ? emptyValue : listOrString;
+    }
+    return listOrString.toString();
+  }
+
+  String? _getFirstItemFromListOrString(dynamic data) {
+    if (data == null) return null;
+    if (data is List && data.isNotEmpty) {
+      return data.first.toString();
+    }
+    if (data is String && data.isNotEmpty) {
+      return data.split(',').first.trim();
+    }
+    return null;
+  }
+
   Future<void> _pickImage() async {
-    final imagePicker = ImagePicker();
     try {
-      final pickedFile = await imagePicker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 80,
-        maxWidth: 800,
-      );
-      if (pickedFile != null && mounted) {
-        final imageFile = File(pickedFile.path);
-        setState(() {
-          _profileImagePath = imageFile.path; // Update local path for display
-          _profileImageUrl = null; // Clear network URL
-        });
-        await _saveImageToPrefs(imageFile.path); // Save local path preference
-        await _uploadProfilePicture(imageFile); // Attempt to upload
+      final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+      if (image != null) {
+        final File imageFile = File(image.path);
+        await _uploadImage(imageFile);
       }
     } catch (e) {
       print("Error picking image: $e");
-      if (mounted) _showErrorSnackBar("Could not pick image: $e");
+      if(mounted) _showErrorSnackBar('Error picking image: $e');
     }
   }
 
-  Future<void> _uploadProfilePicture(File imageFile) async {
+  Future<void> _uploadImage(File imageFile) async {
     if (_userId == null) {
-      _showErrorSnackBar("Cannot upload image: User not identified.");
+      _showErrorSnackBar('User ID not found. Cannot upload image.');
       return;
     }
-    final imgurClientID = dotenv.env['IMGUR_CLIENT_ID'] ?? '';
-    if (imgurClientID.isEmpty) {
-      _showErrorSnackBar(
-          'Image upload configuration missing (Imgur Client ID).');
-      return;
-    }
+    _showSuccessSnackBar('Uploading image...'); // Temporary feedback
 
-    final String imgurUploadUrl = 'https://api.imgur.com/3/image';
-    // Optional: Show an upload indicator
-    // setState(() { _isUploadingImage = true; });
-
+    final url = '$apiBaseUrl/rr/upload_profile_image/$_userId';
     try {
-      final request = http.MultipartRequest('POST', Uri.parse(imgurUploadUrl));
-      request.headers['Authorization'] = 'Client-ID $imgurClientID';
-      request.files
-          .add(await http.MultipartFile.fromPath('image', imageFile.path));
+      var request = http.MultipartRequest('POST', Uri.parse(url));
+      request.files.add(await http.MultipartFile.fromPath('profile_image', imageFile.path));
+      
+      // If you need to send other headers, like an auth token:
+      // SharedPreferences prefs = await SharedPreferences.getInstance();
+      // String? token = prefs.getString('auth_token');
+      // if (token != null) {
+      //   request.headers['Authorization'] = 'Bearer $token';
+      // }
 
-      final response =
-          await request.send().timeout(const Duration(seconds: 30));
-      final responseData = await http.Response.fromStream(response);
+      final response = await request.send().timeout(const Duration(seconds: 30));
 
       if (!mounted) return;
 
-      if (response.statusCode == 200) {
-        final jsonResponse = json.decode(responseData.body);
-        if (jsonResponse['success'] == true &&
-            jsonResponse['data']?['link'] != null) {
-          final newImageUrl = jsonResponse['data']['link'];
-          print("Imgur upload successful: $newImageUrl");
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final responseBody = await response.stream.bytesToString();
+        final responseData = json.decode(responseBody);
+        final newImageUrl = responseData['image_url']; // Adjust based on your API response
 
-          // Update backend with this new Imgur URL
-          // IMPORTANT: Verify this endpoint is correct for your API (might be /rr/rusers/)
-          final backendUpdateUrl = '$apiBaseUrl/rr/users/$_userId';
-          final updateBody = json.encode({'image': newImageUrl});
+        if (newImageUrl != null) {
+          setState(() {
+            _profileImageUrl = newImageUrl; // Update with URL from server
+            _profileImagePath = null; // Clear local path if server URL is used
+          });
+          // Update userDetails map and cache if necessary
+           _userDetails['image'] = newImageUrl;
+           await UserCache.saveData('user_details_cache', _userDetails);
 
-          final backendResponse = await http
-              .patch(
-                Uri.parse(backendUpdateUrl),
-                headers: {'Content-Type': 'application/json'},
-                body: updateBody,
-              )
-              .timeout(const Duration(seconds: 15));
-
-          if (mounted) {
-            if (backendResponse.statusCode == 200 ||
-                backendResponse.statusCode == 204) {
-              _showSuccessSnackBar('Profile picture updated successfully!');
-              setState(() {
-                _profileImageUrl = newImageUrl;
-                _userDetails['image'] = newImageUrl; // Update local data
-              });
-              await UserCache.removeData(
-                  'user_details_cache'); // Invalidate cache
-            } else {
-              print(
-                  "Backend update failed: ${backendResponse.statusCode} - ${backendResponse.body}");
-              _showErrorSnackBar(
-                  'Failed to save new profile picture URL to backend.');
-              // Optional: Revert UI change if backend update fails
-              // setState(() { _profileImagePath = null; _profileImageUrl = _userDetails['profile_picture']; });
-            }
-          }
+          _showSuccessSnackBar('Profile image updated successfully!');
+          await _saveImageToPrefs(''); // Clear local path pref if server URL is used
         } else {
-          throw Exception('Imgur upload failed: Invalid response structure.');
+          _showErrorSnackBar('Image uploaded, but URL not found in response.');
         }
       } else {
-        print('Imgur upload failed: ${responseData.body}');
-        throw Exception(
-            'Failed to upload image to Imgur. Status Code: ${response.statusCode}');
+        final responseBody = await response.stream.bytesToString();
+        print('Failed to upload image. Status: ${response.statusCode}, Body: $responseBody');
+        _showErrorSnackBar('Failed to upload image. Server error: ${response.statusCode}');
       }
+    } on TimeoutException {
+       if (mounted) _showErrorSnackBar('Image upload timed out.');
     } catch (e) {
-      print("Error uploading profile picture: $e");
-      if (mounted) _showErrorSnackBar('Error uploading profile picture: $e');
-      // Optional: Revert UI change
-      // setState(() { _profileImagePath = null; _profileImageUrl = _userDetails['profile_picture']; });
-    } finally {
-      // if (mounted) setState(() { _isUploadingImage = false; });
+      print("Error uploading image: $e");
+      if (mounted) _showErrorSnackBar('Error uploading image: $e');
     }
   }
 
-  Future<void> _saveImageToPrefs(String imagePath) async {
+  Future<void> _saveImageToPrefs(String path) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('image_path', imagePath);
+    await prefs.setString('image_path', path);
   }
 
   Future<void> _loadImageFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    if (mounted) {
-      _profileImagePath = prefs.getString('image_path');
-      // No setState needed here, display logic handles null
+    final path = prefs.getString('image_path');
+    if (path != null && path.isNotEmpty) {
+      if (mounted) {
+        setState(() {
+          _profileImagePath = path;
+        });
+      }
     }
   }
+  // *** END OF RECONSTRUCTED/MISSING METHODS ***
 
-  // --- Editing Save/Cancel Logic ---
+
   Future<void> _saveEditedData() async {
-    if (_userId == null) {
-      _showErrorSnackBar('Cannot save data. User not identified.');
-      return;
-    }
-
-    Map<String, dynamic> dataToUpdate = {};
     String endpointPath = '';
+    Map<String, dynamic> dataToUpdate = {};
+    String successMessage = '';
     String cacheKeyToInvalidate = '';
-    String successMessage = 'Profile updated successfully!';
-    String sectionBeingSaved = ''; // For re-fetching logic
+    String sectionBeingSaved = '';
 
     if (_isEditingUserDetails) {
       sectionBeingSaved = 'details';
-      endpointPath = '/rr/users/$_userId'; // CHECK THIS ENDPOINT
+      endpointPath = '/rr/rusers/$_userId';
       cacheKeyToInvalidate = 'user_details_cache';
+      successMessage = 'User details updated successfully!';
       dataToUpdate = {
-        'name': _userDetailsNameController.text.trim(),
-        'email': _userDetailsEmailController.text.trim(),
-        'phone_number': _userDetailsPhoneController.text.trim(),
-        'location': _userDetailsLocationController.text.trim(),
+        'name': _userDetailsNameController.text,
+        'email': _userDetailsEmailController.text,
+        'phone_number': _userDetailsPhoneController.text,
+        'location': _userDetailsLocationController.text,
       };
-      // Optimistic UI update
+      dataToUpdate.removeWhere((key, value) => value == null || value.isEmpty);
+
+      // Update local state immediately for responsiveness, will be overwritten by fetch on success/fail
       setState(() {
-        _userDetails['Name'] = dataToUpdate['name'];
-        _userDetails['Email'] = dataToUpdate['email'];
-        _userDetails['Phone_Number'] = dataToUpdate['phone_number'];
-        _userDetails['Location'] = dataToUpdate['location'];
+        _userDetails['Name'] = _userDetailsNameController.text;
+        _userDetails['Email'] = _userDetailsEmailController.text;
+        _userDetails['Phone_Number'] = _userDetailsPhoneController.text;
+        _userDetails['Location'] = _userDetailsLocationController.text;
         _isEditingUserDetails = false;
       });
     } else if (_isEditingMetrics) {
       sectionBeingSaved = 'metrics';
       endpointPath = '/rr/metrics/$_userId';
+      cacheKeyToInvalidate = 'user_metrics_cache';
       successMessage = 'Health metrics updated successfully!';
       _parseAndUpdateWeight();
       _parseAndUpdateHeight();
 
+      // Compute dependent values
+      String bmi = _calculateBmi(_heightCm, _weightKg);
+      String idealWeight = (_heightCm > 0 && _selectedSex != null)
+          ? (_selectedSex == 'Male'
+              ? (50 + 0.91 * (_heightCm - 152.4)).toStringAsFixed(2)
+              : (45.5 + 0.91 * (_heightCm - 152.4)).toStringAsFixed(2))
+          : 'N/A';
+      String bmiCategory = 'N/A';
+      double? bmiValue = double.tryParse(bmi);
+      if (bmiValue != null) {
+        if (bmiValue < 18.5) {
+          bmiCategory = 'Underweight';
+        } else if (bmiValue < 25) {
+          bmiCategory = 'Normal';
+        } else if (bmiValue < 30) {
+          bmiCategory = 'Overweight';
+        } else {
+          bmiCategory = 'Obese';
+        }
+      }
+      double? bmr;
+      if (_weightKg > 0 && _heightCm > 0 && _selectedAgeRange != null && _selectedSex != null) {
+        int age = 30; // Default age if parsing fails
+        final ageMatch = RegExp(r'\d+').firstMatch(_selectedAgeRange!);
+        if (ageMatch != null) {
+          age = int.tryParse(ageMatch.group(0)!) ?? 30;
+        }
+        if (_selectedSex == 'Male') {
+          bmr = 10 * _weightKg + 6.25 * _heightCm - 5 * age + 5;
+        } else {
+          bmr = 10 * _weightKg + 6.25 * _heightCm - 5 * age - 161;
+        }
+      }
+      double? dailyCalories;
+      if (bmr != null && _selectedActivityLevel != null) {
+        final activityMultipliers = {
+          'Sedentary': 1.2,
+          'Lightly Active': 1.375,
+          'Moderately Active': 1.55,
+          'Very Active': 1.725,
+          'Extra Active': 1.9 // Added just in case
+        };
+        dailyCalories = bmr * (activityMultipliers[_selectedActivityLevel!] ?? 1.2);
+      }
+
+      // Create a flat metrics object with only the allowed fields as per backend requirements
+      // Convert all numeric values to strings to match backend expectations
       dataToUpdate = {
         'age_range': _selectedAgeRange,
         'sex': _selectedSex,
-        'weight': _weightKg > 0 ? _weightKg : null,
-        'height': _heightCm > 0 ? _heightCm : null,
+        'weight': _weightKg > 0 ? _weightKg.toString() : null,
+        'height': _heightCm > 0 ? _heightCm.toString() : null,
         'activity_level': _selectedActivityLevel,
+        // Note: Backend will calculate these dependent values automatically
+        // We don't need to send them as they'll be computed server-side
       };
+      
+      // Remove null values
       dataToUpdate.removeWhere((key, value) => value == null);
+      
+      print("Sending metrics update: ${json.encode(dataToUpdate)}");
 
-      // Optimistic UI update
       setState(() {
         _userMetrics['age_range'] = _selectedAgeRange ?? 'N/A';
         _userMetrics['sex'] = _selectedSex ?? 'N/A';
@@ -925,13 +912,19 @@ class _ProfilePageState extends State<ProfilePage>
         _userMetrics['height'] =
             _heightCm > 0 ? _heightCm.toStringAsFixed(1) : 'N/A';
         _userMetrics['activity_level'] = _selectedActivityLevel ?? 'N/A';
-        _userMetrics['bmi'] = _calculateBmi(_heightCm, _weightKg);
+        _userMetrics['bmi'] = bmi;
+        _userMetrics['ideal_weight'] = idealWeight;
+        _userMetrics['bmi_category'] = bmiCategory;
+        _userMetrics['bmr'] = bmr?.toStringAsFixed(1) ?? 'N/A';
+        _userMetrics['daily_calories'] = dailyCalories?.toStringAsFixed(1) ?? 'N/A';
         _isEditingMetrics = false;
       });
     } else if (_isEditingPreferences) {
       sectionBeingSaved = 'preferences';
       endpointPath = '/rr/preferences/$_userId';
+      cacheKeyToInvalidate = 'user_preferences_cache';
       successMessage = 'Preferences updated successfully!';
+      
       List<String> restrictionsToSend = [];
       if (_selectedFoodRestriction != null &&
           _selectedFoodRestriction != 'None') {
@@ -941,11 +934,10 @@ class _ProfilePageState extends State<ProfilePage>
       dataToUpdate = {
         'goals': _selectedGoal,
         'diet_type': _selectedDietType,
-        'food_restrictions': restrictionsToSend, // Send as list
+        'food_restrictions': restrictionsToSend.isNotEmpty ? restrictionsToSend : null, // Send null if empty, or API might expect empty list
       };
       dataToUpdate.removeWhere((key, value) => value == null);
 
-      // Optimistic UI update
       setState(() {
         _userPreferences['goals'] = _selectedGoal ?? 'N/A';
         _userPreferences['diet_type'] = _selectedDietType ?? 'N/A';
@@ -958,7 +950,6 @@ class _ProfilePageState extends State<ProfilePage>
       return;
     }
 
-    // --- API Call ---
     if (endpointPath.isNotEmpty && dataToUpdate.isNotEmpty) {
       final url = '$apiBaseUrl$endpointPath';
       print(
@@ -980,8 +971,11 @@ class _ProfilePageState extends State<ProfilePage>
           _showSuccessSnackBar(successMessage);
           if (cacheKeyToInvalidate.isNotEmpty) {
             await UserCache.removeData(cacheKeyToInvalidate);
+             // Also remove timestamp to force fresh fetch
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.remove('${cacheKeyToInvalidate}_timestamp');
           }
-          // Re-fetch the specific data that was just updated
+          // Refetch the specific section that was updated
           if (sectionBeingSaved == 'details') await _fetchUserDetails();
           if (sectionBeingSaved == 'metrics') await _fetchMetrics();
           if (sectionBeingSaved == 'preferences') await _fetchPreferences();
@@ -990,32 +984,36 @@ class _ProfilePageState extends State<ProfilePage>
               "Failed to update profile section. Status: ${response.statusCode}, Body: ${response.body}");
           _showErrorSnackBar(
               'Failed to update. Server error: ${response.statusCode}');
-          // Attempt to re-fetch data on failure to revert optimistic changes
+          // Revert optimistic UI update by refetching
           if (sectionBeingSaved == 'details') await _fetchUserDetails();
           if (sectionBeingSaved == 'metrics') await _fetchMetrics();
           if (sectionBeingSaved == 'preferences') await _fetchPreferences();
         }
       } on TimeoutException {
-        if (mounted)
+        if (mounted) {
           _showErrorSnackBar('Failed to save: Connection timed out.');
-        // Attempt to re-fetch data on failure
-        if (sectionBeingSaved == 'details') await _fetchUserDetails();
-        if (sectionBeingSaved == 'metrics') await _fetchMetrics();
-        if (sectionBeingSaved == 'preferences') await _fetchPreferences();
+          // Revert optimistic UI update by refetching
+          if (sectionBeingSaved == 'details') await _fetchUserDetails();
+          if (sectionBeingSaved == 'metrics') await _fetchMetrics();
+          if (sectionBeingSaved == 'preferences') await _fetchPreferences();
+        }
       } catch (e) {
         print("Error saving profile data: $e");
-        if (mounted) _showErrorSnackBar('An error occurred while saving: $e');
-        // Attempt to re-fetch data on failure
-        if (sectionBeingSaved == 'details') await _fetchUserDetails();
-        if (sectionBeingSaved == 'metrics') await _fetchMetrics();
-        if (sectionBeingSaved == 'preferences') await _fetchPreferences();
+        if (mounted) {
+          _showErrorSnackBar('An error occurred while saving: $e');
+          // Revert optimistic UI update by refetching
+          if (sectionBeingSaved == 'details') await _fetchUserDetails();
+          if (sectionBeingSaved == 'metrics') await _fetchMetrics();
+          if (sectionBeingSaved == 'preferences') await _fetchPreferences();
+        }
       }
     } else {
-      if (endpointPath.isEmpty)
+      if (endpointPath.isEmpty) {
         print("No valid endpoint path determined for saving.");
+      }
       if (dataToUpdate.isEmpty) {
-        print("No changes detected to save.");
-        // Reset editing flags even if nothing was sent
+        print("No changes detected to save. Exiting edit mode.");
+         // Exit edit mode even if no data to PATCH, as user might have just hit save without changes
         setState(() {
           _isEditingUserDetails = false;
           _isEditingMetrics = false;
@@ -1031,30 +1029,29 @@ class _ProfilePageState extends State<ProfilePage>
       _isEditingMetrics = false;
       _isEditingPreferences = false;
 
-      // User Details reset
+      // Reload controllers from the original data maps
       if (_userDetails.isNotEmpty) {
-        _userDetailsNameController.text = _userDetails['Name'] ?? '';
-        _userDetailsEmailController.text = _userDetails['Email'] ?? '';
-        _userDetailsPhoneController.text = _userDetails['Phone_Number'] ?? '';
-        _userDetailsLocationController.text = _userDetails['Location'] ?? '';
+        _userDetailsNameController.text = getCaseInsensitive(_userDetails, 'Name') ?? '';
+        _userDetailsEmailController.text = getCaseInsensitive(_userDetails, 'Email') ?? '';
+        _userDetailsPhoneController.text = getCaseInsensitive(_userDetails, 'Phone_Number') ?? '';
+        _userDetailsLocationController.text = getCaseInsensitive(_userDetails, 'Location') ?? '';
       }
 
-      // Metrics reset (rely on _updateStateWithMetrics having set the correct base state)
       if (_userMetrics.isNotEmpty) {
-        double? currentWeightKg = _tryParseDouble(_userMetrics['weight']);
-        double? currentHeightCm = _tryParseDouble(_userMetrics['height']);
+        double? currentWeightKg = _tryParseDouble(getCaseInsensitive(_userMetrics,'weight'));
+        double? currentHeightCm = _tryParseDouble(getCaseInsensitive(_userMetrics,'height'));
 
-        _selectedAgeRange = _userMetrics['age_range'] != 'N/A'
-            ? _userMetrics['age_range']
+        _selectedAgeRange = getCaseInsensitive(_userMetrics,'age_range') != 'N/A'
+            ? getCaseInsensitive(_userMetrics,'age_range')
             : null;
         if (_selectedAgeRange != null &&
             !_ageRanges.contains(_selectedAgeRange)) _selectedAgeRange = null;
         _selectedSex =
-            _userMetrics['sex'] != 'N/A' ? _userMetrics['sex'] : null;
+            getCaseInsensitive(_userMetrics,'sex') != 'N/A' ? getCaseInsensitive(_userMetrics,'sex') : null;
         if (_selectedSex != null && !_sexs.contains(_selectedSex))
           _selectedSex = null;
-        _selectedActivityLevel = _userMetrics['activity_level'] != 'N/A'
-            ? _userMetrics['activity_level']
+        _selectedActivityLevel = getCaseInsensitive(_userMetrics,'activity_level') != 'N/A'
+            ? getCaseInsensitive(_userMetrics,'activity_level')
             : null;
         if (_selectedActivityLevel != null &&
             !_activityLevels.contains(_selectedActivityLevel))
@@ -1064,7 +1061,7 @@ class _ProfilePageState extends State<ProfilePage>
         _updateWeightControllerBasedOnUnit();
         _heightCm = currentHeightCm ?? 0;
         _updateHeightControllerBasedOnUnit();
-      } else {
+      } else { // Default if _userMetrics is empty
         _selectedAgeRange = null;
         _selectedSex = null;
         _selectedActivityLevel = null;
@@ -1074,33 +1071,31 @@ class _ProfilePageState extends State<ProfilePage>
         _updateHeightControllerBasedOnUnit();
       }
 
-      // Preferences reset (rely on _updateStateWithPreferences having set the correct base state)
       if (_userPreferences.isNotEmpty) {
-        _selectedGoal = _userPreferences['goals'] != 'N/A'
-            ? _userPreferences['goals']
+        _selectedGoal = getCaseInsensitive(_userPreferences,'goals') != 'N/A'
+            ? getCaseInsensitive(_userPreferences,'goals')
             : null;
         if (_selectedGoal != null && !_goalsOptions.contains(_selectedGoal))
           _selectedGoal = null;
-        _selectedDietType = _userPreferences['diet_type'] != 'N/A'
-            ? _userPreferences['diet_type']
+        _selectedDietType = getCaseInsensitive(_userPreferences,'diet_type') != 'N/A'
+            ? getCaseInsensitive(_userPreferences,'diet_type')
             : null;
         if (_selectedDietType != null &&
             !_dietTypeOptions.contains(_selectedDietType))
           _selectedDietType = null;
 
-        // Use the logic from _updateStateWithPreferences to reset the single dropdown value
         String? firstRestriction = _getFirstItemFromListOrString(
-            _userPreferences[
-                'food_restrictions']); // Note: This uses the *processed* string
+            getCaseInsensitive(_userPreferences, 'food_restrictions'));
         _selectedFoodRestriction = (firstRestriction != null &&
                 _foodRestrictionsOptions.contains(firstRestriction))
             ? firstRestriction
-            : (_userPreferences['food_restrictions'] == 'None' ? 'None' : null);
+            : (getCaseInsensitive(_userPreferences, 'food_restrictions') == 'None' ? 'None' : null);
+
         if (_selectedFoodRestriction != null &&
             !_foodRestrictionsOptions.contains(_selectedFoodRestriction)) {
           _selectedFoodRestriction = null;
         }
-      } else {
+      } else { // Default if _userPreferences is empty
         _selectedGoal = null;
         _selectedDietType = null;
         _selectedFoodRestriction = null;
@@ -1111,9 +1106,8 @@ class _ProfilePageState extends State<ProfilePage>
   // --- Weight/Height Unit Conversion and Update Logic ---
   void _onWeightInputChanged() {
     _parseAndUpdateWeight();
-    // Optional: Live update BMI display during edit
     if (_isEditingMetrics && mounted) {
-      setState(() {}); // Trigger rebuild to show updated calculated BMI
+      setState(() {}); // To re-calculate BMI etc. live if needed
     }
   }
 
@@ -1121,15 +1115,13 @@ class _ProfilePageState extends State<ProfilePage>
     final String text = _weightController.text.trim();
     final double? value = double.tryParse(text);
     if (value != null && value >= 0) {
-      // Allow 0
       if (_weightUnit == 'kg') {
         _weightKg = value;
-      } else {
-        // lbs
-        _weightKg = value * 0.453592;
+      } else { // lbs
+        _weightKg = value * 0.453592; // lbs to kg
       }
     } else {
-      _weightKg = 0; // Reset if empty or invalid
+      _weightKg = 0;
     }
   }
 
@@ -1152,26 +1144,22 @@ class _ProfilePageState extends State<ProfilePage>
       final String text = _heightCmController.text.trim();
       final double? value = double.tryParse(text);
       if (value != null && value >= 0) {
-        // Allow 0
         _heightCm = value;
       } else {
-        _heightCm = 0; // Reset if empty or invalid
+        _heightCm = 0;
       }
-    } else {
-      // ft/in
+    } else { // ft/in
       final String feetText = _heightFeetController.text.trim();
       final String inchesText = _heightInchesController.text.trim();
-      // Treat empty fields as 0
       final double feet =
           double.tryParse(feetText.isEmpty ? '0' : feetText) ?? 0;
       final double inches =
           double.tryParse(inchesText.isEmpty ? '0' : inchesText) ?? 0;
 
       if (feet >= 0 && inches >= 0) {
-        // Ensure inches are handled correctly (e.g., don't allow >= 12 if desired, though parser accepts it)
-        _heightCm = (feet * 30.48) + (inches * 2.54);
+        _heightCm = (feet * 30.48) + (inches * 2.54); // ft to cm and in to cm
       } else {
-        _heightCm = 0; // Reset if negative values somehow entered
+        _heightCm = 0;
       }
     }
   }
@@ -1181,9 +1169,8 @@ class _ProfilePageState extends State<ProfilePage>
     if (_weightUnit == 'kg') {
       _weightController.text =
           _weightKg > 0 ? _weightKg.toStringAsFixed(1) : '';
-    } else {
-      // lbs
-      double lbs = _weightKg / 0.453592;
+    } else { // lbs
+      double lbs = _weightKg / 0.453592; // kg to lbs
       _weightController.text = lbs > 0 ? lbs.toStringAsFixed(1) : '';
     }
   }
@@ -1193,15 +1180,15 @@ class _ProfilePageState extends State<ProfilePage>
     if (_heightUnit == 'cm') {
       _heightCmController.text =
           _heightCm > 0 ? _heightCm.toStringAsFixed(1) : '';
+      // Clear ft/in fields if they were used
       if (_heightFeetController.text.isNotEmpty) _heightFeetController.clear();
       if (_heightInchesController.text.isNotEmpty)
         _heightInchesController.clear();
-    } else {
-      // ft
+    } else { // ft/in
       if (_heightCm > 0) {
-        double totalInches = _heightCm / 2.54;
-        double feet = (totalInches ~/ 12).toDouble();
-        double inches = (totalInches % 12);
+        double totalInches = _heightCm / 2.54; // cm to total inches
+        double feet = (totalInches ~/ 12).toDouble(); // Integer part for feet
+        double inches = (totalInches % 12); // Remainder for inches
         _heightFeetController.text = feet > 0 ? feet.toStringAsFixed(0) : '';
         _heightInchesController.text =
             inches > 0 ? inches.toStringAsFixed(1) : '';
@@ -1211,29 +1198,30 @@ class _ProfilePageState extends State<ProfilePage>
         if (_heightInchesController.text.isNotEmpty)
           _heightInchesController.clear();
       }
+      // Clear cm field if it was used
       if (_heightCmController.text.isNotEmpty) _heightCmController.clear();
     }
   }
 
   void _updateWeightUnit(int index) {
     if (_weightSelection[index]) return; // No change if already selected
-    _parseAndUpdateWeight(); // Store current value in _weightKg
+    _parseAndUpdateWeight(); // Ensure _weightKg is up-to-date before switching
     setState(() {
       _weightSelection = [false, false];
       _weightSelection[index] = true;
       _weightUnit = (index == 0) ? 'kg' : 'lbs';
-      _updateWeightControllerBasedOnUnit(); // Update display
+      _updateWeightControllerBasedOnUnit(); // Update text field with new unit
     });
   }
 
   void _updateHeightUnit(int index) {
     if (_heightSelection[index]) return; // No change
-    _parseAndUpdateHeight(); // Store current value in _heightCm
+    _parseAndUpdateHeight(); // Ensure _heightCm is up-to-date
     setState(() {
       _heightSelection = [false, false];
       _heightSelection[index] = true;
-      _heightUnit = (index == 0) ? 'cm' : 'ft';
-      _updateHeightControllerBasedOnUnit(); // Update display
+      _heightUnit = (index == 0) ? 'cm' : 'ft'; // 'ft' implies ft/in mode
+      _updateHeightControllerBasedOnUnit();
     });
   }
 
@@ -1271,10 +1259,33 @@ class _ProfilePageState extends State<ProfilePage>
     );
   }
 
+  // --- Logout ---
   Future<void> _logout() async {
+    await FCMService.deactivateTokenWithBackend();
     final prefs = await SharedPreferences.getInstance();
-    await UserCache.clearAllData(); // Clear specific cache
-    await prefs.clear(); // Clear all SharedPreferences
+    await UserCache.clearAllData(); // Clears all UserCache entries
+    
+    // More targeted removal from SharedPreferences
+    final keysToRemove = <String>{
+        'user_id', 'user_type', 'auth_token', // Common auth keys
+        'image_path', // Specific to this page's local image caching
+        'user_details_cache_timestamp', 
+        'user_metrics_cache_timestamp',
+        'user_preferences_cache_timestamp'
+    };
+    // Remove general user session keys by pattern if any exist
+    final allKeys = prefs.getKeys();
+    final patterns = [RegExp(r'_id\b', caseSensitive: false), RegExp(r'_user_type\b', caseSensitive: false), RegExp(r'token\b', caseSensitive: false)];
+    for (final key in allKeys) {
+        if (patterns.any((p) => p.hasMatch(key))) {
+            keysToRemove.add(key);
+        }
+    }
+    for (final key in keysToRemove) {
+        await prefs.remove(key);
+    }
+    print("Logged out, removed keys: $keysToRemove");
+
     if (mounted) {
       Navigator.pushAndRemoveUntil(
         context,
@@ -1305,9 +1316,10 @@ class _ProfilePageState extends State<ProfilePage>
     );
   }
 
-  InputDecoration _buildInputDecoration(String label, {IconData? prefixIcon}) {
+  InputDecoration _buildInputDecoration(String label, {IconData? prefixIcon, String? hintText}) {
     return InputDecoration(
       labelText: label,
+      hintText: hintText,
       labelStyle: GoogleFonts.poppins(color: kColorPrimary),
       prefixIcon: prefixIcon != null
           ? Icon(prefixIcon, color: kColorPrimary, size: 20)
@@ -1361,7 +1373,6 @@ class _ProfilePageState extends State<ProfilePage>
       items: options.map((T value) {
         return DropdownMenuItem<T>(
           value: value,
-          // Display 'None' specially if needed, otherwise default toString()
           child: Text(value.toString(),
               style:
                   GoogleFonts.poppins(color: kColorTextPrimary, fontSize: 15)),
@@ -1379,19 +1390,20 @@ class _ProfilePageState extends State<ProfilePage>
   Widget build(BuildContext context) {
     bool isEditingAnySection =
         _isEditingUserDetails || _isEditingMetrics || _isEditingPreferences;
-    bool isInitialDataLoaded =
-        !_isLoading && (_userDetails.isNotEmpty || _fetchError.isNotEmpty);
+    
+    // Show main shimmer if _isLoading is true AND (userDetails is empty AND no fetchError has occurred yet)
+    // This prevents shimmer from showing if there's an error message to display or if some data is already loaded.
+    bool showOverallShimmer = _isLoading && _userDetails.isEmpty && _fetchError.isEmpty;
 
     return Scaffold(
       backgroundColor: kColorBackground,
       appBar: AppBar(
-        title: const Text('Profile'),
+        title: Text('Profile', style: GoogleFonts.poppins()),
         backgroundColor: kColorPrimaryDark,
         foregroundColor: kColorTextOnPrimary,
         elevation: 1.0,
         centerTitle: true,
         actions: [
-          // Show Save/Cancel buttons in AppBar only when editing
           if (isEditingAnySection) ...[
             IconButton(
               icon: const Icon(Icons.cancel_outlined),
@@ -1399,17 +1411,15 @@ class _ProfilePageState extends State<ProfilePage>
               onPressed: _cancelEdit,
             ),
             IconButton(
-              icon: const Icon(Icons.save_alt_outlined), // Or Icons.check
+              icon: const Icon(Icons.save_alt_outlined),
               tooltip: 'Save Changes',
-              onPressed: _saveEditedData, // Use the unified save function
+              onPressed: _saveEditedData,
             ),
           ] else ...[
-            // Refresh button when not editing
             AnimatedBuilder(
               animation: _refreshIconController,
               builder: (context, child) {
-                // Check if any section is currently fetching data
-                bool isFetching = _isLoadingUserDetails ||
+                bool isFetchingAnyData = _isLoadingUserDetails ||
                     _isLoadingMetrics ||
                     _isLoadingPreferences ||
                     _refreshIconController.isAnimating;
@@ -1418,9 +1428,9 @@ class _ProfilePageState extends State<ProfilePage>
                     turns: _refreshIconController,
                     child: const Icon(Icons.refresh),
                   ),
-                  tooltip: isFetching ? 'Refreshing...' : 'Refresh',
+                  tooltip: isFetchingAnyData ? 'Refreshing...' : 'Refresh',
                   onPressed:
-                      isFetching ? null : _fetchData, // Disable if fetching
+                      isFetchingAnyData ? null : _fetchData,
                 );
               },
             ),
@@ -1431,42 +1441,33 @@ class _ProfilePageState extends State<ProfilePage>
       body: RefreshIndicator(
         onRefresh: _fetchData,
         color: kColorPrimary,
-        child: _isLoading &&
-                !isInitialDataLoaded // Show shimmer only on initial full load
+        child: showOverallShimmer
             ? _buildLoadingShimmer()
-            : _fetchError.isNotEmpty &&
-                    _userDetails.isEmpty // Show error only if *nothing* loaded
+            : _fetchError.isNotEmpty && _userDetails.isEmpty // Show error only if absolutely no user details loaded
                 ? _buildErrorState(_fetchError)
                 : ListView(
                     padding: const EdgeInsets.all(16.0),
                     children: [
+                      // Profile header should show even if details are partially loaded or only metrics/prefs error out
                       _buildProfileHeader(),
                       const SizedBox(height: 24.0),
 
-                      // --- Card Order ---
-                      // 1. User Details Card (Always first)
-                      _isLoadingUserDetails
-                          ? _buildShimmerCard(
-                              itemCount: 5) // Shimmer for user details
+                      // Individual section shimmers or content
+                      _isLoadingUserDetails && _userDetails.isEmpty // Shimmer for user details only if truly loading and empty
+                          ? _buildShimmerCard(itemCount: 5, title: "User Details")
                           : _buildUserDetailsCard(),
                       const SizedBox(height: 16.0),
 
-                      // 2. Metrics Card
-                      _isLoadingMetrics
-                          ? _buildShimmerCard(
-                              itemCount:
-                                  12) // Increased count for more metrics display
+                      _isLoadingMetrics && _userMetrics.isEmpty // Shimmer for metrics
+                          ? _buildShimmerCard(itemCount: 8, title: "Health Metrics") // Adjusted item count for typical metrics display
                           : _buildMetricsCard(),
                       const SizedBox(height: 16.0),
 
-                      // 3. Preferences Card
-                      _isLoadingPreferences
-                          ? _buildShimmerCard(
-                              itemCount: 4) // Shimmer for preferences
+                      _isLoadingPreferences && _userPreferences.isEmpty // Shimmer for preferences
+                          ? _buildShimmerCard(itemCount: 3, title: "Preferences")
                           : _buildPreferencesCard(),
                       const SizedBox(height: 24.0),
 
-                      // 4. Logout Button
                       _buildLogoutButton(),
                     ],
                   ),
@@ -1482,90 +1483,74 @@ class _ProfilePageState extends State<ProfilePage>
       child: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
-          // Shimmer for Header
+          // Shimmer for Profile Header
           Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const CircleAvatar(radius: 60, backgroundColor: Colors.white),
               const SizedBox(height: 12),
-              Container(height: 20, width: 150, color: Colors.white),
-              const SizedBox(height: 8),
-              Container(height: 16, width: 200, color: Colors.white),
+              Container(height: 20, width: 150, color: Colors.white, margin: const EdgeInsets.symmetric(vertical: 4)),
+              Container(height: 16, width: 200, color: Colors.white, margin: const EdgeInsets.symmetric(vertical: 4)),
             ],
           ),
           const SizedBox(height: 24.0),
-          _buildShimmerCard(itemCount: 5), // User Details
+          _buildShimmerCard(itemCount: 5, title: "User Details"), // User Details Shimmer
           const SizedBox(height: 16.0),
-          _buildShimmerCard(
-              itemCount: 12), // Metrics (Adjust count based on displayed rows)
+          _buildShimmerCard(itemCount: 8, title: "Health Metrics"), // Metrics Shimmer
           const SizedBox(height: 16.0),
-          _buildShimmerCard(itemCount: 4), // Preferences
+          _buildShimmerCard(itemCount: 3, title: "Preferences"), // Preferences Shimmer
         ],
       ),
     );
   }
 
-  // Builds the outer card structure for shimmer
-  Widget _buildShimmerCard({required int itemCount}) {
+  Widget _buildShimmerCard({required int itemCount, String? title}) {
     return Card(
       elevation: 1.0,
       shadowColor: Colors.grey.shade200,
-      margin: EdgeInsets.zero,
+      margin: EdgeInsets.zero, // Handled by ListView padding
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      color: kColorSurface,
+      color: kColorSurface, // Will be overridden by Shimmer
       child: Padding(
         padding: const EdgeInsets.all(16.0),
-        child:
-            _buildShimmerCardContent(itemCount: itemCount, includeTitle: true),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (title != null) ...[
+              Container(height: 20, width: title.length * 8.0, color: Colors.white), // Approx width
+              const SizedBox(height: 12),
+              const Divider(color: kColorDivider, height: 1), // Show divider in shimmer too
+              const SizedBox(height: 12),
+            ],
+            ...List.generate(
+              itemCount,
+              (index) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10.0),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(height: 22, width: 22, color: Colors.white), // Icon placeholder
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(height: 14, width: 80, color: Colors.white), // Label placeholder
+                          const SizedBox(height: 6),
+                          Container(height: 16, width: 120 + (index % 3 * 20.0), color: Colors.white), // Value placeholder (varying width)
+                        ],
+                      ),
+                    )
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  // Builds the inner content of a shimmer card (rows)
-  Widget _buildShimmerCardContent(
-      {required int itemCount, bool includeTitle = false}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (includeTitle) ...[
-          Container(
-              height: 20, width: 120, color: Colors.white), // Title Shimmer
-          const SizedBox(height: 12),
-          const Divider(color: kColorDivider, height: 1),
-          const SizedBox(height: 12),
-        ],
-        ...List.generate(
-            itemCount,
-            (index) => Padding(
-                  padding: const EdgeInsets.symmetric(
-                      vertical: 10.0), // Consistent padding
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                          height: 22, width: 22, color: Colors.white), // Icon
-                      const SizedBox(width: 16),
-                      Expanded(
-                          child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                              height: 14,
-                              width: 80,
-                              color: Colors.white), // Label
-                          const SizedBox(height: 6),
-                          Container(
-                              height: 16,
-                              width: 120,
-                              color: Colors.white), // Value/Input shimmer
-                        ],
-                      ))
-                    ],
-                  ),
-                )),
-      ],
-    );
-  }
 
   // --- Error State Widget ---
   Widget _buildErrorState(String message) {
@@ -1595,8 +1580,8 @@ class _ProfilePageState extends State<ProfilePage>
             const SizedBox(height: 24),
             ElevatedButton.icon(
               icon: const Icon(Icons.refresh),
-              label: const Text("Retry"),
-              onPressed: _fetchData, // Call fetch all data
+              label: Text("Retry", style: GoogleFonts.poppins()),
+              onPressed: _fetchData,
               style: ElevatedButton.styleFrom(
                 foregroundColor: kColorTextOnPrimary,
                 backgroundColor: kColorPrimary,
@@ -1615,27 +1600,31 @@ class _ProfilePageState extends State<ProfilePage>
   // --- Profile Header Widget ---
   Widget _buildProfileHeader() {
     ImageProvider<Object> displayImage;
-    // Determine the best image source to display
+    // Prioritize API image URL, then local path, then default
     if (_profileImageUrl != null && _profileImageUrl!.isNotEmpty) {
       displayImage = CachedNetworkImageProvider(_profileImageUrl!);
-    } else if (_profileImagePath != null) {
+    } else if (_profileImagePath != null && _profileImagePath!.isNotEmpty) {
       final file = File(_profileImagePath!);
       if (file.existsSync()) {
         displayImage = FileImage(file);
       } else {
-        // If local file doesn't exist (edge case), use default
-        displayImage = const AssetImage('assets/images/proffr.png');
+        displayImage = const AssetImage('assets/images/proffr.png'); // Fallback if local file missing
       }
     } else {
-      // Default asset image if neither URL nor local path is available
       displayImage = const AssetImage('assets/images/proffr.png');
     }
+
+    String displayName = getCaseInsensitive<String>(_userDetails, 'Name') ?? 
+                         (_isLoadingUserDetails && _userDetails.isEmpty ? 'Loading...' : 'User Name');
+    String displayEmail = getCaseInsensitive<String>(_userDetails, 'Email') ?? 
+                          (_isLoadingUserDetails && _userDetails.isEmpty ? '' : 'No Email');
+
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         GestureDetector(
-          onTap: _pickImage, // Allow changing image anytime
+          onTap: _pickImage,
           child: Stack(
             alignment: Alignment.bottomRight,
             children: [
@@ -1644,27 +1633,21 @@ class _ProfilePageState extends State<ProfilePage>
                 backgroundColor: kColorPrimaryLightest,
                 backgroundImage: displayImage,
                 onBackgroundImageError: (exception, stackTrace) {
-                  print("Error loading profile image: $exception");
-                  // Optionally force default image on error by clearing state
-                  // setState(() { _profileImageUrl = null; _profileImagePath = null; });
+                  print("Error loading profile image from provider: $exception");
+                  // Optionally, set to a default image directly in state if error occurs
                 },
-                child: displayImage ==
-                            const AssetImage('assets/images/proffr.png') &&
-                        _profileImageUrl == null &&
-                        _profileImagePath == null
-                    ? Icon(Icons.person,
-                        size: 60,
-                        color: kColorPrimary.withOpacity(
-                            0.5)) // Placeholder icon only if default asset is used AND no other image is set
-                    : null,
+                child: (_profileImageUrl == null || _profileImageUrl!.isEmpty) && 
+                       (_profileImagePath == null || _profileImagePath!.isEmpty)
+                    ? Icon(Icons.person, size: 60, color: kColorPrimary.withOpacity(0.5))
+                    : null, // Show person icon only if no image is set at all
               ),
               Container(
                 padding: const EdgeInsets.all(6),
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                     color: kColorPrimary,
                     shape: BoxShape.circle,
                     boxShadow: [
-                      BoxShadow(color: Colors.black26, blurRadius: 3)
+                      BoxShadow(color: Colors.black26, blurRadius: 3, offset: Offset(1,1))
                     ]),
                 child: const Icon(Icons.edit,
                     size: 18, color: kColorTextOnPrimary),
@@ -1674,7 +1657,7 @@ class _ProfilePageState extends State<ProfilePage>
         ),
         const SizedBox(height: 16),
         Text(
-          _userDetails['Name'] ?? 'User Name',
+          displayName,
           style: GoogleFonts.poppins(
               fontSize: 22,
               fontWeight: FontWeight.w600,
@@ -1682,9 +1665,9 @@ class _ProfilePageState extends State<ProfilePage>
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 6),
-        if (_userDetails['Email'] != null && _userDetails['Email'] != 'N/A')
+        if (displayEmail.isNotEmpty && displayEmail != 'No Email')
           Text(
-            _userDetails['Email'] ?? '',
+            displayEmail,
             style:
                 GoogleFonts.poppins(fontSize: 15, color: kColorTextSecondary),
             textAlign: TextAlign.center,
@@ -1700,9 +1683,8 @@ class _ProfilePageState extends State<ProfilePage>
     required bool isEditing,
     required VoidCallback onEdit,
   }) {
-    // Determine if any section is currently being edited
-    bool isAnyEditing =
-        _isEditingUserDetails || _isEditingMetrics || _isEditingPreferences;
+    bool isAnyOtherSectionEditing = (_isEditingUserDetails || _isEditingMetrics || _isEditingPreferences) && !isEditing;
+
 
     return Card(
       elevation: 1.0,
@@ -1726,8 +1708,7 @@ class _ProfilePageState extends State<ProfilePage>
                         color: kColorPrimaryDark),
                   ),
                 ),
-                // Show Edit button only if NOT editing this specific card AND no *other* card is being edited
-                if (!isEditing && !isAnyEditing)
+                if (!isEditing && !isAnyOtherSectionEditing) // Show edit button only if no other section is being edited
                   IconButton(
                     icon: const Icon(Icons.edit_outlined,
                         size: 22, color: kColorPrimary),
@@ -1737,8 +1718,7 @@ class _ProfilePageState extends State<ProfilePage>
                     constraints: const BoxConstraints(),
                     padding: EdgeInsets.zero,
                   ),
-                // Indicate that this section IS being edited (subtle)
-                if (isEditing)
+                if (isEditing) // Show "Editing..." indicator
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1754,7 +1734,7 @@ class _ProfilePageState extends State<ProfilePage>
               ],
             ),
             const Divider(color: kColorDivider, thickness: 1, height: 24),
-            Column(children: children), // Content is always Column now
+            _buildGroupedInfoRows(children, isEditing),
           ],
         ),
       ),
@@ -1762,22 +1742,245 @@ class _ProfilePageState extends State<ProfilePage>
   }
 
   String _formatJoinedDate(String? dateString) {
-    if (dateString == null || dateString == 'N/A') return 'N/A';
+    if (dateString == null || dateString == 'N/A' || dateString.isEmpty) return 'N/A';
     try {
-      // Attempt to parse ISO 8601 format (common in APIs)
-      final dateTime =
-          DateTime.parse(dateString).toLocal(); // Convert to local time
-      return DateFormat('MMM d, yyyy')
-          .format(dateTime); // Format as "Jan 1, 2023"
+      // Attempt to parse common ISO 8601 format first
+      DateTime dateTime = DateTime.parse(dateString).toLocal();
+      return DateFormat('MMM d, yyyy').format(dateTime);
     } catch (e) {
-      print("Error parsing date '$dateString': $e");
-      // Fallback: Try to return the original string if parsing fails
-      return dateString;
+      // Fallback for other potential date formats if needed, or just return original
+      print("Error parsing date '$dateString': $e. Returning as is.");
+      return dateString; // Or handle more gracefully
     }
   }
 
-  // --- Card Content Widgets ---
+  // --- Location Animation & Fetch Methods ---
+  void _startLocationHintAnimation() {
+    _locationHintTimer?.cancel();
+    _locationHintDots = 0;
+    _locationHintTimer = Timer.periodic(const Duration(milliseconds: 400), (timer) {
+      if (!mounted || !_isFetchingLocation) {
+        timer.cancel();
+        if (mounted && !_isFetchingLocation) setState(() => _locationHintDots = 0);
+        return;
+      }
+      if (mounted) {
+        setState(() => _locationHintDots = (_locationHintDots + 1) % 4);
+      }
+    });
+  }
 
+  void _stopLocationHintAnimation() {
+    _locationHintTimer?.cancel();
+    if (mounted) setState(() => _locationHintDots = 0);
+  }
+
+  Future<void> _getCurrentLocation() async {
+    if (_isFetchingLocation) return;
+
+    setState(() {
+      _isFetchingLocation = true;
+      _userDetailsLocationController.clear(); // Clear old text
+    });
+    _startLocationHintAnimation();
+
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted) {
+          _stopLocationHintAnimation();
+          setState(() {
+            _isFetchingLocation = false;
+            _userDetailsLocationController.text = ''; // Ensure it's clear
+          });
+          _showErrorSnackBar('Location services are disabled. Please enable GPS.');
+        }
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw Exception('Location permissions denied by user.');
+        }
+      }
+      if (permission == LocationPermission.deniedForever) {
+        throw Exception('Location permissions permanently denied. Please enable in app settings.');
+      }
+
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 15), // Timeout for position fetching
+      );
+
+      String displayAddress = "Lat: ${position.latitude.toStringAsFixed(4)}, Lon: ${position.longitude.toStringAsFixed(4)}";
+      String coordsForStorage = "${position.latitude},${position.longitude}"; // For storage
+
+      // Attempt reverse geocoding (optional, can fail gracefully)
+      try {
+        // Using a free reverse geocoding service, replace if you have a preferred one or API key
+        final String geocodeApiUrl = 'https://geocode.maps.co/reverse?lat=${position.latitude}&lon=${position.longitude}';
+        final geocodeResponse = await http.get(Uri.parse(geocodeApiUrl)).timeout(const Duration(seconds: 10));
+        if (geocodeResponse.statusCode == 200) {
+          final geocodeData = json.decode(geocodeResponse.body);
+          if (geocodeData['display_name'] != null) {
+            displayAddress = geocodeData['display_name'];
+          }
+        } else {
+          print('Reverse geocoding failed: ${geocodeResponse.statusCode}');
+        }
+      } catch (e) {
+        print('Error during reverse geocoding: $e');
+        // Falls back to Lat/Lon display
+      }
+      
+      if(mounted) {
+        _stopLocationHintAnimation();
+        setState(() {
+          // Store the more detailed address for display, but consider what to save to backend (coords or full address)
+          _userDetailsLocationController.text = displayAddress; 
+          // If you want to store just coordinates, you'd use coordsForStorage when saving.
+          _isFetchingLocation = false;
+        });
+        _showSuccessSnackBar('Location acquired!');
+      }
+
+    } on TimeoutException catch (_) {
+      if (mounted) {
+        _stopLocationHintAnimation();
+        setState(() {
+          _isFetchingLocation = false;
+          _userDetailsLocationController.text = 'Failed: Location timeout';
+        });
+        _showErrorSnackBar('Getting location timed out.');
+      }
+    } catch (e) {
+       if (mounted) {
+        _stopLocationHintAnimation();
+        setState(() {
+          _isFetchingLocation = false;
+          _userDetailsLocationController.text = 'Failed: ${e.toString().replaceFirst("Exception: ", "")}';
+        });
+        _showErrorSnackBar('Error getting location: ${e.toString().replaceFirst("Exception: ", "")}');
+      }
+    }
+  }
+
+  Widget _buildLocationField() {
+    String currentHintText = _isFetchingLocation
+        ? "Acquiring location" + "." * _locationHintDots // Animated dots
+        : "Tap icon to get current location";
+
+    return AnimatedOpacity(
+      opacity: _isFetchingLocation ? 0.7 : 1.0,
+      duration: const Duration(milliseconds: 300),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start, // Align items to the top
+        children: [
+          Expanded(
+            child: TextFormField(
+              controller: _userDetailsLocationController,
+              readOnly: true, // Location is set by the button
+              style: GoogleFonts.poppins(color: kColorTextPrimary, fontSize: 14),
+              decoration: _buildInputDecoration(
+                "Location Address", // Changed label
+                prefixIcon: Icons.location_on_outlined,
+                hintText: currentHintText,
+              ).copyWith(
+                // Ensure content padding works well with multiline
+                 contentPadding: const EdgeInsets.symmetric(vertical: 14.0, horizontal: 12.0),
+              ),
+              maxLines: 2, // Allow for longer addresses
+              // No validator needed for readOnly field set programmatically
+            ),
+          ),
+          const SizedBox(width: 8),
+          Padding(
+            padding: const EdgeInsets.only(top: 4.0), // Adjust button position slightly
+            child: IconButton(
+              icon: Icon(Icons.my_location, color: kColorPrimaryDark),
+              tooltip: 'Get Current Location',
+              onPressed: _isFetchingLocation ? null : _getCurrentLocation, // Disable while fetching
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+
+  // --- Grouped Info Row Helper (Corrected definition) ---
+  Widget _buildGroupedInfoRows(List<Widget> children, bool isEditing) {
+    if (isEditing) {
+      // In edit mode, just a simple column of children (input fields)
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children.map((child) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4.0), // Add some spacing between edit fields
+          child: child,
+        )).toList(),
+      );
+    }
+
+    // In display mode, group items visually
+    List<Widget> groupedChildren = [];
+    List<Widget> buffer = []; // To hold non-CustomGroupContainer items to be grouped
+
+    for (var child in children) {
+      if (child is CustomGroupContainer) {
+        // If buffer has items, group them first
+        if (buffer.isNotEmpty) {
+          groupedChildren.add(
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 4),
+              decoration: BoxDecoration(
+                border: Border.all(color: kColorBorder.withOpacity(0.7), width: 1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: buffer.map((e) => e).toList(), // Add buffered items
+              ),
+            ),
+          );
+          buffer.clear(); // Clear buffer after adding
+        }
+        // Add the CustomGroupContainer directly
+        groupedChildren.add(Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4.0), // Consistent vertical margin
+          child: child,
+        ));
+      } else {
+        // Add other widgets (like _buildInfoRow) to the buffer
+        buffer.add(child);
+      }
+    }
+
+    // Flush any remaining items in the buffer
+    if (buffer.isNotEmpty) {
+      groupedChildren.add(
+        Container(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          decoration: BoxDecoration(
+            border: Border.all(color: kColorBorder.withOpacity(0.7), width: 1),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: buffer.map((e) => e).toList(),
+          ),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: groupedChildren
+    );
+  }
+
+
+  // --- Card Content Widgets ---
   Widget _buildUserDetailsCard() {
     return _buildStyledCard(
       title: 'User Details',
@@ -1785,57 +1988,72 @@ class _ProfilePageState extends State<ProfilePage>
       onEdit: () {
         setState(() {
           _isEditingUserDetails = true;
-          _isEditingMetrics = false;
+          _isEditingMetrics = false; // Ensure other sections are not in edit mode
           _isEditingPreferences = false;
-          // Ensure controllers have the latest data before editing starts
-          _userDetailsNameController.text = _userDetails['Name'] ?? '';
-          _userDetailsEmailController.text = _userDetails['Email'] ?? '';
-          _userDetailsPhoneController.text = _userDetails['Phone_Number'] ?? '';
-          _userDetailsLocationController.text = _userDetails['Location'] ?? '';
+          // Populate controllers from current state
+          _userDetailsNameController.text = getCaseInsensitive<String>(_userDetails, 'Name') ?? '';
+          _userDetailsEmailController.text = getCaseInsensitive<String>(_userDetails, 'Email') ?? '';
+          _userDetailsPhoneController.text = getCaseInsensitive<String>(_userDetails, 'Phone_Number') ?? '';
+          _userDetailsLocationController.text = getCaseInsensitive<String>(_userDetails, 'Location') ?? '';
         });
       },
-      children: [
+      children: _isEditingUserDetails
+       ? [ // Widgets for editing user details
+            _buildTextField(
+              controller: _userDetailsNameController,
+              label: 'Name',
+              icon: Icons.person_outline,
+            ),
+            _buildTextField(
+              controller: _userDetailsEmailController,
+              label: 'Email',
+              icon: Icons.email_outlined,
+              keyboardType: TextInputType.emailAddress,
+            ),
+            _buildTextField(
+              controller: _userDetailsPhoneController,
+              label: 'Phone',
+              icon: Icons.phone_outlined,
+              keyboardType: TextInputType.phone,
+            ),
+            _buildLocationField(), // Special field for location editing
+       ]
+       : [ // Widgets for displaying user details
         _buildInfoRow(
           icon: Icons.badge_outlined,
           label: 'User ID',
-          value: _userDetails['User_Id']?.toString() ?? 'N/A',
+          value: getCaseInsensitive(_userDetails, 'User_Id')?.toString() ?? 'N/A',
           isEditing: false,
         ),
         _buildInfoRow(
           icon: Icons.person_outline,
           label: 'Name',
-          value: _userDetails['Name'] ?? 'N/A',
-          isEditing: _isEditingUserDetails,
-          controller: _userDetailsNameController,
+          value: getCaseInsensitive<String>(_userDetails, 'Name') ?? 'N/A',
+          isEditing: false,
         ),
         _buildInfoRow(
           icon: Icons.email_outlined,
           label: 'Email',
-          value: _userDetails['Email'] ?? 'N/A',
-          isEditing: _isEditingUserDetails,
-          controller: _userDetailsEmailController,
-          keyboardType: TextInputType.emailAddress,
+          value: getCaseInsensitive<String>(_userDetails, 'Email') ?? 'N/A',
+          isEditing: false,
         ),
         _buildInfoRow(
           icon: Icons.phone_outlined,
           label: 'Phone',
-          value: _userDetails['Phone_Number'] ?? 'N/A',
-          isEditing: _isEditingUserDetails,
-          controller: _userDetailsPhoneController,
-          keyboardType: TextInputType.phone,
+          value: getCaseInsensitive<String>(_userDetails, 'Phone_Number') ?? 'N/A',
+          isEditing: false,
         ),
         _buildInfoRow(
           icon: Icons.location_on_outlined,
           label: 'Location',
-          value: _userDetails['Location'] ?? 'N/A',
-          isEditing: _isEditingUserDetails,
-          controller: _userDetailsLocationController,
+          value: getCaseInsensitive<String>(_userDetails, 'Location') ?? 'N/A',
+          isEditing: false,
           maxLines: 2,
         ),
         _buildInfoRow(
           icon: Icons.calendar_today_outlined,
           label: 'Joined',
-          value: _formatJoinedDate(_userDetails['Registration_Date']),
+          value: _formatJoinedDate(getCaseInsensitive(_userDetails, 'Registration_Date')),
           isEditing: false,
         ),
       ],
@@ -1851,209 +2069,245 @@ class _ProfilePageState extends State<ProfilePage>
           _isEditingMetrics = true;
           _isEditingUserDetails = false;
           _isEditingPreferences = false;
-          // Initialize state from the _userMetrics map for editing
-          double? currentWeightKg = _tryParseDouble(_userMetrics['weight']);
-          double? currentHeightCm = _tryParseDouble(_userMetrics['height']);
+          
+          // Populate controllers and selected values from _userMetrics
+          double? currentWeightKg = _tryParseDouble(getCaseInsensitive(_userMetrics, 'weight'));
+          double? currentHeightCm = _tryParseDouble(getCaseInsensitive(_userMetrics, 'height'));
 
-          _selectedAgeRange = _userMetrics['age_range'] != 'N/A'
-              ? _userMetrics['age_range']
+          _selectedAgeRange = getCaseInsensitive(_userMetrics, 'age_range') != 'N/A'
+              ? getCaseInsensitive(_userMetrics, 'age_range')
               : null;
-          if (_selectedAgeRange != null &&
-              !_ageRanges.contains(_selectedAgeRange)) _selectedAgeRange = null;
-          _selectedSex =
-              _userMetrics['sex'] != 'N/A' ? _userMetrics['sex'] : null;
-          if (_selectedSex != null && !_sexs.contains(_selectedSex))
-            _selectedSex = null;
-          _selectedActivityLevel = _userMetrics['activity_level'] != 'N/A'
-              ? _userMetrics['activity_level']
+          if (_selectedAgeRange != null && !_ageRanges.contains(_selectedAgeRange)) _selectedAgeRange = null;
+          
+          _selectedSex = getCaseInsensitive(_userMetrics, 'sex') != 'N/A' ? getCaseInsensitive(_userMetrics, 'sex') : null;
+          if (_selectedSex != null && !_sexs.contains(_selectedSex)) _selectedSex = null;
+
+          _selectedActivityLevel = getCaseInsensitive(_userMetrics, 'activity_level') != 'N/A'
+              ? getCaseInsensitive(_userMetrics, 'activity_level')
               : null;
-          if (_selectedActivityLevel != null &&
-              !_activityLevels.contains(_selectedActivityLevel))
-            _selectedActivityLevel = null;
+          if (_selectedActivityLevel != null && !_activityLevels.contains(_selectedActivityLevel)) _selectedActivityLevel = null;
+          
           _weightKg = currentWeightKg ?? 0;
           _heightCm = currentHeightCm ?? 0;
-          // Update controllers based on the stored kg/cm values and current unit selection
-          _updateWeightControllerBasedOnUnit();
-          _updateHeightControllerBasedOnUnit();
+          _updateWeightControllerBasedOnUnit(); // Populates _weightController
+          _updateHeightControllerBasedOnUnit(); // Populates _heightCmController or ft/in controllers
         });
       },
       children: _isEditingMetrics
-          ? _buildMetricsEditingWidgets() // Show editing widgets
-          : _buildMetricsDisplayWidgets(), // Show display widgets
+        ? _buildMetricsEditingWidgets()
+        : [ 
+            _buildInfoRow(
+              icon: Icons.height_outlined,
+              label: 'Height',
+              value: getCaseInsensitive(_userMetrics, 'height') != 'N/A' && getCaseInsensitive(_userMetrics, 'height') != null
+                  ? '${getCaseInsensitive(_userMetrics, 'height')} cm'
+                  : 'N/A',
+              isEditing: false,
+            ),
+            _buildInfoRow(
+              icon: Icons.fitness_center_outlined,
+              label: 'Weight',
+              value: getCaseInsensitive(_userMetrics, 'weight') != 'N/A' && getCaseInsensitive(_userMetrics, 'weight') != null
+                  ? '${getCaseInsensitive(_userMetrics, 'weight')} kg'
+                  : 'N/A',
+              isEditing: false,
+            ),
+            CustomGroupContainer( 
+              child: Container( 
+                decoration: BoxDecoration( // Inner container to ensure consistent border if CustomGroupContainer doesn't provide one
+                  border: _isEditingMetrics ? Border.all(color: Colors.transparent) : Border.all(color: kColorBorder.withOpacity(0.7), width: 1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildInfoRow(
+                      icon: Icons.monitor_weight_outlined,
+                      label: 'BMI',
+                      value: getCaseInsensitive(_userMetrics, 'bmi') ?? 'N/A',
+                      isEditing: false,
+                    ),
+                    _buildInfoRow(
+                      icon: Icons.accessibility_new_outlined,
+                      label: 'BMI Category',
+                      value: getCaseInsensitive(_userMetrics, 'bmi_category') ?? 'N/A',
+                      isEditing: false,
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 16.0, right: 16.0, bottom: 12.0, top: 0.0),
+                      child: _buildBmiVisualIndicator(_tryParseDouble(getCaseInsensitive(_userMetrics, 'bmi'))),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            CustomGroupContainer( 
+              child: Container(
+                 decoration: BoxDecoration(
+                  border: _isEditingMetrics ? Border.all(color: Colors.transparent) : Border.all(color: kColorBorder.withOpacity(0.7), width: 1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildInfoRow(
+                      icon: Icons.directions_run_outlined,
+                      label: 'Activity Level',
+                      value: getCaseInsensitive(_userMetrics, 'activity_level') ?? 'N/A',
+                      isEditing: false,
+                    ),
+                    _buildInfoRow(
+                      icon: Icons.cake_outlined,
+                      label: 'Age Range',
+                      value: getCaseInsensitive(_userMetrics, 'age_range') ?? 'N/A',
+                      isEditing: false,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            _buildInfoRow(
+              icon: Icons.wc_outlined,
+              label: 'Sex',
+              value: getCaseInsensitive(_userMetrics, 'sex') ?? 'N/A',
+              isEditing: false,
+            ),
+            _buildInfoRow( // Ideal Weight
+              icon: Icons.scale_outlined,
+              label: 'Ideal Weight (Est.)',
+              value: getCaseInsensitive(_userMetrics, 'ideal_weight') != 'N/A' && getCaseInsensitive(_userMetrics, 'ideal_weight') != null
+                  ? '${getCaseInsensitive(_userMetrics, 'ideal_weight')} kg'
+                  : 'N/A',
+              isEditing: false,
+            ),
+            _buildInfoRow(
+              icon: Icons.bolt_outlined, 
+              label: 'BMR (Est.)',
+              value: getCaseInsensitive(_userMetrics, 'bmr') != 'N/A' && getCaseInsensitive(_userMetrics, 'bmr') != null
+                  ? '${getCaseInsensitive(_userMetrics, 'bmr')} kcal'
+                  : 'N/A',
+              isEditing: false,
+            ),
+            _buildInfoRow(
+              icon: Icons.restaurant_outlined,
+              label: 'Daily Calories (Est.)',
+              value: getCaseInsensitive(_userMetrics, 'daily_calories') != 'N/A' && getCaseInsensitive(_userMetrics, 'daily_calories') != null
+                  ? '${getCaseInsensitive(_userMetrics, 'daily_calories')} kcal'
+                  : 'N/A',
+              isEditing: false,
+            ),
+             _buildInfoRow( // Other medical metrics - assuming they are less frequently edited manually
+              icon: Icons.opacity_outlined,
+              label: 'Cholesterol',
+              value: getCaseInsensitive(_userMetrics,'cholesterol_level') ?? 'N/A',
+              isEditing: false, // Not editable in this version
+            ),
+            _buildInfoRow(
+              icon: Icons.favorite_border_outlined,
+              label: 'Blood Pressure (Sys/Dia)',
+              value: '${getCaseInsensitive(_userMetrics,'sys_bp') ?? 'N/A'} / ${getCaseInsensitive(_userMetrics,'dia_bp') ?? 'N/A'}',
+              isEditing: false, // Not editable
+            ),
+            _buildInfoRow(
+              icon: Icons.monitor_heart_outlined,
+              label: 'Pulse',
+              value: getCaseInsensitive(_userMetrics,'pulse') ?? 'N/A',
+              isEditing: false, // Not editable
+            ),
+            _buildInfoRow(
+              icon: Icons.update_outlined,
+              label: 'Last Recorded',
+              value: _formatJoinedDate(getCaseInsensitive(_userMetrics, 'recorded_at')),
+              isEditing: false,
+            ),
+          ],
     );
   }
 
-  List<Widget> _buildMetricsDisplayWidgets() {
-    String displayBmi = _userMetrics['bmi'] ?? 'N/A';
-
-    return [
-      _buildInfoRow(
-        icon: Icons.height_outlined,
-        label: 'Height',
-        value: _userMetrics['height'] != 'N/A'
-            ? '${_userMetrics['height']} cm'
-            : 'N/A',
-        isEditing: false,
-      ),
-      _buildInfoRow(
-        icon: Icons.fitness_center_outlined,
-        label: 'Weight',
-        value: _userMetrics['weight'] != 'N/A'
-            ? '${_userMetrics['weight']} kg'
-            : 'N/A',
-        isEditing: false,
-      ),
-      _buildInfoRow(
-        icon: Icons.monitor_weight_outlined,
-        label: 'BMI',
-        value: displayBmi,
-        isEditing: false,
-      ),
-      if (displayBmi != 'N/A') ...[
-        const SizedBox(height: 8),
-        _buildBmiVisualIndicator(double.tryParse(displayBmi)),
-        const SizedBox(height: 8),
-      ],
-      _buildInfoRow(
-        // Display BMI Category from API
-        icon: Icons.accessibility_new_outlined,
-        label: 'BMI Category',
-        value: _userMetrics['bmi_category'] ?? 'N/A', isEditing: false,
-      ),
-      _buildInfoRow(
-        icon: Icons.cake_outlined,
-        label: 'Age Range',
-        value: _userMetrics['age_range'] ?? 'N/A',
-        isEditing: false,
-      ),
-      _buildInfoRow(
-        icon: Icons.wc_outlined,
-        label: 'Sex',
-        value: _userMetrics['sex'] ?? 'N/A',
-        isEditing: false,
-      ),
-      _buildInfoRow(
-        icon: Icons.directions_run_outlined,
-        label: 'Activity Level',
-        value: _userMetrics['activity_level'] ?? 'N/A',
-        isEditing: false,
-      ),
-      _buildInfoRow(
-        icon: Icons.opacity_outlined,
-        label: 'Cholesterol',
-        value: _userMetrics['cholesterol_level'] ?? 'N/A',
-        isEditing: false,
-      ),
-      _buildInfoRow(
-        icon: Icons.favorite_border_outlined,
-        label: 'Blood Pressure (Sys/Dia)',
-        value:
-            '${_userMetrics['sys_bp'] ?? 'N/A'} / ${_userMetrics['dia_bp'] ?? 'N/A'}',
-        isEditing: false,
-      ),
-      _buildInfoRow(
-        icon: Icons.monitor_heart_outlined,
-        label: 'Pulse',
-        value: _userMetrics['pulse'] ?? 'N/A',
-        isEditing: false,
-      ),
-      _buildInfoRow(
-        icon: Icons.scale_outlined,
-        label: 'Ideal Weight (Est.)',
-        value: _userMetrics['ideal_weight'] != 'N/A'
-            ? '${_userMetrics['ideal_weight']} kg'
-            : 'N/A',
-        isEditing: false,
-      ),
-      _buildInfoRow(
-        icon: Icons.local_fire_department_outlined,
-        label: 'BMR (Est.)',
-        value: _userMetrics['bmr'] != 'N/A'
-            ? '${_userMetrics['bmr']} kcal'
-            : 'N/A',
-        isEditing: false,
-      ),
-      _buildInfoRow(
-        icon: Icons.restaurant_outlined,
-        label: 'Daily Calories (Est.)',
-        value: _userMetrics['daily_calories'] != 'N/A'
-            ? '${_userMetrics['daily_calories']} kcal'
-            : 'N/A',
-        isEditing: false,
-      ),
-      _buildInfoRow(
-        icon: Icons.update_outlined,
-        label: 'Last Recorded',
-        value:
-            _formatJoinedDate(_userMetrics['recorded_at']), // Format the date
-        isEditing: false,
-      ),
-    ];
-  }
-
   List<Widget> _buildMetricsEditingWidgets() {
+    String calculatedBmi = _calculateBmi(_heightCm, _weightKg);
+    // For BMR and Daily Calories preview during editing:
+    double? bmrPreview;
+    if (_weightKg > 0 && _heightCm > 0 && _selectedAgeRange != null && _selectedSex != null) {
+        int age = 30;
+        final ageMatch = RegExp(r'\d+').firstMatch(_selectedAgeRange!);
+        if (ageMatch != null) age = int.tryParse(ageMatch.group(0)!) ?? 30;
+        if (_selectedSex == 'Male') bmrPreview = 10 * _weightKg + 6.25 * _heightCm - 5 * age + 5;
+        else bmrPreview = 10 * _weightKg + 6.25 * _heightCm - 5 * age - 161;
+    }
+    double? dailyCaloriesPreview;
+    if (bmrPreview != null && _selectedActivityLevel != null) {
+        final activityMultipliers = {'Sedentary': 1.2, 'Lightly Active': 1.375, 'Moderately Active': 1.55, 'Very Active': 1.725};
+        dailyCaloriesPreview = bmrPreview * (activityMultipliers[_selectedActivityLevel!] ?? 1.2);
+    }
+
+
     return [
+      _buildDropdownField<String>(
+        label: 'Age Range',
+        icon: Icons.cake_outlined,
+        currentValue: _selectedAgeRange,
+        options: _ageRanges,
+        onChanged: (value) => setState(() => _selectedAgeRange = value),
+      ),
+      _buildDropdownField<String>(
+        label: 'Sex',
+        icon: Icons.wc_outlined,
+        currentValue: _selectedSex,
+        options: _sexs,
+        onChanged: (value) => setState(() => _selectedSex = value),
+      ),
+      _buildWeightInputRow(),
+      _buildHeightInputRow(),
+      _buildDropdownField<String>(
+        label: 'Activity Level',
+        icon: Icons.directions_run_outlined,
+        currentValue: _selectedActivityLevel,
+        options: _activityLevels,
+        onChanged: (value) => setState(() => _selectedActivityLevel = value),
+      ),
+      // Display calculated BMI, BMR, Daily Calories dynamically during editing
       Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8.0),
-        child: _buildDropdownField<String>(
-          label: 'Age Range',
-          icon: Icons.cake_outlined,
-          currentValue: _selectedAgeRange,
-          options: _ageRanges,
-          onChanged: (value) => setState(() => _selectedAgeRange = value),
+        padding: const EdgeInsets.only(top: 16.0),
+        child: Column(
+          children: [
+            _buildInfoRow(
+              icon: Icons.monitor_weight_outlined,
+              label: 'BMI (Calculated)',
+              value: calculatedBmi,
+              isEditing: false, // Display only
+            ),
+             if (calculatedBmi != 'N/A') Padding(
+                padding: const EdgeInsets.only(left: 16.0, right: 16.0, bottom: 8.0),
+                child: _buildBmiVisualIndicator(_tryParseDouble(calculatedBmi)),
+            ),
+            _buildInfoRow(
+              icon: Icons.bolt_outlined,
+              label: 'BMR (Est. Preview)',
+              value: bmrPreview != null ? '${bmrPreview.toStringAsFixed(0)} kcal' : 'N/A',
+              isEditing: false, // Display only
+            ),
+            _buildInfoRow(
+              icon: Icons.restaurant_menu_outlined,
+              label: 'Daily Calories (Est. Preview)',
+              value: dailyCaloriesPreview != null ? '${dailyCaloriesPreview.toStringAsFixed(0)} kcal' : 'N/A',
+              isEditing: false, // Display only
+            ),
+          ],
         ),
       ),
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8.0),
-        child: _buildDropdownField<String>(
-          label: 'Sex',
-          icon: Icons.wc_outlined,
-          currentValue: _selectedSex,
-          options: _sexs,
-          onChanged: (value) => setState(() => _selectedSex = value),
-        ),
-      ),
-      _buildWeightInputRow(), // Combined input + unit toggle
-      _buildHeightInputRow(), // Combined input + unit toggle
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8.0),
-        child: _buildDropdownField<String>(
-          label: 'Activity Level',
-          icon: Icons.directions_run_outlined,
-          currentValue: _selectedActivityLevel,
-          options: _activityLevels,
-          onChanged: (value) => setState(() => _selectedActivityLevel = value),
-        ),
-      ),
-      Padding(
-        // Display calculated BMI live
-        padding: const EdgeInsets.only(top: 16.0, bottom: 8.0),
-        child: _buildInfoRow(
-          icon: Icons.monitor_weight_outlined,
-          label: 'BMI (Calculated)',
-          value: _calculateBmi(
-              _heightCm, _weightKg), // Calculate live based on inputs
-          isEditing: false, // Always display, not editable
-        ),
-      ),
-      // Optionally display other non-editable fields for context
+       // Display non-editable metrics for context if needed
       _buildInfoRow(
         icon: Icons.opacity_outlined,
-        label: 'Cholesterol',
-        value: _userMetrics['cholesterol_level'] ?? 'N/A',
+        label: 'Cholesterol (Last Known)',
+        value: getCaseInsensitive(_userMetrics,'cholesterol_level') ?? 'N/A',
         isEditing: false,
       ),
       _buildInfoRow(
         icon: Icons.favorite_border_outlined,
-        label: 'Blood Pressure (Sys/Dia)',
+        label: 'Blood Pressure (Last Known)',
         value:
-            '${_userMetrics['sys_bp'] ?? 'N/A'} / ${_userMetrics['dia_bp'] ?? 'N/A'}',
-        isEditing: false,
-      ),
-      _buildInfoRow(
-        icon: Icons.monitor_heart_outlined,
-        label: 'Pulse',
-        value: _userMetrics['pulse'] ?? 'N/A',
+            '${getCaseInsensitive(_userMetrics,'sys_bp') ?? 'N/A'} / ${getCaseInsensitive(_userMetrics,'dia_bp') ?? 'N/A'}',
         isEditing: false,
       ),
     ];
@@ -2068,34 +2322,27 @@ class _ProfilePageState extends State<ProfilePage>
           _isEditingPreferences = true;
           _isEditingUserDetails = false;
           _isEditingMetrics = false;
-          // Initialize selections from the userPreferences map
-          _selectedGoal = _userPreferences['goals'] != 'N/A'
-              ? _userPreferences['goals']
+          // Populate controllers from _userPreferences
+          _selectedGoal = getCaseInsensitive(_userPreferences, 'goals') != 'N/A'
+              ? getCaseInsensitive(_userPreferences, 'goals')
               : null;
-          if (_selectedGoal != null && !_goalsOptions.contains(_selectedGoal))
-            _selectedGoal = null;
-          _selectedDietType = _userPreferences['diet_type'] != 'N/A'
-              ? _userPreferences['diet_type']
-              : null;
-          if (_selectedDietType != null &&
-              !_dietTypeOptions.contains(_selectedDietType))
-            _selectedDietType = null;
+          if (_selectedGoal != null && !_goalsOptions.contains(_selectedGoal)) _selectedGoal = null;
 
-          // Reset selection based on the *display* string in the map
-          String currentRestrictionDisplay =
-              _userPreferences['food_restrictions'] ?? 'N/A';
+          _selectedDietType = getCaseInsensitive(_userPreferences, 'diet_type') != 'N/A'
+              ? getCaseInsensitive(_userPreferences, 'diet_type')
+              : null;
+          if (_selectedDietType != null && !_dietTypeOptions.contains(_selectedDietType)) _selectedDietType = null;
+
+          String? currentRestrictionDisplay = getCaseInsensitive(_userPreferences, 'food_restrictions');
           if (currentRestrictionDisplay == 'None') {
             _selectedFoodRestriction = 'None';
-          } else if (currentRestrictionDisplay != 'N/A') {
-            String firstItem =
-                currentRestrictionDisplay.split(',').first.trim();
-            _selectedFoodRestriction =
-                _foodRestrictionsOptions.contains(firstItem) ? firstItem : null;
+          } else if (currentRestrictionDisplay != null && currentRestrictionDisplay != 'N/A') {
+            String firstItem = currentRestrictionDisplay.split(',').first.trim();
+            _selectedFoodRestriction = _foodRestrictionsOptions.contains(firstItem) ? firstItem : null;
           } else {
             _selectedFoodRestriction = null;
           }
-          if (_selectedFoodRestriction != null &&
-              !_foodRestrictionsOptions.contains(_selectedFoodRestriction)) {
+           if (_selectedFoodRestriction != null && !_foodRestrictionsOptions.contains(_selectedFoodRestriction)) {
             _selectedFoodRestriction = null;
           }
         });
@@ -2111,67 +2358,62 @@ class _ProfilePageState extends State<ProfilePage>
       _buildInfoRow(
         icon: Icons.flag_outlined,
         label: 'Goals',
-        value: _userPreferences['goals'] ?? 'Not Set',
+        value: getCaseInsensitive(_userPreferences, 'goals') ?? 'Not Set',
         isEditing: false,
       ),
       _buildInfoRow(
         icon: Icons.restaurant_menu_outlined,
         label: 'Diet Type',
-        value: _userPreferences['diet_type'] ?? 'Not Set',
+        value: getCaseInsensitive(_userPreferences, 'diet_type') ?? 'Not Set',
         isEditing: false,
       ),
       _buildInfoRow(
-        icon: Icons.no_food_outlined, label: 'Restrictions',
-        value: _userPreferences['food_restrictions'] ??
-            'None', // Use processed string
-        isEditing: false, maxLines: 3, // Allow wrapping
+        icon: Icons.no_food_outlined, label: 'Food Restrictions',
+        value: getCaseInsensitive(_userPreferences, 'food_restrictions') ?? 'None',
+        isEditing: false, maxLines: 3,
       ),
       _buildInfoRow(
         icon: Icons.ramen_dining_outlined, label: 'Cuisine Preferences',
-        value: _userPreferences['cuisine_preferences'] ??
-            'Not Set', // Use processed string
-        isEditing: false, maxLines: 3, // Allow wrapping
+        value: getCaseInsensitive(_userPreferences, 'cuisine_preferences') ?? 'Not Set',
+        isEditing: false, maxLines: 3,
       ),
       const SizedBox(height: 16),
-      _buildMealRecommendationsButton(), // Button always visible
+      _buildMealRecommendationsButton(),
     ];
   }
 
   List<Widget> _buildPreferencesEditingWidgets() {
     return [
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8.0),
-        child: _buildDropdownField<String>(
-          label: 'Goals',
-          icon: Icons.flag_outlined,
-          currentValue: _selectedGoal,
-          options: _goalsOptions,
-          onChanged: (value) => setState(() => _selectedGoal = value),
-        ),
+      _buildDropdownField<String>(
+        label: 'Goals',
+        icon: Icons.flag_outlined,
+        currentValue: _selectedGoal,
+        options: _goalsOptions,
+        onChanged: (value) => setState(() => _selectedGoal = value),
       ),
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8.0),
-        child: _buildDropdownField<String>(
-          label: 'Diet Type',
-          icon: Icons.restaurant_menu_outlined,
-          currentValue: _selectedDietType,
-          options: _dietTypeOptions,
-          onChanged: (value) => setState(() => _selectedDietType = value),
-        ),
+      _buildDropdownField<String>(
+        label: 'Diet Type',
+        icon: Icons.restaurant_menu_outlined,
+        currentValue: _selectedDietType,
+        options: _dietTypeOptions,
+        onChanged: (value) => setState(() => _selectedDietType = value),
       ),
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8.0),
-        child: _buildDropdownField<String>(
-          label: 'Food Restrictions', icon: Icons.no_food_outlined,
-          currentValue: _selectedFoodRestriction,
-          options: _foodRestrictionsOptions, // Includes 'None'
-          onChanged: (value) =>
-              setState(() => _selectedFoodRestriction = value),
-        ),
+      _buildDropdownField<String>(
+        label: 'Food Restrictions (Primary)', icon: Icons.no_food_outlined,
+        currentValue: _selectedFoodRestriction,
+        options: _foodRestrictionsOptions, // Includes "None"
+        hint: "Select primary restriction",
+        onChanged: (value) =>
+            setState(() => _selectedFoodRestriction = value),
       ),
-      // Add inputs for other editable preferences like cuisine if needed
+      // Cuisine preferences are not editable in this version, show display value
+       _buildInfoRow(
+        icon: Icons.ramen_dining_outlined, label: 'Cuisine Preferences (Current)',
+        value: getCaseInsensitive(_userPreferences, 'cuisine_preferences') ?? 'Not Set',
+        isEditing: false, maxLines: 3,
+      ),
       const SizedBox(height: 16),
-      _buildMealRecommendationsButton(), // Button visible during edit too
+      _buildMealRecommendationsButton(),
     ];
   }
 
@@ -2218,8 +2460,8 @@ class _ProfilePageState extends State<ProfilePage>
     required IconData icon,
     required String label,
     required String value,
-    required bool isEditing,
-    TextEditingController? controller,
+    required bool isEditing, // This parameter is now less used directly by _buildInfoRow itself for TextField creation
+    TextEditingController? controller, // Kept for potential direct use, but _buildUserDetailsCard now provides TextFields directly
     TextInputType? keyboardType,
     int? maxLines = 1,
   }) {
@@ -2228,74 +2470,76 @@ class _ProfilePageState extends State<ProfilePage>
     final valueStyle =
         GoogleFonts.poppins(color: kColorTextPrimary, fontSize: 15);
 
+    // This widget is now primarily for DISPLAY purposes. 
+    // Editing fields are constructed directly in _buildUserDetailsCard, _buildMetricsEditingWidgets etc.
+    // If 'isEditing' is true and a controller is passed, it implies a TextField would be built by the caller.
+    // Here, we always build the display version.
+
+    Widget contentWidget = Text(
+      value.isEmpty ? 'N/A' : value,
+      style: valueStyle,
+      maxLines: maxLines,
+      overflow: TextOverflow.ellipsis,
+    );
+    
+    // If a controller is provided, it implies this row MIGHT be part of an edit form,
+    // but _buildInfoRow itself doesn't create the TextField.
+    // The padding adjustment for icon is based on whether it's a simple display or part of a form-like structure.
+    bool isPotentiallyInForm = controller != null;
+
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10.0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding:
-                const EdgeInsets.only(top: 4.0), // Adjust alignment slightly
+            // Adjust icon alignment slightly if it's likely next to a form field (even if read-only)
+            padding: EdgeInsets.only(top: isPotentiallyInForm ? 3.0 : 1.0), 
             child: Icon(icon, color: kColorPrimary, size: 22),
           ),
           const SizedBox(width: 16),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: labelStyle), // Always show label
-                const SizedBox(height: 4),
-                // Show TextField if editing AND controller is provided, otherwise show Text
-                isEditing && controller != null
-                    ? _buildTextField(
-                        // Use the general text field builder
-                        controller: controller,
-                        label: label, // Pass label for decoration
-                        icon: icon, // Pass icon for decoration
-                        keyboardType: keyboardType,
-                        maxLines: maxLines,
-                      )
-                    : Text(
-                        value.isEmpty ? 'N/A' : value,
-                        style: valueStyle,
-                        maxLines: maxLines,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-              ],
-            ),
+            child: Column( 
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label, style: labelStyle),
+                    const SizedBox(height: 4),
+                    contentWidget, // Always display content for _buildInfoRow
+                  ],
+                ),
           ),
         ],
       ),
     );
   }
 
+
   // --- Weight Input Row (for Editing Metrics) ---
   Widget _buildWeightInputRow() {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      padding: const EdgeInsets.symmetric(vertical: 4.0), // Reduced vertical padding
       child: Row(
         crossAxisAlignment:
-            CrossAxisAlignment.start, // Align units toggle better
+            CrossAxisAlignment.start, // Align items to the top of the row
         children: [
           Expanded(
             child: TextFormField(
               controller: _weightController,
-              decoration: _buildInputDecoration('Weight',
+              decoration: _buildInputDecoration('Weight', // Label inside the input decoration
                   prefixIcon: Icons.fitness_center_outlined),
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
               inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
-              ], // Allow leading decimal point
-              // onChanged handled by listener
+                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')) // Allow numbers and one decimal point
+              ],
               style:
                   GoogleFonts.poppins(color: kColorTextPrimary, fontSize: 15),
             ),
           ),
           const SizedBox(width: 10),
           Padding(
-            padding:
-                const EdgeInsets.only(top: 8.0), // Adjust vertical alignment
+            padding: const EdgeInsets.only(top: 4.0), // Align ToggleButtons with TextFormField content
             child: ToggleButtons(
               isSelected: _weightSelection,
               onPressed: _updateWeightUnit,
@@ -2304,14 +2548,14 @@ class _ProfilePageState extends State<ProfilePage>
               color: kColorPrimary,
               fillColor: kColorPrimary,
               constraints:
-                  const BoxConstraints(minHeight: 40.0, minWidth: 48.0),
-              children: const <Widget>[
+                  const BoxConstraints(minHeight: 48.0, minWidth: 48.0), // Ensure buttons are tappable
+              children: <Widget>[
                 Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('kg')),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('kg', style: GoogleFonts.poppins(fontSize: 14))),
                 Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('lbs')),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('lbs', style: GoogleFonts.poppins(fontSize: 14))),
               ],
             ),
           ),
@@ -2323,17 +2567,18 @@ class _ProfilePageState extends State<ProfilePage>
   // --- Height Input Row (for Editing Metrics) ---
   Widget _buildHeightInputRow() {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
             child: _heightUnit == 'cm'
                 ? TextFormField(
-                    // CM Input
                     controller: _heightCmController,
-                    decoration: _buildInputDecoration('Height',
-                        prefixIcon: Icons.height_outlined),
+                    decoration: _buildInputDecoration('Height', 
+                        prefixIcon: Icons.height_outlined,
+                        hintText: 'cm' // Hint for unit
+                    ),
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [
@@ -2342,25 +2587,19 @@ class _ProfilePageState extends State<ProfilePage>
                     style: GoogleFonts.poppins(
                         color: kColorTextPrimary, fontSize: 15),
                   )
-                : Row(
-                    // FT + IN Input Row
+                : Row( // For ft/in input
                     crossAxisAlignment:
-                        CrossAxisAlignment.start, // Align fields vertically
+                        CrossAxisAlignment.start, 
                     children: [
-                      // Add the icon only once, before the feet field
+                      // Common prefix icon for ft/in mode
                       Padding(
-                        padding: const EdgeInsets.only(
-                            top: 12.0,
-                            right: 8.0), // Align icon with input text
-                        child: Icon(Icons.height_outlined,
-                            color: kColorPrimary, size: 20),
+                        padding: const EdgeInsets.only(top: 12.0, right: 8.0), // Align icon with text field content
+                        child: Icon(Icons.height_outlined, color: kColorPrimary, size: 20),
                       ),
                       Expanded(
-                        // Feet Input
                         child: TextFormField(
                           controller: _heightFeetController,
-                          decoration: _buildInputDecoration('ft').copyWith(
-                              prefixIcon: null), // Remove redundant icon
+                          decoration: _buildInputDecoration('Height (ft)', prefixIcon: null), // No redundant icon
                           keyboardType: TextInputType.number,
                           inputFormatters: [
                             FilteringTextInputFormatter.digitsOnly
@@ -2371,11 +2610,9 @@ class _ProfilePageState extends State<ProfilePage>
                       ),
                       const SizedBox(width: 8),
                       Expanded(
-                        // Inches Input
                         child: TextFormField(
                           controller: _heightInchesController,
-                          decoration: _buildInputDecoration('in').copyWith(
-                              prefixIcon: null), // Remove redundant icon
+                          decoration: _buildInputDecoration('(in)', prefixIcon: null), // Label for inches
                           keyboardType: const TextInputType.numberWithOptions(
                               decimal: true),
                           inputFormatters: [
@@ -2391,8 +2628,7 @@ class _ProfilePageState extends State<ProfilePage>
           ),
           const SizedBox(width: 10),
           Padding(
-            // Unit Toggle
-            padding: const EdgeInsets.only(top: 8.0),
+            padding: const EdgeInsets.only(top: 4.0), 
             child: ToggleButtons(
               isSelected: _heightSelection,
               onPressed: _updateHeightUnit,
@@ -2401,14 +2637,14 @@ class _ProfilePageState extends State<ProfilePage>
               color: kColorPrimary,
               fillColor: kColorPrimary,
               constraints:
-                  const BoxConstraints(minHeight: 40.0, minWidth: 48.0),
-              children: const <Widget>[
+                  const BoxConstraints(minHeight: 48.0, minWidth: 48.0),
+              children: <Widget>[
                 Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('cm')),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('cm', style: GoogleFonts.poppins(fontSize: 14))),
                 Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('ft')),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('ft', style: GoogleFonts.poppins(fontSize: 14))),
               ],
             ),
           ),
@@ -2419,55 +2655,76 @@ class _ProfilePageState extends State<ProfilePage>
 
   // BMI Indicator
   Widget _buildBmiVisualIndicator([double? bmiValue]) {
-    // Use value from state map if not provided
-    bmiValue ??= _tryParseDouble(_userMetrics['bmi']);
+    // Try to get BMI from _userMetrics if not provided (e.g., during initial display)
+    bmiValue ??= _tryParseDouble(getCaseInsensitive(_userMetrics, 'bmi'));
 
     if (bmiValue == null ||
         bmiValue <= 0 ||
         bmiValue.isNaN ||
         bmiValue.isInfinite) {
-      return const SizedBox.shrink(); // Don't show indicator for invalid BMI
+      return const SizedBox.shrink(); // Don't show if BMI is invalid
     }
 
     const double underweightThreshold = 18.5;
-    const double normalThreshold = 24.9;
-    const double overweightThreshold = 29.9;
+    const double normalMinThreshold = 18.5; // Explicit min for normal
+    const double normalMaxThreshold = 24.9;
+    const double overweightMinThreshold = 25.0; // Explicit min for overweight
+    const double overweightMaxThreshold = 29.9;
+    // Obese is >= 30.0
 
     Color barColor;
-    String category;
+    String categoryText;
 
-    String apiCategory = _userMetrics['bmi_category'] ?? '';
-    bool useApiCategory = apiCategory.isNotEmpty && apiCategory != 'N/A';
+    // Determine category and color based on BMI value
+    // Use API category if available and valid, otherwise calculate
+    String apiCategory = getCaseInsensitive(_userMetrics,'bmi_category') ?? '';
+    bool useApiCategoryText = apiCategory.isNotEmpty && apiCategory != 'N/A';
 
     if (bmiValue < underweightThreshold) {
       barColor = Colors.blue.shade300;
-      category = useApiCategory ? apiCategory : 'Underweight';
-    } else if (bmiValue < normalThreshold) {
+      categoryText = useApiCategoryText ? apiCategory : 'Underweight';
+    } else if (bmiValue >= normalMinThreshold && bmiValue <= normalMaxThreshold) {
       barColor = Colors.green.shade400;
-      category = useApiCategory ? apiCategory : 'Normal';
-    } else if (bmiValue < overweightThreshold) {
+      categoryText = useApiCategoryText ? apiCategory : 'Normal';
+    } else if (bmiValue >= overweightMinThreshold && bmiValue <= overweightMaxThreshold) {
       barColor = Colors.orange.shade400;
-      category = useApiCategory ? apiCategory : 'Overweight';
-    } else {
+      categoryText = useApiCategoryText ? apiCategory : 'Overweight';
+    } else { // bmiValue > overweightMaxThreshold (i.e., >= 30.0)
       barColor = Colors.red.shade400;
-      category = useApiCategory ? apiCategory : 'Obese';
+      categoryText = useApiCategoryText ? apiCategory : 'Obese';
     }
 
+    // Simple bar representation (could be enhanced with a pointer or more segments)
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          height: 8,
+          height: 10, // Slightly thicker bar
           decoration: BoxDecoration(
-            color: barColor,
-            borderRadius: BorderRadius.circular(4),
+            // Could be a gradient or segmented bar in future
+            color: Colors.grey.shade200, // Background for the bar track
+            borderRadius: BorderRadius.circular(5),
           ),
+          child: Align( // Align the actual colored bar within the track
+            alignment: Alignment.centerLeft,
+            child: FractionallySizedBox(
+              // Width factor could represent position on a scale, but simple color is fine for now
+              // For simplicity, full width with the category color
+              widthFactor: 1.0, 
+              child: Container(
+                 decoration: BoxDecoration(
+                    color: barColor,
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+              ),
+            ),
+          )
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 6),
         Text(
-          category, // Use determined category (API or calculated)
+          categoryText,
           style: GoogleFonts.poppins(
-              fontSize: 12, color: barColor, fontWeight: FontWeight.w500),
+              fontSize: 13, color: barColor, fontWeight: FontWeight.w500), // Slightly larger font
         )
       ],
     );
@@ -2475,13 +2732,45 @@ class _ProfilePageState extends State<ProfilePage>
 }
 
 // --- Global Helper Functions ---
-// Helper to safely parse double from dynamic input
+T? getCaseInsensitive<T>(Map? map, String key) {
+  if (map == null || key.isEmpty) return null;
+  final lowerKey = key.toLowerCase();
+  for (final entry in map.entries) {
+    if (entry.key is String && entry.key.toString().toLowerCase() == lowerKey) {
+      if (entry.value == null) return null;
+      if (entry.value is T) {
+        return entry.value as T;
+      }
+      // Attempt common conversions
+      if (T == String) {
+        return entry.value.toString() as T;
+      }
+      if (T == double) {
+        if (entry.value is num) return (entry.value as num).toDouble() as T;
+        if (entry.value is String) return double.tryParse(entry.value as String) as T?;
+      }
+      if (T == int) {
+         if (entry.value is num) return (entry.value as num).toInt() as T;
+         if (entry.value is String) return int.tryParse(entry.value as String) as T?;
+      }
+      // Fallback for other types if direct cast might work or if specific conversion is not handled
+      try {
+        return entry.value as T;
+      } catch (e) {
+        // print("getCaseInsensitive: Cast failed for key '$key', value '${entry.value}' (type ${entry.value.runtimeType}) to type $T. Error: $e");
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
 double? _tryParseDouble(dynamic value) {
   if (value == null) return null;
   if (value is double) return value;
   if (value is int) return value.toDouble();
   if (value is String) {
-    if (value.trim().isEmpty) return null;
+    if (value.trim().isEmpty || value.trim().toLowerCase() == 'n/a') return null;
     return double.tryParse(value);
   }
   return null;

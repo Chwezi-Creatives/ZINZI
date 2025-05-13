@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:zinzi2/signup_or_Login.dart';
 
 // --- Reusing Color Palette (from previous examples) ---
 const Color kColorPrimary = Color(0xFF00796B); // Teal Primary
@@ -204,10 +205,22 @@ class _stakeholderdas2222State extends State<stakeholderdas2222> {
           IconButton(
             icon: const Icon(Icons.logout_outlined),
             tooltip: 'Logout',
-            onPressed: () {
-              // TODO: Implement Logout action
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Logout Tapped (Not Implemented)')));
+            onPressed: () async {
+              final prefs = await SharedPreferences.getInstance();
+              final keys = prefs.getKeys();
+              final patterns = [RegExp(r'_id\b'), RegExp(r'_user_type\b')];
+              for (final key in keys) {
+                if (patterns.any((p) => p.hasMatch(key))) {
+                  await prefs.remove(key);
+                }
+              }
+              if (mounted) {
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (context) => const SignUpOrLoginPage()),
+                  (Route<dynamic> route) => false,
+                );
+              }
             },
           ),
         ],

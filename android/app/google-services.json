@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "140229310127",
+    "project_id": "zinzi-fcm2",
+    "storage_bucket": "zinzi-fcm2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:140229310127:android:d940b3fc82c637dc8b065a",
+        "android_client_info": {
+          "package_name": "com.example.zinzi2"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAMOYWwAVntsxg6cfY1EHa_q4Xt3zlliFM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

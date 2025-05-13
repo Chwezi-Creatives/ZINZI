@@ -6,21 +6,21 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:intl/intl.dart';
-import 'package:zinzi2/app_drawer_unified.dart';
+import 'package:zinzi2/app_drawer_unified.dart'; // Assuming this import is correct
 import 'package:google_fonts/google_fonts.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:provider/provider.dart';
-import 'notifications/notification_provider.dart';
+import 'notifications/notification_provider.dart'; // Assuming this import is correct
 
 // --- Environment & API ---
 // Ensure you have initialized dotenv in your main.dart: await dotenv.load(fileName: ".env");
-final String apiBaseUrl = dotenv.env['API_BASE_URL'] ??
+final String _apiBaseUrl = dotenv.env['API_BASE_URL'] ??
     dotenv.env['API_BASE_URL-intranet'] ??
     'https://your.default.api.url/fallback'; // Provide a sensible fallback
 
 // --- Theme Colors ---
 final kColorPrimary = Colors.teal[900];
-const Color kColorAccent = Color(0xFF4CAF50); // Keep consistent naming if possible
+const Color kColorAccent = Color(0xFF4CAF50);
 const Color kColorBackground = Color(0xFFF5F5F5);
 const Color kColorCard = Colors.white;
 const Color kColorTextPrimary = Color(0xFF333333);
@@ -28,19 +28,18 @@ const Color kColorTextSecondary = Color(0xFF666666);
 const Color kColorStatusActive = Color(0xFF4CAF50);
 const Color kColorStatusInactive = Color(0xFFCCCCCC);
 const Color kColorDivider = Color(0xFFEEEEEE);
-const Color kColorTimelineLine =
-    Color(0xFFE0E0E0); // Color for timeline connecting lines
+const Color kColorTimelineLine = Color(0xFFE0E0E0);
 
 class OrderStatusScreen extends StatefulWidget {
-  final int userId;
+  final String userId;
   final List<int> orderIdList;
-  final int orderId; // Initial orderId to potentially focus on
+  final int orderId;
 
   const OrderStatusScreen({
     super.key,
     required this.userId,
     required this.orderIdList,
-    required this.orderId, // Consider if this is still needed if using _selectedOrderId
+    required this.orderId,
   });
 
   @override
@@ -52,50 +51,72 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
   Timer? _pollingTimer;
   int? _selectedOrderId;
   bool _isOrderInfoExpanded = false;
-  bool _isLoading = true;
-  bool _isRefreshing = false;
+  bool _isLoading = true; // For initial page load
+  bool _isRefreshing = false; // For any data fetch operation (poll, pull-to-refresh, notification)
   final Map<int, Map<String, dynamic>> _ordersMap = {};
   final Map<int, String> _previousOrderStatuses = {};
   bool _isVerificationProcessActive = false;
   int? _loadingVerificationOrderId;
 
+  // Logging helper
+  void _log(String message) {
+    // In a real app, you might use a dedicated logger package (e.g., 'logger')
+    print('[OrderStatusScreen] $message');
+  }
+
   @override
   void initState() {
     super.initState();
-    _selectedOrderId = widget.orderIdList.contains(widget.orderId) ? widget.orderId : (widget.orderIdList.isNotEmpty ? widget.orderIdList.first : null);
-    _fetchOrders();
-    _startPolling();
-    
-    // Listen for notification refreshes
+    _log('initState called.');
+    _log('API Base URL: $_apiBaseUrl');
+    _log('Initial User ID: ${widget.userId}');
+    _log('Initial Order ID List: ${widget.orderIdList}');
+    _log('Initial Order ID focus: ${widget.orderId}');
+
+    if (widget.orderIdList.isEmpty) {
+      _log('Order ID list is empty. No initial fetch or polling will occur.');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    } else {
+      _selectedOrderId = widget.orderIdList.contains(widget.orderId)
+          ? widget.orderId
+          : widget.orderIdList.first;
+      _log('Selected Order ID set to: $_selectedOrderId');
+      _fetchOrders(isInitialFetch: true);
+      _startPolling();
+    }
+
     final notificationProvider = Provider.of<NotificationProvider>(context, listen: false);
     notificationProvider.addListener(_handleNotificationRefresh);
+    _log('Notification listener added.');
   }
 
   @override
   void dispose() {
+    _log('dispose called.');
     _pollingTimer?.cancel();
+    _log('Polling timer cancelled.');
     final notificationProvider = Provider.of<NotificationProvider>(context, listen: false);
     notificationProvider.removeListener(_handleNotificationRefresh);
+    _log('Notification listener removed.');
     _audioPlayer.dispose();
+    _log('Audio player disposed.');
     super.dispose();
   }
 
   void _handleNotificationRefresh() {
+    _log('Notification refresh triggered.');
     if (!_isRefreshing) {
-      setState(() {
-        _isRefreshing = true;
-      });
-      _fetchOrders().then((_) {
-        if (mounted) {
-          setState(() {
-            _isRefreshing = false;
-          });
-        }
-      });
+      _log('Starting fetch due to notification.');
+      _fetchOrders();
+    } else {
+      _log('Skipping notification refresh, another fetch is already in progress.');
     }
   }
 
-  // Helper to build the complementary meals row
   Widget _buildComplementaryMealsRow(dynamic complementaryMealsRaw) {
     if (complementaryMealsRaw == null || complementaryMealsRaw.toString().trim().isEmpty) {
       return const SizedBox.shrink();
@@ -103,396 +124,405 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
     List<dynamic> mealsList;
     try {
       if (complementaryMealsRaw is String) {
-        // Try to decode JSON string
         final decoded = json.decode(complementaryMealsRaw);
         if (decoded is List) {
           mealsList = decoded;
         } else {
+          _log('Complementary meals raw string is not a list after decoding: $complementaryMealsRaw');
           return const SizedBox.shrink();
         }
       } else if (complementaryMealsRaw is List) {
         mealsList = complementaryMealsRaw;
       } else {
+        _log('Complementary meals raw data is not a string or list: $complementaryMealsRaw');
         return const SizedBox.shrink();
       }
-      // Extract names, strip extra slashes/spaces
       final names = mealsList
         .map((item) => (item is Map && item['name'] != null) ? item['name'].toString().replaceAll(RegExp(r'[\/]+'), '').trim() : null)
         .where((name) => name != null && name.isNotEmpty)
         .toList();
-      if (names.isEmpty) return const SizedBox.shrink();
+
+      if (names.isEmpty) {
+         _log('No valid names found in complementary meals list.');
+        return const SizedBox.shrink();
+      }
       return _buildInfoRow('Best served with', names.join(', '));
-    } catch (e) {
-      // If any error in decoding/parsing, just hide the row
+    } catch (e, s) {
+      _log('Error parsing complementary meals: $e. Raw data: $complementaryMealsRaw. Stack: $s');
       return const SizedBox.shrink();
     }
   }
 
   void _startPolling() {
+    _log('Attempting to start polling...');
+    if (_pollingTimer != null && _pollingTimer!.isActive) {
+      _log('Polling timer already active. Not starting a new one.');
+      return;
+    }
+    _pollingTimer?.cancel(); // Cancel any existing timer just in case
+
     _pollingTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
-      if (!_isVerificationProcessActive) {
+      _log('Polling timer tick. mounted: $mounted, _isVerificationProcessActive: $_isVerificationProcessActive, _isRefreshing: $_isRefreshing');
+      if (!mounted) {
+        _log('Polling timer cancelled inside periodic callback because widget is not mounted.');
+        timer.cancel();
+        return;
+      }
+      if (!_isVerificationProcessActive && !_isRefreshing) {
+        _log('Polling: Conditions met, calling _fetchOrders.');
         _fetchOrders();
       } else {
-        print("Polling skipped - verification dialog active");
+        String reason = '';
+        if (_isVerificationProcessActive) reason += 'Verification process active. ';
+        if (_isRefreshing) reason += 'A refresh is already in progress. ';
+        _log('Polling: Skipped. Reason: ${reason.isEmpty ? "Unknown (check flags)" : reason}');
       }
     });
+    _log('Polling timer started with 8-second interval.');
   }
 
-  // Check for status changes and trigger verification dialog if needed
   void _checkForStatusChanges(Map<int, Map<String, dynamic>> updatedOrders) {
+    _log('Checking for status changes...');
     final Map<int, String> currentStatuses = {};
-    
-    // Build map of current statuses
-    for (final entry in updatedOrders.entries) {
-      final orderId = entry.key;
-      final status = entry.value['order_status']?.toString();
+
+    updatedOrders.forEach((orderId, orderData) {
+      final status = orderData['order_status']?.toString();
       if (status != null) {
         currentStatuses[orderId] = status;
       }
-    }
-    
-    // Check for changes and trigger dialogs
-    for (final entry in currentStatuses.entries) {
-      final orderId = entry.key;
-      final newStatus = entry.value;
+    });
+
+    currentStatuses.forEach((orderId, newStatus) {
       final previousStatus = _previousOrderStatuses[orderId];
-      
-      // If status changed to 'verification needed' and not already showing the dialog
-      if (newStatus == 'verification needed' && 
+      _log('Order #$orderId: New status "$newStatus", Previous status "$previousStatus"');
+      if (newStatus == 'verification needed' &&
           newStatus != previousStatus &&
           !_isVerificationProcessActive) {
-        // Use postFrameCallback to ensure the dialog is shown after the build is complete
+        _log('Order #$orderId requires verification. Current status: "$newStatus", Previous: "$previousStatus". Triggering verification.');
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          _handleVerificationRequest(orderId);
+          if (mounted) {
+             _handleVerificationRequest(orderId);
+          } else {
+            _log('Widget not mounted when trying to show verification dialog for order #$orderId via postFrameCallback.');
+          }
         });
       }
-    }
-    
-    // Update previous statuses for next comparison
+    });
+
     _previousOrderStatuses.clear();
     _previousOrderStatuses.addAll(currentStatuses);
+    _log('Previous statuses updated.');
   }
 
-  // Handle verification request (called on tap or status change)
   Future<void> _handleVerificationRequest(int orderId) async {
-    if (mounted) {
-      setState(() {
-        _isVerificationProcessActive = true;
-        _loadingVerificationOrderId = orderId;
-      });
+    _log('Starting verification process for Order #$orderId.');
+    if (!mounted) {
+      _log('Cannot handle verification request, widget not mounted for Order #$orderId.');
+      return;
     }
-    
-    print("Verification process started for Order #$orderId. Polling paused.");
-    
-    // Show the verification dialog
+
+    setState(() {
+      _isVerificationProcessActive = true;
+      _loadingVerificationOrderId = orderId;
+      _log('State updated: _isVerificationProcessActive = true, _loadingVerificationOrderId = $orderId. Polling will be paused.');
+    });
+
     await _showCompletionCodeDialog(orderId);
+    // _isVerificationProcessActive will be set to false when dialog is closed or an error occurs that prevents dialog showing.
   }
   
-  // Show completion code dialog
   Future<void> _showCompletionCodeDialog(int orderId) async {
     String completionCode = 'N/A';
     String errorMessage = '';
     bool codeFetchedSuccessfully = false;
 
-    final uri = Uri.parse('$apiBaseUrl/rr/get_completion_code/$orderId');
-    print("Fetching completion code for Order #$orderId from: $uri");
+    final uri = Uri.parse('$_apiBaseUrl/rr/get_completion_code/$orderId');
+    _log("Fetching completion code for Order #$orderId from: $uri");
 
     try {
-      final response = await http
-          .get(uri)
-          .timeout(const Duration(seconds: 15));
+      final response = await http.get(uri).timeout(const Duration(seconds: 15));
+      String responseBodySummary = response.body;
+      if (responseBodySummary.length > 200) responseBodySummary = "${responseBodySummary.substring(0, 200)}...";
+      _log("Completion code API response for Order #$orderId: Status ${response.statusCode}, Body (summary): $responseBodySummary");
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data is Map<String, dynamic> && data['completion_code'] != null) {
           completionCode = data['completion_code'].toString();
           codeFetchedSuccessfully = true;
-          print("Completion code fetched successfully for Order #$orderId.");
+          _log("Completion code '$completionCode' fetched successfully for Order #$orderId.");
         } else {
           errorMessage = 'Invalid response format for completion code.';
-          print("Unexpected completion code response format: $data");
+          _log("Unexpected completion code response format for Order #$orderId: $data");
         }
       } else {
         errorMessage = 'Failed to fetch completion code (Status: ${response.statusCode}).';
-        print("Failed to fetch completion code: Status ${response.statusCode}, Body: ${response.body}");
+        _log("Failed to fetch completion code for Order #$orderId: Status ${response.statusCode}, Body: ${response.body}");
       }
-    } on TimeoutException catch (_) {
+    } on TimeoutException catch (e, s) {
       errorMessage = 'Request for completion code timed out.';
-      print("Completion code request timed out for Order #$orderId.");
-    } on http.ClientException catch (e) {
-      errorMessage = 'Network error fetching completion code.';
-      print("Network error fetching completion code for Order #$orderId: ${e.message}");
-    } catch (e) {
+      _log("Completion code request timed out for Order #$orderId. Error: $e, Stack: $s");
+    } on http.ClientException catch (e, s) {
+      errorMessage = 'Network error fetching completion code: ${e.message}.';
+      _log("Network error fetching completion code for Order #$orderId: ${e.message}. Error: $e, Stack: $s");
+    } catch (e, s) {
       errorMessage = 'Error fetching completion code: ${e.toString()}';
-      print("Error fetching completion code for Order #$orderId: $e");
+      _log("Generic error fetching completion code for Order #$orderId: $e, Stack: $s");
     }
 
-    // Stop loading animation before showing the dialog
-    if (mounted) {
-      setState(() {
-        _loadingVerificationOrderId = null;
-      });
+    if (!mounted) {
+      _log('Widget not mounted after fetching completion code for Order #$orderId. Dialog will not be shown.');
+      // If not mounted, ensure verification process is reset if it was started.
+      if (_isVerificationProcessActive && _loadingVerificationOrderId == orderId) {
+        // No setState here as widget is not mounted. Just log and ensure state is eventually consistent if re-mounted.
+         _isVerificationProcessActive = false;
+         _loadingVerificationOrderId = null;
+        _log('Reset _isVerificationProcessActive and _loadingVerificationOrderId as widget unmounted during code fetch.');
+      }
+      return;
     }
-
-    // Show the dialog
-    if (mounted) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            backgroundColor: const Color.fromARGB(255, 241, 255, 254),
-            title: Text(
-              codeFetchedSuccessfully
-                  ? 'Order #$orderId Ready!'
-                  : 'Order #$orderId Verification',
-              style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.bold, 
-                  color: kColorPrimary),
-            ),
-            content: SingleChildScrollView(
-              child: ListBody(
-                children: <Widget>[
-                  Text(
-                    errorMessage.isNotEmpty
-                        ? 'Could not retrieve verification code: $errorMessage'
-                        : 'Verification code is ready.',
-                    style: GoogleFonts.poppins(color: kColorTextPrimary),
-                    textAlign: TextAlign.left,
-                  ),
-                  if (errorMessage.isEmpty && codeFetchedSuccessfully) ...[
-                    const SizedBox(height: 16),
-                    Text(
-                      'Verification Code:',
-                      style: GoogleFonts.poppins(
-                        fontWeight: FontWeight.bold,
-                        color: kColorPrimary,
-                      ),
-                    ),
-                    SelectableText(
-                      completionCode,
-                      style: GoogleFonts.poppins(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: kColorStatusActive,
-                      ),
-                      textAlign: TextAlign.left,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Provide this code to the rider ONLY after confirming successful delivery.',
-                      style: GoogleFonts.poppins(
-                        fontStyle: FontStyle.italic,
-                        color: kColorTextSecondary,
-                        fontSize: 13,
-                      ),
-                      textAlign: TextAlign.left,
-                    ),
-                  ] else if (errorMessage.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    Text(
-                      'Please try again shortly or contact support if the issue persists.',
-                      style: GoogleFonts.poppins(
-                        fontStyle: FontStyle.italic,
-                        color: kColorTextSecondary,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  // Resume polling when dialog is dismissed
-                  if (mounted) {
-                    setState(() {
-                      _isVerificationProcessActive = false;
-                    });
-                  }
-                },
-                child: Text(
-                  'CLOSE',
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.bold,
-                    color: kColorPrimary,
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-      );
-    }
-  }
-
-  Future<void> _fetchOrders() async {
-    if (_isRefreshing) return; // Prevent concurrent refreshes
     
-    if (widget.orderIdList.isEmpty) {
+    // Stop loading animation for this specific order before showing the dialog
+    setState(() {
+      if (_loadingVerificationOrderId == orderId) {
+        _loadingVerificationOrderId = null;
+      }
+      _log('State updated: _loadingVerificationOrderId reset for $orderId.');
+    });
+
+    showDialog(
+      context: context,
+      barrierDismissible: false, // User must explicitly close
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: const Color.fromARGB(255, 241, 255, 254),
+          title: Text(
+            codeFetchedSuccessfully ? 'Order #$orderId Ready!' : 'Order #$orderId Verification',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: kColorPrimary),
+          ),
+          content: SingleChildScrollView(
+            child: ListBody(
+              children: <Widget>[
+                Text(
+                  errorMessage.isNotEmpty
+                      ? 'Could not retrieve verification code: $errorMessage'
+                      : 'Verification code is ready.',
+                  style: GoogleFonts.poppins(color: kColorTextPrimary),
+                  textAlign: TextAlign.left,
+                ),
+                if (errorMessage.isEmpty && codeFetchedSuccessfully) ...[
+                  const SizedBox(height: 16),
+                  Text('Verification Code:', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: kColorPrimary)),
+                  SelectableText(completionCode, style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.bold, color: kColorStatusActive), textAlign: TextAlign.left),
+                  const SizedBox(height: 16),
+                  Text('Provide this code to the rider ONLY after confirming successful delivery.', style: GoogleFonts.poppins(fontStyle: FontStyle.italic, color: kColorTextSecondary, fontSize: 13), textAlign: TextAlign.left),
+                ] else if (errorMessage.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text('Please try again shortly or contact support if the issue persists.', style: GoogleFonts.poppins(fontStyle: FontStyle.italic, color: kColorTextSecondary, fontSize: 13), textAlign: TextAlign.left),
+                ],
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                // State update handled by .then() block after showDialog
+              },
+              child: Text('CLOSE', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: kColorPrimary)),
+            ),
+          ],
+        );
+      },
+    ).then((_) {
+      // This block executes after the dialog is popped, regardless of how it's popped.
       if (mounted) {
         setState(() {
-          _isLoading = false;
+          _isVerificationProcessActive = false;
+          // _loadingVerificationOrderId should have been cleared before showing dialog,
+          // but ensure it's clear if the dialog was for the currently loading order.
+          if (_loadingVerificationOrderId == orderId) _loadingVerificationOrderId = null;
+          _log('Verification dialog for Order #$orderId closed. State updated: _isVerificationProcessActive = false. Polling will resume if conditions met.');
+        });
+      } else {
+        _log('Widget not mounted when verification dialog for Order #$orderId was closed.');
+      }
+    });
+  }
+
+  Future<void> _fetchOrders({bool isInitialFetch = false}) async {
+    _log('_fetchOrders called. isInitialFetch: $isInitialFetch, current _isRefreshing: $_isRefreshing, current _isLoading: $_isLoading');
+
+    if (_isRefreshing && !isInitialFetch) {
+      _log('_fetchOrders: Already refreshing (and not initial fetch), skipping this call.');
+      return;
+    }
+    if (widget.orderIdList.isEmpty) {
+      _log('_fetchOrders: Order ID list is empty. Nothing to fetch.');
+      if (mounted) {
+        setState(() {
+          _isLoading = false; 
           _isRefreshing = false;
         });
       }
       return;
     }
-    
-    setState(() {
-      _isRefreshing = true;
-    });
 
-    // Fetch details for all orders in the list concurrently
-    final fetchFutures = widget.orderIdList.map((orderId) async {
-      final uri = Uri.parse('$apiBaseUrl/rr/orders?user_id=${widget.userId}&order_id=$orderId');
-      try {
-        final response = await http.get(uri).timeout(const Duration(seconds: 20));
-
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          if (data is Map<String, dynamic> && data['data'] is List) {
-            final orderDataList = data['data'] as List;
-            if (orderDataList.isNotEmpty && orderDataList.first is Map<String, dynamic>) {
-              final Map<String, dynamic> orderData = Map<String, dynamic>.from(orderDataList.first); // Ensure it's mutable
-
-              // Ensure order_id is an integer
-              orderData['order_id'] = int.tryParse(orderData['order_id']?.toString() ?? '') ?? orderId; // Use loop orderId as fallback
-
-              return orderData; // Return the single order data
-            }
-          } else {
-             print("Unexpected response format for order $orderId: ${response.body}");
-          }
-        } else {
-          print("Error fetching details for order $orderId: Status ${response.statusCode}");
-        }
-      } catch (e) {
-        print("Error fetching details for order $orderId: $e");
-      }
-      return null; // Return null on error or if data not found
-    }).toList();
-
-    final results = await Future.wait(fetchFutures);
-
-    bool dataUpdated = false;
-    final Map<int, Map<String, dynamic>> updatedOrders = {};
-
-    for (final orderData in results) {
-      if (orderData != null && orderData['order_id'] != null) {
-        final int currentOrderId = orderData['order_id'];
-        updatedOrders[currentOrderId] = orderData; // Add to temporary map
-
-        final String currentOrderStatus = orderData['order_status']?.toString() ?? 'pending';
-
-        // Check if status has changed from the previously stored status
-        if (_ordersMap.containsKey(currentOrderId) &&
-            _ordersMap[currentOrderId]?['order_status'] != currentOrderStatus) {
-          _playStatusChangeSound();
-          dataUpdated = true;
-        } else if (!_ordersMap.containsKey(currentOrderId)) {
-          // If it's a new order being added
-          dataUpdated = true;
-        } else if (_ordersMap[currentOrderId] != orderData) {
-           // Check if any other data changed (optional, could be noisy)
-           dataUpdated = true;
-        }
-
-        // Store previous status (might not be needed anymore if just comparing current vs new fetch)
-        // _previousOrderStatuses[currentOrderId] = _ordersMap[currentOrderId]?['order_status'] ?? 'pending';
-      }
+    if (mounted) {
+      setState(() {
+        if (isInitialFetch) _isLoading = true;
+        _isRefreshing = true;
+        _log('_fetchOrders: Set _isRefreshing = true. _isLoading is now $_isLoading.');
+      });
+    } else {
+      // If not mounted, cannot proceed with fetch that updates state.
+      _log('_fetchOrders: Widget not mounted at the beginning of fetch. Aborting.');
+      return;
     }
 
-    // Update the main map and state only if there are changes or it's the initial load
-    if (dataUpdated || _isLoading) {
-      if (mounted) { // Check if widget is still in the tree
+    try {
+      _log('Fetching data for order IDs: ${widget.orderIdList}');
+      final fetchFutures = widget.orderIdList.map((orderId) async {
+        try {
+          final uri = Uri.parse('$_apiBaseUrl/rr/orders?user_id=${widget.userId}&order_id=$orderId');
+          _log('Fetching details for Order #$orderId from: $uri');
+          final response = await http.get(uri).timeout(const Duration(seconds: 25));
+          
+          String responseBodySummary = response.body;
+          if (responseBodySummary.length > 200) responseBodySummary = "${responseBodySummary.substring(0, 200)}...";
+          _log('API Response for Order #$orderId: Status ${response.statusCode}, Body (summary): $responseBodySummary');
+
+          if (response.statusCode == 200) {
+            final data = json.decode(response.body);
+            if (data is Map<String, dynamic> && data['data'] is List) {
+              final orderDataList = data['data'] as List;
+              if (orderDataList.isNotEmpty && orderDataList.first is Map<String, dynamic>) {
+                final Map<String, dynamic> orderData = Map<String, dynamic>.from(orderDataList.first);
+                orderData['order_id'] = int.tryParse(orderData['order_id']?.toString() ?? '') ?? orderId;
+                _log('Successfully parsed data for Order #$orderId.');
+                return orderData;
+              } else {
+                _log('Order #$orderId: Data list is empty or first item is not a map. Response data: ${data['data']}');
+              }
+            } else {
+              _log('Unexpected response format for Order #$orderId. Expected Map with "data" as List. Got: ${data.runtimeType}');
+            }
+          } else {
+            _log('Error fetching details for Order #$orderId: Status ${response.statusCode}. Body: ${response.body}');
+          }
+        } on TimeoutException catch (e, s) {
+          _log('Timeout error fetching details for Order #$orderId: $e, Stack: $s');
+        } on http.ClientException catch (e, s) {
+          _log('Client/Network error fetching details for Order #$orderId: ${e.message}. Error: $e, Stack: $s');
+        } catch (e, s) {
+          _log('Generic error fetching details for Order #$orderId: $e, Stack: $s');
+        }
+        return null; 
+      }).toList();
+
+      final results = await Future.wait(fetchFutures);
+      _log('All order fetch futures completed. Number of results: ${results.length}');
+
+      if (!mounted) {
+        _log('_fetchOrders: Widget not mounted after awaiting fetch futures. Aborting state update.');
+        // Set _isRefreshing to false as the operation is done, even if no UI update.
+        _isRefreshing = false; 
+        return;
+      }
+
+      bool dataUpdated = false;
+      final Map<int, Map<String, dynamic>> updatedOrders = {};
+
+      for (final orderData in results) {
+        if (orderData != null && orderData['order_id'] != null) {
+          final int currentOrderId = orderData['order_id'];
+          updatedOrders[currentOrderId] = orderData;
+
+          final String currentOrderStatus = orderData['order_status']?.toString() ?? 'pending';
+
+          if (_ordersMap.containsKey(currentOrderId)) {
+            if (_ordersMap[currentOrderId]?['order_status'] != currentOrderStatus) {
+              _log('Order #$currentOrderId status changed from "${_ordersMap[currentOrderId]?['order_status']}" to "$currentOrderStatus". Playing sound.');
+              _playStatusChangeSound();
+              dataUpdated = true;
+            } else if (jsonEncode(_ordersMap[currentOrderId]) != jsonEncode(orderData)) {
+               _log('Order #$currentOrderId data changed (other than status).');
+               dataUpdated = true;
+            }
+          } else {
+            _log('New order data received for Order #$currentOrderId.');
+            dataUpdated = true;
+          }
+        }
+      }
+
+      if (dataUpdated || _isLoading) { 
+        _log('Data updated or initial load. Updating state. dataUpdated: $dataUpdated, _isLoading (before setState): $_isLoading');
         setState(() {
           _ordersMap.clear();
           _ordersMap.addAll(updatedOrders);
-          // Ensure _selectedOrderId is still valid
           if (_selectedOrderId == null || !_ordersMap.containsKey(_selectedOrderId)) {
             _selectedOrderId = _ordersMap.keys.firstOrNull;
-            _isOrderInfoExpanded = false; // Reset expansion if selected order changes
+            _isOrderInfoExpanded = false; 
+            _log('Selected order ID re-evaluated to: $_selectedOrderId. Order info expansion reset.');
           }
-          _isLoading = false; // Mark loading as complete
+          if (_isLoading) _isLoading = false;
         });
-        
-        // Check for status changes that should trigger verification dialog
+        _log('State updated with new order data. Order map size: ${_ordersMap.length}. _isLoading is now $_isLoading.');
         _checkForStatusChanges(updatedOrders);
+      } else {
+        _log('No data changes detected for existing orders.');
+        if (_isLoading && mounted) {
+            setState(() { _isLoading = false; });
+            _log('Initial load resulted in no data changes (or all fetches failed silently). Setting _isLoading to false.');
+        }
       }
-    } else {
-       // Even if no data *changed*, ensure loading state is off after first fetch attempt
-       if (_isLoading && mounted) {
-         setState(() {
-           _isLoading = false;
-         });
-       }
+    } catch (e, s) {
+      _log('Error in _fetchOrders main try block: $e, Stack: $s');
+      if (mounted) {
+        setState(() {
+          if (_isLoading) _isLoading = false; 
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRefreshing = false;
+          _log('_fetchOrders: finally block. Set _isRefreshing = false.');
+          if (widget.orderIdList.isEmpty && _isLoading) _isLoading = false; // Ensure isLoading is false if list was empty
+        });
+      } else {
+        // If not mounted, still ensure _isRefreshing is reset if it was set.
+        _isRefreshing = false;
+        _log('_fetchOrders: finally block. Widget not mounted. Set _isRefreshing = false.');
+      }
     }
+    _log('_fetchOrders completed. Final state: _isLoading: $_isLoading, _isRefreshing: $_isRefreshing');
   }
-
 
   void _playStatusChangeSound() async {
-    if (_isRefreshing) return; // Prevent sound during refresh
-    
+    _log('Playing status change sound.');
     try {
-      await _audioPlayer.play(AssetSource('sounds/chime.mp3'));
+      await _audioPlayer.play(AssetSource('sounds/chime.mp3')); // Ensure path is correct in pubspec.yaml and assets folder
+      _log('Sound played successfully.');
     } catch (e) {
-      print("Error playing status change sound: $e");
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isRefreshing = false;
-        });
-      }
-    }
-    if (_isRefreshing) return; // Prevent sound during refresh
-    
-    try {
-      await _audioPlayer.play(AssetSource('sounds/chime.mp3'));
-    } catch (e) {
-      print("Error playing status change sound: $e");
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isRefreshing = false;
-        });
-      }
-    }
-    if (_isRefreshing) return; // Prevent sound during refresh
-    // Play sound only if status changed during normal operation
-    try {
-      // Consider adding a debounce mechanism if status changes can happen very rapidly
-      await _audioPlayer.play(AssetSource('sounds/chime.mp3')); // Ensure path is correct in pubspec.yaml
-    } catch (e) {
-      print("Error playing sound: $e");
+      _log("Error playing status change sound: $e");
     }
   }
-
-
 
   @override
   Widget build(BuildContext context) {
+    _log('Build method called. _isLoading: $_isLoading, _ordersMap empty: ${_ordersMap.isEmpty}, _selectedOrderId: $_selectedOrderId, orderIdList empty: ${widget.orderIdList.isEmpty}');
     return Scaffold(
       backgroundColor: kColorBackground,
-      drawer: const AppDrawer(), // Unified drawer,
+      drawer: const AppDrawer(),
       appBar: AppBar(
-        title: Text(
-          'ORDER TRACKING',
-          style: GoogleFonts.poppins(
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-            fontSize: 18,
-          ),
-        ),
+        title: Text('ORDER TRACKING', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 18)),
         centerTitle: true,
         backgroundColor: kColorPrimary,
-        elevation: 2, // Subtle shadow
+        elevation: 2,
         iconTheme: const IconThemeData(color: Colors.white),
-        systemOverlayStyle: SystemUiOverlayStyle.light.copyWith(
-          statusBarColor: kColorPrimary, // Match AppBar color
-        ),
+        systemOverlayStyle: SystemUiOverlayStyle.light.copyWith(statusBarColor: kColorPrimary),
       ),
       body: _buildBody(),
     );
@@ -500,21 +530,45 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
 
   Widget _buildBody() {
     if (_isLoading) {
+      _log('_buildBody: Showing loading state.');
       return _buildLoadingState();
     }
-    if (_ordersMap.isEmpty) {
+    // If orderIdList was initially empty, or if _ordersMap became empty after fetches and no order is selected.
+    if (widget.orderIdList.isEmpty || (_ordersMap.isEmpty && _selectedOrderId == null)) {
+      _log('_buildBody: Showing empty state (orderIdList empty: ${widget.orderIdList.isEmpty}, _ordersMap empty: ${_ordersMap.isEmpty}, _selectedOrderId: $_selectedOrderId).');
       return _buildEmptyState();
     }
-    // Check if _selectedOrderId is valid before building content
+    // If selected order ID is invalid or its data is missing, but other orders might exist.
     if (_selectedOrderId == null || !_ordersMap.containsKey(_selectedOrderId)) {
-      return _buildErrorState("No order selected or order data missing.");
+       _log('_buildBody: Selected order ID ($_selectedOrderId) is invalid or its data is missing from map. Keys: ${_ordersMap.keys}');
+      if (_ordersMap.isNotEmpty) {
+        _log('_buildBody: Attempting to auto-select first available order as fallback.');
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {
+              _selectedOrderId = _ordersMap.keys.first;
+              _isOrderInfoExpanded = false;
+               _log('_buildBody: Auto-selected order ID: $_selectedOrderId via postFrameCallback.');
+            });
+          }
+        });
+        return _buildLoadingState(); // Show loading briefly while state updates
+      } else {
+        // This case means orderIdList was not empty, but _ordersMap is empty (all fetches failed or returned no data)
+        _log('_buildBody: Showing empty state because _ordersMap is empty despite non-empty orderIdList.');
+        return _buildEmptyState();
+      }
     }
 
-    return RefreshIndicator( // Add pull-to-refresh
-       onRefresh: _fetchOrders,
+    _log('_buildBody: Showing main content for order ID: $_selectedOrderId.');
+    return RefreshIndicator(
+       onRefresh: () async {
+          _log('Pull-to-refresh triggered.');
+          await _fetchOrders(); 
+       },
        color: kColorPrimary ?? Colors.teal,
        child: SingleChildScrollView(
-        padding: const EdgeInsets.only(bottom: 16), // Add padding at the bottom
+        padding: const EdgeInsets.only(bottom: 16),
         child: Column(
           children: [
             _buildOrderSelector(),
@@ -528,58 +582,46 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
   }
 
   Widget _buildOrderSelector() {
-    // Ensure _ordersMap is not empty and keys exist before building dropdown
-    if (_ordersMap.isEmpty) return const SizedBox.shrink();
+    if (_ordersMap.isEmpty) {
+      _log('_buildOrderSelector: Orders map is empty, rendering SizedBox.shrink().');
+      return const SizedBox.shrink();
+    }
+    _log('_buildOrderSelector: Building dropdown. Selected: $_selectedOrderId. Available: ${_ordersMap.keys.toList()}');
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      margin: const EdgeInsets.only(top: 16, left: 16, right: 16), // Add margin
-      decoration: BoxDecoration( // Add decoration
+      margin: const EdgeInsets.only(top: 16, left: 16, right: 16),
+      decoration: BoxDecoration(
         color: kColorCard,
         borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 4))],
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            'SELECTED ORDER', // Changed label
-            style: GoogleFonts.poppins(
-              fontWeight: FontWeight.bold,
-              fontSize: 14, // Slightly smaller
-              color: kColorTextPrimary,
-            ),
-          ),
+          Text('SELECTED ORDER', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 14, color: kColorTextPrimary)),
           DropdownButton<int>(
-            value: _selectedOrderId,
-            // Ensure items list is not empty and contains _selectedOrderId
+            value: _selectedOrderId, // Should be valid if we reach here due to _buildBody checks
             items: _ordersMap.keys.map((orderId) {
-              return DropdownMenuItem<int>(
-                value: orderId,
-                child: Text(
-                  'Order #$orderId',
-                  style: GoogleFonts.poppins(fontSize: 14),
-                ),
-              );
+              return DropdownMenuItem<int>(value: orderId, child: Text('Order #$orderId', style: GoogleFonts.poppins(fontSize: 14)));
             }).toList(),
             onChanged: (value) {
                if (value != null && _ordersMap.containsKey(value)) {
-                 setState(() {
-                  _selectedOrderId = value;
-                  _isOrderInfoExpanded = false; // Collapse details when switching orders
-                 });
+                 _log('Order selection changed to: $value');
+                 if (mounted) {
+                    setState(() {
+                      _selectedOrderId = value;
+                      _isOrderInfoExpanded = false;
+                    });
+                 }
+               } else {
+                 _log('Invalid order selection attempt: $value. Current _selectedOrderId: $_selectedOrderId');
                }
             },
-            underline: Container(), // Remove default underline
+            underline: Container(),
             icon: Icon(Icons.arrow_drop_down, color: kColorPrimary),
             style: GoogleFonts.poppins(color: kColorTextPrimary, fontSize: 14),
-            dropdownColor: kColorCard, // Match card background
+            dropdownColor: kColorCard,
           ),
         ],
       ),
@@ -588,47 +630,27 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
 
   Widget _buildOrderStatusCard() {
     final order = _selectedOrderId != null ? _ordersMap[_selectedOrderId] : null;
-    if (order == null) return Container(); // Should not happen if _buildBody checks correctly
+    if (order == null) return Container(); 
 
     final status = order['order_status']?.toString() ?? 'pending';
     final formattedDate = _formatDate(order['order_date']?.toString());
     final formattedTime = _formatTime(order['order_date']?.toString());
 
     return Container(
-      margin: const EdgeInsets.only(top: 16, left: 16, right: 16), // Consistent margin
+      margin: const EdgeInsets.only(top: 16, left: 16, right: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: kColorCard,
         borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 4))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Order Status: ${_formatStatus(status)}',
-            style: GoogleFonts.poppins(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-              color: kColorPrimary, // Use primary color for emphasis
-            ),
-          ),
+          Text('Order Status: ${_formatStatus(status)}', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16, color: kColorPrimary)),
           const SizedBox(height: 8),
-           if (formattedDate != 'N/A') // Only show if date is valid
-             Text(
-              'Placed on: $formattedDate ${formattedTime ?? ""}', // Combine date and time
-              style: GoogleFonts.poppins(
-                color: kColorTextSecondary,
-                fontSize: 13,
-              ),
-            ),
-          const SizedBox(height: 20), // Increased spacing
+           if (formattedDate != 'N/A') Text('Placed on: $formattedDate ${formattedTime ?? ""}', style: GoogleFonts.poppins(color: kColorTextSecondary, fontSize: 13)),
+          const SizedBox(height: 20),
           _buildStatusTimeline(status),
         ],
       ),
@@ -636,93 +658,48 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
   }
 
   Widget _buildStatusTimeline(String status) {
-    // Simplified statuses for the timeline visual
     final timelineStatuses = ['Order Placed', 'Dispatched', 'Delivered'];
     final currentSimplifiedIndex = _getSimplifiedStatusIndex(status);
-    final orderDate = _selectedOrderId != null
-        ? (_selectedOrderId != null && _ordersMap[_selectedOrderId] != null ? _ordersMap[_selectedOrderId]!['order_date']?.toString() : null)
-        : null;
+    final orderDate = _selectedOrderId != null ? (_ordersMap[_selectedOrderId]?['order_date']?.toString()) : null;
 
-    return LayoutBuilder( // Use LayoutBuilder to calculate line width
+    return LayoutBuilder(
       builder: (context, constraints) {
         final double segmentWidth = constraints.maxWidth / timelineStatuses.length;
         final double circleRadius = 12.0;
-        final double horizontalPadding = segmentWidth / 2 - circleRadius; // Center circles in segments
+        final double horizontalPadding = segmentWidth / 2 - circleRadius;
 
         return Stack(
           children: [
-            // Horizontal connecting line - Position adjusted based on layout
             Positioned(
-              top: circleRadius - 1, // Center vertically with the circles
-              left: horizontalPadding + circleRadius, // Start after first half-circle
-              right: horizontalPadding + circleRadius, // End before last half-circle
-              child: Container(
-                height: 2,
-                color: kColorTimelineLine,
-              ),
+              top: circleRadius - 1,
+              left: horizontalPadding + circleRadius,
+              right: horizontalPadding + circleRadius,
+              child: Container(height: 2, color: kColorTimelineLine),
             ),
-            // Active part of the line
              Positioned(
               top: circleRadius - 1,
               left: horizontalPadding + circleRadius,
-              // Calculate width based on current status index
-              width: currentSimplifiedIndex > 0
-                  ? (segmentWidth * currentSimplifiedIndex)
+              width: currentSimplifiedIndex >= 0 // ensure non-negative width
+                  ? (segmentWidth * (currentSimplifiedIndex < timelineStatuses.length ? currentSimplifiedIndex : timelineStatuses.length -1 )) // Cap at max index
                   : 0,
-              child: Container(
-                height: 2,
-                color: kColorStatusActive, // Active line color
-              ),
+              child: Container(height: 2, color: kColorStatusActive),
             ),
             Row(
               children: List.generate(timelineStatuses.length, (index) {
                 bool isActive = index <= currentSimplifiedIndex;
-                // Determine date for this step
                 String stepDate = isActive ? _getSimplifiedStatusDate(orderDate, index) : '';
-
                 return Expanded(
                   child: Column(
                     children: [
-                      // Indicator Circle
                       Container(
-                        width: circleRadius * 2,
-                        height: circleRadius * 2,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: isActive ? kColorStatusActive : kColorStatusInactive,
-                           border: Border.all( // Add subtle border
-                             color: isActive ? kColorStatusActive : kColorTimelineLine,
-                             width: 1.5,
-                           ),
-                        ),
-                        child: isActive
-                            ? const Icon(Icons.check, size: 16, color: Colors.white)
-                            : null,
+                        width: circleRadius * 2, height: circleRadius * 2,
+                        decoration: BoxDecoration(shape: BoxShape.circle, color: isActive ? kColorStatusActive : kColorStatusInactive, border: Border.all(color: isActive ? kColorStatusActive : kColorTimelineLine, width: 1.5)),
+                        child: isActive ? const Icon(Icons.check, size: 16, color: Colors.white) : null,
                       ),
                       const SizedBox(height: 8),
-                      // Status text
-                      Text(
-                        timelineStatuses[index],
-                        style: GoogleFonts.poppins(
-                          fontSize: 12,
-                          fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
-                          color: isActive ? kColorTextPrimary : kColorTextSecondary,
-                        ),
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                      Text(timelineStatuses[index], style: GoogleFonts.poppins(fontSize: 12, fontWeight: isActive ? FontWeight.w600 : FontWeight.w500, color: isActive ? kColorTextPrimary : kColorTextSecondary), textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis),
                       const SizedBox(height: 4),
-                      // Date (only show for active steps with valid dates)
-                      if (stepDate.isNotEmpty && stepDate != 'N/A')
-                        Text(
-                          stepDate,
-                          style: GoogleFonts.poppins(
-                            fontSize: 10,
-                            color: kColorTextSecondary,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
+                      if (stepDate.isNotEmpty && stepDate != 'N/A') Text(stepDate, style: GoogleFonts.poppins(fontSize: 10, color: kColorTextSecondary), textAlign: TextAlign.center),
                     ],
                   ),
                 );
@@ -734,137 +711,113 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
     );
   }
 
-  // --- Updated _buildOrderInfoCard ---
   Widget _buildOrderInfoCard() {
-    final order =
-        _selectedOrderId != null ? _ordersMap[_selectedOrderId] : null;
-    if (order == null) return Container();
-    
-    // Check if verification is needed and if this order is loading verification
+    final order = _selectedOrderId != null ? _ordersMap[_selectedOrderId] : null;
+    if (order == null) {
+      _log('_buildOrderInfoCard: Selected order data is null for ID: $_selectedOrderId. Rendering empty container.');
+      return Container();
+    }
+    // Shorten log for order data to avoid excessive output
+    String orderDataSummary = order.toString();
+    if (orderDataSummary.length > 200) orderDataSummary = "${orderDataSummary.substring(0, 200)}...";
+    _log('_buildOrderInfoCard: Building for order ID: $_selectedOrderId. Data (summary): $orderDataSummary');
+
     final bool needsVerification = order['order_status']?.toString() == 'verification needed';
     final bool isLoadingVerification = _loadingVerificationOrderId == _selectedOrderId;
 
-    // --- MODIFICATION START ---
-    // Determine product name based on order_type
     String productName;
     final orderType = order['order_type']?.toString();
+    _log('_buildOrderInfoCard: Order type: $orderType');
 
     if (orderType == 'gig') {
       final gigDetailsData = order['gig_details'];
       if (gigDetailsData is Map<String, dynamic>) {
-        // Prioritize 'gig_name', then 'gig_type'
-        productName = gigDetailsData['gig_name']?.toString() ??
-                      gigDetailsData['gig_type']?.toString() ??
-                      'N/A (Gig Name/Type Missing)';
+        productName = gigDetailsData['gig_name']?.toString() ?? gigDetailsData['gig_type']?.toString() ?? 'N/A (Gig Name/Type Missing)';
+        _log('_buildOrderInfoCard: Gig product name (from map): $productName');
       } else if (gigDetailsData is String) {
-         // Handle if gig_details is just a string (less ideal, but possible)
          try {
             final decodedDetails = json.decode(gigDetailsData);
              if (decodedDetails is Map<String, dynamic>) {
-                 productName = decodedDetails['gig_name']?.toString() ??
-                               decodedDetails['gig_type']?.toString() ??
-                               'N/A (Gig Name/Type Missing)';
+                 productName = decodedDetails['gig_name']?.toString() ?? decodedDetails['gig_type']?.toString() ?? 'N/A (Gig Name/Type Missing)';
+                 _log('_buildOrderInfoCard: Gig product name (from decoded string): $productName');
             } else {
-                 productName = 'N/A (Invalid Gig Details Format)';
+                 productName = 'N/A (Invalid Gig Details Format after decode)';
+                 _log('_buildOrderInfoCard: Decoded gig_details string is not a map.');
             }
          } catch (e) {
-           print("Error decoding gig_details string: $e");
+           _log("_buildOrderInfoCard: Error decoding gig_details string: $e. Details: $gigDetailsData");
            productName = 'N/A (Error in Gig Details)';
          }
       } else {
-        // Handle cases where gig_details might be missing or not a map/string
-        print("Warning: Order type is 'gig' but 'gig_details' is missing or not a map/string for order ${_selectedOrderId}");
+        _log("_buildOrderInfoCard: Warning: Order type is 'gig' but 'gig_details' is missing or not a map/string for order $_selectedOrderId. Details: $gigDetailsData");
         productName = 'N/A (Invalid Gig Details)';
       }
     } else {
-      // Fallback to existing logic for other order types (e.g., meal, product)
-      productName = order['meal_name']?.toString() ??
-                    order['product_name']?.toString() ??
-                    'N/A';
+      productName = order['meal_name']?.toString() ?? order['product_name']?.toString() ?? 'N/A';
+      _log('_buildOrderInfoCard: Product name (non-gig): $productName');
     }
-    // --- MODIFICATION END ---
 
-    // Essential information (always visible)
-    final customerName = order['customer_name'] ?? order['user_id']?.toString() ?? 'N/A'; // Prefer customer_name if available
+    final String actualCustomerName = order['customer_name']?.toString() ?? '';
+    final String userIdForDisplay = order['user_id']?.toString() ?? widget.userId; // Use widget.userId as ultimate fallback
+    final String displayCustomer = actualCustomerName.isNotEmpty ? actualCustomerName : 'User #$userIdForDisplay';
+
     final quantity = order['quantity']?.toString() ?? '1';
     final totalPrice = order['total_price']?.toString() ?? 'N/A';
-    final orderStatus =
-        _formatStatus(order['order_status']?.toString() ?? 'pending');
-    final chefName = order['chef_name']; // May be null
-    final producerName = order['producer_name']; // May be null
-
-    // Extended information (visible when expanded)
+    final orderStatus = _formatStatus(order['order_status']?.toString() ?? 'pending');
+    final chefName = order['chef_name'];
+    final producerName = order['producer_name'];
     final contactInfo = order['contact_info']?.toString() ?? 'Not provided';
-    final deliveryAddress = order['delivery_address']?.toString(); // Can be null
-    final notes = order['notes']?.toString(); // Can be null
-    final paymentStatus =
-        _formatStatus(order['payment_status']?.toString() ?? 'N/A');
-    final ingredients = order['ingredients']?.toString(); // Can be null
+    final deliveryAddress = order['delivery_address']?.toString();
+    final notes = order['notes']?.toString();
+    final paymentStatus = _formatStatus(order['payment_status']?.toString() ?? 'N/A');
+    final ingredients = order['ingredients']?.toString();
 
-    // Create more readable address by removing potential coordinates
     String cleanAddress = 'Not specified';
     if (deliveryAddress != null && deliveryAddress.isNotEmpty) {
-      cleanAddress = deliveryAddress.contains(',') && deliveryAddress.length > 40 // Basic check for coordinates format
+      cleanAddress = deliveryAddress.contains(',') && deliveryAddress.length > 40
           ? deliveryAddress.split(',').skip(2).join(',').trim()
           : deliveryAddress;
-      if (cleanAddress.isEmpty) cleanAddress = deliveryAddress; // Fallback if splitting removes everything
+      if (cleanAddress.isEmpty) cleanAddress = deliveryAddress;
     }
 
-
-    return Container( // Use Container instead of InkWell for better structure control
+    return Container(
         margin: const EdgeInsets.only(top: 16, left: 16, right: 16),
         decoration: BoxDecoration(
           color: kColorCard,
           borderRadius: BorderRadius.circular(8),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
-            ),
-          ],
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 4))],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            InkWell( // Wrap the header in InkWell for tap detection
+            InkWell(
               onTap: () {
-                setState(() {
-                  _isOrderInfoExpanded = !_isOrderInfoExpanded;
-                });
+                if (mounted) {
+                  setState(() {
+                    _isOrderInfoExpanded = !_isOrderInfoExpanded;
+                    _log('_buildOrderInfoCard: Toggled _isOrderInfoExpanded to $_isOrderInfoExpanded');
+                  });
+                }
               },
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'ORDER DETAILS',
-                      style: GoogleFonts.poppins(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: kColorTextPrimary,
-                      ),
-                    ),
-                    Icon(
-                      _isOrderInfoExpanded ? Icons.expand_less : Icons.expand_more,
-                      color: kColorTextPrimary,
-                      size: 28,
-                    ),
+                    Text('ORDER DETAILS', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16, color: kColorTextPrimary)),
+                    Icon(_isOrderInfoExpanded ? Icons.expand_less : Icons.expand_more, color: kColorTextPrimary, size: 28),
                   ],
                 ),
               ),
             ),
-            const Divider(height: 1, thickness: 1, color: kColorDivider), // Divider below header
-
-            // Always visible content
+            const Divider(height: 1, thickness: 1, color: kColorDivider),
              Padding(
                padding: const EdgeInsets.only(left: 16.0, right: 16.0, top: 12.0, bottom: 8.0),
                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                       _buildInfoRow('Product', productName),
-                      _buildInfoRow('Customer', customerName == 'N/A' ? 'User #$customerName' : customerName), // Show 'User #' only if name missing
+                      _buildInfoRow('Customer', displayCustomer),
                       _buildInfoRow('Quantity', quantity),
                       _buildInfoRow('Total Price', '$totalPrice UGX'),
                       _buildInfoRow('Order Status', orderStatus),
@@ -872,157 +825,109 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                         const SizedBox(height: 16),
                         Center(
                           child: ElevatedButton(
-                            onPressed: isLoadingVerification 
-                                ? null 
-                                : () => _handleVerificationRequest(_selectedOrderId!),
+                            onPressed: isLoadingVerification ? null : () {
+                               _log('_buildOrderInfoCard: VERIFY DELIVERY button pressed for order #$_selectedOrderId.');
+                               _handleVerificationRequest(_selectedOrderId!);
+                            },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: kColorPrimary,
                               padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             ),
                             child: isLoadingVerification
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      color: Colors.white,
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : Text(
-                                    'VERIFY DELIVERY',
-                                    style: GoogleFonts.poppins(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14,
-                                      color: Colors.white,
-                                    ),
-                                  ),
+                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                                : Text('VERIFY DELIVERY', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
                           ),
                         ),
                       ],
-
-                      // Display complementary meals if present
                       _buildComplementaryMealsRow(order['complementary_meals']),
-
-                      // Display Chef or Producer only if they have a value
-                      if (chefName != null && chefName.isNotEmpty)
-                        _buildInfoRow('Chef', chefName),
-                      if (producerName != null && producerName.isNotEmpty)
-                        _buildInfoRow('Producer', producerName),
+                      if (chefName != null && chefName.isNotEmpty) _buildInfoRow('Chef', chefName),
+                      if (producerName != null && producerName.isNotEmpty) _buildInfoRow('Producer', producerName),
                  ],
                ),
              ),
-
-            // Expandable content using AnimatedCrossFade for smooth transition
             AnimatedCrossFade(
               duration: const Duration(milliseconds: 300),
-              firstChild: Container(), // Empty container when collapsed
-              secondChild: Padding( // Content when expanded
+              firstChild: Container(),
+              secondChild: Padding(
                  padding: const EdgeInsets.only(left: 16.0, right: 16.0, bottom: 16.0),
                  child: Column(
                    crossAxisAlignment: CrossAxisAlignment.start,
                    children: [
-                     const Divider(color: kColorDivider, height: 16, thickness: 1), // Divider before expanded content
+                     const Divider(color: kColorDivider, height: 16, thickness: 1),
                      _buildInfoRow('Contact', contactInfo),
                      _buildInfoRow('Delivery To', cleanAddress),
                      _buildInfoRow('Payment Status', paymentStatus),
-                     if (notes != null && notes.isNotEmpty) // Only show if notes exist
-                        _buildInfoRow('Notes', notes),
-                     // Conditionally show ingredients if relevant and exist
-                     if (ingredients != null && ingredients.isNotEmpty && orderType != 'gig')
-                       _buildInfoRow('Ingredients', ingredients),
+                     if (notes != null && notes.isNotEmpty) _buildInfoRow('Notes', notes),
+                     if (ingredients != null && ingredients.isNotEmpty && orderType != 'gig') _buildInfoRow('Ingredients', ingredients),
                    ],
                  ),
               ),
               crossFadeState: _isOrderInfoExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
             ),
-
-            // Hint for expandable content - adjusted padding and style
             if (!_isOrderInfoExpanded)
               Padding(
-                padding: const EdgeInsets.only(bottom: 12.0, top: 0), // Adjusted padding
+                padding: const EdgeInsets.only(bottom: 12.0, top: 0),
                 child: Center(
-                  child: Text(
-                    'Tap here for more details', // Changed text
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: kColorTextSecondary,
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
+                  child: Text('Tap here for more details', style: GoogleFonts.poppins(fontSize: 12, color: kColorTextSecondary, fontStyle: FontStyle.italic)),
                 ),
               ),
           ],
         ),
     );
   }
-  // --- End of Updated _buildOrderInfoCard ---
-
 
   Widget _buildTrackingHistoryCard() {
-    final order =
-        _selectedOrderId != null ? _ordersMap[_selectedOrderId] : null;
+    final order = _selectedOrderId != null ? _ordersMap[_selectedOrderId] : null;
     if (order == null) return Container();
 
     final orderDate = order['order_date']?.toString();
     final currentStatus = order['order_status']?.toString() ?? 'pending';
     final currentSimplifiedIndex = _getSimplifiedStatusIndex(currentStatus);
 
-    // Generate the list of events that have occurred
     final List<Widget> trackingEvents = [];
-    for (int i = 0; i <= currentSimplifiedIndex; i++) {
-      // Use actual status change times if available, otherwise estimate based on order date
-      // TODO: Implement logic to get actual timestamps for each status from order data if available
-      final String eventDate = _getSimplifiedStatusDate(orderDate, i); // Using estimated date for now
-      final String? eventTime = _getSimplifiedStatusTime(orderDate, i); // Using estimated time for now
+    final timelineStatusNames = ['Order Placed', 'Dispatched', 'Delivered']; // Consistent with _buildStatusTimeline
 
-      trackingEvents.add(
-        _buildTrackingEvent(
-          _getSimplifiedStatusName(i),
-          eventDate != 'N/A' ? '$eventDate ${eventTime ?? ""}' : 'Pending', // Combine date and time
-          isLast: i == currentSimplifiedIndex,
-        ),
-      );
+    // Only generate events up to the current actual step, or max defined steps
+    int maxEventsToShow = currentSimplifiedIndex;
+    if (maxEventsToShow < 0) maxEventsToShow = 0; // Handle cancelled/failed if mapped to -1
+    if (maxEventsToShow >= timelineStatusNames.length) maxEventsToShow = timelineStatusNames.length - 1;
+
+
+    for (int i = 0; i <= maxEventsToShow; i++) {
+      final String eventDate = _getSimplifiedStatusDate(orderDate, i);
+      final String? eventTime = _getSimplifiedStatusTime(orderDate, i);
+      trackingEvents.add(_buildTrackingEvent(
+        _getSimplifiedStatusName(i), 
+        eventDate != 'N/A' ? '$eventDate ${eventTime ?? ""}' : 'Pending', 
+        isLast: i == maxEventsToShow,
+      ));
     }
 
-    if (trackingEvents.isEmpty) {
-      // Handle case where even 'Order Placed' hasn't registered (should be rare)
+    if (trackingEvents.isEmpty && currentSimplifiedIndex >=0 ) { // If no events but status is valid (e.g. 'Order Placed')
+       final String eventDate = _getSimplifiedStatusDate(orderDate, 0);
+       final String? eventTime = _getSimplifiedStatusTime(orderDate, 0);
+      trackingEvents.add(_buildTrackingEvent(_getSimplifiedStatusName(0), eventDate != 'N/A' ? '$eventDate ${eventTime ?? ""}' : 'Pending', isLast: true));
+    } else if (trackingEvents.isEmpty) { // Truly no events, status might be unknown or error
       trackingEvents.add(_buildTrackingEvent('Order Status Pending', '', isLast: true));
     }
 
+
     return Container(
-      margin: const EdgeInsets.only(top: 16, left: 16, right: 16), // Consistent margin
+      margin: const EdgeInsets.only(top: 16, left: 16, right: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: kColorCard,
         borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 4))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12.0), // Add padding below title
-            child: Text( // Removed Center, let it align start
-              'TRACKING HISTORY',
-              style: GoogleFonts.poppins(
-                fontWeight: FontWeight.bold,
-                color: kColorTextPrimary,
-                fontSize: 16,
-              ),
-            ),
-          ),
+          Padding(padding: const EdgeInsets.only(bottom: 12.0), child: Text('TRACKING HISTORY', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: kColorTextPrimary, fontSize: 16))),
           const Divider(color: kColorDivider, height: 1, thickness: 1),
           const SizedBox(height: 16),
-          ...trackingEvents, // Spread the list of event widgets
+          ...trackingEvents,
         ],
       ),
     );
@@ -1030,100 +935,49 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
 
   Widget _buildInfoRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6), // Increased vertical padding
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-          width: 105, // Slightly reduced label width to give more space to value
-          child: Text(
-            label,
-            style: GoogleFonts.poppins(
-              fontSize: 13,
-              color: kColorTextSecondary,
-            ),
-          ),
-        ),
-        const SizedBox(width: 20), // Increased spacing between label and value
-        Expanded(
-          child: Text(
-            value.isEmpty ? 'N/A' : value, // Handle empty strings
-            style: GoogleFonts.poppins(
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: kColorTextPrimary,
-            ),
-          ),
-        ),
+          SizedBox(width: 105, child: Text(label, style: GoogleFonts.poppins(fontSize: 13, color: kColorTextSecondary))),
+          const SizedBox(width: 20),
+          Expanded(child: Text(value.isEmpty ? 'N/A' : value, style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500, color: kColorTextPrimary))),
         ],
       ),
     );
   }
 
   Widget _buildTrackingEvent(String event, String dateTime, {bool isLast = false}) {
-    return IntrinsicHeight( // Ensure Row elements align vertically correctly
+    return IntrinsicHeight(
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch, // Stretch children vertically
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Vertical timeline column
           SizedBox(
-            width: 30, // Increased width for better spacing
+            width: 30,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.start,
-              crossAxisAlignment: CrossAxisAlignment.center, // Center dot/line horizontally
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                 // Dot
-                Container(
-                  width: 12,
-                  height: 12,
-                  margin: const EdgeInsets.only(top: 4), // Align dot with first line of text
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: kColorStatusActive,
-                  ),
-                ),
-                // Vertical connecting line (only if not the last item)
-                if (!isLast)
-                  Expanded( // Let the line fill the remaining space
-                    child: Container(
-                      width: 2,
-                      margin: const EdgeInsets.only(top: 4, bottom: 4), // Spacing around line
-                      color: kColorStatusActive, // Line color
-                    ),
-                  ),
-                 // Add Spacer if it's the last item to take up equivalent space
-                 if (isLast) const Spacer(),
+                Container(width: 12, height: 12, margin: const EdgeInsets.only(top: 4), decoration: BoxDecoration(shape: BoxShape.circle, color: kColorStatusActive)),
+                if (!isLast) Expanded(child: Container(width: 2, margin: const EdgeInsets.only(top: 4, bottom: 4), color: kColorStatusActive)),
+                if (isLast && !isLast) const Spacer(), // This line was 'if (isLast) const Spacer()' which is fine. Redundant !isLast here.
+                                                      // If it's the last item, we don't need a spacer IF there's no line.
+                                                      // The structure implies the spacer is only needed if the line is absent.
+                                                      // Correct logic: If isLast, then no line is drawn. If not isLast, line is drawn. Spacer is for height alignment with text.
+                                                      // Let's keep it simple: If not last, draw line. If last, nothing extra here.
               ],
             ),
           ),
-          // Event details column
           Expanded(
             child: Padding(
-              padding: EdgeInsets.only(
-                bottom: isLast ? 0 : 24, // Space below each event, except the last
-                top: 2 // Align text slightly below the top of the dot
-              ),
+              padding: EdgeInsets.only(bottom: isLast ? 0 : 24, top: 2),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.start,
                 children: [
-                  Text(
-                    event,
-                    style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.w600, // Bolder event name
-                      fontSize: 14,
-                      color: kColorTextPrimary,
-                    ),
-                  ),
+                  Text(event, style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14, color: kColorTextPrimary)),
                   const SizedBox(height: 2),
-                  if (dateTime.isNotEmpty) // Only show date/time if available
-                    Text(
-                      dateTime,
-                      style: GoogleFonts.poppins(
-                        color: kColorTextSecondary,
-                        fontSize: 12,
-                      ),
-                    ),
+                  if (dateTime.isNotEmpty) Text(dateTime, style: GoogleFonts.poppins(color: kColorTextSecondary, fontSize: 12)),
                 ],
               ),
             ),
@@ -1133,43 +987,32 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
     );
   }
 
-
    Widget _buildLoadingState() {
+    _log('Building loading state widget.');
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          CircularProgressIndicator(
-            color: kColorPrimary ?? Colors.teal,
-            strokeWidth: 3,
-          ),
+          CircularProgressIndicator(color: kColorPrimary ?? Colors.teal, strokeWidth: 3),
           const SizedBox(height: 20),
-          Text(
-            'Loading order details...',
-            style: GoogleFonts.poppins(
-              fontSize: 16,
-              color: kColorTextPrimary,
-            ),
-          ),
+          Text('Loading order details...', style: GoogleFonts.poppins(fontSize: 16, color: kColorTextPrimary)),
         ],
       ),
     );
   }
 
   Widget _buildEmptyState() {
+    _log('Building empty state widget.');
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(Icons.receipt_long_outlined, size: 60, color: kColorTextSecondary),
           const SizedBox(height: 16),
-          Text(
-            'No active orders found',
-            style: GoogleFonts.poppins(fontSize: 18, color: kColorTextPrimary),
-          ),
+          Text('No active orders found', style: GoogleFonts.poppins(fontSize: 18, color: kColorTextPrimary)),
           const SizedBox(height: 8),
           Text(
-            'There are no orders matching the provided list.',
+            widget.orderIdList.isEmpty ? 'Your order list is currently empty.' : 'No order data could be fetched for the provided list. Please try again.',
             style: GoogleFonts.poppins(color: kColorTextSecondary),
             textAlign: TextAlign.center,
           ),
@@ -1177,11 +1020,11 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
            ElevatedButton.icon(
              icon: const Icon(Icons.refresh, size: 18),
              label: Text('Retry', style: GoogleFonts.poppins()),
-             onPressed: _fetchOrders,
-             style: ElevatedButton.styleFrom(
-               backgroundColor: kColorPrimary,
-               foregroundColor: Colors.white,
-             ),
+             onPressed: () {
+                _log('Retry button pressed from empty state.');
+                _fetchOrders(isInitialFetch: true); // Treat as an initial fetch
+             },
+             style: ElevatedButton.styleFrom(backgroundColor: kColorPrimary, foregroundColor: Colors.white),
            )
         ],
       ),
@@ -1189,6 +1032,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
   }
 
    Widget _buildErrorState(String message) {
+    _log('Building error state widget. Message: $message');
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(20.0),
@@ -1197,26 +1041,18 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
           children: [
             Icon(Icons.error_outline, size: 60, color: Colors.red[700]),
             const SizedBox(height: 16),
-            Text(
-              'Error Loading Order',
-              style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: kColorTextPrimary),
-              textAlign: TextAlign.center,
-            ),
+            Text('Error Loading Order', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: kColorTextPrimary), textAlign: TextAlign.center),
             const SizedBox(height: 8),
-            Text(
-              message,
-              style: GoogleFonts.poppins(color: kColorTextSecondary),
-              textAlign: TextAlign.center,
-            ),
+            Text(message, style: GoogleFonts.poppins(color: kColorTextSecondary), textAlign: TextAlign.center),
             const SizedBox(height: 20),
             ElevatedButton.icon(
               icon: const Icon(Icons.refresh, size: 18),
               label: Text('Retry', style: GoogleFonts.poppins()),
-              onPressed: _fetchOrders,
-               style: ElevatedButton.styleFrom(
-                 backgroundColor: kColorPrimary,
-                 foregroundColor: Colors.white,
-               ),
+              onPressed: () {
+                _log('Retry button pressed from error state.');
+                _fetchOrders(isInitialFetch: true); // Treat as an initial fetch
+              },
+               style: ElevatedButton.styleFrom(backgroundColor: kColorPrimary, foregroundColor: Colors.white),
             )
           ],
         ),
@@ -1224,16 +1060,14 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
     );
   }
 
-  // Helper methods
   String _formatDate(String? dateString) {
     if (dateString == null || dateString.isEmpty) return 'N/A';
     try {
-      // Attempt to parse, handling potential timezone offsets
       final dateTime = DateTime.parse(dateString).toLocal();
-      return DateFormat('d MMMM yyyy').format(dateTime); // Include year
+      return DateFormat('d MMMM yyyy').format(dateTime);
     } catch (e) {
-      print("Error formatting date '$dateString': $e");
-      return 'Invalid Date'; // Return specific error string
+      _log("Error formatting date '$dateString': $e");
+      return 'Invalid Date';
     }
   }
 
@@ -1241,152 +1075,91 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
     if (dateString == null || dateString.isEmpty) return null;
     try {
       final dateTime = DateTime.parse(dateString).toLocal();
-      return DateFormat('h:mm a').format(dateTime); // Format time
+      return DateFormat('h:mm a').format(dateTime);
     } catch (e) {
-      print("Error formatting time '$dateString': $e");
+      _log("Error formatting time '$dateString': $e");
       return null;
     }
   }
 
   String _formatStatus(String status) {
      if (status.isEmpty) return 'Pending';
-     // Handle specific known statuses for better readability if needed
      switch (status.toLowerCase()) {
         case 'on_the_way': return 'On The Way';
         case 'order_placed': return 'Order Placed';
-        // Add more specific cases if your backend uses snake_case frequently
+        case 'verification needed': return 'Verification Needed';
      }
-     // General formatting for other cases
-    return status
-        .replaceAll('_', ' ')
-        .split(' ')
-        .map((word) => word.isNotEmpty
-            ? word[0].toUpperCase() + word.substring(1).toLowerCase()
-            : '')
-        .join(' ')
-        .trim();
+    return status.replaceAll('_', ' ').split(' ').map((word) => word.isNotEmpty ? word[0].toUpperCase() + word.substring(1).toLowerCase() : '').join(' ').trim();
   }
 
-  // --- Simplified Timeline Helpers (as used in _buildStatusTimeline and _buildTrackingHistoryCard) ---
-
-  // Maps backend status string to a simplified index (0, 1, 2)
   int _getSimplifiedStatusIndex(String status) {
+    // Maps backend status string to a simplified index (0, 1, 2) for timeline
+    // Ensure 'verification needed' is handled appropriately in your timeline logic.
+    // For this example, it's placed before 'Delivered'.
     switch (status.toLowerCase()) {
-      // Order Placed group
       case 'pending':
       case 'placed':
       case 'order_placed':
-        return 0;
+        return 0; // Order Placed
 
-      // Dispatched group (covers preparation, acceptance, shipping)
       case 'accepted':
       case 'preparing':
-      case 'ready_for_pickup': // Example of another potential status
+      case 'ready_for_pickup':
       case 'shipped':
       case 'dispatched':
       case 'on the way':
       case 'on_the_way':
-        return 1;
+      case 'verification needed': // Rider is likely on the way or has arrived
+        return 1; // Dispatched / On The Way / Awaiting Verification
 
-      // Delivered group
       case 'delivered':
       case 'complete':
       case 'completed':
-        return 2;
+        return 2; // Delivered
 
-      // Consider adding cases for failed/cancelled states if needed
       case 'cancelled':
       case 'failed':
-        return -1; // Or handle separately
-
+        return -1; // Represents a non-progressive state, handle separately if needed
       default:
-        print("Warning: Unmapped status encountered in _getSimplifiedStatusIndex: '$status'");
+        _log("Warning: Unmapped status encountered in _getSimplifiedStatusIndex: '$status'");
         return 0; // Default to the first step if unknown
     }
   }
 
-  // Gets the display name for a simplified index
   String _getSimplifiedStatusName(int index) {
+    // Gets the display name for a simplified timeline index
     switch (index) {
-      case 0:
-        return 'Order Placed';
-      case 1:
-        return 'Dispatched'; // Or 'Processing' / 'On The Way' depending on desired label
-      case 2:
-        return 'Delivered';
-      default:
-        return 'Unknown Status';
+      case 0: return 'Order Placed';
+      case 1: return 'Dispatched'; // Could also be 'Processing' or 'Awaiting Verification' based on context
+      case 2: return 'Delivered';
+      default: return 'Unknown Status';
     }
   }
 
-  // Gets an *estimated* date for a simplified timeline step based on the order date
-  // TODO: Replace this with actual status timestamp data from the API if available
+  // Gets an *estimated* date for a simplified timeline step.
+  // TODO: Replace with actual status timestamp data from the API if available.
   String _getSimplifiedStatusDate(String? orderDate, int index) {
     if (orderDate == null || orderDate.isEmpty) return 'N/A';
     try {
       final dateTime = DateTime.parse(orderDate).toLocal();
-      // Basic estimation: Add some hours/days per step for demonstration
-      // In a real app, you'd use actual timestamps for each status change from the API.
-      final adjustedDate = dateTime.add(Duration(hours: index * 6)); // Example: 6 hours per step
+      // Basic estimation: Add some hours per step.
+      final adjustedDate = dateTime.add(Duration(hours: index * 2 + index)); // e.g., step 0: +0h, step 1: +3h, step 2: +6h
       return DateFormat('d MMM').format(adjustedDate); // e.g., "15 Feb"
     } catch (e) {
-      print("Error calculating simplified status date for index $index from '$orderDate': $e");
+      _log("Error calculating simplified status date for index $index from '$orderDate': $e");
       return 'N/A';
     }
   }
 
-  // Gets an *estimated* time for a simplified timeline step
-  // TODO: Replace with actual timestamps
    String? _getSimplifiedStatusTime(String? orderDate, int index) {
     if (orderDate == null || orderDate.isEmpty) return null;
     try {
       final dateTime = DateTime.parse(orderDate).toLocal();
-      final adjustedDate = dateTime.add(Duration(hours: index * 6)); // Same estimation as date
+      final adjustedDate = dateTime.add(Duration(hours: index * 2 + index));
       return DateFormat('h:mm a').format(adjustedDate);
     } catch (e) {
-      print("Error calculating simplified status time for index $index from '$orderDate': $e");
+      _log("Error calculating simplified status time for index $index from '$orderDate': $e");
       return null;
     }
   }
-
-  // --- Original Detailed Status Helpers (kept for reference or potential future use) ---
-
-  // int _getStatusIndex(String status) {
-  //   switch (status.toLowerCase()) {
-  //     case 'pending': return 0;
-  //     case 'placed': return 0; // Alias
-  //     case 'order_placed': return 0; // Alias
-  //     case 'accepted': return 1;
-  //     case 'preparing': return 2;
-  //     case 'on the way': return 3;
-  //     case 'on_the_way': return 3; // Alias
-  //     case 'shipped': return 3; // Alias
-  //     case 'dispatched': return 3; // Alias
-  //     case 'delivered': return 4;
-  //     case 'complete': return 5;
-  //     case 'completed': return 5; // Alias
-  //     default: return 0;
-  //   }
-  // }
-
-  // String _getStatusName(int index) {
-  //   switch (index) {
-  //     case 0: return 'Order Placed';
-  //     case 1: return 'Accepted';
-  //     case 2: return 'Preparing';
-  //     case 3: return 'On The Way';
-  //     case 4: return 'Delivered';
-  //     case 5: return 'Complete';
-  //     default: return 'Unknown Status';
-  //   }
-  // }
-
-  // String _getStatusDate(String? orderDate, int statusIndex) {
-  //    // ... (original estimation logic) ...
-  // }
-
-  // String _getStatusTime(String? orderDate, int statusIndex) {
-  //    // ... (original estimation logic) ...
-  // }
-
 }

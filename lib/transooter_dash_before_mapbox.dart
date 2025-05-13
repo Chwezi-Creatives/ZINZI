@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io'; // Required for File and image picking
@@ -7,17 +8,14 @@ import 'package:image_picker/image_picker.dart'; // For image picking
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart'; // Import SharedPreferences for caching and prefs
 import 'package:cached_network_image/cached_network_image.dart'; // Image caching
-import 'package:shimmer/shimmer.dart'; // Shimmer effect
-import 'package:geolocator/geolocator.dart'; // For location in profile edit (if needed)
 
 // Add these imports at the top of the file
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
-
 // --- Assumed Imports (Ensure these files exist) ---
 import 'package:zinzi2/Transporter_login.dart'; // For logout navigation
 import 'package:zinzi2/user_cache.dart'; // <<< IMPORT UserCache
-import 'package:zinzi2/cache_config.dart'; // <<< IMPORT CacheConfig
+import 'package:zinzi2/chef_verification_helper.dart'; // For verification dialog
+// Removed unused import // <<< IMPORT CacheConfig
 // import 'package:zinzi2/app_drawer.dart'; // If you reuse the drawer from old code
 
 // --- Environment Variables ---
@@ -239,6 +237,19 @@ class TransporterProfile {
 }
 
 class Order {
+  // ...existing fields...
+  // Add this getter for customer phone number (adjust field name if needed)
+  String? get userPhone {
+    // Try to find a field that holds the customer phone number
+    // If not present, return null or a placeholder
+    if (this.toJson().containsKey('customer_phone')) {
+      return getStringSafe(this.toJson()['customer_phone']);
+    }
+    if (this.toJson().containsKey('user_phone')) {
+      return getStringSafe(this.toJson()['user_phone']);
+    }
+    return null;
+  }
   final int orderId;
   final int? userId;
   final String orderType;
@@ -918,10 +929,26 @@ class TransporterApiService {
 
   // Fetch available orders (not assigned yet)
   static Future<List<Order>> fetchAvailableOrders() async {
-    // Assuming 'pending' or similar status means available
-    // Adjust status query param based on your API
-    final Uri uri = Uri.parse('$apibaseurl/rr/orders?order_status=pending'); // Use 'pending' for available
-    print("Fetching available orders from: $uri");
+    // Extract transporter_id from SharedPreferences (try transporter_id, fallback to user_id)
+    final prefs = await SharedPreferences.getInstance();
+    dynamic transporterId = prefs.get('transporter_id');
+    if (transporterId == null) {
+      transporterId = prefs.get('user_id');
+    }
+    if (transporterId == null) {
+      throw Exception('Transporter ID not found in SharedPreferences.');
+    }
+    // Handle int or String
+    String transporterIdStr;
+    if (transporterId is int) {
+      transporterIdStr = transporterId.toString();
+    } else if (transporterId is String) {
+      transporterIdStr = transporterId;
+    } else {
+      throw Exception('Transporter ID is of unexpected type: ${transporterId.runtimeType}');
+    }
+    final Uri uri = Uri.parse('$apibaseurl/rr/orders?transporter_id=$transporterIdStr');
+    print("Fetching available orders for transporter $transporterIdStr from: $uri");
     try {
       final response =
           await http.get(uri, headers: _getWriteHeaders(requiresAuth: true));
@@ -1005,12 +1032,89 @@ class TransporterApiService {
   }
 } // End of TransporterApiService
 
-// ================================================
 // === MAIN DASHBOARD WIDGET (New UI Structure) ===
 // ================================================
 
 class TransporterDashNew extends StatefulWidget {
-  final String transporterId; // Pass the logged-in transporter's ID
+  final String transporterId;
+
+  /// Preload transporter dashboard cache for splash screen (no UI, no context needed)
+  static Future<void> preloadCacheForSplash(String transporterId) async {
+    if (transporterId.isEmpty) {
+      print('[Splash][TransporterDash] Error: Empty transporter ID provided');
+      return;
+    }
+    
+    // --- Profile Cache ---
+    const String profileKey = 'transporter_profile_cache_new_v2';
+    const String profileTsKey = 'transporter_profile_cache_timestamp_new_v2';
+    const String ordersKey = 'transporter_orders_cache';
+    const String ordersTsKey = 'transporter_orders_cache_timestamp';
+    final now = DateTime.now();
+
+    // --- Profile ---
+    final cachedProfile = await UserCache.getData(profileKey);
+    final cachedProfileTs = await UserCache.getData(profileTsKey);
+    bool profileCacheValid = false;
+    if (cachedProfile != null && cachedProfileTs is String) {
+      final cacheTime = DateTime.tryParse(cachedProfileTs);
+      if (cacheTime != null && now.difference(cacheTime).inMinutes < 15) {
+        profileCacheValid = true;
+      }
+    }
+    if (!profileCacheValid) {
+      try {
+        final profile = await TransporterApiService.fetchTransporterProfile(transporterId);
+        await UserCache.saveData(profileKey, profile.toJson());
+        await UserCache.saveData(profileTsKey, now.toIso8601String());
+        print('[Splash][TransporterDash] Profile cache updated');
+      } catch (e) {
+        print('[Splash][TransporterDash] Profile preload error: $e');
+      }
+    } else {
+      print('[Splash][TransporterDash] Profile preload skipped: Cache still valid');
+    }
+
+    // --- Orders ---
+    final cachedOrders = await UserCache.getData(ordersKey);
+    final cachedOrdersTs = await UserCache.getData(ordersTsKey);
+    bool ordersCacheValid = false;
+    if (cachedOrders is List && cachedOrdersTs is String) {
+      final cacheTime = DateTime.tryParse(cachedOrdersTs);
+      if (cacheTime != null && now.difference(cacheTime).inMinutes < 15) {
+        ordersCacheValid = true;
+      }
+    }
+    if (!ordersCacheValid) {
+      try {
+        // Fetch transporter orders and available orders
+        final results = await Future.wait([
+          TransporterApiService.fetchAllTransporterOrders(transporterId),
+          TransporterApiService.fetchAvailableOrders(),
+        ]);
+        
+        final transporterOrders = results[0] as List<Order>;
+        final availableOrders = results[1] as List<Order>;
+        
+        // Combine and serialize
+        final List<Order> combinedOrders = [
+          ...transporterOrders,
+          ...availableOrders,
+        ];
+        
+        final List<Map<String, dynamic>> serializedOrders = 
+            combinedOrders.map((order) => order.toJson()).toList();
+            
+        await UserCache.saveData(ordersKey, serializedOrders);
+        await UserCache.saveData(ordersTsKey, now.toIso8601String());
+        print('[Splash][TransporterDash] Orders cache updated');
+      } catch (e) {
+        print('[Splash][TransporterDash] Orders preload error: $e');
+      }
+    } else {
+      print('[Splash][TransporterDash] Orders preload skipped: Cache still valid');
+    }
+  }
 
   const TransporterDashNew({Key? key, required this.transporterId})
       : super(key: key);
@@ -1027,49 +1131,14 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   static const String _profileCacheKey = 'transporter_profile_cache_new_v2';
   static const String _profileCacheTimestampKey =
       'transporter_profile_cache_timestamp_new_v2';
-
-  // Load cache from UserCache
-  Future<void> _loadProfileCacheFromPrefs() async {
-    final cachedData = await UserCache.getData(_profileCacheKey);
-    final timestampData = await UserCache.getData(_profileCacheTimestampKey);
-
-    if (cachedData is Map<String, dynamic> && timestampData is String) {
-      try {
-        _profileCache = TransporterProfile.fromJson(cachedData);
-        _profileCacheTimestamp = DateTime.tryParse(timestampData)?.toLocal();
-        print("Loaded profile from cache. Timestamp: $_profileCacheTimestamp");
-      } catch (e) {
-        print("Error parsing cached transporter profile (new): $e");
-        _profileCache = null;
-        _profileCacheTimestamp = null;
-        await UserCache.removeData(
-            _profileCacheKey); // Clear potentially corrupted cache
-        await UserCache.removeData(_profileCacheTimestampKey);
-      }
-    } else {
-      print("No valid profile cache found in prefs.");
-      _profileCache = null;
-      _profileCacheTimestamp = null;
-    }
-  }
-
-  // Save cache to UserCache
-  Future<void> _saveProfileCacheToPrefs(TransporterProfile profile) async {
-    try {
-      Map<String, dynamic> cacheableProfile = profile.toJson();
-      await UserCache.saveData(_profileCacheKey, cacheableProfile);
-      final now = DateTime.now();
-      await UserCache.saveData(
-          _profileCacheTimestampKey, now.toIso8601String());
-      _profileCache = profile; // Update in-memory cache
-      _profileCacheTimestamp = now;
-      print("Saved profile to cache. Timestamp: $_profileCacheTimestamp");
-    } catch (e) {
-      print("Error saving profile to cache: $e");
-    }
-  }
-  // --- End Caching ---
-
+      
+  // --- Caching for Orders ---
+  static List<Order>? _ordersCache;
+  static DateTime? _ordersCacheTimestamp;
+  static const String _ordersCacheKey = 'transporter_orders_cache';
+  static const String _ordersCacheTimestampKey = 
+      'transporter_orders_cache_timestamp';
+  
   int _selectedDrawerIndex = 0; // 0: Dashboard, 1: Deliveries, 2: Profile
   TransporterProfile? _transporterProfile;
   List<Order> _allOrders = []; // Combined list of orders
@@ -1165,6 +1234,124 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     }
   }
 
+  // Load profile cache from UserCache
+  Future<void> _loadProfileCacheFromPrefs() async {
+    final cachedData = await UserCache.getData(_profileCacheKey);
+    final timestampData = await UserCache.getData(_profileCacheTimestampKey);
+
+    if (cachedData is Map<String, dynamic> && timestampData is String) {
+      try {
+        _profileCache = TransporterProfile.fromJson(cachedData);
+        _profileCacheTimestamp = DateTime.tryParse(timestampData)?.toLocal();
+        print("Loaded profile from cache. Timestamp: $_profileCacheTimestamp");
+      } catch (e) {
+        print("Error parsing cached transporter profile (new): $e");
+        _profileCache = null;
+        _profileCacheTimestamp = null;
+        await UserCache.removeData(
+            _profileCacheKey); // Clear potentially corrupted cache
+        await UserCache.removeData(_profileCacheTimestampKey);
+      }
+    } else {
+      print("No valid profile cache found in prefs.");
+      _profileCache = null;
+      _profileCacheTimestamp = null;
+    }
+  }
+  
+  // Load orders cache from UserCache
+  Future<bool> _loadOrdersCacheFromPrefs() async {
+    final cachedData = await UserCache.getData(_ordersCacheKey);
+    final timestampData = await UserCache.getData(_ordersCacheTimestampKey);
+    
+    if (cachedData is List && timestampData is String) {
+      try {
+        final DateTime? cacheTime = DateTime.tryParse(timestampData)?.toLocal();
+        final bool cacheIsValid = cacheTime != null && 
+            DateTime.now().difference(cacheTime).inMinutes < 15;
+            
+        if (cacheIsValid) {
+          final List<Order> orders = (cachedData as List)
+              .map((json) => Order.fromJson(json))
+              .toList();
+          // Sort orders by orderDate descending (latest first)
+          orders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
+          _allOrders = orders;    
+          _ordersCache = orders;
+          _ordersCacheTimestamp = cacheTime;
+          
+          // Update UI with cached data
+          if (mounted) {
+            setStateIfMounted(() {
+              _isLoading = false; // Turn off loading indicator
+            });
+          }
+          
+          print("Loaded ${orders.length} orders from cache. Timestamp: $_ordersCacheTimestamp");
+          return true;
+        } else {
+          print("Orders cache expired. Cache time: $cacheTime");
+          _ordersCache = null;
+          _ordersCacheTimestamp = null;
+        }
+      } catch (e) {
+        print("Error parsing cached orders: $e");
+        _ordersCache = null;
+        _ordersCacheTimestamp = null;
+        await UserCache.removeData(_ordersCacheKey);
+        await UserCache.removeData(_ordersCacheTimestampKey);
+      }
+    } else {
+      print("No valid orders cache found in prefs.");
+      _ordersCache = null;
+      _ordersCacheTimestamp = null;
+    }
+    return false;
+  }
+  
+  // Save orders to cache
+  Future<void> _saveOrdersCacheToPrefs(List<Order> orders) async {
+    try {
+      // Sort orders by orderDate descending (latest first) before saving
+      orders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
+      final List<Map<String, dynamic>> serializedOrders = 
+          orders.map((order) => order.toJson()).toList();
+          
+      await UserCache.saveData(_ordersCacheKey, serializedOrders);
+      final now = DateTime.now();
+      await UserCache.saveData(_ordersCacheTimestampKey, now.toIso8601String());
+      
+      _ordersCache = orders;
+      _ordersCacheTimestamp = now;
+      print("Saved ${orders.length} orders to cache. Timestamp: $_ordersCacheTimestamp");
+    } catch (e) {
+      print("Error saving orders to cache: $e");
+    }
+  }
+  
+  // Save cache to UserCache
+  Future<void> _saveProfileCacheToPrefs(TransporterProfile profile) async {
+    try {
+      Map<String, dynamic> cacheableProfile = profile.toJson();
+      await UserCache.saveData(_profileCacheKey, cacheableProfile);
+      final now = DateTime.now();
+      await UserCache.saveData(
+          _profileCacheTimestampKey, now.toIso8601String());
+      _profileCache = profile; // Update in-memory cache
+      _profileCacheTimestamp = now;
+      print("Saved profile to cache. Timestamp: $_profileCacheTimestamp");
+    } catch (e) {
+      print("Error saving profile to cache: $e");
+    }
+  }
+  
+  // Helper to safely call setState only if the widget is still mounted
+  void setStateIfMounted(VoidCallback fn) {
+    if (mounted) {
+      setState(fn);
+    }
+  }
+
   // Combined cache load and background fetch for Transporter Profile
   Future<void> _initializeTransporterProfile() async {
     if (mounted) {
@@ -1191,8 +1378,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     if (_profileCache != null && mounted) {
       final now = DateTime.now();
       final bool cacheIsValid = _profileCacheTimestamp != null &&
-          now.difference(_profileCacheTimestamp!) <
-              CacheConfig.profileCacheDuration;
+          now.difference(_profileCacheTimestamp!).inMinutes < 15;
 
       // Update state only if profile isn't set yet or if cache is valid (to refresh potentially stale UI)
       if (_transporterProfile == null || cacheIsValid) {
@@ -1257,8 +1443,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         });
       }
     } catch (error, stackTrace) {
-      print(
-          "Error fetching fresh transporter profile (new): $error\n$stackTrace");
+      print("Error fetching fresh transporter profile (new): $error\n$stackTrace");
       if (mounted) {
         // Only show error prominently if there's no cached data at all
         if (_transporterProfile == null) {
@@ -1284,13 +1469,6 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     }
   }
 
-  // Helper to safely call setState only if the widget is still mounted
-  void setStateIfMounted(VoidCallback fn) {
-    if (mounted) {
-      setState(fn);
-    }
-  }
-
   // Load initial orders and payments, triggers profile loading
   Future<void> _loadInitialData() async {
     if (!mounted) return;
@@ -1303,54 +1481,59 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
 
     // Trigger profile initialization/fetch (cache-first) - runs concurrently
     _initializeTransporterProfile(); // Don't await this, let it run
-
+    
+    // 1. Load orders from cache if available
+    bool loadedOrdersFromCache = await _loadOrdersCacheFromPrefs();
+    
+    // 2. Always fetch fresh data in background
     try {
       // Fetch orders and payments concurrently
       final results = await Future.wait([
         TransporterApiService.fetchAllTransporterOrders(widget.transporterId),
         TransporterApiService.fetchTransporterPayments(widget.transporterId),
-        TransporterApiService.fetchAvailableOrders(), // Fetch available orders
-      ]);
+        TransporterApiService.fetchAvailableOrders(),
+      ], eagerError: true);
 
-      // Process results carefully
-      final allOrdersResult = results[0]; // Type List<Order> expected
-      final paymentsResult = results[1]; // Type List<Payment> expected
-      final availableOrdersResult = results[2]; // Type List<Order> expected
+      if (mounted) {
+        final ordersResult = results[0] as List<dynamic>;
+        final paymentsResult = results[1] as List<dynamic>;
+        final availableOrdersResult = results[2] as List<dynamic>;
 
-      // Combine assigned and available orders, removing duplicates based on orderId
-      final allFetchedOrdersMap = <int, Order>{};
-      for (var order in allOrdersResult) {
-        if (order is Order) {
-          allFetchedOrdersMap[order.orderId] = order;
-        }
+        // Combine assigned orders with available orders
+        final List<Order> combinedOrders = [
+          ...ordersResult.cast<Order>(),
+          ...availableOrdersResult.cast<Order>(),
+        ];
+
+        setStateIfMounted(() {
+          _allOrders = combinedOrders;
+          _payments = paymentsResult
+              .cast<Payment>(); // Assuming paymentsResult is List<Payment>
+          _isLoading = false; // Done loading general data
+          _errorMessage = null;
+        });
+        
+        // Save orders to cache for next time
+        await _saveOrdersCacheToPrefs(combinedOrders);
       }
-      for (var order in availableOrdersResult) {
-        // Add available order only if it wasn't already in the 'all' list (which might include assigned/active ones)
-        if (order is Order) {
-          allFetchedOrdersMap.putIfAbsent(order.orderId, () => order);
-        }
-      }
-      final combinedOrders = allFetchedOrdersMap.values.toList();
-      // Sort orders by date descending
-      combinedOrders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
-
-      setStateIfMounted(() {
-        _allOrders = combinedOrders;
-        _payments = paymentsResult
-            .cast<Payment>(); // Assuming paymentsResult is List<Payment>
-        _isLoading = false; // Done loading general data
-        _errorMessage = null;
-      });
     } catch (e, stackTrace) {
       print(
           "Error loading initial data (orders/payments/available): $e\n$stackTrace");
-      if (mounted) {
+      if (mounted && !loadedOrdersFromCache) {
+        // Only show error if we didn't load from cache
         setStateIfMounted(() {
           _errorMessage = "Failed to load data: ${e.toString()}";
           _isLoading = false;
           // Don't clear profile if it loaded from cache
-          _allOrders = [];
-          _payments = [];
+          if (_allOrders.isEmpty) {
+            _allOrders = [];
+            _payments = [];
+          }
+        });
+      } else if (mounted) {
+        // If we loaded from cache, just turn off loading indicator
+        setStateIfMounted(() {
+          _isLoading = false;
         });
       }
     }
@@ -1477,17 +1660,20 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             CircleAvatar(
               radius: 16,
               backgroundColor: _primaryTeal.withOpacity(0.1),
-              backgroundImage: _transporterProfile?.profileImageUrl != null
-                  ? CachedNetworkImageProvider(_transporterProfile!.profileImageUrl!) // Use CachedNetworkImageProvider
+              backgroundImage: (_transporterProfile?.profileImageUrl != null && _transporterProfile!.profileImageUrl!.isNotEmpty)
+                  ? CachedNetworkImageProvider(_transporterProfile!.profileImageUrl!)
+                  : const AssetImage('assets/images/proffr.png'),
+              onBackgroundImageError: (_transporterProfile?.profileImageUrl != null && _transporterProfile!.profileImageUrl!.isNotEmpty)
+                  ? (_, __) {
+                      print("Error loading profile image: ${_transporterProfile?.profileImageUrl}");
+                    }
                   : null,
-              onBackgroundImageError: (_, __) { // Handle image loading errors
-                print("Error loading profile image: ${_transporterProfile?.profileImageUrl}");
-              },
-              child: (_transporterProfile?.profileImageUrl == null &&
-                      _transporterProfile?.name.isNotEmpty == true)
-                  ? Text(_transporterProfile!.name[0].toUpperCase(),
-                      style: TextStyle(
-                          color: _primaryTeal, fontWeight: FontWeight.bold))
+              child: (_transporterProfile?.profileImageUrl == null || _transporterProfile!.profileImageUrl!.isEmpty) &&
+                      _transporterProfile?.name.isNotEmpty == true
+                  ? Text(
+                      _transporterProfile!.name[0].toUpperCase(),
+                      style: TextStyle(color: _primaryTeal, fontWeight: FontWeight.bold),
+                    )
                   : null,
             ),
             SizedBox(width: 10),
@@ -1534,20 +1720,19 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             accountEmail: Text(_transporterProfile?.email ?? 'rider@email.com'),
             currentAccountPicture: CircleAvatar(
               backgroundColor: _lightTeal,
-              backgroundImage: _transporterProfile?.profileImageUrl != null
-                  ? CachedNetworkImageProvider(_transporterProfile!.profileImageUrl!) // Use CachedNetworkImageProvider
+              backgroundImage: (_transporterProfile?.profileImageUrl != null && _transporterProfile!.profileImageUrl!.isNotEmpty)
+                  ? CachedNetworkImageProvider(_transporterProfile!.profileImageUrl!)
+                  : const AssetImage('assets/images/proffr.png'),
+              onBackgroundImageError: (_transporterProfile?.profileImageUrl != null && _transporterProfile!.profileImageUrl!.isNotEmpty)
+                  ? (_, __) {
+                      print("Error loading drawer image: ${_transporterProfile?.profileImageUrl}");
+                    }
                   : null,
-              onBackgroundImageError: (_, __) {
-                 print("Error loading drawer image: ${_transporterProfile?.profileImageUrl}");
-              },
-              child: (_transporterProfile?.profileImageUrl == null &&
-                      _transporterProfile?.name.isNotEmpty == true)
+              child: (_transporterProfile?.profileImageUrl == null || _transporterProfile!.profileImageUrl!.isEmpty) &&
+                      _transporterProfile?.name.isNotEmpty == true
                   ? Text(
                       _transporterProfile!.name[0].toUpperCase(),
-                      style: TextStyle(
-                          fontSize: 30,
-                          color: _darkTeal,
-                          fontWeight: FontWeight.bold),
+                      style: TextStyle(fontSize: 30, color: _darkTeal, fontWeight: FontWeight.bold),
                     )
                   : null,
             ),
@@ -1659,8 +1844,16 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
 
     if (confirm == true) {
       try {
-        // Clear relevant cache/prefs
-        SharedPreferences prefs = await SharedPreferences.getInstance();
+        // Dynamically clear all user-related keys from SharedPreferences
+        final prefs = await SharedPreferences.getInstance();
+        final keys = prefs.getKeys();
+        final patterns = [RegExp(r'_id\b'), RegExp(r'_user_type\b')];
+        for (final key in keys) {
+          if (patterns.any((p) => p.hasMatch(key))) {
+            await prefs.remove(key);
+          }
+        }
+        // Clear specific keys
         await prefs.remove('transporter_token'); // **VERIFY KEY NAME**
         await prefs.remove('transporter_user_id'); // **VERIFY KEY NAME**
         // Clear profile cache
@@ -2475,8 +2668,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     return _allOrders
         .where((o) => activeStatuses.contains(o.orderStatus.toLowerCase()))
         .toList()
-      ..sort((a, b) => a.orderDate
-          .compareTo(b.orderDate)); // Sort oldest first? Or based on priority?
+      ..sort((a, b) => b.orderDate.compareTo(a.orderDate)); // Newest first
   }
 
   List<Order> _getAvailableOrders() {
@@ -2491,13 +2683,9 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   }
 
   List<Order> _getCompletedOrders() {
-    const completedStatuses = {
-      Order.STATUS_DELIVERED,
-      Order.STATUS_COMPLETED,
-      Order.STATUS_CANCELLED
-    };
+    // Only include orders with status 'completed' (case-insensitive)
     return _allOrders
-        .where((o) => completedStatuses.contains(o.orderStatus.toLowerCase()))
+        .where((o) => o.orderStatus.toLowerCase() == 'completed')
         .toList()
       ..sort((a, b) => b.orderDate.compareTo(a.orderDate)); // Most recent first
   }
@@ -3523,6 +3711,10 @@ class OrderDetailsScreen extends StatefulWidget {
 }
 
 class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
+  // TODO: Wire this up to the actual orders list from the dashboard state if needed
+  List<Order> _allOrders = [];
+
+  bool _navigationTriggered = false; // Track if navigation was started for this order
   // State vars same as provided
 
   // Method to get user-friendly status text (copied from main state)
@@ -3836,6 +4028,175 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             SizedBox(height: 16),
           ],
           // Show main action button if applicable
+          // Show "I have arrived" button only if navigation was triggered and order is not delivered/completed/cancelled
+          if (_navigationTriggered &&
+              statusLower != Order.STATUS_DELIVERED &&
+              statusLower != Order.STATUS_COMPLETED &&
+              statusLower != Order.STATUS_CANCELLED) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 8.0),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _isUpdatingStatus ? null : () async {
+                    setState(() => _isUpdatingStatus = true);
+                    try {
+                      // Prepare ID logic (copied from verification helper)
+                      final prefs = await SharedPreferences.getInstance();
+                      final userType = prefs.getString('user_type');
+                      final userId = prefs.getString('user_id');
+                      final chefId = prefs.getString('chef_user_id');
+                      String? idToSend;
+                      String idKey;
+                      if (userType != null && userType.toLowerCase() == 'transporter') {
+                        idToSend = userId;
+                        idKey = 'transporter_id';
+                      } else {
+                        idToSend = chefId;
+                        idKey = 'chef_id';
+                      }
+                      if (idToSend == null) throw Exception('User ID not found. Please log in again.');
+                      final apiBaseUrl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://api.example.com';
+                      final uri = Uri.parse('${apiBaseUrl}/rr/orders/${_currentOrder.orderId}/status');
+                      final response = await http.patch(
+                        uri,
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'Accept': 'application/json',
+                        },
+                        body: jsonEncode({
+                          idKey: idToSend,
+                          'order_status': 'completed',
+                        }),
+                      ).timeout(const Duration(seconds: 15));
+                      if (response.statusCode == 200) {
+                        // Now show verification dialog
+                        final verified = await ChefVerificationHelper.showVerificationDialog(context, _currentOrder);
+                        if (verified) {
+                          // After verification, update status to completed
+                          try {
+                            final prefs = await SharedPreferences.getInstance();
+                            final userType = prefs.getString('user_type');
+                            final userId = prefs.getString('user_id');
+                            final chefId = prefs.getString('chef_user_id');
+                            String? idToSend;
+                            String idKey;
+                            if (userType != null && userType.toLowerCase() == 'transporter') {
+                              idToSend = userId;
+                              idKey = 'transporter_id';
+                            } else {
+                              idToSend = chefId;
+                              idKey = 'chef_id';
+                            }
+                            if (idToSend == null) throw Exception('User ID not found. Please log in again.');
+                            final apiBaseUrl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://api.example.com';
+                            final uri = Uri.parse('${apiBaseUrl}/rr/orders/${_currentOrder.orderId}/status');
+                            final response = await http.patch(
+                              uri,
+                              headers: {
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json',
+                              },
+                              body: jsonEncode({
+                                idKey: idToSend,
+                                'order_status': 'completed',
+                              }),
+                            ).timeout(const Duration(seconds: 15));
+                            if (response.statusCode == 200) {
+                              // TODO: Optionally refresh order from backend after marking as completed
+                              /*
+                              try {
+                                final orderUri = Uri.parse('${apiBaseUrl}/rr/orders/${_currentOrder.orderId}');
+                                final orderResp = await http.get(orderUri, headers: {
+                                  'Content-Type': 'application/json',
+                                  'Accept': 'application/json',
+                                }).timeout(const Duration(seconds: 15));
+                                if (orderResp.statusCode == 200) {
+                                  final orderJson = jsonDecode(orderResp.body);
+                                  setState(() {
+                                    _currentOrder = Order.fromJson(orderJson);
+                                  });
+                                  _showSuccessSnackBar('Order marked as completed!');
+                                } else {
+                                  setState(() {
+                                    _currentOrder = _currentOrder.copyWith(orderStatus: 'completed');
+                                  });
+                                  _showSuccessSnackBar('Order marked as completed (local update, failed to refresh from backend)!');
+                                }
+                              } catch (e) {
+                                setState(() {
+                                  _currentOrder = _currentOrder.copyWith(orderStatus: 'completed');
+                                });
+                                _showSuccessSnackBar('Order marked as completed (local update, failed to refresh from backend)!');
+                              }
+                              */
+                              setState(() {
+                                _currentOrder = _currentOrder.copyWith(orderStatus: 'completed');
+                                // Also update in _allOrders if present so it appears in completed tab
+                                final idx = _allOrders.indexWhere((o) => o.orderId == _currentOrder.orderId);
+                                if (idx != -1) {
+                                  _allOrders[idx] = _currentOrder;
+                                }
+                              });
+                              _showSuccessSnackBar('Order marked as completed!');
+                            } else {
+                              final detail = jsonDecode(response.body);
+                              _showErrorSnackBar('Failed to mark as completed: ${detail['detail'] ?? response.statusCode}');
+                            }
+                          } catch (e) {
+                            _showErrorSnackBar('Failed to mark as completed: $e');
+                          }
+                        } else {
+                          _showErrorSnackBar('Verification failed or cancelled.');
+                        }
+                      } else {
+                        final detail = jsonDecode(response.body);
+                        _showErrorSnackBar('Failed to trigger code: ${detail['detail'] ?? response.statusCode}');
+                      }
+                    } catch (e) {
+                      _showErrorSnackBar('Failed to trigger code: $e');
+                    } finally {
+                      setState(() => _isUpdatingStatus = false);
+                    }
+                  },
+                  child: Text('I have arrived'),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      foregroundColor: _white,
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8))),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 8.0),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: Icon(Icons.phone, color: _primaryTeal),
+                  label: Text('Contact Customer'),
+                  onPressed: () async {
+                    final customerPhone = _currentOrder.userPhone ?? "(256) 7YY-YYY-YYY";
+                    if (customerPhone.isNotEmpty) {
+                      final Uri telUri = Uri(scheme: 'tel', path: customerPhone);
+                      if (await canLaunchUrl(telUri)) {
+                        await launchUrl(telUri);
+                      } else {
+                        _showErrorSnackBar('Could not launch phone dialer');
+                      }
+                    } else {
+                      _showErrorSnackBar('Customer phone number not available');
+                    }
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _primaryTeal,
+                    side: BorderSide(color: _lightTeal),
+                  ),
+                ),
+              ),
+            ),
+          ],
           if (_canCompleteDelivery() &&
               statusLower != Order.STATUS_DELIVERED &&
               statusLower != Order.STATUS_COMPLETED &&
@@ -3873,32 +4234,39 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   }
 
   Widget _buildMapPlaceholder() {
-    /* ... Same as provided ... */
     return Container(
-        padding: EdgeInsets.all(20),
-        decoration: BoxDecoration(
-            color: _lightGrey,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey.shade300)),
-        child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Text('Map View Placeholder', // Updated text
-                  style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: _darkTeal),
-                  textAlign: TextAlign.center),
-              SizedBox(height: 8),
-              Text(
-                  'Map integration (e.g., Mapbox, Google Maps) would show the route here.', // Updated text
-                  style: TextStyle(color: _grey, fontSize: 13),
-                  textAlign: TextAlign.center),
-               SizedBox(height: 16),
-               Icon(Icons.map_outlined, size: 40, color: _grey),
-              // Removed token input field for cleaner placeholder
-            ]));
+      padding: EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: _lightGrey,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Center(
+        child: GestureDetector(
+          onTap: () {
+            setState(() {
+              _navigationTriggered = true;
+            });
+            // Replicate the navigation logic from the Navigate button
+            final addressParts = _currentOrder.deliveryAddress.split(',');
+            if (addressParts.length >= 2) {
+              final lat = double.tryParse(addressParts[0].trim());
+              final lng = double.tryParse(addressParts[1].trim());
+              if (lat != null && lng != null) {
+                _launchGoogleMapsNavigation(LatLng(lat, lng));
+                return;
+              }
+            }
+            _showErrorSnackBar('Could not parse delivery location coordinates from address: "${_currentOrder.deliveryAddress}"');
+          },
+          child: Image.asset(
+            'assets/images/go.png',
+            fit: BoxFit.contain,
+            height: 120, // adjust as needed
+          ),
+        ),
+      ),
+    );
   }
 
   // *** MODIFIED: Added Navigation Button ***
@@ -3959,15 +4327,17 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   icon: Icon(Icons.directions, size: 18),
-                  label: Text('Navigate to Delivery Location'),
+                  label: Text('Directions to Delivery Location'),
                   onPressed: () {
-                    // Extract coordinates from delivery address if available
                     final addressParts = _currentOrder.deliveryAddress.split(',');
                     if (addressParts.length >= 2) {
                       final lat = double.tryParse(addressParts[0].trim());
                       final lng = double.tryParse(addressParts[1].trim());
                       if (lat != null && lng != null) {
                         print("Attempting to navigate to: Lat=$lat, Lng=$lng");
+                        setState(() {
+                          _navigationTriggered = true;
+                        });
                         _launchGoogleMapsNavigation(LatLng(lat, lng));
                         return; // Exit after successful launch attempt
                       } else {

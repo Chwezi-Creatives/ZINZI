@@ -162,12 +162,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
     setState(() => _isLoading = true);
 
-    int? userId;
+    String? userId;
     try {
       final prefs = await SharedPreferences.getInstance();
-      userId = prefs.getInt('user_id');
+      userId = prefs.getString('user_id');
 
-      if (userId == null) {
+      if (userId == null || userId.isEmpty) {
         _showSnackBar('User is not logged in.');
         setState(() => _isLoading = false);
         return;
@@ -549,6 +549,41 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 ),
                 SizedBox(height: 24),
 
+                // Payment Method Card
+                Card(
+                  color: Colors.teal[50],
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 1,
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Choose a payment method',
+                          style: GoogleFonts.poppins(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.teal[800],
+                          ),
+                        ),
+                        SizedBox(height: 16),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.start,
+                          children: [
+                            _buildPaymentMethodChoice('Momo', 'assets/images/momo.png', showImage: true),
+                            SizedBox(width: 12),
+                            _buildPaymentMethodChoice('Airtel', 'assets/images/airtel.png', showImage: false),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                SizedBox(height: 24),
+
                 // Place Order Button
                 Center(
                   child: AnimatedScale(
@@ -572,6 +607,46 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  // Payment method button widget for payment selection
+  Widget _buildPaymentMethodChoice(String method, String assetPath, {bool showImage = true}) {
+    final bool isSelected = _selectedPaymentMethod == method;
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _selectedPaymentMethod = method;
+        });
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white, // Always white background
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? Colors.teal.shade700 : Colors.grey.shade300,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            // Only show image if showImage is true
+            if (showImage) ...[
+              Image.asset(assetPath, height: 20, width: 20),
+              SizedBox(width: 8),
+            ],
+            Text(
+              method,
+              style: GoogleFonts.poppins(
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                color: Colors.black87, // Consistent text color
+                fontSize: 14,
+              ),
+            ),
+          ],
         ),
       ),
     );

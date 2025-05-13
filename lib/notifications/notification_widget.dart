@@ -3,16 +3,69 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'notification_provider.dart';
 import 'notification_model.dart';
+import 'notification_panel.dart';
 
 class NotificationWidget extends StatelessWidget {
-  const NotificationWidget({Key? key}) : super(key: key);
+  final Color iconColor;
+  final bool showCounter;
+  final int notificationCount;
+  final String targetUserType;
+
+  const NotificationWidget({
+    Key? key,
+    this.iconColor = Colors.white,
+    this.showCounter = false,
+    this.notificationCount = 0,
+    this.targetUserType = '',
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
+    if (showCounter) {
+      // Notification bell with badge/counter
+      return Consumer<NotificationProvider>(
+        builder: (context, provider, child) {
+          final unreadCount = notificationCount > 0
+              ? notificationCount
+              : provider.unreadCount;
+          return GestureDetector(
+            onTap: () => showNotificationPanel(context),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.notifications, color: iconColor, size: 28),
+                if (unreadCount > 0)
+                  Positioned(
+                    right: -2,
+                    top: -2,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                      constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                      child: Text(
+                        '$unreadCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      );
+    }
+    // Default: show full notification list (as before)
     return Consumer<NotificationProvider>(
       builder: (context, provider, child) {
         final notifications = provider.notifications;
-        
         if (notifications.isEmpty) {
           return const Center(
             child: Padding(
@@ -27,7 +80,6 @@ class NotificationWidget extends StatelessWidget {
             ),
           );
         }
-
         return ListView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
@@ -51,16 +103,10 @@ class NotificationWidget extends StatelessWidget {
                   ? const Icon(Icons.check_circle, color: Colors.green)
                   : const Icon(Icons.circle, color: Colors.red),
               onTap: () async {
-                // Mark as read first
                 provider.markAsRead(notification.id);
-                
-                // Handle notification tap based on type
                 if (notification.type == 'order_status_changed') {
-                  // Get user type from shared preferences
                   final prefs = await SharedPreferences.getInstance();
                   final userType = prefs.getString('UserType') ?? 'user';
-                  
-                  // Navigate to appropriate screen based on user type
                   if (userType == 'chef') {
                     Navigator.pushNamed(
                       context,

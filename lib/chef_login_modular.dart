@@ -11,6 +11,7 @@ class ChefLoginPageModular extends StatelessWidget {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setString('chef_user_id', userId.toString());
     await prefs.setString('user_type', userType); // Use standardized key
+    await prefs.setString('user_id', userId.toString()); // Standard key for splash
     await prefs.setBool('is_logged_in', true);
     // Register FCM token with user info (async, do not await)
     FCMService.registerTokenWithUserInfo();

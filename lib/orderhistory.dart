@@ -10,6 +10,7 @@ import 'package:intl/intl.dart'; // For date and currency formatting
 import 'dart:async'; // For TimeoutException, Timer
 import 'package:shimmer/shimmer.dart'; // For loading shimmer
 import 'package:shared_preferences/shared_preferences.dart'; // For Shared Preferences
+import 'package:zinzi2/user_cache.dart';
 import 'package:provider/provider.dart';
 import 'notifications/notification_provider.dart'; // For notification refresh functionality
 
@@ -107,12 +108,71 @@ String _getStatusDisplay(String? status) {
 class OrderHistoryScreen extends StatefulWidget {
   const OrderHistoryScreen({super.key});
 
+  /// Preload order history cache for splash screen (no UI, no context needed)
+  static Future<void> preloadCacheForSplash() async {
+    const String cacheKey = 'order_history_cache';
+    const String cacheTsKey = 'order_history_cache_ts';
+    final now = DateTime.now();
+    final cachedOrders = await UserCache.getData(cacheKey);
+    final cachedTs = await UserCache.getData(cacheTsKey);
+    bool cacheValid = false;
+    if (cachedOrders != null && cachedTs != null) {
+      final cacheTime = DateTime.tryParse(cachedTs.toString());
+      if (cacheTime != null && now.difference(cacheTime) < const Duration(minutes: 15)) {
+        cacheValid = true;
+      }
+    }
+    if (!cacheValid) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        String? userId = prefs.getString('user_id');
+        if (userId == null || userId.isEmpty) {
+          final int? intUserId = prefs.getInt('user_id');
+          if (intUserId != null) {
+            userId = intUserId.toString();
+            await prefs.setString('user_id', userId);
+          }
+        }
+        if (userId != null && userId.isNotEmpty) {
+          final uri = Uri.parse('$apiBaseUrl/rr/orders?user_id=$userId');
+          final response = await http.get(uri).timeout(const Duration(seconds: 25));
+          if (response.statusCode == 200) {
+            final data = json.decode(response.body);
+            if (data is Map<String, dynamic> && data['data'] is List) {
+              final orderDataList = data['data'] as List;
+              List<Map<String, dynamic>> orders = [];
+              for (final orderItem in orderDataList) {
+                if (orderItem is Map<String, dynamic>) {
+                  final Map<String, dynamic> orderData = Map<String, dynamic>.from(orderItem);
+                  int? parsedId = int.tryParse(orderData['order_id']?.toString() ?? '');
+                  if (parsedId != null) {
+                    orderData['order_id'] = parsedId;
+                    orders.add(orderData);
+                  }
+                }
+              }
+              await UserCache.saveData(cacheKey, orders);
+              await UserCache.saveData(cacheTsKey, now.toIso8601String());
+            }
+          }
+        }
+      } catch (e) {
+        print('[Splash][OrderHistory] preload error: $e');
+      }
+    } else {
+      print('[Splash][OrderHistory] preload skipped: Cache still valid.');
+    }
+  }
+
   @override
   State<OrderHistoryScreen> createState() => _OrderHistoryScreenState();
 }
 
 class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   Future<List<Map<String, dynamic>>>? _orderHistoryFuture;
+  List<Map<String, dynamic>> _orders = [];
+  static const String _cacheKey = 'order_history_cache';
+  static const String _cacheTsKey = 'order_history_cache_ts';
   final Map<int, bool> _isExpandedMap = {};
   Timer? _pollingTimer;
   bool _isRefreshing = false;
@@ -125,26 +185,29 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   // Track which order is currently fetching the verification code for animation
   int? _loadingVerificationOrderId;
 
+  late NotificationProvider _notificationProvider;
+
   @override
   void initState() {
     super.initState();
+    print('[DEBUG] initState called for OrderHistoryScreen');
+    print('[OrderHistory] Polling page initialized.'); // DEBUG: Polling page start
     _orderHistoryFuture = _loadInitialHistory();
     _startPolling();
-    
     // Listen for notification refreshes
-    final notificationProvider = Provider.of<NotificationProvider>(context, listen: false);
-    notificationProvider.addListener(_handleNotificationRefresh);
+    _notificationProvider = Provider.of<NotificationProvider>(context, listen: false);
+    _notificationProvider.addListener(_handleNotificationRefresh);
   }
 
   @override
   void dispose() {
     _pollingTimer?.cancel();
-    final notificationProvider = Provider.of<NotificationProvider>(context, listen: false);
-    notificationProvider.removeListener(_handleNotificationRefresh);
+    _notificationProvider.removeListener(_handleNotificationRefresh);
     super.dispose();
   }
 
   void _handleNotificationRefresh() {
+    print('[DEBUG] _handleNotificationRefresh called for OrderHistoryScreen');
     if (!_isRefreshing) {
       setState(() {
         _isRefreshing = true;
@@ -162,59 +225,62 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   void _startPolling() {
     // Cancel existing timer if any
     _pollingTimer?.cancel();
+    print('[OrderHistory] Polling started (interval: 15s).'); // DEBUG: Polling started
     _pollingTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
       // --- MODIFIED: Only poll if verification process is NOT active ---
       if (!_isVerificationProcessActive && mounted) {
         print("Polling for order updates...");
-        // Use _loadInitialHistory which internally calls _fetchOrderHistoryDetails
-        // We want the state update from the fetch, but dialog trigger is now manual
-        _refreshHistorySilently(); // Fetch updates without replacing the main future for the builder
+        _refreshHistorySilently();
       } else {
-        print(
-            "Polling skipped: Verification process active or widget not mounted.");
+        print("Polling skipped: Verification process active or widget not mounted.");
       }
     });
   }
 
   // Fetch history but update state without rebuilding the entire FutureBuilder
   Future<void> _refreshHistorySilently() async {
-    if (_isRefreshing) return; // Prevent concurrent refreshes
+    final prefs = await SharedPreferences.getInstance();
+    String? userId = prefs.getString('user_id');
+    print('[DEBUG] _refreshHistorySilently called. _isRefreshing=$_isRefreshing, userId=$userId');
+    if (_isRefreshing) {
+      print('[DEBUG] Early return: _isRefreshing is true, skipping poll.');
+      return; // Prevent concurrent refreshes
+    }
     setState(() {
       _isRefreshing = true;
     });
     print("Refreshing order history silently...");
     try {
-      final prefs = await SharedPreferences.getInstance();
-      // Get user_id as string
-      String? userId = prefs.getString('user_id');
-      
       if (userId == null || userId.isEmpty) {
-        // If not found as string, try int for backward compatibility
         final int? intUserId = prefs.getInt('user_id');
         if (intUserId != null) {
           userId = intUserId.toString();
-          // Update to store as string for future use
           await prefs.setString('user_id', userId);
         } else {
-          print("Silent Refresh: User ID not found in preferences.");
-          return; // Don't proceed without user ID
+          print("[DEBUG] Silent Refresh: User ID not found in preferences. Returning early.");
+          return;
         }
       }
-      // Fetch new data but only update state if mounted
-      final freshOrders = await _fetchOrderHistoryDetails(userId);
-      
-      // Check for status changes and trigger dialogs if needed
+      print('[DEBUG] Before await _fetchAndUpdateOrderHistory');
+      final freshOrders = await _fetchAndUpdateOrderHistory(userId!);
+      print('[DEBUG] After await _fetchAndUpdateOrderHistory');
       if (mounted) {
         _checkForStatusChanges(freshOrders);
-        
         setState(() {
-          // Update the future with latest data
-          _orderHistoryFuture = Future.value(freshOrders);
+          _orders = freshOrders;
         });
       }
     } catch (e) {
-      print("Error during silent history refresh: $e");
-      // Handle error silently or show a subtle notification if desired
+      print("[DEBUG] Error during silent history refresh: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRefreshing = false;
+        });
+      } else {
+        _isRefreshing = false;
+      }
+      print('[DEBUG] _refreshHistorySilently complete. _isRefreshing=$_isRefreshing');
     }
   }
 
@@ -228,26 +294,61 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     }
     try {
       final prefs = await SharedPreferences.getInstance();
-      // Get user_id as string
       String? userId = prefs.getString('user_id');
-      
       if (userId == null || userId.isEmpty) {
-        // If not found as string, try int for backward compatibility
         final int? intUserId = prefs.getInt('user_id');
         if (intUserId != null) {
           userId = intUserId.toString();
-          // Update to store as string for future use
           await prefs.setString('user_id', userId);
         } else {
           print("User ID not found in preferences. User needs to log in.");
           throw Exception("User not logged in.");
         }
       }
-      return await _fetchOrderHistoryDetails(userId);
+      // --- CACHE-FIRST: Try loading from cache first ---
+      bool cacheValid = false;
+      List<Map<String, dynamic>> cachedOrders = [];
+      final cachedData = await UserCache.getData(_cacheKey);
+      final cachedTs = await UserCache.getData(_cacheTsKey);
+      final now = DateTime.now();
+      if (cachedData != null && cachedTs != null) {
+        final cacheTime = DateTime.tryParse(cachedTs.toString());
+        if (cacheTime != null && now.difference(cacheTime) < const Duration(minutes: 15)) {
+          cachedOrders = List<Map<String, dynamic>>.from(cachedData);
+          cacheValid = true;
+        }
+      }
+      if (cacheValid) {
+        print('[OrderHistory] Loaded from cache.');
+        // Start background fetch but return cached data immediately
+        _fetchAndUpdateOrderHistory(userId!);
+        if (mounted) setState(() { _orders = List<Map<String, dynamic>>.from(cachedOrders); });
+        return List<Map<String, dynamic>>.from(cachedOrders);
+      } else {
+        // No valid cache, fetch from API
+        final freshOrders = await _fetchAndUpdateOrderHistory(userId!);
+        if (mounted) setState(() { _orders = freshOrders; });
+        return freshOrders;
+      }
     } catch (e) {
       print("Error during initial history load setup: $e");
-      throw Exception("Failed to initialize order history: ${e.toString()}");
+      throw Exception("Failed to initialize order history: "+e.toString());
     }
+  }
+
+  // --- Helper to fetch from API and update cache ---
+  Future<List<Map<String, dynamic>>> _fetchAndUpdateOrderHistory(String userId) async {
+    print('[DEBUG] Entering _fetchAndUpdateOrderHistory for userId=$userId');
+    final orders = await _fetchOrderHistoryDetails(userId);
+    print('[DEBUG] After await _fetchOrderHistoryDetails in _fetchAndUpdateOrderHistory');
+    try {
+      await UserCache.saveData(_cacheKey, orders);
+      await UserCache.saveData(_cacheTsKey, DateTime.now().toIso8601String());
+    } catch (e) {
+      print('[OrderHistory] Error saving to cache: $e');
+    }
+    print('[DEBUG] Exiting _fetchAndUpdateOrderHistory for userId=$userId');
+    return orders;
   }
 
   // Check for status changes and trigger dialogs if needed
@@ -287,12 +388,14 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
 
   Future<List<Map<String, dynamic>>> _fetchOrderHistoryDetails(
       String userId) async {
+    print('[DEBUG] Entering _fetchOrderHistoryDetails for userId=$userId');
     List<Map<String, dynamic>> orders = [];
     final uri = Uri.parse('$apiBaseUrl/rr/orders?user_id=$userId');
     print("Fetching order history from: $uri");
 
     try {
       final response = await http.get(uri).timeout(const Duration(seconds: 25));
+      print('[OrderHistory] Poll result: Status ${response.statusCode}, Body: ${response.body}'); // DEBUG: Show API result
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -345,6 +448,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       }
 
       print("Fetched and sorted ${orders.length} orders.");
+      print('[DEBUG] Exiting _fetchOrderHistoryDetails for userId=$userId');
       return orders;
     } on TimeoutException catch (_) {
       print("Order history request timed out.");
@@ -353,6 +457,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       print("Network error fetching order history: ${e.message}");
       throw Exception('Network error: Could not connect to the server.');
     } catch (e) {
+      print("[DEBUG] Exception in _fetchOrderHistoryDetails for userId=$userId: $e");
       print("Error fetching or processing order history details: $e");
       throw Exception('Failed to load order history. Please try again.');
     }
@@ -586,78 +691,56 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
             statusBarIconBrightness: Brightness.light,
           ),
         ),
-        body: FutureBuilder<List<Map<String, dynamic>>>(
-          future: _orderHistoryFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting &&
-                !_isVerificationProcessActive) {
-              // Show shimmer only if not waiting due to verification click
-              print("FutureBuilder: Waiting for initial order history...");
-              return _buildLoadingShimmer();
-            }
-            // If verification IS active, show the current list underneath (or shimmer if initial load never finished)
-            if (snapshot.connectionState == ConnectionState.waiting &&
-                _isVerificationProcessActive &&
-                !snapshot.hasData) {
-              print(
-                  "FutureBuilder: Waiting (verification active, no data yet)...");
-              return _buildLoadingShimmer(); // Show shimmer if initial load hasn't completed
-            }
-
-            if (snapshot.hasError) {
-              print(
-                  "FutureBuilder: Error loading order history: ${snapshot.error}");
-              return _buildErrorWidget(context, snapshot.error);
-            }
-
-            // Handle case where snapshot is active/done but has no data (could be empty list or null after error)
-            if (!snapshot.hasData ||
-                snapshot.data == null ||
-                snapshot.data!.isEmpty) {
-              // Check if it was an error state that resulted in no data
-              if (snapshot.connectionState == ConnectionState.done &&
-                  snapshot.error == null) {
-                print(
-                    "FutureBuilder: No order history data found (empty list).");
-                return _buildEmptyState(context);
-              } else if (snapshot.error != null) {
-                // Already handled by snapshot.hasError block, but defensive check
-                return _buildErrorWidget(context, snapshot.error);
-              } else {
-                // Still waiting, but data is null/empty (should ideally be handled by waiting state)
-                print("FutureBuilder: Waiting (snapshot has no data yet)...");
-                // Avoid showing empty state while potentially loading
-                return _buildLoadingShimmer();
-              }
-            }
-
-            // --- Success State ---
-            final orders = snapshot.data!;
-            print("FutureBuilder: Displaying ${orders.length} orders.");
-            return RefreshIndicator(
-              onRefresh: _refreshHistory,
-              color: kColorPrimary,
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: _horizontalPadding / 2,
-                    vertical: _verticalPadding),
-                itemCount: orders.length,
-                itemBuilder: (context, index) {
-                  final order = orders[index];
-                  final orderId = order['order_id'] as int;
-                  final isExpanded = _isExpandedMap[orderId] ?? false;
-
-                  return _buildOrderCard(context, order, orderId, isExpanded);
+        body: _orderHistoryFuture == null
+            ? _buildLoadingShimmer()
+            : FutureBuilder<List<Map<String, dynamic>>>(
+                future: _orderHistoryFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting && !_isVerificationProcessActive) {
+                    return _buildLoadingShimmer();
+                  }
+                  if (snapshot.hasError) {
+                    return _buildErrorWidget(context, snapshot.error);
+                  }
+                  if (!snapshot.hasData || snapshot.data == null || snapshot.data!.isEmpty) {
+                    if (snapshot.connectionState == ConnectionState.done && snapshot.error == null) {
+                      return _buildEmptyState(context);
+                    } else if (snapshot.error != null) {
+                      return _buildErrorWidget(context, snapshot.error);
+                    } else {
+                      return _buildLoadingShimmer();
+                    }
+                  }
+                  // Initial load done, show persistent list
+                  return _buildOrderList();
                 },
               ),
-            );
-          },
-        ),
       ),
     );
   }
 
   // --- UI Building Widgets ---
+
+  Widget _buildOrderList() {
+    if (_orders.isEmpty) {
+      return _buildEmptyState(context);
+    }
+    return RefreshIndicator(
+      onRefresh: _refreshHistory,
+      color: kColorPrimary,
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(
+            horizontal: _horizontalPadding / 2, vertical: _verticalPadding),
+        itemCount: _orders.length,
+        itemBuilder: (context, index) {
+          final order = _orders[index];
+          final orderId = order['order_id'] as int;
+          final isExpanded = _isExpandedMap[orderId] ?? false;
+          return _buildOrderCard(context, order, orderId, isExpanded);
+        },
+      ),
+    );
+  }
 
   Widget _buildOrderCard(BuildContext context, Map<String, dynamic> order,
       int orderId, bool isExpanded) {
@@ -1275,7 +1358,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                 color: kColorTextSecondary.withOpacity(0.6), size: 50),
             const SizedBox(height: _verticalPadding),
             Text(
-              'No Orders Found',
+              'Refreshing order list please wait',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   color: kColorTextPrimary, fontWeight: FontWeight.w600),
               textAlign: TextAlign.center,

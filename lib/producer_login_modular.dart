@@ -13,6 +13,7 @@ class ProducerLoginPageModular extends StatelessWidget {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setString('producer_id', producerId); // Already a string
     await prefs.setString('user_type', userType); // Save user_type
+    await prefs.setString('user_id', producerId); // Standard key for splash
     await prefs.setBool('is_logged_in', true);
     print('Producer ID saved: $producerId');
     print('User Type saved: $userType');
