@@ -62,6 +62,25 @@ except ImportError:
 # Global variable to hold the pool, managed by lifespan
 db_pool: Optional[asyncpg.Pool] = None
 
+# Function to preload meal data to avoid slow first request
+async def preload_meal_data():
+    """Preload meal data into cache to improve first request performance."""
+    try:
+        logger.info("Preloading meal data into cache...")
+        # Import here to avoid circular imports
+        from meal_algorithm4 import MealRecommendation4
+        
+        # Create a default instance to populate the shared cache
+        default_recommender = MealRecommendation4(1)  # Use a default user ID
+        
+        # Trigger data loading into the shared cache
+        meals = default_recommender.fetch_all_meals()
+        logger.info(f"Successfully preloaded {len(meals)} meals into cache")
+        return True
+    except Exception as e:
+        logger.error(f"Error preloading meal data: {e}")
+        return False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage the database connection pool lifecycle."""
@@ -106,7 +125,10 @@ async def lifespan(app: FastAPI):
             command_timeout=60, # Default timeout for commands
             statement_cache_size=0 # Uncomment ONLY if needed for pgbouncer transaction/statement mode
         )
-        logger.info(f"Database connection pool created successfully (Min: {db_pool.get_min_size()}, Max: {db_pool.get_max_size()}).")
+        logger.info(f"Database connection pool created successfully (Min: {db_pool.get_min_size()}, Max: {db_pool.get_max_size()}).")        
+        
+        # Preload meal data to avoid slow first request
+        await preload_meal_data()
         
         # Initialize services on-demand
         app.state.notification_service = None
@@ -1845,6 +1867,13 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
             order = order_list[0]
 
+            # Check if the order is already in a final state
+            current_status = order.get('order_status')
+            final_statuses = ['completed', 'delivered', 'complete']
+            if current_status and current_status.lower() in final_statuses:
+                logger.warning(f"Attempted to update order {order_id} which is already in final state: '{current_status}'. Ignoring update.")
+                return {"message": f"Order {order_id} is already in a final state ('{current_status}') and cannot be updated.", "success": False}
+
             original_order_id = order.get('order_id')
             if original_order_id is None: # Should not happen if read_orders works
                 logger.error(f"Fetched order for ID {order_id} is missing 'order_id' field.")
@@ -2157,99 +2186,6 @@ class CalculationLogic:
         if act_level not in mults: logger.warning(f"Unknown activity '{activity_level}', using sedentary.")
         return round(bmr_f * mult)
 
-# --- Meal Recommendation Classes (Updated for asyncpg pool) ---
-class BaseMealRecommender:
-    def __init__(self, user_id: int):
-        # ... (init unchanged, still instantiates CRUD classes) ...
-        if not isinstance(user_id, int): raise TypeError("user_id must be int.")
-        self.user_id = user_id; self._users_crud=AuthenticationAndUsers(); self._produce_crud=Produce()
-        self.user_preferences: Optional[Dict]=None; self.user_metrics: Optional[Dict]=None
-
-    async def _load_user_data(self, conn: asyncpg.Connection):
-        # ... (implementation unchanged, calls _get methods with conn) ...
-         if self.user_preferences is None: self.user_preferences=await self._get_user_preferences(conn)
-         if self.user_metrics is None: self.user_metrics=await self._get_user_metrics(conn)
-         self._validate_user_data()
-
-    def _validate_user_data(self):
-        # ... (implementation unchanged) ...
-        if not self.user_preferences: logger.warning(f"RecSys({self.__class__.__name__}) No prefs User: {self.user_id}.")
-        if not self.user_metrics: logger.warning(f"RecSys({self.__class__.__name__}) No metrics User: {self.user_id}.")
-
-    async def _get_user_preferences(self, conn: asyncpg.Connection) -> Optional[Dict]:
-        # ... (implementation uses _users_crud with conn) ...
-        try:
-             prefs_list=await self._users_crud.list_preferences(conn, user_id=self.user_id) # Pass conn
-             if not prefs_list: return None
-             res=prefs_list[0]; return {"goals":res.get('goals','').strip().lower() or None, "diet_type":res.get('diet_type','').strip().lower() or None, "food_restrictions":deserialize_list(res.get('food_restrictions','')), "cuisine_preferences":deserialize_list(res.get('cuisine_preferences',''))}
-        except Exception as e: logger.error(f"Error fetch prefs user {self.user_id}: {e}", exc_info=True); return None
-
-    async def _get_user_metrics(self, conn: asyncpg.Connection) -> Optional[Dict]:
-        # ... (implementation uses _users_crud with conn) ...
-        try:
-             metrics_list=await self._users_crud.list_metrics(conn, user_id=self.user_id) # Pass conn
-             if not metrics_list: return None
-             metrics=metrics_list[0]; metrics['sex']=metrics.get('sex','male').strip().lower(); metrics['activity_level']=metrics.get('activity_level','sedentary').strip().lower(); return metrics
-        except Exception as e: logger.error(f"Error fetch metrics user {self.user_id}: {e}", exc_info=True); return None
-
-
-    # _calculate_meal_nutrition remains synchronous helper
-
-class MealRecommendation1(BaseMealRecommender):
-    async def fetch_all_meals_with_ingredients(self, conn: asyncpg.Connection):
-        # ... (uses conn for _execute_query and _fetch_produce_data) ...
-        query = """
-        WITH MealDetails AS (SELECT m.meal_id, m.meal_name, m.meal_category, m.recipe, m.recipe_link, m.image_link, m.goal, m.dietary_preference, m.allergies, m.disease_management, m.cuisine_preferences, m.skill_level, m.prep_time, m.meal_description FROM meals m)
-        SELECT md.*,
-               COALESCE((SELECT STRING_AGG(p.produce_name, ', ') FROM meal_ingredients i JOIN produce p ON i.produce_id = p.produce_id WHERE i.meal_id = md.meal_id), '') AS ingredients,
-               COALESCE((SELECT STRING_AGG(mc.meal_name, ', ') FROM meal_complementaries mc_link JOIN meals mc ON mc_link.complementary_dish_id = mc.meal_id WHERE mc_link.meal_id = md.meal_id), '') AS complementary_dishes
-        FROM MealDetails md;
-        """ # Uses the same detailed query
-        try:
-             all_meals = await self._execute_query(conn, query, fetch_all=True) # Pass conn
-             if not all_meals: return []
-             all_ingr = set(n.strip().lower() for m in all_meals if m.get('ingredients') for n in str(m['ingredients']).split(",") if n.strip())
-             produce_cache = await self._fetch_produce_data(conn, list(all_ingr)) # Pass conn
-             processed = [];
-             for meal in all_meals: p_meal = dict(meal); p_meal['calculated_nutrition'] = self._calculate_meal_nutrition(p_meal.get('ingredients'), produce_cache); processed.append(p_meal)
-             return processed
-        except HTTPException: raise
-        except Exception as e: logger.error(f"RecSysV1 User {self.user_id} fetch meals err: {e}", exc_info=True); return None # Return None on unexpected error
-
-    # filter_meals remains synchronous helper
-    def filter_meals(self, all_meals):
-        # ... (implementation unchanged) ...
-        if not all_meals: return []
-        if not self.user_preferences: logger.warning(f"RecSysV1 User {self.user_id} No prefs, returning all."); return all_meals
-        prefs=self.user_preferences; filtered=[];
-        for meal in all_meals:
-            meal_diet_str=meal.get('dietary_preference') or ''; meal_diet=[d.strip().lower() for d in str(meal_diet_str).split(',') if d.strip()]
-            meal_allergens_str=meal.get('allergies') or ''; meal_allergens=[a.strip().lower() for a in str(meal_allergens_str).split(',') if a.strip()]
-            meal_cuisines_str=meal.get('cuisine_preferences') or ''; meal_cuisines=[c.strip().lower() for c in str(meal_cuisines_str).split(',') if c.strip()]
-            meal_goal=meal.get('goal') or ''; meal_goal_lower=str(meal_goal).strip().lower() if meal_goal else None
-            user_goal=prefs.get('goals'); user_diet=prefs.get('diet_type'); user_rest=prefs.get('food_restrictions'); user_cuis=prefs.get('cuisine_preferences')
-            if user_diet and meal_diet and user_diet not in meal_diet: continue
-            if user_rest and any(res in meal_allergens for res in user_rest): continue
-            if user_cuis and meal_cuisines and not any(cp in meal_cuisines for cp in user_cuis): continue
-            if user_goal and meal_goal_lower and user_goal != meal_goal_lower: continue
-            filtered.append(meal)
-        logger.info(f"RecSysV1 User {self.user_id}: Filtered {len(all_meals)} -> {len(filtered)}")
-        return filtered
-
-    async def recommend_meals(self, conn: asyncpg.Connection):
-        # ... (uses conn for _load_user_data and fetch_all_meals_with_ingredients) ...
-        try:
-             await self._load_user_data(conn) # Pass conn
-             if not self.user_preferences: raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User preferences not found.")
-             all_meals = await self.fetch_all_meals_with_ingredients(conn) # Pass conn
-             if all_meals is None: raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get meals.")
-             recommended = self.filter_meals(all_meals)
-             processed = [];
-             for meal in recommended: p_meal=dict(meal); p_meal.setdefault('price',10000); [p_meal.update({k:v.isoformat()}) for k,v in p_meal.items() if isinstance(v, (datetime, date))]; processed.append(p_meal)
-             logger.info(f"RecSysV1 User {self.user_id}: Generated {len(processed)} recommendations.")
-             return {"recommended_meals": processed, "success": True}
-        except HTTPException: raise
-        except Exception as e: logger.error(f"RecSysV1 User {self.user_id} Error: {e}", exc_info=True); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Recommendation error.")
 
 # --- GetAllMeals Class ---
 class GetAllMeals(BaseRepository):
@@ -2523,7 +2459,6 @@ calc_logic = CalculationLogic() # Doesn't need DB
 meal_fetcher = GetAllMeals()
 disbursement_handler = Disbursements()
 supplements_crud = Supplements()
-meal_fetcher = GetAllMeals()
 disbursement_handler = Disbursements()
 supplements_crud = Supplements()
 
@@ -2645,6 +2580,91 @@ async def update_chef_status_endpoint(chef_id: int, status_update: dict = Body(.
     is_active = status_update['is_active']
     await chefs_crud.update_chef_status(conn, chef_id, is_active) # Pass conn
     return {'message': f'Chef {chef_id} status updated'}
+
+#
+
+# === New  version 4 Meal Recommendation Endpoint ---
+meal_recommender = None  # Lazy-initialized meal recommender
+
+# Global cache for meal recommendations
+meal_recommenders = {}
+meal_data_cache = {}
+
+@app.get("/rr/meals2/{user_id}")
+async def get_meal_recommendations(user_id: int, conn: asyncpg.Connection = Depends(get_db)):
+    """
+    Get meal recommendations for a user.
+    
+    Args:
+        user_id: User ID for whom to generate recommendations
+    
+    Returns:
+        List of recommended meals
+    """
+    global meal_recommenders, meal_data_cache
+    
+    try:
+        # Check if we have cached results for this user
+        cache_key = f"user_{user_id}"
+        if cache_key in meal_data_cache:
+            cache_time, recommendations = meal_data_cache[cache_key]
+            # Cache valid for 1 hour
+            if datetime.now() - cache_time < timedelta(hours=1):
+                return {"recommended_meals": recommendations, "success": True}
+        
+        # Initialize meal recommender on first request
+        if user_id not in meal_recommenders:
+            # Import here to avoid circular imports
+            from meal_algorithm4 import MealRecommendation4
+            # Preload the meal recommender at startup
+            meal_recommenders[user_id] = MealRecommendation4(user_id)
+        
+        # Get recommendations
+        recommendations = meal_recommenders[user_id].recommend_meals()
+        
+        # Cache the results
+        meal_data_cache[cache_key] = (datetime.now(), recommendations)
+        
+        return {"recommended_meals": recommendations, "success": True}
+        
+    except Exception as e:
+        logger.error(f"Error generating meal recommendations: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate meal recommendations")
+
+@app.get("/rr/meal_calories/{meal_id}")
+async def get_meal_calories(meal_id: str, conn: asyncpg.Connection = Depends(get_db)):
+    """
+    Calculate calories and nutritional information for a specific meal.
+    
+    Args:
+        meal_id: ID of the meal to calculate calories for
+    
+    Returns:
+        Dictionary containing:
+        - calories: Total calories in the meal
+        - nutritional_info: Full nutritional information
+        - serving_size: Recommended serving size in grams
+        - meal_name: Name of the meal
+    """
+    global meal_recommender
+    
+    try:
+        # Lazy initialize the meal recommender
+        if meal_recommender is None:
+            from meal_algorithm4 import MealRecommendation4
+            meal_recommender = MealRecommendation4(1)  # Use default user_id 1 since we only need meal info
+        
+        # Calculate meal calories
+        result = meal_recommender.calculate_meal_calories(meal_id)
+        
+        if "error" in result:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result["error"])
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error calculating meal calories: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to calculate meal calories")
 
 # === PRODUCER Endpoints ===
 @app.post('/rr/aproducers', status_code=status.HTTP_201_CREATED)
@@ -3595,10 +3615,6 @@ async def momo_callback(request: Request):
     except Exception as e: logger.error(f"MoMo callback process err: {e}", exc_info=True); return JSONResponse(content={"error":"Callback process failed"}, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # --- Recommendation Endpoints ---
-@app.get("/rr/recommendations/v1/{user_id}")
-async def get_recommendations_v1(user_id: int, conn: asyncpg.Connection = Depends(get_db)):
-    recommender = MealRecommendation1(user_id)
-    return await recommender.recommend_meals(conn) # Pass conn
 
 @app.get("/rr/recommendations/v2/{user_id}")
 async def get_recommendations_v2(user_id: int, conn: asyncpg.Connection = Depends(get_db)):
