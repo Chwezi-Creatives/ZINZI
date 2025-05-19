@@ -12,7 +12,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 # Database connection is now handled by database.py
 
-
 class MealRecommendation4:
     # Class-level cache for shared data across instances
     _shared_cache = {
@@ -20,7 +19,7 @@ class MealRecommendation4:
         'nutrition_data': {},  # Cache for nutrition data
         'last_update': datetime.now()
     }
-    
+
     def __init__(self, user_id: int):
         self.user_id = user_id
         # Instance-specific cache
@@ -730,6 +729,18 @@ class MealRecommendation4:
             if not meals:
                 return []
 
+            # MODIFIED: Simply return all filtered meals with serving sizes
+            final_recommendations = []
+            for meal in meals:
+                meal_type = self._determine_meal_type(meal)
+                serving_size = self.calculate_serving_size(meal, meal_type)
+                meal["recommended_serving_size"] = serving_size
+                final_recommendations.append(meal)
+
+            return final_recommendations
+
+            # ORIGINAL CODE (COMMENTED OUT FOR NOW):
+            """
             # Use all filtered meals initially
             recommended_meals = meals
 
@@ -767,6 +778,7 @@ class MealRecommendation4:
                 final_recommendations.append(meal)
 
             return final_recommendations
+            """
 
         except Exception as e:
             logging.error(f"Error generating meal recommendations: {e}")
@@ -1153,11 +1165,11 @@ class MealRecommendation4:
         # Check if the meal's disease management matches the user's disease management
         if meal.get("disease_management") == self.user_metrics.get("health_conditions"):
             match = 1
-    
+
         return match
 
 # Example usage
-#user_id = 138
-#meal_recommender2 = MealRecommendation4(user_id)
-#recommendations = meal_recommender2.recommend_meals()
-#print(recommendations)
+user_id = 138
+meal_recommender4 = MealRecommendation4(user_id)
+recommendations = meal_recommender4.recommend_meals()
+print(recommendations)
