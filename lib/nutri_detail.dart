@@ -35,7 +35,7 @@ class Nutri_DetailPage extends StatefulWidget {
     if (!cacheValid) {
       try {
         final apiBaseUrl = dotenv.env['API_BASE_URL'] ?? dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
-        final response = await http.get(Uri.parse('apiBaseUrl/rr/rproducers')).timeout(const Duration(seconds: 15));
+        final response = await http.get(Uri.parse('$apiBaseUrl/rr/rproducers')).timeout(const Duration(seconds: 15));
         if (response.statusCode == 200) {
           final dataList = jsonDecode(response.body);
           await UserCache.saveData(producersCacheKey, dataList);
@@ -48,7 +48,7 @@ class Nutri_DetailPage extends StatefulWidget {
   final NutritionItem item;
   final Widget? decodedImage;
 
-  Nutri_DetailPage({required this.item, this.decodedImage}) : super(key: globalKey);
+  Nutri_DetailPage({required this.item, this.decodedImage, required String tag}) : super(key: globalKey);
 
   static Future<void> manualRefreshFromAppBar() async {
     final state = globalKey.currentState;

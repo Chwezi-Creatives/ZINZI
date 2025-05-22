@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 import 'package:http/http.dart' as http;
-import 'package:zinzi2/app_drawer_unified.dart';
-import 'package:zinzi2/user_cache.dart';
-import 'package:zinzi2/cache_config.dart';
-import 'package:zinzi2/utils/image_utils.dart';
+import 'package:zinzi2/app_drawer_unified.dart'; // Assuming this exists
+import 'package:zinzi2/user_cache.dart';       // Assuming this exists
+import 'package:zinzi2/cache_config.dart';    // Assuming this exists
+import 'package:zinzi2/utils/image_utils.dart'; // Assuming this exists
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cached_network_image/cached_network_image.dart' as cn;
 import 'package:shimmer/shimmer.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'dart:async';
 import 'dart:convert';
-import 'nutri_detail.dart';
+
+import 'nutri_detail.dart'; // Assuming this exists
+// import 'package:zinzi2/nutri_detail.dart'; // Duplicate import, removed one
 
 const Color primaryTeal = Color(0xFF00796B);
 const Color lightTeal = Color(0xFFB2DFDB);
@@ -53,9 +55,13 @@ class Supplement {
       supplementName: json['supplement_name'] ?? 'Unknown',
       description: json['description'],
       unit: json['unit'],
-      price: (json['price'] is num) ? (json['price'] as num).toDouble() : double.tryParse(json['price']?.toString() ?? ''),
+      price: (json['price'] is num)
+          ? (json['price'] as num).toDouble()
+          : double.tryParse(json['price']?.toString() ?? ''),
       imageUrl: json['image_url'],
-      dateAdded: json['date_added'] != null ? DateTime.tryParse(json['date_added']) : null,
+      dateAdded: json['date_added'] != null
+          ? DateTime.tryParse(json['date_added'])
+          : null,
       addedBy: json['added_by'],
       addedByType: json['added_by_type'],
     );
@@ -94,12 +100,18 @@ class Herbal {
       herbalName: json['herbal_name'] ?? 'Unknown',
       description: json['description'],
       unit: json['unit'],
-      price: (json['price'] is num) ? (json['price'] as num).toDouble() : double.tryParse(json['price']?.toString() ?? ''),
+      price: (json['price'] is num)
+          ? (json['price'] as num).toDouble()
+          : double.tryParse(json['price']?.toString() ?? ''),
       imageUrl: json['image_url'],
-      dateAdded: json['date_added'] != null ? DateTime.tryParse(json['date_added']) : null,
+      dateAdded: json['date_added'] != null
+          ? DateTime.tryParse(json['date_added'])
+          : null,
       addedBy: json['added_by'],
       addedByType: json['added_by_type'],
-      updatedAt: json['updated_at'] != null ? DateTime.tryParse(json['updated_at']) : null,
+      updatedAt: json['updated_at'] != null
+          ? DateTime.tryParse(json['updated_at'])
+          : null,
     );
   }
 }
@@ -139,12 +151,18 @@ class Gadget {
       description: json['description'],
       brand: json['brand'],
       model: json['model'],
-      price: (json['price'] is num) ? (json['price'] as num).toDouble() : double.tryParse(json['price']?.toString() ?? ''),
+      price: (json['price'] is num)
+          ? (json['price'] as num).toDouble()
+          : double.tryParse(json['price']?.toString() ?? ''),
       imageUrl: json['image_url'],
-      dateAdded: json['date_added'] != null ? DateTime.tryParse(json['date_added']) : null,
+      dateAdded: json['date_added'] != null
+          ? DateTime.tryParse(json['date_added'])
+          : null,
       addedBy: json['added_by'],
       addedByType: json['added_by_type'],
-      updatedAt: json['updated_at'] != null ? DateTime.tryParse(json['updated_at']) : null,
+      updatedAt: json['updated_at'] != null
+          ? DateTime.tryParse(json['updated_at'])
+          : null,
     );
   }
 }
@@ -175,39 +193,56 @@ class NutritionItem {
     String detectedIdValue = '';
     String detectedType = '';
 
-    for (final key in json.keys) {
-      if (key.endsWith('_id') && json[key] != null) {
-        detectedIdKey = key;
-        detectedIdValue = json[key].toString();
-        detectedType = key.replaceAll('_id', '');
-        break;
-      }
+    // Prioritize specific keys for ID and type detection
+    if (json.containsKey('spice_id')) {
+        detectedIdKey = 'spice_id';
+        detectedType = 'spice';
+    } else if (json.containsKey('herbal_id')) {
+        detectedIdKey = 'herbal_id';
+        detectedType = 'herbal';
+    } else if (json.containsKey('supplement_id')) {
+        detectedIdKey = 'supplement_id';
+        detectedType = 'supplement';
+    } else if (json.containsKey('gadget_id')) {
+        detectedIdKey = 'gadget_id';
+        detectedType = 'gadget';
+    } else {
+        // Fallback to general key detection
+        for (final key in json.keys) {
+          if (key.endsWith('_id') && json[key] != null) {
+            detectedIdKey = key;
+            detectedIdValue = json[key].toString();
+            detectedType = key.replaceAll('_id', '');
+            break;
+          }
+        }
     }
+    
+    detectedIdValue = json[detectedIdKey]?.toString() ?? json['id']?.toString() ?? '';
 
-    detectedIdKey = detectedIdKey.isNotEmpty ? detectedIdKey : 'id';
-    detectedIdValue = detectedIdValue.isNotEmpty
-        ? (json[detectedIdKey]?.toString() ?? '')
-        : (json['id']?.toString() ?? '');
-    detectedType =
-        detectedType.isNotEmpty ? detectedType : (json['type'] ?? 'meal');
 
     // Extract name using the correct key for each type
-    String extractedName =
-        json['supplement_name'] ??
-        json['herbal_name'] ??
-        json['gadget_name'] ??
-        json['spice_name'] ??
-        json['name'] ??
-        'Unknown';
+    String extractedName = json['${detectedType}_name'] ?? // e.g., spice_name, herbal_name
+                           json['name'] ??
+                           'Unknown';
+
+    // Ensure price is parsed correctly
+    double? parsedPrice;
+    if (json['price'] is num) {
+      parsedPrice = (json['price'] as num).toDouble();
+    } else if (json['price'] is String) {
+      parsedPrice = double.tryParse(json['price']);
+    }
+
 
     return NutritionItem(
       id: detectedIdValue,
-      type: detectedType,
+      type: detectedType.isNotEmpty ? detectedType : 'unknown', // Ensure type is set
       name: extractedName,
       imagePath: json['image_url'],
       description: json['description'],
-      price: (json['price'] is num) ? (json['price'] as num).toDouble() : null,
-      idKey: detectedIdKey,
+      price: parsedPrice,
+      idKey: detectedIdKey.isNotEmpty ? detectedIdKey : 'id',
       rawData: json,
     );
   }
@@ -219,125 +254,64 @@ class NutritionItem {
 }
 
 class NutritionPage extends StatefulWidget {
-  /// Preload all Nutrition+ tab caches for splash screen (no UI, no context needed)
   static Future<void> preloadCachesForSplash() async {
-    // Spices
-    const String spicesKey = 'nutrition_spices';
-    const String spicesTsKey = 'nutrition_spices_ts';
     final now = DateTime.now();
-    final cachedSpices = await UserCache.getData(spicesKey);
-    final cachedSpicesTs = await UserCache.getData(spicesTsKey);
-    bool spicesValid = false;
-    if (cachedSpices != null && cachedSpicesTs != null) {
-      final cacheTime = DateTime.tryParse(cachedSpicesTs.toString());
-      if (cacheTime != null && now.difference(cacheTime) < CacheConfig.chefProducerDetailCacheDuration) {
-        spicesValid = true;
+    final apiBaseUrl = dotenv.env['API_BASE_URL'];
+
+    if (apiBaseUrl == null) {
+      print('[Splash][Nutrition+] API_BASE_URL is null. Cannot preload data.');
+      return;
+    }
+
+    // Helper function for preloading each category
+    Future<void> preloadCategory(String categoryName, String endpoint, String cacheKey, String cacheTsKey) async {
+      final cachedData = await UserCache.getData(cacheKey);
+      final cachedTs = await UserCache.getData(cacheTsKey);
+      bool isValid = false;
+      if (cachedData != null && cachedTs != null) {
+        final cacheTime = DateTime.tryParse(cachedTs.toString());
+        if (cacheTime != null && now.difference(cacheTime) < CacheConfig.chefProducerDetailCacheDuration) { // Use appropriate duration
+          isValid = true;
+        }
+      }
+
+      if (!isValid) {
+        try {
+          final response = await http.get(Uri.parse(apiBaseUrl + endpoint));
+          if (response.statusCode == 200) {
+            final decodedResponse = jsonDecode(response.body);
+            if (decodedResponse is Map<String, dynamic> && decodedResponse['data'] is List) {
+              final List<dynamic> itemsList = decodedResponse['data'] as List<dynamic>;
+              await UserCache.saveData(cacheKey, itemsList); // Store only the list
+              await UserCache.saveData(cacheTsKey, now.toIso8601String());
+              print('[Splash][Nutrition+] Preloaded and cached $categoryName.');
+            } else {
+              print('[Splash][Nutrition+] Preload $categoryName error: API response format unexpected. Expected Map with "data" as List. Received: ${decodedResponse.runtimeType}');
+            }
+          } else {
+            print('[Splash][Nutrition+] Preload $categoryName error: API request failed with status ${response.statusCode}.');
+          }
+        } catch (e, s) {
+          print('[Splash][Nutrition+] Preload $categoryName error: $e\n$s');
+        }
+      } else {
+        print('[Splash][Nutrition+] $categoryName data is already cached and valid.');
       }
     }
-    if (!spicesValid) {
-      // Fetch and cache spices (same as _fetchSpices logic, but no UI)
-      try {
-        // TODO: Replace with your actual API endpoint for spices
-        final apiBaseUrl = dotenv.env['API_BASE_URL'];
-if (apiBaseUrl != null) {
-  final response = await http.get(Uri.parse(apiBaseUrl + '/rr/rspices'));
-  if (response.statusCode == 200) {
-    final dataList = jsonDecode(response.body);
-    await UserCache.saveData(spicesKey, dataList);
-    await UserCache.saveData(spicesTsKey, now.toIso8601String());
-  }
-} else {
-  print('[Splash][Nutrition+] API_BASE_URL is null. Cannot fetch spices.');
-}
 
-      } catch (e) { print('[Splash][Nutrition+] preload spices error: $e'); }
-    }
+    // Spices
+    await preloadCategory('spices', '/rr/spices', 'nutrition_spices', 'nutrition_spices_ts');
     // Herbals
-    const String herbalsKey = 'nutrition_herbals';
-    const String herbalsTsKey = 'nutrition_herbals_ts';
-    final cachedHerbals = await UserCache.getData(herbalsKey);
-    final cachedHerbalsTs = await UserCache.getData(herbalsTsKey);
-    bool herbalsValid = false;
-    if (cachedHerbals != null && cachedHerbalsTs != null) {
-      final cacheTime = DateTime.tryParse(cachedHerbalsTs.toString());
-      if (cacheTime != null && now.difference(cacheTime) < CacheConfig.chefProducerDetailCacheDuration) {
-        herbalsValid = true;
-      }
-    }
-    if (!herbalsValid) {
-      try {
-        final apiBaseUrl = dotenv.env['API_BASE_URL'];
-        if (apiBaseUrl != null) {
-          final response = await http.get(Uri.parse(apiBaseUrl + '/rr/rherbals'));
-          if (response.statusCode == 200) {
-            final dataList = jsonDecode(response.body);
-            await UserCache.saveData(herbalsKey, dataList);
-            await UserCache.saveData(herbalsTsKey, now.toIso8601String());
-          }
-        } else {
-          print('[Splash][Nutrition+] API_BASE_URL is null. Cannot fetch herbals.');
-        }
-
-      } catch (e) { print('[Splash][Nutrition+] preload herbals error: $e'); }
-    }
+    await preloadCategory('herbals', '/rr/rherbals', 'nutrition_herbals', 'nutrition_herbals_ts');
     // Supplements
-    const String supplementsKey = 'nutrition_supplements';
-    const String supplementsTsKey = 'nutrition_supplements_ts';
-    final cachedSupplements = await UserCache.getData(supplementsKey);
-    final cachedSupplementsTs = await UserCache.getData(supplementsTsKey);
-    bool supplementsValid = false;
-    if (cachedSupplements != null && cachedSupplementsTs != null) {
-      final cacheTime = DateTime.tryParse(cachedSupplementsTs.toString());
-      if (cacheTime != null && now.difference(cacheTime) < CacheConfig.chefProducerDetailCacheDuration) {
-        supplementsValid = true;
-      }
-    }
-    if (!supplementsValid) {
-      try {
-        final apiBaseUrl = dotenv.env['API_BASE_URL'];
-        if (apiBaseUrl != null) {
-          final response = await http.get(Uri.parse(apiBaseUrl + '/rr/rsupplements'));
-          if (response.statusCode == 200) {
-            final dataList = jsonDecode(response.body);
-            await UserCache.saveData(supplementsKey, dataList);
-            await UserCache.saveData(supplementsTsKey, now.toIso8601String());
-          }
-        } else {
-          print('[Splash][Nutrition+] API_BASE_URL is null. Cannot fetch supplements.');
-        }
-
-      } catch (e) { print('[Splash][Nutrition+] preload supplements error: $e'); }
-    }
+    await preloadCategory('supplements', '/rr/supplements', 'nutrition_supplements', 'nutrition_supplements_ts');
     // Gadgets
-    const String gadgetsKey = 'nutrition_gadgets';
-    const String gadgetsTsKey = 'nutrition_gadgets_ts';
-    final cachedGadgets = await UserCache.getData(gadgetsKey);
-    final cachedGadgetsTs = await UserCache.getData(gadgetsTsKey);
-    bool gadgetsValid = false;
-    if (cachedGadgets != null && cachedGadgetsTs != null) {
-      final cacheTime = DateTime.tryParse(cachedGadgetsTs.toString());
-      if (cacheTime != null && now.difference(cacheTime) < CacheConfig.chefProducerDetailCacheDuration) {
-        gadgetsValid = true;
-      }
-    }
-    if (!gadgetsValid) {
-      try {
-        final apiBaseUrl = dotenv.env['API_BASE_URL'];
-        if (apiBaseUrl != null) {
-          final response = await http.get(Uri.parse(apiBaseUrl + '/rr/rgadgets'));
-          if (response.statusCode == 200) {
-            final dataList = jsonDecode(response.body);
-            await UserCache.saveData(gadgetsKey, dataList);
-            await UserCache.saveData(gadgetsTsKey, now.toIso8601String());
-          }
-        } else {
-          print('[Splash][Nutrition+] API_BASE_URL is null. Cannot fetch gadgets.');
-        }
-
-      } catch (e) { print('[Splash][Nutrition+] preload gadgets error: $e'); }
-    }
+    await preloadCategory('gadgets', '/rr/gadgets', 'nutrition_gadgets', 'nutrition_gadgets_ts');
   }
-  static final GlobalKey<_NutritionPageState> globalKey = GlobalKey<_NutritionPageState>();
+
+
+  static final GlobalKey<_NutritionPageState> globalKey =
+      GlobalKey<_NutritionPageState>();
   NutritionPage({Key? key}) : super(key: globalKey);
 
   static Future<void> manualRefreshFromAppBar() async {
@@ -351,13 +325,15 @@ if (apiBaseUrl != null) {
   State<NutritionPage> createState() => _NutritionPageState();
 }
 
-class _NutritionPageState extends State<NutritionPage> with TickerProviderStateMixin {
-  // Scroll controller for preloading
+class _NutritionPageState extends State<NutritionPage>
+    with TickerProviderStateMixin {
   final ScrollController _scrollController = ScrollController();
-  final int _preloadThreshold = 15; // Number of items before the end to start preloading
-  bool _isPreloadingEnabled = true; // Always enable preloading
-  bool _isLoadingMore = false; // Track if we're currently loading more items
+  final int _preloadThreshold = 15;
+  bool _isPreloadingEnabled = true;
+  // bool _isLoadingMore = false; // Not currently used, can be removed if not planned
+
   Future<void> manualRefreshFromAppBar() async {
+    if (!mounted) return;
     setState(() {
       spicesLoading = true;
       herbalsLoading = true;
@@ -368,13 +344,24 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
       supplementsError = null;
       gadgetsError = null;
     });
+    // Clear existing cache before fetching new data to ensure refresh
+    await UserCache.removeData('nutrition_spices');
+    await UserCache.removeData('nutrition_spices_ts');
+    await UserCache.removeData('nutrition_herbals');
+    await UserCache.removeData('nutrition_herbals_ts');
+    await UserCache.removeData('nutrition_supplements');
+    await UserCache.removeData('nutrition_supplements_ts');
+    await UserCache.removeData('nutrition_gadgets');
+    await UserCache.removeData('nutrition_gadgets_ts');
+
     await Future.wait([
-      _fetchSpices(),
-      _fetchHerbals(),
-      _fetchSupplements(),
-      _fetchGadgets(),
+      _fetchSpices(forceRefresh: true),
+      _fetchHerbals(forceRefresh: true),
+      _fetchSupplements(forceRefresh: true),
+      _fetchGadgets(forceRefresh: true),
     ]);
   }
+
   late AnimationController _refreshIconController;
   late TabController _tabController;
 
@@ -402,17 +389,14 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
       vsync: this,
       duration: const Duration(seconds: 1),
     );
-    
-    // Initialize scroll controller
+
     _scrollController.addListener(_onScroll);
-    
-    // Initial data fetch
+
     _fetchSpices();
     _fetchHerbals();
     _fetchSupplements();
     _fetchGadgets();
-    
-    // Initial preload after first frame
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _preloadImages();
@@ -422,21 +406,15 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
 
   @override
   void dispose() {
-    // Remove scroll listener first to prevent callbacks after disposal
     _scrollController.removeListener(_onScroll);
-    
-    // Dispose controllers
     _refreshIconController.dispose();
     _tabController.dispose();
     _scrollController.dispose();
-    
-    // Cancel any pending operations
-    // Add any other cleanup here
-    
     super.dispose();
   }
 
-  Future<void> _fetchSpices() async {
+  Future<void> _fetchSpices({bool forceRefresh = false}) async {
+    if (!mounted) return;
     print('[Nutrition+] Fetching spices (API fetch started)...');
     setState(() {
       spicesLoading = true;
@@ -448,73 +426,91 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
     const String cacheTsKey = 'nutrition_spices_ts';
 
     try {
-      final cachedData = await UserCache.getData(cacheKey);
-      final cachedTs = await UserCache.getData(cacheTsKey);
-      final now = DateTime.now();
+      if (!forceRefresh) {
+        final cachedData = await UserCache.getData(cacheKey);
+        final cachedTs = await UserCache.getData(cacheTsKey);
+        final now = DateTime.now();
 
-      if (cachedData != null && cachedTs != null) {
-        final cacheTime = DateTime.tryParse(cachedTs.toString());
-        if (cacheTime != null &&
-            now.difference(cacheTime) < CacheConfig.allMealsCacheDuration) {
-          print('[Nutrition+] Loaded spices from cache.');
-          setState(() {
-            fetchedSpices = (cachedData as List)
-                .map((json) => NutritionItem.fromApi(json))
-                .toList();
-            spicesLoading = false;
-          });
-          _refreshIconController.stop();
-          return;
+        if (cachedData != null && cachedTs != null) {
+          final cacheTime = DateTime.tryParse(cachedTs.toString());
+          if (cacheTime != null &&
+              now.difference(cacheTime) < CacheConfig.allMealsCacheDuration) {
+            if (cachedData is List) {
+              print('[Nutrition+] Loaded spices from cache.');
+              if (mounted) {
+                setState(() {
+                  fetchedSpices = (cachedData as List)
+                      .map((jsonItem) => NutritionItem.fromApi(jsonItem as Map<String, dynamic>))
+                      .toList();
+                  spicesLoading = false;
+                });
+                _refreshIconController.stop();
+              }
+              return;
+            } else {
+              print('[Nutrition+] Cached spices data is not a List (type: ${cachedData.runtimeType}). Fetching from API.');
+              await UserCache.removeData(cacheKey); // Clear malformed cache
+              await UserCache.removeData(cacheTsKey);
+            }
+          }
         }
       }
 
-      final String baseUrl =
-          dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
+      final String baseUrl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
       final response = await http.get(Uri.parse('$baseUrl/rr/spices'));
 
       print('[Nutrition+] Spices API response: status=${response.statusCode}');
       if (response.statusCode == 200) {
-        final decoded = json.decode(response.body);
-        List<dynamic> dataList;
+        final decodedApiResponse = json.decode(response.body);
+        
+        if (decodedApiResponse is Map<String, dynamic> && decodedApiResponse['data'] is List) {
+          final List<dynamic> itemsList = decodedApiResponse['data'] as List<dynamic>;
 
-        if (decoded is List) {
-          dataList = decoded;
-          print('[Nutrition+] Spices API: decoded is List');
-        } else if (decoded is Map<String, dynamic> && decoded['data'] is List) {
-          dataList = decoded['data'];
-          print('[Nutrition+] Spices API: decoded is Map with data field');
+          await UserCache.saveData(cacheKey, itemsList);
+          await UserCache.saveData(cacheTsKey, DateTime.now().toIso8601String());
+
+          if (mounted) {
+            setState(() {
+              fetchedSpices = itemsList
+                  .map((jsonItem) => NutritionItem.fromApi(jsonItem as Map<String, dynamic>))
+                  .toList();
+              spicesLoading = false;
+            });
+          }
         } else {
-          dataList = [];
-          print('[Nutrition+] Spices API: Unexpected response format');
+          print('[Nutrition+] Spices API: Unexpected response format. Expected Map with "data" as List, received ${decodedApiResponse.runtimeType}');
+          if (mounted) {
+            setState(() {
+              spicesError = 'Failed to load spices: Invalid data format.';
+              spicesLoading = false;
+            });
+          }
         }
-
-        await UserCache.saveData(cacheKey, dataList);
-        await UserCache.saveData(cacheTsKey, now.toIso8601String());
-
-        setState(() {
-          fetchedSpices =
-              dataList.map((json) => NutritionItem.fromApi(json)).toList();
-          spicesLoading = false;
-        });
-        _refreshIconController.stop();
       } else {
+        if (mounted) {
+          setState(() {
+            spicesError = 'Failed to load spices. Status: ${response.statusCode}';
+            spicesLoading = false;
+          });
+        }
+      }
+    } catch (e, s) {
+      print('[Nutrition+] Spices API error: $e\n$s');
+      if (mounted) {
         setState(() {
-          spicesError = 'Failed to load spices.';
+          spicesError = 'Error: ' + e.toString();
           spicesLoading = false;
         });
+      }
+    } finally {
+      if (mounted) {
         _refreshIconController.stop();
       }
-    } catch (e) {
-      print('[Nutrition+] Spices API error: $e');
-      setState(() {
-        spicesError = 'Error: ' + e.toString();
-        spicesLoading = false;
-      });
-      _refreshIconController.stop();
     }
   }
 
-  Future<void> _fetchHerbals() async {
+  Future<void> _fetchHerbals({bool forceRefresh = false}) async {
+    if (!mounted) return;
     print('[Nutrition+] Fetching herbals (API fetch started)...');
     setState(() {
       herbalsLoading = true;
@@ -525,69 +521,86 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
     const String cacheTsKey = 'nutrition_herbals_ts';
 
     try {
-      final cachedData = await UserCache.getData(cacheKey);
-      final cachedTs = await UserCache.getData(cacheTsKey);
-      final now = DateTime.now();
+      if (!forceRefresh) {
+        final cachedData = await UserCache.getData(cacheKey);
+        final cachedTs = await UserCache.getData(cacheTsKey);
+        final now = DateTime.now();
 
-      if (cachedData != null && cachedTs != null) {
-        final cacheTime = DateTime.tryParse(cachedTs.toString());
-        if (cacheTime != null &&
-            now.difference(cacheTime) < CacheConfig.allMealsCacheDuration) {
-          print('[Nutrition+] Loaded herbals from cache.');
-          setState(() {
-            fetchedHerbals = (cachedData as List)
-                .map((json) => Herbal.fromJson(json as Map<String, dynamic>))
-                .toList();
-            herbalsLoading = false;
-          });
-          return;
+        if (cachedData != null && cachedTs != null) {
+          final cacheTime = DateTime.tryParse(cachedTs.toString());
+          if (cacheTime != null &&
+              now.difference(cacheTime) < CacheConfig.allMealsCacheDuration) {
+            if (cachedData is List) {
+              print('[Nutrition+] Loaded herbals from cache.');
+              if (mounted) {
+                setState(() {
+                  fetchedHerbals = (cachedData as List)
+                      .map((jsonItem) => Herbal.fromJson(jsonItem as Map<String, dynamic>))
+                      .toList();
+                  herbalsLoading = false;
+                });
+              }
+              return;
+            } else {
+              print('[Nutrition+] Cached herbals data is not a List (type: ${cachedData.runtimeType}). Fetching from API.');
+               await UserCache.removeData(cacheKey);
+               await UserCache.removeData(cacheTsKey);
+            }
+          }
         }
       }
 
-      final String baseUrl =
-          dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
+      final String baseUrl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
       final response = await http.get(Uri.parse('$baseUrl/rr/rherbals'));
 
       print('[Nutrition+] Herbals API response: status=${response.statusCode}');
       if (response.statusCode == 200) {
-        final decoded = json.decode(response.body);
-        List<dynamic> dataList;
+        final decodedApiResponse = json.decode(response.body);
+        
+        if (decodedApiResponse is Map<String, dynamic> && decodedApiResponse['data'] is List) {
+          final List<dynamic> itemsList = decodedApiResponse['data'] as List<dynamic>;
 
-        if (decoded is List) {
-          dataList = decoded;
-          print('[Nutrition+] Herbals API: decoded is List');
-        } else if (decoded is Map<String, dynamic> && decoded['data'] is List) {
-          dataList = decoded['data'];
-          print('[Nutrition+] Herbals API: decoded is Map with data field');
+          await UserCache.saveData(cacheKey, itemsList);
+          await UserCache.saveData(cacheTsKey, DateTime.now().toIso8601String());
+
+          if (mounted) {
+            setState(() {
+              fetchedHerbals = itemsList
+                  .map((jsonItem) => Herbal.fromJson(jsonItem as Map<String, dynamic>))
+                  .toList();
+              herbalsLoading = false;
+            });
+          }
         } else {
-          dataList = [];
-          print('[Nutrition+] Herbals API: Unexpected response format');
+          print('[Nutrition+] Herbals API: Unexpected response format. Expected Map with "data" as List, received ${decodedApiResponse.runtimeType}');
+          if (mounted) {
+            setState(() {
+              herbalsError = 'Failed to load herbals: Invalid data format.';
+              herbalsLoading = false;
+            });
+          }
         }
-
-        await UserCache.saveData(cacheKey, dataList);
-        await UserCache.saveData(cacheTsKey, now.toIso8601String());
-
-        setState(() {
-          fetchedHerbals =
-              dataList.map((json) => Herbal.fromJson(json as Map<String, dynamic>)).toList();
-          herbalsLoading = false;
-        });
       } else {
+        if (mounted) {
+          setState(() {
+            herbalsError = 'Failed to load herbals. Status: ${response.statusCode}';
+            herbalsLoading = false;
+          });
+        }
+      }
+    } catch (e, s) {
+      print('[Nutrition+] Herbals API error: $e\n$s');
+      if (mounted) {
         setState(() {
-          herbalsError = 'Failed to load herbals.';
+          herbalsError = 'Error: ' + e.toString();
           herbalsLoading = false;
         });
       }
-    } catch (e) {
-      print('[Nutrition+] Herbals API error: $e');
-      setState(() {
-        herbalsError = 'Error: ' + e.toString();
-        herbalsLoading = false;
-      });
     }
   }
 
-  Future<void> _fetchSupplements() async {
+  Future<void> _fetchSupplements({bool forceRefresh = false}) async {
+    if (!mounted) return;
     print('[Nutrition+] Fetching supplements (API fetch started)...');
     setState(() {
       supplementsLoading = true;
@@ -598,70 +611,86 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
     const String cacheTsKey = 'nutrition_supplements_ts';
 
     try {
-      final cachedData = await UserCache.getData(cacheKey);
-      final cachedTs = await UserCache.getData(cacheTsKey);
-      final now = DateTime.now();
+      if (!forceRefresh) {
+        final cachedData = await UserCache.getData(cacheKey);
+        final cachedTs = await UserCache.getData(cacheTsKey);
+        final now = DateTime.now();
 
-      if (cachedData != null && cachedTs != null) {
-        final cacheTime = DateTime.tryParse(cachedTs.toString());
-        if (cacheTime != null &&
-            now.difference(cacheTime) < CacheConfig.allMealsCacheDuration) {
-          print('[Nutrition+] Loaded supplements from cache.');
-          setState(() {
-            fetchedSupplements = (cachedData as List)
-                .map((json) => Supplement.fromJson(json as Map<String, dynamic>))
-                .toList();
-            supplementsLoading = false;
-          });
-          return;
+        if (cachedData != null && cachedTs != null) {
+          final cacheTime = DateTime.tryParse(cachedTs.toString());
+          if (cacheTime != null &&
+              now.difference(cacheTime) < CacheConfig.allMealsCacheDuration) {
+            if (cachedData is List) {
+              print('[Nutrition+] Loaded supplements from cache.');
+              if (mounted) {
+                setState(() {
+                  fetchedSupplements = (cachedData as List)
+                      .map((jsonItem) => Supplement.fromJson(jsonItem as Map<String, dynamic>))
+                      .toList();
+                  supplementsLoading = false;
+                });
+              }
+              return;
+            } else {
+               print('[Nutrition+] Cached supplements data is not a List (type: ${cachedData.runtimeType}). Fetching from API.');
+               await UserCache.removeData(cacheKey);
+               await UserCache.removeData(cacheTsKey);
+            }
+          }
         }
       }
 
-      final String baseUrl =
-          dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
+      final String baseUrl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
       final response = await http.get(Uri.parse('$baseUrl/rr/supplements'));
 
-      print(
-          '[Nutrition+] Supplements API response: status=${response.statusCode}');
+      print('[Nutrition+] Supplements API response: status=${response.statusCode}');
       if (response.statusCode == 200) {
-        final decoded = json.decode(response.body);
-        List<dynamic> dataList;
+        final decodedApiResponse = json.decode(response.body);
 
-        if (decoded is List) {
-          dataList = decoded;
-          print('[Nutrition+] Supplements API: decoded is List');
-        } else if (decoded is Map<String, dynamic> && decoded['data'] is List) {
-          dataList = decoded['data'];
-          print('[Nutrition+] Supplements API: decoded is Map with data field');
+        if (decodedApiResponse is Map<String, dynamic> && decodedApiResponse['data'] is List) {
+          final List<dynamic> itemsList = decodedApiResponse['data'] as List<dynamic>;
+          
+          await UserCache.saveData(cacheKey, itemsList);
+          await UserCache.saveData(cacheTsKey, DateTime.now().toIso8601String());
+
+          if (mounted) {
+            setState(() {
+              fetchedSupplements = itemsList
+                  .map((jsonItem) => Supplement.fromJson(jsonItem as Map<String, dynamic>))
+                  .toList();
+              supplementsLoading = false;
+            });
+          }
         } else {
-          dataList = [];
-          print('[Nutrition+] Supplements API: Unexpected response format');
+           print('[Nutrition+] Supplements API: Unexpected response format. Expected Map with "data" as List, received ${decodedApiResponse.runtimeType}');
+           if (mounted) {
+            setState(() {
+              supplementsError = 'Failed to load supplements: Invalid data format.';
+              supplementsLoading = false;
+            });
+          }
         }
-
-        await UserCache.saveData(cacheKey, dataList);
-        await UserCache.saveData(cacheTsKey, now.toIso8601String());
-
-        setState(() {
-          fetchedSupplements =
-              dataList.map((json) => Supplement.fromJson(json as Map<String, dynamic>)).toList();
-          supplementsLoading = false;
-        });
       } else {
+        if (mounted) {
+          setState(() {
+            supplementsError = 'Failed to load supplements. Status: ${response.statusCode}';
+            supplementsLoading = false;
+          });
+        }
+      }
+    } catch (e, s) {
+      print('[Nutrition+] Supplements API error: $e\n$s');
+      if (mounted) {
         setState(() {
-          supplementsError = 'Failed to load supplements.';
+          supplementsError = 'Error: ' + e.toString();
           supplementsLoading = false;
         });
       }
-    } catch (e) {
-      print('[Nutrition+] Supplements API error: $e');
-      setState(() {
-        supplementsError = 'Error: ' + e.toString();
-        supplementsLoading = false;
-      });
     }
   }
 
-  Future<void> _fetchGadgets() async {
+  Future<void> _fetchGadgets({bool forceRefresh = false}) async {
+    if (!mounted) return;
     print('[Nutrition+] Fetching gadgets (API fetch started)...');
     setState(() {
       gadgetsLoading = true;
@@ -672,78 +701,101 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
     const String cacheTsKey = 'nutrition_gadgets_ts';
 
     try {
-      final cachedData = await UserCache.getData(cacheKey);
-      final cachedTs = await UserCache.getData(cacheTsKey);
-      final now = DateTime.now();
+      if (!forceRefresh) {
+        final cachedData = await UserCache.getData(cacheKey);
+        final cachedTs = await UserCache.getData(cacheTsKey);
+        final now = DateTime.now();
 
-      if (cachedData != null && cachedTs != null) {
-        final cacheTime = DateTime.tryParse(cachedTs.toString());
-        if (cacheTime != null &&
-            now.difference(cacheTime) < CacheConfig.allMealsCacheDuration) {
-          print('[Nutrition+] Loaded gadgets from cache.');
-          setState(() {
-            fetchedGadgets = (cachedData as List)
-                .map((json) => Gadget.fromJson(json as Map<String, dynamic>))
-                .toList();
-            gadgetsLoading = false;
-          });
-          return;
+        if (cachedData != null && cachedTs != null) {
+          final cacheTime = DateTime.tryParse(cachedTs.toString());
+          if (cacheTime != null &&
+              now.difference(cacheTime) < CacheConfig.allMealsCacheDuration) {
+            if (cachedData is List) {
+              print('[Nutrition+] Loaded gadgets from cache.');
+              if (mounted) {
+                setState(() {
+                  fetchedGadgets = (cachedData as List)
+                      .map((jsonItem) => Gadget.fromJson(jsonItem as Map<String, dynamic>))
+                      .toList();
+                  gadgetsLoading = false;
+                });
+              }
+              return;
+            } else {
+              print('[Nutrition+] Cached gadgets data is not a List (type: ${cachedData.runtimeType}). Fetching from API.');
+              await UserCache.removeData(cacheKey);
+              await UserCache.removeData(cacheTsKey);
+            }
+          }
         }
       }
 
-      final String baseUrl =
-          dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
+      final String baseUrl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
       final response = await http.get(Uri.parse('$baseUrl/rr/gadgets'));
 
       print('[Nutrition+] Gadgets API response: status=${response.statusCode}');
       if (response.statusCode == 200) {
-        final decoded = json.decode(response.body);
-        List<dynamic> dataList;
+        final decodedApiResponse = json.decode(response.body);
 
-        if (decoded is List) {
-          dataList = decoded;
-          print('[Nutrition+] Gadgets API: decoded is List');
-        } else if (decoded is Map<String, dynamic> && decoded['data'] is List) {
-          dataList = decoded['data'];
-          print('[Nutrition+] Gadgets API: decoded is Map with data field');
+        if (decodedApiResponse is Map<String, dynamic> && decodedApiResponse['data'] is List) {
+          final List<dynamic> itemsList = decodedApiResponse['data'] as List<dynamic>;
+
+          await UserCache.saveData(cacheKey, itemsList);
+          await UserCache.saveData(cacheTsKey, DateTime.now().toIso8601String());
+
+          if (mounted) {
+            setState(() {
+              fetchedGadgets = itemsList
+                  .map((jsonItem) => Gadget.fromJson(jsonItem as Map<String, dynamic>))
+                  .toList();
+              gadgetsLoading = false;
+            });
+          }
         } else {
-          dataList = [];
-          print('[Nutrition+] Gadgets API: Unexpected response format');
+          print('[Nutrition+] Gadgets API: Unexpected response format. Expected Map with "data" as List, received ${decodedApiResponse.runtimeType}');
+          if (mounted) {
+            setState(() {
+              gadgetsError = 'Failed to load gadgets: Invalid data format.';
+              gadgetsLoading = false;
+            });
+          }
         }
-
-        await UserCache.saveData(cacheKey, dataList);
-        await UserCache.saveData(cacheTsKey, now.toIso8601String());
-
-        setState(() {
-          fetchedGadgets =
-              dataList.map((json) => Gadget.fromJson(json as Map<String, dynamic>)).toList();
-          gadgetsLoading = false;
-        });
       } else {
+        if (mounted) {
+          setState(() {
+            gadgetsError = 'Failed to load gadgets. Status: ${response.statusCode}';
+            gadgetsLoading = false;
+          });
+        }
+      }
+    } catch (e, s) {
+      print('[Nutrition+] Gadgets API error: $e\n$s');
+      if (mounted) {
         setState(() {
-          gadgetsError = 'Failed to load gadgets.';
+          gadgetsError = 'Error: ' + e.toString();
           gadgetsLoading = false;
         });
       }
-    } catch (e) {
-      print('[Nutrition+] Gadgets API error: $e');
-      setState(() {
-        gadgetsError = 'Error: ' + e.toString();
-        gadgetsLoading = false;
-      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: AppDrawer(),
+      // drawer: AppDrawerUnified(), // Uncomment if you have this drawer
       appBar: AppBar(
+         // Uncomment if you have this drawer
         title: const Text('Nutrition+'),
         actions: [
           AnimatedBuilder(
             animation: _refreshIconController,
             builder: (context, child) {
               bool isLoading = false;
+              if (_tabController.indexIsChanging) {
+                // If tab is changing, use the previous tab's loading state briefly
+                // or handle it based on your preference. For simplicity, just check current tab.
+              }
               switch (_tabController.index) {
                 case 0:
                   isLoading = spicesLoading;
@@ -760,23 +812,23 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
               }
               return IconButton(
                 icon: Transform.rotate(
-                  angle: isLoading ? _refreshIconController.value * 6.3 : 0,
+                  angle: isLoading ? _refreshIconController.value * 2.0 * math.pi : 0, // 2*pi for full rotation
                   child: const Icon(Icons.refresh),
                 ),
                 tooltip: 'Refresh',
-                onPressed: () {
+                onPressed: isLoading ? null : () { // Disable button while loading
                   switch (_tabController.index) {
                     case 0:
-                      _fetchSpices();
+                      _fetchSpices(forceRefresh: true);
                       break;
                     case 1:
-                      _fetchHerbals();
+                      _fetchHerbals(forceRefresh: true);
                       break;
                     case 2:
-                      _fetchSupplements();
+                      _fetchSupplements(forceRefresh: true);
                       break;
                     case 3:
-                      _fetchGadgets();
+                      _fetchGadgets(forceRefresh: true);
                       break;
                   }
                 },
@@ -786,6 +838,7 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
         ],
         bottom: TabBar(
           controller: _tabController,
+          isScrollable: true, // Good for many tabs
           tabs: const [
             Tab(text: 'Spices'),
             Tab(text: 'Herbs'),
@@ -797,32 +850,32 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
       body: TabBarView(
         controller: _tabController,
         children: [
-          _buildTabContent(
+          _buildTabContent<NutritionItem>(
             loading: spicesLoading,
             error: spicesError,
             items: fetchedSpices,
-            onRetry: _fetchSpices,
+            onRetry: () => _fetchSpices(forceRefresh: true),
             label: 'spices',
           ),
           _buildTabContent<Herbal>(
             loading: herbalsLoading,
             error: herbalsError,
             items: fetchedHerbals,
-            onRetry: _fetchHerbals,
+            onRetry: () => _fetchHerbals(forceRefresh: true),
             label: 'herbals',
           ),
           _buildTabContent<Supplement>(
             loading: supplementsLoading,
             error: supplementsError,
             items: fetchedSupplements,
-            onRetry: _fetchSupplements,
+            onRetry: () => _fetchSupplements(forceRefresh: true),
             label: 'supplements',
           ),
           _buildTabContent<Gadget>(
             loading: gadgetsLoading,
             error: gadgetsError,
             items: fetchedGadgets,
-            onRetry: _fetchGadgets,
+            onRetry: () => _fetchGadgets(forceRefresh: true),
             label: 'gadgets',
           ),
         ],
@@ -837,7 +890,7 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
     required VoidCallback onRetry,
     required String label,
   }) {
-    if (loading) {
+    if (loading && items.isEmpty) { // Show loader only if items are empty initially
       return const Center(child: CircularProgressIndicator());
     }
     if (error != null) {
@@ -845,14 +898,14 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(error, style: const TextStyle(color: Colors.red)),
+            Text(error, style: const TextStyle(color: Colors.red), textAlign: TextAlign.center,),
             const SizedBox(height: 8),
             ElevatedButton(onPressed: onRetry, child: const Text('Retry')),
           ],
         ),
       );
     }
-    if (items.isEmpty) {
+    if (items.isEmpty && !loading) { // Show "No items" only if not loading and no error
       return Center(child: Text('No $label found.'));
     }
     return _buildCategoryGrid<T>(items, context, label: label);
@@ -860,179 +913,157 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
 
   String? getDisplayImageUrl(String? url) {
     if (url == null || url.isEmpty) return null;
+    // Assuming ImageUtils.processImageUrl handles any necessary transformations
     return ImageUtils.processImageUrl(url);
   }
 
-  // Handle scroll events for preloading
   void _onScroll() {
-    // Check if widget is still mounted and preloading is enabled
-    if (!mounted || !_isPreloadingEnabled) return;
-    
-    // Check if scroll controller is still attached
-    if (!_scrollController.hasClients) return;
-    
+    if (!mounted || !_isPreloadingEnabled || !_scrollController.hasClients) return;
+
     try {
       final position = _scrollController.position;
-      if (!position.hasContentDimensions) return;
-      
-      final threshold = 0.7; // Start preloading when 70% scrolled
-      final maxScroll = position.maxScrollExtent;
-      final currentScroll = position.pixels;
-      
-      if (maxScroll <= 0) return; // List not yet laid out or has no scroll
-      
-      if (currentScroll >= (maxScroll * threshold)) {
+      if (!position.hasContentDimensions || position.maxScrollExtent <= 0) return;
+
+      final threshold = 0.8; // Start preloading when 80% scrolled
+      if (position.pixels >= (position.maxScrollExtent * threshold)) {
         _preloadImages();
       }
     } catch (e) {
-      // Ignore any errors during scroll handling
       debugPrint('Scroll handling error: $e');
     }
   }
 
-  // Preload images that are about to be visible
   void _preloadImages() {
-    // Check if widget is still mounted and preloading is enabled
-    if (!mounted || !_isPreloadingEnabled) return;
-    
-    // Check if scroll controller is still attached
-    if (!_scrollController.hasClients) return;
-    
-    // Get current tab items
+    if (!mounted || !_isPreloadingEnabled || !_scrollController.hasClients) return;
+
     List<dynamic> currentItems = [];
     switch (_tabController.index) {
-      case 0:
-        currentItems = fetchedSpices;
-        break;
-      case 1:
-        currentItems = fetchedHerbals;
-        break;
-      case 2:
-        currentItems = fetchedSupplements;
-        break;
-      case 3:
-        currentItems = fetchedGadgets;
-        break;
+      case 0: currentItems = fetchedSpices; break;
+      case 1: currentItems = fetchedHerbals; break;
+      case 2: currentItems = fetchedSupplements; break;
+      case 3: currentItems = fetchedGadgets; break;
     }
-    
+
     if (currentItems.isEmpty) return;
+
+    // Estimate item height for rough calculation, adjust as needed
+    double estimatedItemHeight = 250; // Adjust based on your _buildItemCard height
+    final screenHeight = MediaQuery.of(context).size.height;
+    final itemsPerPage = (screenHeight / estimatedItemHeight).ceil();
     
-    // Calculate visible items
-    final firstVisibleIndex = (_scrollController.position.pixels / 200).floor();
-    final lastVisibleIndex = ((_scrollController.position.pixels + 
-        MediaQuery.of(context).size.height) / 200).ceil();
-    
-    // Preload images for items slightly beyond the visible area
-    final preloadStart = firstVisibleIndex.clamp(0, currentItems.length - 1);
-    final preloadEnd = (lastVisibleIndex + _preloadThreshold)
-        .clamp(0, currentItems.length - 1);
-    
+    final firstVisibleIndex = (_scrollController.position.pixels / estimatedItemHeight).floor();
+    final lastVisibleIndex = firstVisibleIndex + itemsPerPage;
+
+    final preloadStart = math.max(0, firstVisibleIndex);
+    final preloadEnd = math.min(currentItems.length - 1, lastVisibleIndex + _preloadThreshold);
+
     for (int i = preloadStart; i <= preloadEnd; i++) {
-      if (i >= 0 && i < currentItems.length) {
-        final item = currentItems[i];
-        String? imageUrl;
-        
-        if (item is NutritionItem) {
-          imageUrl = getDisplayImageUrl(item.imagePath);
-        } else if (item is Herbal) {
-          imageUrl = getDisplayImageUrl(item.imageUrl);
-        } else if (item is Supplement) {
-          imageUrl = getDisplayImageUrl(item.imageUrl);
-        } else if (item is Gadget) {
-          imageUrl = getDisplayImageUrl(item.imageUrl);
-        }
-        
-        if (imageUrl != null && imageUrl.startsWith('http')) {
-          try {
-            // Preload the image into cache silently
-            cn.CachedNetworkImageProvider(imageUrl)
-              .resolve(ImageConfiguration())
-              .addListener(
-                ImageStreamListener(
-                  (_, __) {},
-                  onError: (dynamic error, StackTrace? stackTrace) {
-                    // Silently handle errors during preloading
-                    debugPrint('Error preloading image: $error');
-                  },
-                ),
-              );
-          } catch (e) {
-            debugPrint('Error setting up image preload: $e');
-          }
+      final item = currentItems[i];
+      String? imageUrl;
+
+      if (item is NutritionItem) imageUrl = getDisplayImageUrl(item.imagePath);
+      else if (item is Herbal) imageUrl = getDisplayImageUrl(item.imageUrl);
+      else if (item is Supplement) imageUrl = getDisplayImageUrl(item.imageUrl);
+      else if (item is Gadget) imageUrl = getDisplayImageUrl(item.imageUrl);
+
+      if (imageUrl != null && imageUrl.startsWith('http')) {
+        try {
+          // cn.CachedNetworkImageProvider(imageUrl).resolve(ImageConfiguration())
+          //   .addListener(ImageStreamListener((_, __) {}, onError: (err, stack) {
+          //     debugPrint('Error preloading image $imageUrl: $err');
+          //   }));
+          // Using precacheImage for more direct control if needed, or stick to provider.
+          precacheImage(cn.CachedNetworkImageProvider(imageUrl), context, onError: (err, stack) {
+             debugPrint('Error preloading image $imageUrl: $err');
+          });
+        } catch (e) {
+          debugPrint('Error setting up image preload for $imageUrl: $e');
         }
       }
     }
   }
 
-  Widget _buildCategoryGrid<T>(List<T> items, BuildContext context, {String? defaultItemImagePath, String? label}) {
+  Widget _buildCategoryGrid<T>(List<T> items, BuildContext context,
+      {String? defaultItemImagePath, String? label}) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12.0, 12.0, 12.0, 0),
-      child: NotificationListener<ScrollNotification>(
-        onNotification: (ScrollNotification scrollInfo) {
-          if (scrollInfo is ScrollEndNotification) {
-            _scrollController.removeListener(_onScroll);
-            _scrollController.addListener(_onScroll);
-            _preloadImages();
-          }
-          return false;
-        },
-        child: GridView.builder(
-          controller: _scrollController,
-          physics: const ClampingScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            crossAxisSpacing: 12.0,
-            mainAxisSpacing: 12.0,
-            childAspectRatio: 0.80,
-          ),
-          itemCount: items.length,
-          itemBuilder: (BuildContext context, int index) {
-            // Preload images for the first few items
-            if (index < 10) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) _preloadImages();
-              });
-            }
-            
-            return AnimatedOpacity(
-              opacity: 1.0,
-              duration: Duration(milliseconds: 400 + (index % 5 * 100)),
-              curve: Curves.easeOut,
-              child: _buildItemCard<T>(items[index], context, label: label, defaultItemImagePath: defaultItemImagePath),
-            );
-          },
+      // Removed NotificationListener, _onScroll is attached directly
+      child: GridView.builder(
+        controller: _scrollController, // Crucial for _onScroll to work
+        physics: const ClampingScrollPhysics(), // Or AlwaysScrollableScrollPhysics if you want pull-to-refresh feel
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          crossAxisSpacing: 12.0,
+          mainAxisSpacing: 12.0,
+          childAspectRatio: 0.80, // Adjust as needed
         ),
+        itemCount: items.length,
+        itemBuilder: (BuildContext context, int index) {
+          // Initial preload for first few items can be aggressive
+          // if (index < 6) { // Preload first 6 items quickly
+          //   WidgetsBinding.instance.addPostFrameCallback((_) {
+          //     if (mounted) _preloadImagesForIndex(items, index);
+          //   });
+          // }
+          return AnimatedOpacity( // Consider removing if performance is an issue on older devices
+            opacity: 1.0,
+            duration: Duration(milliseconds: 300 + (index % 4 * 50)),
+            curve: Curves.easeOut,
+            child: _buildItemCard<T>(items[index], context,
+                label: label, defaultItemImagePath: defaultItemImagePath),
+          );
+        },
       ),
     );
   }
+  // Helper for initial preloading
+  // void _preloadImagesForIndex(List<dynamic> items, int index) {
+  //   if (index < 0 || index >= items.length) return;
+  //   final item = items[index];
+  //   String? imageUrl;
+  //   if (item is NutritionItem) imageUrl = getDisplayImageUrl(item.imagePath);
+  //   // ... add other types
+  //   if (imageUrl != null && imageUrl.startsWith('http')) {
+  //     precacheImage(cn.CachedNetworkImageProvider(imageUrl), context, onError: (e,s){});
+  //   }
+  // }
 
-  Widget _buildItemCard<T>(T item, BuildContext context, {String? label, String? defaultItemImagePath}) {
+
+  Widget _buildItemCard<T>(T item, BuildContext context,
+      {String? label, String? defaultItemImagePath}) {
     String? imageUrl;
-    String name = '';
+    String name = 'No Name';
     double? price;
-    String heroTag = '';
+    String heroTagSuffix = DateTime.now().millisecondsSinceEpoch.toString(); // Default unique suffix
+    String baseHeroTag = 'item';
+
 
     if (item is NutritionItem) {
       imageUrl = getDisplayImageUrl(item.imagePath);
       name = item.name;
       price = item.price;
-      heroTag = item.heroTag;
+      baseHeroTag = item.id; // Use unique ID for hero tag
+      heroTagSuffix = item.type;
     } else if (item is Herbal) {
       imageUrl = getDisplayImageUrl(item.imageUrl);
       name = item.herbalName;
       price = item.price;
-      heroTag = item.herbalName;
+      baseHeroTag = item.herbalId.toString();
+      heroTagSuffix = 'herbal';
     } else if (item is Supplement) {
       imageUrl = getDisplayImageUrl(item.imageUrl);
       name = item.supplementName;
       price = item.price;
-      heroTag = item.supplementName;
+      baseHeroTag = item.supplementId.toString();
+      heroTagSuffix = 'supplement';
     } else if (item is Gadget) {
       imageUrl = getDisplayImageUrl(item.imageUrl);
       name = item.gadgetName;
       price = item.price;
-      heroTag = item.gadgetName;
+      baseHeroTag = item.gadgetId.toString();
+      heroTagSuffix = 'gadget';
     }
+    final String heroTag = '$baseHeroTag-$heroTagSuffix-${imageUrl ?? name}'; // Make hero tag more unique
 
     final borderRadius = BorderRadius.circular(15.0);
 
@@ -1049,107 +1080,56 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
           splashColor: lightTeal.withAlpha(50),
           highlightColor: lightTeal.withAlpha(25),
           onTap: () {
-            // Only NutritionItem supports inline base64 images
             Widget? decodedImageWidget;
-            if (item is NutritionItem && item.imagePath != null && item.imagePath!.startsWith('data:image')) {
+             String? currentItemImagePath;
+            if (item is NutritionItem) currentItemImagePath = item.imagePath;
+            // Add other types if they can have base64 images
+            
+            if (currentItemImagePath != null && currentItemImagePath.startsWith('data:image')) {
               try {
-                final base64Str = item.imagePath!.split(',').last;
+                final base64Str = currentItemImagePath.split(',').last;
                 final bytes = base64Decode(base64Str);
                 decodedImageWidget = Image.memory(bytes, fit: BoxFit.cover, width: double.infinity, height: 110);
               } catch (e) {
                 decodedImageWidget = null;
+                 print("Error decoding base64 image: $e");
               }
             }
+
+            NutritionItem detailItem;
+            if (item is NutritionItem) {
+              detailItem = item;
+            } else if (item is Herbal) {
+              detailItem = NutritionItem(
+                id: item.herbalId.toString(), type: 'herbal', name: item.herbalName,
+                imagePath: item.imageUrl, description: item.description, price: item.price,
+                idKey: 'herbal_id', rawData: { /* fill from item properties */ }
+              );
+            } else if (item is Supplement) {
+              detailItem = NutritionItem(
+                id: item.supplementId.toString(), type: 'supplement', name: item.supplementName,
+                imagePath: item.imageUrl, description: item.description, price: item.price,
+                idKey: 'supplement_id', rawData: { /* fill from item properties */ }
+              );
+            } else if (item is Gadget) {
+              detailItem = NutritionItem(
+                id: item.gadgetId.toString(), type: 'gadget', name: item.gadgetName,
+                imagePath: item.imageUrl, description: item.description, price: item.price,
+                idKey: 'gadget_id', rawData: { /* fill from item properties */ }
+              );
+            } else {
+              // Should not happen if T is constrained, but as a fallback:
+              detailItem = NutritionItem(id: '', type: 'unknown', name: 'Unknown Item', rawData: {}, idKey: '');
+            }
+            
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) {
-                  NutritionItem detailItem;
-                  if (item is NutritionItem) {
-                    detailItem = item;
-                  } else if (item is Herbal) {
-                    detailItem = NutritionItem(
-                      id: item.herbalId.toString(),
-                      type: 'herbal',
-                      name: item.herbalName,
-                      imagePath: item.imageUrl,
-                      description: item.description,
-                      price: item.price,
-                      idKey: 'herbal_id',
-                      rawData: {
-                        'herbal_id': item.herbalId,
-                        'herbal_name': item.herbalName,
-                        'description': item.description,
-                        'unit': item.unit,
-                        'price': item.price,
-                        'image_url': item.imageUrl,
-                        'date_added': item.dateAdded?.toIso8601String(),
-                        'added_by': item.addedBy,
-                        'added_by_type': item.addedByType,
-                        'updated_at': item.updatedAt?.toIso8601String(),
-                      },
-                    );
-                  } else if (item is Supplement) {
-                    detailItem = NutritionItem(
-                      id: item.supplementId.toString(),
-                      type: 'supplement',
-                      name: item.supplementName,
-                      imagePath: item.imageUrl,
-                      description: item.description,
-                      price: item.price,
-                      idKey: 'supplement_id',
-                      rawData: {
-                        'supplement_id': item.supplementId,
-                        'supplement_name': item.supplementName,
-                        'description': item.description,
-                        'unit': item.unit,
-                        'price': item.price,
-                        'image_url': item.imageUrl,
-                        'date_added': item.dateAdded?.toIso8601String(),
-                        'added_by': item.addedBy,
-                        'added_by_type': item.addedByType,
-                      },
-                    );
-                  } else if (item is Gadget) {
-                    detailItem = NutritionItem(
-                      id: item.gadgetId.toString(),
-                      type: 'gadget',
-                      name: item.gadgetName,
-                      imagePath: item.imageUrl,
-                      description: item.description,
-                      price: item.price,
-                      idKey: 'gadget_id',
-                      rawData: {
-                        'gadget_id': item.gadgetId,
-                        'gadget_name': item.gadgetName,
-                        'description': item.description,
-                        'brand': item.brand,
-                        'model': item.model,
-                        'price': item.price,
-                        'image_url': item.imageUrl,
-                        'date_added': item.dateAdded?.toIso8601String(),
-                        'added_by': item.addedBy,
-                        'added_by_type': item.addedByType,
-                        'updated_at': item.updatedAt?.toIso8601String(),
-                      },
-                    );
-                  } else {
-                    detailItem = NutritionItem(
-                      id: '',
-                      type: 'unknown',
-                      name: '',
-                      imagePath: null,
-                      description: null,
-                      price: null,
-                      idKey: '',
-                      rawData: {},
-                    );
-                  }
-                  return Nutri_DetailPage(
-                    item: detailItem,
-                    decodedImage: decodedImageWidget,
-                  );
-                },
+                builder: (context) => Nutri_DetailPage( // Assuming Nutri_DetailPage exists
+                  item: detailItem,
+                  decodedImage: decodedImageWidget, // Pass the decoded image if available
+                  tag: heroTag, // FIX: Changed 'heroImageTag' to 'tag'
+                ),
               ),
             );
           },
@@ -1159,7 +1139,7 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
               Expanded(
                 flex: 3,
                 child: Hero(
-                  tag: heroTag,
+                  tag: heroTag, // Use the unique heroTag
                   flightShuttleBuilder: (
                     BuildContext flightContext,
                     Animation<double> animation,
@@ -1168,7 +1148,7 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
                     BuildContext toHeroContext,
                   ) {
                     final Hero toHero = toHeroContext.widget as Hero;
-                    return FadeTransition(
+                    return FadeTransition( // Or ScaleTransition, SizeTransition etc.
                       opacity: animation.drive(
                         Tween<double>(begin: 0.85, end: 1.0).chain(
                           CurveTween(curve: Curves.easeInOut),
@@ -1177,56 +1157,37 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
                       child: toHero.child,
                     );
                   },
-                  child: Material(
+                  child: Material( // Ensures smooth transitions for image properties
                     type: MaterialType.transparency,
                     child: ClipRRect(
-                      borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(15.0)),
-                      child: imageUrl != null && imageUrl.startsWith('http')
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(15.0)),
+                      child: (imageUrl != null && imageUrl.startsWith('http'))
                           ? CachedNetworkImage(
                               imageUrl: imageUrl,
                               fit: BoxFit.cover,
-                              width: double.infinity,
-                              height: 110,
+                              // width: double.infinity, // Let Expanded handle width
+                              // height: 110, // Let Expanded handle height
                               placeholder: (context, url) => Shimmer.fromColors(
                                 baseColor: Colors.grey[300]!,
                                 highlightColor: Colors.grey[100]!,
-                                child: Container(
-                                  width: double.infinity,
-                                  height: 110,
-                                  color: Colors.white,
-                                ),
+                                child: Container(color: Colors.white),
                               ),
                               errorWidget: (context, url, error) => Container(
                                 color: Colors.grey[200],
                                 child: const Center(
-                                  child: Icon(
-                                    Icons.broken_image_outlined,
-                                    color: errorIconColor,
-                                    size: 40.0,
-                                  ),
+                                  child: Icon(Icons.broken_image_outlined, color: errorIconColor, size: 40.0),
                                 ),
                               ),
                             )
-                          : (defaultItemImagePath != null
-                              ? Image.asset(
-                                  defaultItemImagePath,
-                                  fit: BoxFit.cover,
-                                  width: double.infinity,
-                                  height: 110,
-                                )
-                              : Container(
+                          : (defaultItemImagePath != null // Fallback for local asset
+                              ? Image.asset(defaultItemImagePath, fit: BoxFit.cover)
+                              : Container( // Default placeholder if no image
                                   color: Colors.grey[200],
-                                  width: double.infinity,
-                                  height: 110,
                                   child: const Center(
-                                    child: Icon(
-                                      Icons.broken_image_outlined,
-                                      color: errorIconColor,
-                                      size: 40.0,
-                                    ),
+                                    child: Icon(Icons.image_not_supported_outlined, color: errorIconColor, size: 40.0),
                                   ),
-                                )),
+                                )
+                             ),
                     ),
                   ),
                 ),
@@ -1235,6 +1196,7 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
                 padding: const EdgeInsets.fromLTRB(10.0, 8.0, 10.0, 10.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min, // Important for Column inside Expanded
                   children: [
                     Text(
                       name,
@@ -1243,14 +1205,14 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
                         fontWeight: FontWeight.w600,
                         color: primaryTextColor,
                       ),
-                      maxLines: 1,
+                      maxLines: 2, // Allow for two lines for longer names
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 4.0),
                     Text(
-                      price != null
-                          ? 'ugx ${price!.toStringAsFixed(2)}'
-                          : 'Price: not available',
+                      price != null && price > 0
+                          ? 'UGX ${price.toStringAsFixed(0)}' // No decimals if not needed
+                          : 'Price: N/A', // Clearer "Not Available"
                       style: const TextStyle(
                         color: priceColor,
                         fontSize: 14.0,

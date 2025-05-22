@@ -205,7 +205,9 @@ class FCMService {
       }
 
       // Get API endpoint from .env
-      final apiUrl = dotenv.env['API_URL'] ?? 'http://localhost:5000';
+      final apiUrl = dotenv.env['API_BASE_URL'] ??
+          dotenv.env['API_BASE_URL-intranet'] ??
+          'http://localhost:5000';
       final endpoint = '$apiUrl/rr/notifications/tokens';
 
       // Prepare request payload

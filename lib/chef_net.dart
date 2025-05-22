@@ -162,11 +162,9 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
     print('[ChefNet] Cached timestamp string: $cachedTimestampString');
     if (cachedData != null && cachedTimestampString != null) {
       print('[ChefNet] Cache found, checking validity...');
-      DateTime? cachedTimestamp;
-      try {
-        cachedTimestamp = DateTime.parse(cachedTimestampString);
-      } catch (e) {
-        print('[ChefNet] Invalid cache timestamp: $cachedTimestampString, error: $e');
+      DateTime? cachedTimestamp = _parseDate(cachedTimestampString);
+      if (cachedTimestamp == null) {
+        print('[ChefNet] Invalid cache timestamp: $cachedTimestampString, error: FormatException');
       }
       if (cachedTimestamp != null) {
         print('[ChefNet] Cache timestamp: $cachedTimestamp');

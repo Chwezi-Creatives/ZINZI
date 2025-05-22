@@ -4,7 +4,7 @@ import 'package:zinzi2/onboard.dart';
 import 'package:zinzi2/signup_or_login.dart'; // Assuming this is your login/signup choice page
 import 'package:google_fonts/google_fonts.dart'; // For custom fonts
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/nutri_detail.dart';
+import 'package:zinzi2/nutri_detail.dart' as nutrition_details;
 import 'package:zinzi2/chef_net.dart';
 
 import 'package:zinzi2/chef_dash8888.dart';
@@ -185,7 +185,7 @@ class _SplashScreenState extends State<SplashScreen>
       }),
       MealDetailScreen.loadChefsCacheFromUserCache(),
       MealDetailScreen.loadProducersCacheFromUserCache(),
-      Nutri_DetailPage.preloadProducersCacheForSplash(),
+      nutrition_details.Nutri_DetailPage.preloadProducersCacheForSplash(),
       ChooseChefNetwork.preloadCacheForSplash(),
       NutritionPage.preloadCachesForSplash().catchError((e) {
         debugPrint('[SPLASH] Error preloading Nutrition+ data: $e');
