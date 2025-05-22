@@ -1,3 +1,4 @@
+//cspell:disable
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -979,6 +980,37 @@ class TransporterApiService {
     // final Uri uri = Uri.parse('$apibaseurl/rr/orders/$orderId/reject');
     // try { ... http.post/patch ... } catch { ... }
   }
+
+  // Fire-and-forget method to log meal calories upon order completion
+  static Future<void> logMealCaloriesAfterCompletion(int orderId) async {
+    if (orderId == 0) { // Basic validation for invalid orderId
+        print("Log Meal Calories: Invalid orderId (0), skipping log.");
+        return;
+    }
+    final Uri uri = Uri.parse('$apibaseurl/test/log-meal-calories/$orderId');
+    print("Attempting to log meal calories for order $orderId via POST to $uri");
+
+    try {
+      // Using _getWriteHeaders for consistency, assuming auth might be needed
+      // Sending an empty JSON object as body is common for POSTs if no other data is required.
+      final response = await http.post(
+        uri,
+        headers: _getWriteHeaders(requiresAuth: true), // Assuming this endpoint is also authenticated
+        body: jsonEncode({}), 
+      );
+
+      if (response.statusCode >= 200 && response.statusCode < 300) { // Broader success range
+        print("Successfully logged meal calories for order $orderId. Status: ${response.statusCode}");
+      } else {
+        print("Failed to log meal calories for order $orderId. Status: ${response.statusCode}, Body: ${response.body}");
+        // Further error handling or logging to a more persistent store could be added here if needed
+      }
+    } catch (e) {
+      print("Exception occurred while trying to log meal calories for order $orderId: $e");
+      // Handle exception (e.g., network error, DNS resolution failure etc.)
+    }
+  }
+
 } // End of TransporterApiService
 
 // ================================================
@@ -3647,6 +3679,14 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         _showSuccessSnackBar(isVerification
             ? 'Delivery verified and completed!'
             : 'Order status updated to $newStatus!');
+        
+        // <<< MODIFICATION: Call fire-and-forget method on successful completion >>>
+        if (newStatus == Order.STATUS_DELIVERED || newStatus == Order.STATUS_COMPLETED) {
+            // Call the fire-and-forget method without awaiting
+            TransporterApiService.logMealCaloriesAfterCompletion(_currentOrder.orderId);
+        }
+        // <<< END MODIFICATION >>>
+
         // Update local state and refresh the previous screen
         setState(() {
           // Create a new Order object with the updated status

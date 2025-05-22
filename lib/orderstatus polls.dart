@@ -19,9 +19,9 @@ import 'notifications/notification_provider.dart';
 // Add this to your main.dart or a separate routes.dart file
 class AppRouteObserver extends RouteObserver<PageRoute<dynamic>> {
   static final AppRouteObserver _instance = AppRouteObserver._internal();
-  
+
   factory AppRouteObserver() => _instance;
-  
+
   AppRouteObserver._internal();
 }
 
@@ -62,7 +62,8 @@ class OrderStatusScreen extends StatefulWidget {
   State<OrderStatusScreen> createState() => _OrderStatusScreenState();
 }
 
-class _OrderStatusScreenState extends State<OrderStatusScreen> with RouteAware, WidgetsBindingObserver, TickerProviderStateMixin {
+class _OrderStatusScreenState extends State<OrderStatusScreen>
+    with RouteAware, WidgetsBindingObserver, TickerProviderStateMixin {
   // Track if the route is currently visible
   bool _isRouteActive = false;
   // Controllers
@@ -91,23 +92,23 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> with RouteAware, 
   void initState() {
     super.initState();
     _log('initState called.');
-    
+
     // Initialize controllers
     _tabController = TabController(length: 4, vsync: this);
     _refreshIconController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 1),
     );
-    
+
     // Set up audio player
     _audioPlayer.setReleaseMode(ReleaseMode.release);
-    
+
     // Add lifecycle observer
     WidgetsBinding.instance.addObserver(this);
-    
+
     // Add lifecycle observer
     WidgetsBinding.instance.addObserver(this);
-    
+
     _log('API Base URL: $_apiBaseUrl');
     _log('Initial User ID: ${widget.userId}');
     _log('Initial Order ID List: ${widget.orderIdList}');
@@ -141,30 +142,30 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> with RouteAware, 
   @override
   void dispose() {
     _log('dispose() called.');
-    
+
     // Cancel any active polling
     _stopPolling();
-    
+
     // Cancel any pending callbacks
     _tabController.animation?.removeListener(() {});
-    
+
     // Dispose audio player
     try {
       _audioPlayer.dispose();
     } catch (e) {
       _log('Error disposing audio player: $e');
     }
-    
+
     // Remove route observer
     try {
       AppRouteObserver().unsubscribe(this);
     } catch (e) {
       _log('Error unsubscribing from route observer: $e');
     }
-    
+
     // Remove lifecycle observer
     WidgetsBinding.instance.removeObserver(this);
-    
+
     // Remove notification listener
     try {
       final notificationProvider = Provider.of<NotificationProvider>(
@@ -175,12 +176,12 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> with RouteAware, 
     } catch (e) {
       _log('Error removing notification listener: $e');
     }
-    
+
     // Dispose controllers
     _tabController.dispose();
     _refreshIconController.dispose();
     _scrollController.dispose();
-    
+
     _log('All resources disposed.');
     super.dispose();
   }
@@ -252,11 +253,12 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> with RouteAware, 
   // Check if all orders are in a terminal state
   bool _allOrdersInTerminalState() {
     if (_ordersMap.isEmpty) return false;
-    
+
     return _ordersMap.values.every((order) {
-      final status = order['order_status']?.toString().toLowerCase().trim() ?? '';
-      return _terminalStatuses.any((terminalStatus) => 
-          status == terminalStatus.toLowerCase().trim());
+      final status =
+          order['order_status']?.toString().toLowerCase().trim() ?? '';
+      return _terminalStatuses.any(
+          (terminalStatus) => status == terminalStatus.toLowerCase().trim());
     });
   }
 
@@ -269,62 +271,63 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> with RouteAware, 
 
   void _startPolling() {
     _log('Attempting to start polling...');
-    
+
     // Don't start polling if the route is not active
     if (!_isRouteActive) {
       _log('Not starting polling - route is not active.');
       return;
     }
-    
+
     // Don't start polling if all orders are in terminal state
     if (_allOrdersInTerminalState()) {
       _log('Not starting polling - all orders are in terminal state.');
       return;
     }
-    
+
     // If already polling, just return
     if (_pollingTimer != null && _pollingTimer!.isActive) {
       _log('Polling timer already active. Not starting a new one.');
       return;
     }
-    
+
     // Cancel any existing timer just in case
     _pollingTimer?.cancel();
 
     _pollingTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       _log(
           'Polling timer tick. mounted: $mounted, _isVerificationProcessActive: $_isVerificationProcessActive, _isRefreshing: $_isRefreshing');
-          
+
       // Check if widget is still mounted
       if (!mounted) {
         _log('Widget not mounted, cancelling timer.');
         timer.cancel();
         return;
       }
-      
+
       // Check if route is still active
       if (!_isRouteActive) {
         _log('Route is no longer active, stopping polling.');
         _stopPolling();
         return;
       }
-      
+
       // Check if all orders are in terminal state
       if (_allOrdersInTerminalState()) {
         _log('All orders in terminal state, stopping polling.');
         _stopPolling();
         return;
       }
-      
+
       // Check if we should skip this poll
       if (_isVerificationProcessActive || _isRefreshing) {
         String reason = '';
-        if (_isVerificationProcessActive) reason += 'Verification process active. ';
+        if (_isVerificationProcessActive)
+          reason += 'Verification process active. ';
         if (_isRefreshing) reason += 'A refresh is already in progress. ';
         _log('Polling: Skipped. Reason: ${reason.isEmpty ? "None" : reason}');
         return;
       }
-      
+
       // All checks passed, fetch orders
       _log('Polling: Conditions met, calling _fetchOrders.');
       _fetchOrders().then((_) {
@@ -333,7 +336,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> with RouteAware, 
         _log('Error during polling fetch: $error\n$stackTrace');
       });
     });
-    
+
     _log('Polling timer started with 10-second interval.');
   }
 
@@ -560,24 +563,25 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> with RouteAware, 
       _log('Widget not mounted, not updating polling state.');
       return;
     }
-    
+
     if (!_isRouteActive) {
       _log('Route is not active, not starting polling.');
       _stopPolling();
       return;
     }
-    
+
     if (_allOrdersInTerminalState()) {
       _log('All orders in terminal state, stopping polling.');
       _stopPolling();
     } else if (_pollingTimer == null || !_pollingTimer!.isActive) {
-      _log('Not all orders in terminal state and polling not active, starting polling.');
+      _log(
+          'Not all orders in terminal state and polling not active, starting polling.');
       _startPolling();
     } else {
       _log('Polling already active, no action needed.');
     }
   }
-  
+
   // Called when the current route has been pushed.
   @override
   void didPush() {
@@ -590,32 +594,32 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> with RouteAware, 
     _log('Route was popped next (user returned to this route)');
     _updateRouteStatus(true);
   }
-  
+
   @override
   void didPushNext() {
     _log('Route push next');
     _updateRouteStatus(false);
   }
-  
+
   @override
   void didPop() {
     _log('Route was popped');
     _updateRouteStatus(false);
   }
-  
+
   // Update route status and manage polling
   void _updateRouteStatus(bool isActive) {
     if (!mounted) {
       _log('Widget not mounted, skipping route status update');
       return;
     }
-    
+
     _log('Route active state changed to: $isActive');
-    
+
     setState(() {
       _isRouteActive = isActive;
     });
-    
+
     if (isActive) {
       // If route became active, check if we need to start polling
       _checkAndUpdatePolling();
@@ -626,16 +630,17 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> with RouteAware, 
       _stopPolling();
     }
   }
-  
+
   // Handle app lifecycle changes
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _log('App lifecycle state changed to: $state');
-    
+
     if (state == AppLifecycleState.resumed) {
       // App came back to the foreground
       if (_isRouteActive) {
-        _log('App resumed and route is active, checking if polling should resume');
+        _log(
+            'App resumed and route is active, checking if polling should resume');
         _checkAndUpdatePolling();
         // Do an immediate fetch to get fresh data
         _fetchOrders();
@@ -820,7 +825,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> with RouteAware, 
           if (widget.orderIdList.isEmpty && _isLoading) {
             _isLoading = false; // Ensure isLoading is false if list was empty
           }
-          
+
           // Update polling state based on current order statuses
           _checkAndUpdatePolling();
         });
@@ -1658,7 +1663,9 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> with RouteAware, 
       case 'preparing':
       case 'ready_for_pickup':
       case 'shipped':
-      case 'accepted':
+      case 'assigned':
+      case 'picked up':
+      case 'picked_up':
       case 'on the way':
       case 'on_the_way':
       case 'verification needed': // Rider is likely on the way or has arrived

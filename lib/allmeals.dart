@@ -10,13 +10,13 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:shimmer/shimmer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/cart.dart'as cart;
+import 'package:zinzi2/cart.dart' as cart;
 
 import 'package:zinzi2/app_drawer_unified.dart';
 import 'package:zinzi2/meal_detail.dart' as meal_detail;
 import 'package:zinzi2/user_cache.dart';
 import 'package:zinzi2/utils/image_utils.dart';
- // Import CacheConfig
+// Import CacheConfig
 
 // --- Re-add Color Constants (or import from a shared file) ---
 const Color kColorPrimaryDark = Color(0xFF004D40);
@@ -48,7 +48,7 @@ class AllMealsScreen extends StatefulWidget {
   // Public static cache loader for splash screen
   static Future<void> loadMealsCacheFromPrefs() =>
       _AllMealsScreenState.loadMealsCacheFromPrefs();
-      
+
   /// Preload meals data if cache is invalid
   /// Returns true if new data was loaded, false if using cache
   static Future<bool> preloadMealsIfNeeded() =>
@@ -58,7 +58,8 @@ class AllMealsScreen extends StatefulWidget {
   _AllMealsScreenState createState() => _AllMealsScreenState();
 }
 
-class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProviderStateMixin {
+class _AllMealsScreenState extends State<AllMealsScreen>
+    with SingleTickerProviderStateMixin {
   // --- Caching ---
   static List<Map<String, dynamic>> _mealsCache = [];
   static DateTime? _mealsCacheTimestamp;
@@ -91,42 +92,40 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
   static bool get isCacheInvalid {
     if (_mealsCache.isEmpty) return true;
     if (_mealsCacheTimestamp == null) return true;
-    
+
     // Consider cache invalid if older than 1 hour
     final cacheAge = DateTime.now().difference(_mealsCacheTimestamp!);
     return cacheAge.inHours >= 1;
   }
-  
+
   /// Preload meals data if cache is invalid
   /// Returns true if new data was loaded, false if using cache
   static Future<bool> preloadMealsIfNeeded() async {
     try {
       // First try to load existing cache
       final hasCache = await loadMealsCacheFromPrefs();
-      
+
       // If cache is valid, no need to refresh
       if (hasCache && !isCacheInvalid) {
         print('[AllMeals] Using valid cache');
         return false;
       }
-      
+
       print('[AllMeals] Cache invalid or empty, fetching fresh data...');
-      
+
       // Fetch fresh data
       final instance = _AllMealsScreenState();
       final meals = await instance._fetchMeals();
-      
+
       // Update cache
       _mealsCache = List<Map<String, dynamic>>.from(meals);
       _mealsCacheTimestamp = DateTime.now();
-      
+
       // Save to persistent storage
       await UserCache.saveData(_mealsCacheKey, _mealsCache);
       await UserCache.saveData(
-        _mealsCacheTimestampKey, 
-        _mealsCacheTimestamp!.toIso8601String()
-      );
-      
+          _mealsCacheTimestampKey, _mealsCacheTimestamp!.toIso8601String());
+
       print('[AllMeals] Successfully preloaded ${meals.length} meals');
       return true;
     } catch (e) {
@@ -134,8 +133,6 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
       return false; // Return false to indicate we're using existing cache
     }
   }
-
-
 
   final TextEditingController _searchController = TextEditingController();
   Timer? _debounce;
@@ -155,8 +152,10 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
 
   late final AnimationController _refreshIconController;
   final ScrollController _scrollController = ScrollController();
-  final int _preloadThreshold = 15; // Number of items before the end to start preloading
-  bool _isPreloadingEnabled = true; // Always enable preloading regardless of connection type
+  final int _preloadThreshold =
+      25; // Number of items before the end to start preloading
+  bool _isPreloadingEnabled =
+      true; // Always enable preloading regardless of connection type
 
   @override
   void initState() {
@@ -165,12 +164,12 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
       vsync: this,
       duration: const Duration(seconds: 1),
     );
-    
+
     // Initialize scroll controller and add listener
     _scrollController.addListener(_onScroll);
-    
+
     // Preloading is always enabled now
-    
+
     // Load persistent cache first (async)
     _initialFetchFuture = (() async {
       await AllMealsScreen.loadMealsCacheFromPrefs();
@@ -183,16 +182,17 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
         _filterMeals('');
         if (mounted) {
           setState(() {
-            _isLoadingMeals = false; // Assume not loading initially if cache is present
+            _isLoadingMeals =
+                false; // Assume not loading initially if cache is present
           });
         }
       } else {
-         // If no cache, show loading shimmer initially
-         if (mounted) {
-            setState(() {
-              _isLoadingMeals = true;
-            });
-         }
+        // If no cache, show loading shimmer initially
+        if (mounted) {
+          setState(() {
+            _isLoadingMeals = true;
+          });
+        }
       }
 
       // Always fetch new data in the background
@@ -202,39 +202,39 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
       _searchController.addListener(_onSearchChanged);
       _fetchUserDetails();
     })();
-    
+
     // No longer need to listen to connectivity changes
   }
 
   /// Force refresh meals data, invalidating cache
   Future<void> _forceRefreshMeals() async {
     if (_isLoadingMeals) return; // Prevent multiple simultaneous refreshes
-    
+
     setState(() {
       _isLoadingMeals = true;
       _fetchError = '';
     });
     _startRefreshAnimation();
-    
+
     try {
       final meals = await _fetchMeals();
-      
+
       if (mounted) {
         // Update cache and UI
         _allMeals = meals;
-        _AllMealsScreenState._mealsCache = List<Map<String, dynamic>>.from(meals);
+        _AllMealsScreenState._mealsCache =
+            List<Map<String, dynamic>>.from(meals);
         _AllMealsScreenState._mealsCacheTimestamp = DateTime.now();
-        
+
         // Persist updated cache
-        await UserCache.saveData(_mealsCacheKey, _AllMealsScreenState._mealsCache);
         await UserCache.saveData(
-          _mealsCacheTimestampKey, 
-          _AllMealsScreenState._mealsCacheTimestamp!.toIso8601String()
-        );
-        
+            _mealsCacheKey, _AllMealsScreenState._mealsCache);
+        await UserCache.saveData(_mealsCacheTimestampKey,
+            _AllMealsScreenState._mealsCacheTimestamp!.toIso8601String());
+
         _buildMealLookupMap();
         _filterMeals(_searchController.text); // Re-apply current search filter
-        
+
         setState(() {
           _isLoadingMeals = false;
         });
@@ -260,30 +260,30 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
 
   Future<void> _fetchMealsAndPreprocess() async {
     if (_isLoadingMeals) return; // Prevent multiple simultaneous fetches
-    
+
     // Only show loading indicator if we don't have cached data
     if (_allMeals.isEmpty) {
       setState(() {
         _isLoadingMeals = true;
       });
     }
-    
+
     _fetchError = ''; // Reset error on new fetch
-    
+
     try {
       final meals = await _fetchMeals();
       if (mounted) {
         // Check if widget is still mounted
         _allMeals = meals;
-        _AllMealsScreenState._mealsCache = List<Map<String, dynamic>>.from(meals);
+        _AllMealsScreenState._mealsCache =
+            List<Map<String, dynamic>>.from(meals);
         _AllMealsScreenState._mealsCacheTimestamp = DateTime.now();
-        
+
         // Persist cache using UserCache
-        await UserCache.saveData(_mealsCacheKey, _AllMealsScreenState._mealsCache);
         await UserCache.saveData(
-          _mealsCacheTimestampKey, 
-          _mealsCacheTimestamp!.toIso8601String()
-        );
+            _mealsCacheKey, _AllMealsScreenState._mealsCache);
+        await UserCache.saveData(
+            _mealsCacheTimestampKey, _mealsCacheTimestamp!.toIso8601String());
 
         _buildMealLookupMap();
         _filterMeals(_searchController.text); // Re-apply current search filter
@@ -297,11 +297,11 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
         print('Error fetching new meals in background: $e');
         // If there was no cached data, show the error state.
         if (_allMeals.isEmpty) {
-           setState(() {
-             _isLoadingMeals = false;
-             _fetchError = "Failed to load meals. Please try again.";
-             _filteredMealsNotifier.value = []; // Clear meals on error
-           });
+          setState(() {
+            _isLoadingMeals = false;
+            _fetchError = "Failed to load meals. Please try again.";
+            _filteredMealsNotifier.value = []; // Clear meals on error
+          });
         }
         // If cached data is present, just log the error and keep showing cached data.
       }
@@ -456,22 +456,20 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
     // Filtering is handled by the listener reacting to the empty text
   }
 
-
-
   // Removed connection type checking as preloading is now always enabled
 
   void _onScroll() {
     if (!_isPreloadingEnabled || _allMeals.isEmpty) return;
-    
+
     // Check if we're near the bottom of the list
     if (!_scrollController.hasClients) return;
-    
+
     final threshold = 0.7; // Start preloading when 80% scrolled
     final maxScroll = _scrollController.position.maxScrollExtent;
     final currentScroll = _scrollController.position.pixels;
-    
+
     if (maxScroll == 0.0) return; // List not yet laid out
-    
+
     if (currentScroll >= (maxScroll * threshold)) {
       _preloadImages();
     }
@@ -479,38 +477,38 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
 
   void _preloadImages() async {
     if (_allMeals.isEmpty || !_isPreloadingEnabled) return;
-    
+
     final firstVisibleIndex = (_scrollController.position.pixels / 200).floor();
-    final lastVisibleIndex = ((_scrollController.position.pixels + 
-        MediaQuery.of(context).size.height) / 200).ceil();
-    
+    final lastVisibleIndex = ((_scrollController.position.pixels +
+                MediaQuery.of(context).size.height) /
+            200)
+        .ceil();
+
     // Preload images for items slightly beyond the visible area
     final preloadStart = firstVisibleIndex.clamp(0, _allMeals.length - 1);
-    final preloadEnd = (lastVisibleIndex + _preloadThreshold)
-        .clamp(0, _allMeals.length - 1);
-    
+    final preloadEnd =
+        (lastVisibleIndex + _preloadThreshold).clamp(0, _allMeals.length - 1);
+
     for (int i = preloadStart; i <= preloadEnd; i++) {
       if (i >= 0 && i < _allMeals.length) {
         final meal = _allMeals[i];
         final imageUrl = _processImagePath(
-          meal['Image_link'] ?? '', 
-          meal['Meal_name'] ?? ''
-        );
-        
+            meal['Image_link'] ?? '', meal['Meal_name'] ?? '');
+
         if (imageUrl.startsWith('http')) {
           try {
             // Preload the image into cache silently
             cn.CachedNetworkImageProvider(imageUrl)
-              .resolve(ImageConfiguration())
-              .addListener(
-                ImageStreamListener(
-                  (_, __) {},
-                  onError: (dynamic error, StackTrace? stackTrace) {
-                    // Silently handle errors during preloading
-                    debugPrint('Error preloading image: $error');
-                  },
-                ),
-              );
+                .resolve(ImageConfiguration())
+                .addListener(
+                  ImageStreamListener(
+                    (_, __) {},
+                    onError: (dynamic error, StackTrace? stackTrace) {
+                      // Silently handle errors during preloading
+                      debugPrint('Error preloading image: $error');
+                    },
+                  ),
+                );
           } catch (e) {
             debugPrint('Error setting up image preload: $e');
           }
@@ -563,7 +561,9 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
             builder: (context, child) {
               return IconButton(
                 icon: Transform.rotate(
-                  angle: _isLoadingMeals ? _refreshIconController.value * 6.3 : 0, // 2pi radians
+                  angle: _isLoadingMeals
+                      ? _refreshIconController.value * 6.3
+                      : 0, // 2pi radians
                   child: const Icon(Icons.refresh),
                 ),
                 tooltip: _isLoadingMeals ? 'Refreshing...' : 'Refresh',
@@ -772,7 +772,7 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
         _preloadImages();
       }
     });
-    
+
     return GridView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.all(8),
