@@ -1448,23 +1448,6 @@ class ChefDetailScreen extends StatelessWidget {
                           1.0
                         ]))),
                     // Chef Name at Bottom
-                    Positioned(
-                        bottom: 20,
-                        left: 20,
-                        right: 20,
-                        child: Text(chefName,
-                            style: GoogleFonts.poppins(
-                                fontSize: 28,
-                                fontWeight: FontWeight.bold,
-                                color: kColorTextOnPrimary,
-                                shadows: [
-                                  Shadow(
-                                      color: Colors.black.withOpacity(0.5),
-                                      blurRadius: 4,
-                                      offset: const Offset(0, 2))
-                                ]),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis))
                   ])),
               stretchModes: const [
                 StretchMode.zoomBackground,
@@ -1483,7 +1466,30 @@ class ChefDetailScreen extends StatelessWidget {
                   serviceRadius != null ||
                   responseTime != null ||
                   minNotice != null) ...[
-                _buildSectionHeader('At a Glance', icon: Icons.bolt_outlined),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    _buildSectionHeader('At a Glance', icon: Icons.bolt_outlined),
+                    Expanded( // Use Expanded to allow the text to take available space
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 16.0), // Add some spacing
+                        child: Text(
+                          chefName,
+                          textAlign: TextAlign.end, // Align text to the end
+                          style: GoogleFonts.poppins(
+                            fontSize: 18, // Adjust font size as needed
+                            fontWeight: FontWeight.w600,
+                            color: kColorPrimaryDark, // Use teal color
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16), // Add spacing below the header row
                 GridView.count(
                     crossAxisCount: 2,
                     shrinkWrap: true,
