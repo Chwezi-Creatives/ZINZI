@@ -276,7 +276,7 @@ def deserialize_list_from_json_string(json_string):
 
 # --- Consolidated BaseRepository (Takes connection as argument) ---
 class BaseRepository:
-    # REMOVED DB Connection initialization here
+    # REMOVED DB Connection initialization her
     # Methods now take 'conn' as the first argument
 
     async def _execute_query(self, conn: asyncpg.Connection, sql: str, params: Optional[tuple] = None, fetch_one: bool = False, fetch_val=False, fetch_all: bool = False, returning_id_column: Optional[str] = None) -> Any:
