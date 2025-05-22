@@ -16,6 +16,7 @@ import 'package:zinzi2/meal_detail.dart';
 import 'package:zinzi2/cache_config.dart'; // Import CacheConfig
 import 'package:zinzi2/user_cache.dart'; // Import UserCache
 import 'package:zinzi2/orderhistory.dart'; // Import OrderHistoryScreen for preloading
+import 'package:zinzi2/nutrition+.dart'; // Import NutritionPage for preloading
 
 // --- Hardcoded Color Scheme (Shades of Teal and White/Off-White) ---
 const Color kColorPrimaryDark = Color(0xFF004D40); // Darkest Teal
@@ -168,16 +169,30 @@ class _SplashScreenState extends State<SplashScreen>
       nextScreen = SignUpOrLoginPage();
     }
 
-    // Parallelized preload/caching logic for fastest splash
-    final preloadFutures = [
+      // Parallelized preload/caching logic for fastest splash
+    final preloadFutures = <Future>[
       OrderHistoryScreen.preloadCacheForSplash(),
       ProducerDash22.preloadCacheForSplash(),
-      AllMealsScreen.loadMealsCacheFromPrefs(),
+      // Preload meals data if cache is invalid
+      AllMealsScreen.preloadMealsIfNeeded().then((refreshed) {
+        if (refreshed) {
+          debugPrint('[SPLASH] Successfully refreshed meals cache');
+        } else {
+          debugPrint('[SPLASH] Using existing meals cache');
+        }
+      }).catchError((e) {
+        debugPrint('[SPLASH] Error preloading meals: $e');
+      }),
       MealDetailScreen.loadChefsCacheFromUserCache(),
       MealDetailScreen.loadProducersCacheFromUserCache(),
       Nutri_DetailPage.preloadProducersCacheForSplash(),
       ChooseChefNetwork.preloadCacheForSplash(),
+      NutritionPage.preloadCachesForSplash().catchError((e) {
+        debugPrint('[SPLASH] Error preloading Nutrition+ data: $e');
+      }),
     ];
+    
+    // Add transporter-specific preloading if needed
     if (userType == 'transporter' && userId != null) {
       preloadFutures.add(TransporterDashNew.preloadCacheForSplash(userId.toString()));
     }

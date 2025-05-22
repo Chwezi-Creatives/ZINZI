@@ -1,31 +1,55 @@
-import 'dart:io';
+//cspell:disable
+// Remove the old problematic import:
+// import 'dart:io' if (dart.library.js) 'dart:html' as io; NO!
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
+import 'package:zinzi2/splash.dart';
 import 'notifications/notification_provider.dart';
-import 'notifications/fcm_service.dart';
+// Conditionally import the appropriate FCM service implementation
+import 'notifications/fcm_service.dart'
+    if (dart.library.js) 'notifications/fcm_service_web.dart' as fcm;
 import 'notifications/notification_badge.dart';
 import 'app_drawer_unified.dart';
-import 'http_overrides.dart';
-import 'splash.dart';
+import 'platform_info.dart'; // For OS check
+import 'package:zinzi2/services/performance_service.dart';
 
 void main() async {
+  // Start performance monitoring
+  PerformanceService.startTimer();
+
   WidgetsFlutterBinding.ensureInitialized();
-  print("Initializing WidgetsBinding");
 
-  await dotenv.load(fileName: ".env");
-  print(".env file loaded");
+  // Initialize performance service
+  await PerformanceService.initialize();
 
-  final certBytes = await rootBundle.load('assets/images/selfsigned.crt');
-  print("Certificate loaded");
+  // Load environment variables in parallel with other initializations
+  final envLoad = dotenv.load(fileName: ".env");
 
-  final cert = certBytes.buffer.asUint8List();
-  HttpOverrides.global = MyHttpOverrides(cert);
-  print("HTTP Overrides set");
+  // Initialize Firebase and FCM in parallel
+  final firebaseInit = _initializeFirebase();
+  final fcmInit = _initializeFCM();
+  final drawerInit = _initializeDrawer();
 
+  // Wait for all async operations to complete
+  await Future.wait([
+    envLoad,
+    firebaseInit,
+    fcmInit,
+    drawerInit,
+  ]);
+
+  // End performance monitoring
+  PerformanceService.endTimer();
+
+  runApp(const MyApp());
+}
+
+// Initialize Firebase in the background
+Future<void> _initializeFirebase() async {
   try {
     if (kIsWeb) {
       await Firebase.initializeApp(
@@ -42,34 +66,42 @@ void main() async {
       print("Firebase initialized (web)");
     } else {
       await Firebase.initializeApp();
-      print("Firebase initialized (mobile)");
-    }
-
-    // Request notification permissions for web and iOS
-    if (kIsWeb) {
-      await FCMService.initialize();
-      print("FCMService initialized (web)");
-    } else if (Platform.isIOS) {
-      await FCMService.initialize();
-      print("FCMService initialized (iOS)");
-    } else {
-      await FCMService.initialize();
-      print("FCMService initialized (Android)");
+      print("Firebase initialized (mobile/desktop)");
     }
   } catch (e) {
-    print("Error initializing Firebase/FCM: $e");
+    print("Error initializing Firebase: $e");
   }
+}
 
-  // Initialize drawer data
+// Initialize FCM in the background
+Future<void> _initializeFCM() async {
+  try {
+    await fcm.FCMService.initialize();
+    if (kIsWeb) {
+      print("FCMService initialized (web)");
+    } else {
+      final os = getOperatingSystem();
+      if (isIOS()) {
+        print("FCMService initialized (iOS)");
+      } else if (isAndroid()) {
+        print("FCMService initialized (Android)");
+      } else {
+        print("FCMService initialized (other non-web OS: $os)");
+      }
+    }
+  } catch (e) {
+    print("Error initializing FCM: $e");
+  }
+}
+
+// Initialize drawer data in the background
+Future<void> _initializeDrawer() async {
   try {
     await AppDrawer.initializeUserData();
     print("Drawer data initialized");
   } catch (e) {
     print("Error initializing drawer data: $e");
   }
-
-  runApp(MyApp());
-  print("App started");
 }
 
 class MyApp extends StatelessWidget {

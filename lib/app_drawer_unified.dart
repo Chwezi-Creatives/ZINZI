@@ -143,6 +143,12 @@ class _AppDrawerState extends State<AppDrawer> {
     _profileImagePath = prefs.getString('profile_image_path');
     // Fix: Accept user_id as int or parse from String
     _userId = prefs.getInt('user_id');
+if (_userId == null) {
+  final userIdStr = prefs.getString('user_id');
+  if (userIdStr != null) {
+    _userId = int.tryParse(userIdStr);
+  }
+}
     if (_userId == null) {
       final userIdStr = prefs.getString('user_id');
       if (userIdStr != null) {

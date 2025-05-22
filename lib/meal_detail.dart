@@ -17,6 +17,7 @@ import 'package:google_fonts/google_fonts.dart'; // For consistent font
 
 import 'package:zinzi2/user_cache.dart'; // Import UserCache
 import 'package:zinzi2/cache_config.dart'; // Import CacheConfig
+import 'package:zinzi2/utils/image_utils.dart'; // Import ImageUtils
 import 'package:intl/intl.dart';
 
 // Assuming dotenv is initialized elsewhere in your main.dart or similar
@@ -966,53 +967,18 @@ class _MealDetailScreenState extends State<MealDetailScreen>
     return location.substring(0, 30) + '...';
   }
 
- String _formatImageUrl(String? imageUrl) {
-     imageUrl ??= 'assets/images/cover.png'; // Default if null
+  String _formatImageUrl(String? imageUrl) {
+    if (imageUrl == null || imageUrl.isEmpty) {
+      return 'assets/images/cover.png'; // Default if null or empty
+    }
+    
+    // Handle local assets
     if (imageUrl.startsWith('assets/')) {
-      return imageUrl; // Assume local asset path is correct
+      return imageUrl;
     }
-     // Handle potential base URL issues if API returns relative paths
-     if (!imageUrl.startsWith('http') && !imageUrl.startsWith('assets/')) {
-         if(imageUrl.isNotEmpty) {
-             // Attempt to prepend the base URL if it looks like a relative path
-              print("Warning: Image URL might be relative or invalid: $imageUrl");
-             // If you know the base URL part for images, uncomment and adjust below
-             // try {
-             //   Uri baseUrl = Uri.parse(apibaseurl);
-             //   // Construct the full URL carefully
-             //   String imagePath = imageUrl.startsWith('/') ? imageUrl.substring(1) : imageUrl;
-             //   Uri fullUri = baseUrl.resolve(imagePath);
-             //   print("Attempting formatted URL: ${fullUri.toString()}");
-             //   return fullUri.toString();
-             // } catch (e) {
-             //    print("Error parsing/resolving URL: $e");
-             //    return 'assets/images/cover.png'; // Fallback on error
-             // }
-              return 'assets/images/cover.png'; // Fallback for now
-         } else {
-              return 'assets/images/cover.png'; // Default for empty string
-         }
-     }
-
-    if (imageUrl.contains('drive.google.com/uc?export=view&id=')) {
-      return imageUrl; // Already formatted
-    } else if (imageUrl.contains('drive.google.com') &&
-        imageUrl.contains('/d/')) {
-      final parts = imageUrl.split('/d/');
-      if (parts.length > 1) {
-        final idPart = parts[1].split('/')[0];
-        // Ensure HTTPS
-        if (idPart.isNotEmpty) {
-          return 'https://drive.google.com/uc?export=view&id=$idPart';
-        }
-      }
-    }
-    // Ensure HTTPS for regular URLs
-    if (imageUrl.startsWith('http://')) {
-       return 'https://${imageUrl.substring(7)}';
-    }
-
-    return imageUrl; // Return if already HTTPS or other valid format
+    
+    // Use the centralized ImageUtils to process the URL
+    return ImageUtils.processImageUrl(imageUrl);
   }
 
   // --- Build Methods ---

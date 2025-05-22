@@ -1,22 +1,23 @@
 // cspell:disable
-import 'dart:async';
 import 'dart:convert';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:cached_network_image/cached_network_image.dart' as cn;
+import 'dart:async'; // For Timer
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
-import 'package:shimmer/shimmer.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/cart.dart'as cart;
-
-import 'package:zinzi2/app_drawer_unified.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:zinzi2/meal_detail.dart' as meal_detail;
+import 'package:zinzi2/cart.dart' as cart;
+
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:shimmer/shimmer.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:zinzi2/app_drawer_unified.dart';
 import 'package:zinzi2/user_cache.dart';
 import 'package:zinzi2/utils/image_utils.dart';
- // Import CacheConfig
+// Import CacheConfig
 
 // --- Re-add Color Constants (or import from a shared file) ---
 const Color kColorPrimaryDark = Color(0xFF004D40);
@@ -42,100 +43,54 @@ final apiBaseUrl = dotenv.env['API_BASE_URL'] ??
     dotenv.env['API_BASE_URL-intranet'] ??
     'https://default.url';
 
-class AllMealsScreen extends StatefulWidget {
-  const AllMealsScreen({super.key}); // Use super parameters
+class OnlymealsScreen extends StatefulWidget {
+  const OnlymealsScreen({super.key}); // Use super parameters
 
   // Public static cache loader for splash screen
   static Future<void> loadMealsCacheFromPrefs() =>
-      _AllMealsScreenState.loadMealsCacheFromPrefs();
-      
-  /// Preload meals data if cache is invalid
-  /// Returns true if new data was loaded, false if using cache
-  static Future<bool> preloadMealsIfNeeded() =>
-      _AllMealsScreenState.preloadMealsIfNeeded();
+      _OnlymealsScreenState.loadMealsCacheFromPrefs();
 
   @override
-  _AllMealsScreenState createState() => _AllMealsScreenState();
+  _OnlymealsScreenState createState() => _OnlymealsScreenState();
 }
 
-class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProviderStateMixin {
+class _OnlymealsScreenState extends State<OnlymealsScreen>
+    with SingleTickerProviderStateMixin {
   // --- Caching ---
+  List<Map<String, dynamic>> _meals = [];
   static List<Map<String, dynamic>> _mealsCache = [];
   static DateTime? _mealsCacheTimestamp;
 
-  static const String _mealsCacheKey = 'all_meals_cache';
-  static const String _mealsCacheTimestampKey = 'all_meals_cache_timestamp';
+  static const String _mealsCacheKey = 'only_meals_cache';
+  static const String _mealsCacheTimestampKey = 'only_meals_cache_timestamp';
 
-  /// Load cache from SharedPreferences (persistent storage)
-  /// Returns true if cache was loaded successfully
-  static Future<bool> loadMealsCacheFromPrefs() async {
-    try {
-      final cachedData = await UserCache.getData(_mealsCacheKey);
-      final timestampData = await UserCache.getData(_mealsCacheTimestampKey);
+  // Load cache from SharedPreferences (persistent storage)
+  static Future<void> loadMealsCacheFromPrefs() async {
+    final cachedData = await UserCache.getData(_mealsCacheKey);
+    final timestampData = await UserCache.getData(_mealsCacheTimestampKey);
 
-      if (cachedData != null && timestampData != null) {
+    if (cachedData != null && timestampData != null) {
+      try {
+        print('[Onlymeals] Cache hit: Loaded meals from cache');
         _mealsCache = List<Map<String, dynamic>>.from(cachedData);
         _mealsCacheTimestamp = DateTime.parse(timestampData);
-        print('[AllMeals] Cache loaded with ${_mealsCache.length} items');
-        return _mealsCache.isNotEmpty;
+      } catch (_) {
+        _mealsCache = [];
+        _mealsCacheTimestamp = null;
       }
-    } catch (e) {
-      print('[AllMeals] Error loading cache: $e');
-    }
-    _mealsCache = [];
-    _mealsCacheTimestamp = null;
-    return false;
-  }
-
-  /// Check if the cache is invalid (either empty or too old)
-  static bool get isCacheInvalid {
-    if (_mealsCache.isEmpty) return true;
-    if (_mealsCacheTimestamp == null) return true;
-    
-    // Consider cache invalid if older than 1 hour
-    final cacheAge = DateTime.now().difference(_mealsCacheTimestamp!);
-    return cacheAge.inHours >= 1;
-  }
-  
-  /// Preload meals data if cache is invalid
-  /// Returns true if new data was loaded, false if using cache
-  static Future<bool> preloadMealsIfNeeded() async {
-    try {
-      // First try to load existing cache
-      final hasCache = await loadMealsCacheFromPrefs();
-      
-      // If cache is valid, no need to refresh
-      if (hasCache && !isCacheInvalid) {
-        print('[AllMeals] Using valid cache');
-        return false;
-      }
-      
-      print('[AllMeals] Cache invalid or empty, fetching fresh data...');
-      
-      // Fetch fresh data
-      final instance = _AllMealsScreenState();
-      final meals = await instance._fetchMeals();
-      
-      // Update cache
-      _mealsCache = List<Map<String, dynamic>>.from(meals);
-      _mealsCacheTimestamp = DateTime.now();
-      
-      // Save to persistent storage
-      await UserCache.saveData(_mealsCacheKey, _mealsCache);
-      await UserCache.saveData(
-        _mealsCacheTimestampKey, 
-        _mealsCacheTimestamp!.toIso8601String()
-      );
-      
-      print('[AllMeals] Successfully preloaded ${meals.length} meals');
-      return true;
-    } catch (e) {
-      print('[AllMeals] Error preloading meals: $e');
-      return false; // Return false to indicate we're using existing cache
+    } else {
+      _mealsCache = [];
+      _mealsCacheTimestamp = null;
     }
   }
 
-
+  // Save cache to SharedPreferences
+  static Future<void> saveMealsCacheToPrefs(
+      List<Map<String, dynamic>> meals) async {
+    await UserCache.saveData(_mealsCacheKey, meals);
+    await UserCache.saveData(
+        _mealsCacheTimestampKey, DateTime.now().toIso8601String());
+  }
 
   final TextEditingController _searchController = TextEditingController();
   Timer? _debounce;
@@ -143,20 +98,21 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
   final ValueNotifier<List<Map<String, dynamic>>> _filteredMealsNotifier =
       ValueNotifier([]);
   // Store all meals and lookup map internally
-  List<Map<String, dynamic>> _allMeals = [];
+  List<Map<String, dynamic>> _Onlymeals = [];
   Map<String, Map<String, dynamic>> _mealMapByName = {};
   // Separate future for initial fetch state
-  Future<void>? _initialFetchFuture; // Changed to Future<void>
-
+  Future<void>? _initialFetchFuture;
+  
+  // For thinking animation
+  final ValueNotifier<bool> _showThinking = ValueNotifier<bool>(false);
+  Timer? _thinkingTimer;
+  
   Map<String, dynamic> _userDetails = {};
   bool _isLoadingUserDetails = true;
   bool _isLoadingMeals = true; // Track meal loading state separately
   String _fetchError = ''; // Store fetch error message
 
   late final AnimationController _refreshIconController;
-  final ScrollController _scrollController = ScrollController();
-  final int _preloadThreshold = 15; // Number of items before the end to start preloading
-  bool _isPreloadingEnabled = true; // Always enable preloading regardless of connection type
 
   @override
   void initState() {
@@ -166,181 +122,170 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
       duration: const Duration(seconds: 1),
     );
     
-    // Initialize scroll controller and add listener
-    _scrollController.addListener(_onScroll);
-    
-    // Preloading is always enabled now
-    
-    // Load persistent cache first (async)
-    _initialFetchFuture = (() async {
-      await AllMealsScreen.loadMealsCacheFromPrefs();
+    _showThinking.value = false; // Initialize thinking state
 
-      // Always display cached data immediately if available
-      if (_AllMealsScreenState._mealsCache.isNotEmpty) {
-        _allMeals =
-            List<Map<String, dynamic>>.from(_AllMealsScreenState._mealsCache);
-        _buildMealLookupMap();
-        _filterMeals('');
-        if (mounted) {
-          setState(() {
-            _isLoadingMeals = false; // Assume not loading initially if cache is present
-          });
-        }
-      } else {
-         // If no cache, show loading shimmer initially
-         if (mounted) {
-            setState(() {
-              _isLoadingMeals = true;
-            });
-         }
-      }
-
-      // Always fetch new data in the background
-      // We don't await this fetch here so the UI can show cached data immediately
-      _fetchMealsAndPreprocess();
-
-      _searchController.addListener(_onSearchChanged);
-      _fetchUserDetails();
-    })();
-    
-    // No longer need to listen to connectivity changes
-  }
-
-  /// Force refresh meals data, invalidating cache
-  Future<void> _forceRefreshMeals() async {
-    if (_isLoadingMeals) return; // Prevent multiple simultaneous refreshes
-    
-    setState(() {
-      _isLoadingMeals = true;
-      _fetchError = '';
-    });
-    _startRefreshAnimation();
-    
-    try {
-      final meals = await _fetchMeals();
-      
-      if (mounted) {
-        // Update cache and UI
-        _allMeals = meals;
-        _AllMealsScreenState._mealsCache = List<Map<String, dynamic>>.from(meals);
-        _AllMealsScreenState._mealsCacheTimestamp = DateTime.now();
-        
-        // Persist updated cache
-        await UserCache.saveData(_mealsCacheKey, _AllMealsScreenState._mealsCache);
-        await UserCache.saveData(
-          _mealsCacheTimestampKey, 
-          _AllMealsScreenState._mealsCacheTimestamp!.toIso8601String()
-        );
-        
-        _buildMealLookupMap();
-        _filterMeals(_searchController.text); // Re-apply current search filter
-        
-        setState(() {
-          _isLoadingMeals = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        print('Error during force refresh: $e');
-        setState(() {
-          _isLoadingMeals = false;
-          _fetchError = 'Failed to refresh. Please try again.';
-        });
-        // Keep showing the existing data if available
-        if (_allMeals.isEmpty) {
-          _filteredMealsNotifier.value = [];
-        }
-      }
-    } finally {
-      if (mounted) {
-        _stopRefreshAnimation();
-      }
-    }
-  }
-
-  Future<void> _fetchMealsAndPreprocess() async {
-    if (_isLoadingMeals) return; // Prevent multiple simultaneous fetches
-    
-    // Only show loading indicator if we don't have cached data
-    if (_allMeals.isEmpty) {
+    // Set loading state immediately
+    if (mounted) {
       setState(() {
         _isLoadingMeals = true;
       });
     }
-    
-    _fetchError = ''; // Reset error on new fetch
-    
-    try {
-      final meals = await _fetchMeals();
+
+    // Start fresh data fetch
+    _initialFetchFuture = (() async {
+      // Start loading fresh data immediately
+      await _fetchMealsAndPreprocess();
+      
+      // Set up search listener
+      _searchController.addListener(_onSearchChanged);
+      
+      // Fetch user details in parallel
+      _fetchUserDetails();
+    })();
+  }
+
+  Future<void> _fetchMealsAndPreprocess() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.get('user_id'); // Get user_id, can be int or String
+
+    if (userId == null) {
       if (mounted) {
-        // Check if widget is still mounted
-        _allMeals = meals;
-        _AllMealsScreenState._mealsCache = List<Map<String, dynamic>>.from(meals);
-        _AllMealsScreenState._mealsCacheTimestamp = DateTime.now();
-        
-        // Persist cache using UserCache
-        await UserCache.saveData(_mealsCacheKey, _AllMealsScreenState._mealsCache);
-        await UserCache.saveData(
-          _mealsCacheTimestampKey, 
-          _mealsCacheTimestamp!.toIso8601String()
-        );
-
-        _buildMealLookupMap();
-        _filterMeals(_searchController.text); // Re-apply current search filter
-
         setState(() {
           _isLoadingMeals = false;
+          _fetchError = "User not logged in. Cannot fetch personalized meals.";
+          _filteredMealsNotifier.value = [];
         });
       }
-    } catch (e) {
-      if (mounted) {
-        print('Error fetching new meals in background: $e');
-        // If there was no cached data, show the error state.
-        if (_allMeals.isEmpty) {
-           setState(() {
-             _isLoadingMeals = false;
-             _fetchError = "Failed to load meals. Please try again.";
-             _filteredMealsNotifier.value = []; // Clear meals on error
-           });
+      print("User ID not found in SharedPreferences.");
+      return; // Exit if no user ID
+    }
+
+    int userIdInt;
+    if (userId is int) {
+      userIdInt = userId;
+    } else if (userId is String) {
+      userIdInt = int.tryParse(userId) ??
+          -1; // Attempt to parse, use -1 or handle error
+      if (userIdInt == -1) {
+        if (mounted) {
+          setState(() {
+            _isLoadingMeals = false;
+            _fetchError =
+                "Invalid user ID format. Cannot fetch personalized meals.";
+            _filteredMealsNotifier.value = [];
+          });
         }
-        // If cached data is present, just log the error and keep showing cached data.
+        print("Invalid user ID format in SharedPreferences: $userId");
+        return; // Exit if user ID is invalid string
       }
+    } else {
+      if (mounted) {
+        setState(() {
+          _isLoadingMeals = false;
+          _fetchError =
+              "Unexpected user ID type. Cannot fetch personalized meals.";
+          _filteredMealsNotifier.value = [];
+        });
+      }
+      print(
+          "Unexpected user ID type in SharedPreferences: ${userId.runtimeType}");
+      return; // Exit if user ID is unexpected type
+    }
+
+    try {
+      final meals = await _fetchMeals(userIdInt);
+      if (!mounted) return;
+      
+      // Update the local state with fresh data
+      _Onlymeals = meals;
+      
+      // Update cache in background
+      _updateCache(meals);
+      
+      // Update UI
+      _buildMealLookupMap();
+      _filterMeals('');
+      
+      setState(() {
+        _isLoadingMeals = false;
+      });
+      
+    } catch (e) {
+      print('Error fetching meals: $e');
+      if (!mounted) return;
+      
+      // Try to load from cache if available
+      await _loadFromCacheIfAvailable();
+      
+      _thinkingTimer?.cancel();
+      _showThinking.value = false;
+      _thinkingTimer?.cancel();
+      _showThinking.value = false;
+      setState(() {
+        _isLoadingMeals = false;
+        if (_Onlymeals.isEmpty) {
+          _fetchError = "Failed to load meals. Please check your connection and try again.";
+        }
+      });
     }
   }
 
   void _buildMealLookupMap() {
     _mealMapByName = Map.fromEntries(
-      _allMeals
-          .where((m) => m['Meal_name'] != null) // Use PascalCase key
-          .map((m) => MapEntry(m['Meal_name'].toString().toLowerCase(),
-              m)), // Use PascalCase key
+      _Onlymeals.where((m) => m['meal_name'] != null) // Use lowercase key
+          .map((m) => MapEntry(m['meal_name'].toString().toLowerCase(),
+              m)), // Use lowercase key
     );
   }
 
-  Future<List<Map<String, dynamic>>> _fetchMeals() async {
-    // Keep _fetchMeals implementation as before, but ensure it throws
-    // an exception on HTTP error or parsing failure for better handling.
+  // Helper method to update cache
+  Future<void> _updateCache(List<Map<String, dynamic>> meals) async {
+    _OnlymealsScreenState._mealsCache = List<Map<String, dynamic>>.from(meals);
+    _OnlymealsScreenState._mealsCacheTimestamp = DateTime.now();
+    
+    // Persist to UserCache
+    await UserCache.saveData(_mealsCacheKey, _OnlymealsScreenState._mealsCache);
+    await UserCache.saveData(
+      _mealsCacheTimestampKey,
+      _OnlymealsScreenState._mealsCacheTimestamp!.toIso8601String(),
+    );
+  }
+  
+  // Helper method to load from cache if available
+  Future<void> _loadFromCacheIfAvailable() async {
+    await OnlymealsScreen.loadMealsCacheFromPrefs();
+    
+    if (_OnlymealsScreenState._mealsCache.isNotEmpty) {
+      _Onlymeals = List<Map<String, dynamic>>.from(_OnlymealsScreenState._mealsCache);
+      _buildMealLookupMap();
+      _filterMeals('');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchMeals(int userId) async {
     try {
       final response = await http
-          .get(Uri.parse('$apiBaseUrl/rr/meals'))
-          .timeout(const Duration(seconds: 15)); // Add timeout
+          .get(Uri.parse('$apiBaseUrl/rr/meals2/$userId'))
+          .timeout(const Duration(seconds: 30));
       if (response.statusCode == 200) {
         final decoded = json.decode(response.body);
-        // Expect structure like {"data": [...]}
-        if (decoded is Map<String, dynamic> && decoded.containsKey('data')) {
-          final dataList = decoded['data'];
+        // Expect structure like {"recommended_meals": [...]}
+        if (decoded is Map<String, dynamic> && decoded.containsKey('recommended_meals')) {
+          final dataList = decoded['recommended_meals']; // Get the array directly
           if (dataList is List) {
-            // Ensure price is parsed correctly (assuming it might be int or double)
+            // Convert each meal item to Map<String, dynamic> and ensure price field
             return List<Map<String, dynamic>>.from(dataList.map((item) {
               final mapItem = Map<String, dynamic>.from(item);
+              
+              // Ensure price field exists with fallback to 0.0
               if (mapItem.containsKey('Price') && mapItem['Price'] is num) {
                 // Keep price as num (int or double)
+                mapItem['Price'] = mapItem['Price'];
               } else {
                 // Handle potential string price or missing price - default to 0.0
-                mapItem['Price'] =
-                    double.tryParse(mapItem['Price']?.toString() ?? '0.0') ??
-                        0.0;
+                mapItem['Price'] = double.tryParse(mapItem['Price']?.toString() ?? '0.0') ?? 0.0;
               }
+              
               return mapItem;
             }));
           }
@@ -431,9 +376,9 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
   void _filterMeals(String query) {
     final cleanQuery = query.toLowerCase().trim();
     if (cleanQuery.isEmpty) {
-      _filteredMealsNotifier.value = List.from(_allMeals);
+      _filteredMealsNotifier.value = List.from(_Onlymeals);
     } else {
-      _filteredMealsNotifier.value = _allMeals.where((meal) {
+      _filteredMealsNotifier.value = _Onlymeals.where((meal) {
         // Use PascalCase keys for filtering
         final mealName = meal['Meal_name']?.toString().toLowerCase() ?? '';
         final cuisine =
@@ -456,94 +401,23 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
     // Filtering is handled by the listener reacting to the empty text
   }
 
-
-
-  // Removed connection type checking as preloading is now always enabled
-
-  void _onScroll() {
-    if (!_isPreloadingEnabled || _allMeals.isEmpty) return;
-    
-    // Check if we're near the bottom of the list
-    if (!_scrollController.hasClients) return;
-    
-    final threshold = 0.7; // Start preloading when 80% scrolled
-    final maxScroll = _scrollController.position.maxScrollExtent;
-    final currentScroll = _scrollController.position.pixels;
-    
-    if (maxScroll == 0.0) return; // List not yet laid out
-    
-    if (currentScroll >= (maxScroll * threshold)) {
-      _preloadImages();
-    }
-  }
-
-  void _preloadImages() async {
-    if (_allMeals.isEmpty || !_isPreloadingEnabled) return;
-    
-    final firstVisibleIndex = (_scrollController.position.pixels / 200).floor();
-    final lastVisibleIndex = ((_scrollController.position.pixels + 
-        MediaQuery.of(context).size.height) / 200).ceil();
-    
-    // Preload images for items slightly beyond the visible area
-    final preloadStart = firstVisibleIndex.clamp(0, _allMeals.length - 1);
-    final preloadEnd = (lastVisibleIndex + _preloadThreshold)
-        .clamp(0, _allMeals.length - 1);
-    
-    for (int i = preloadStart; i <= preloadEnd; i++) {
-      if (i >= 0 && i < _allMeals.length) {
-        final meal = _allMeals[i];
-        final imageUrl = _processImagePath(
-          meal['Image_link'] ?? '', 
-          meal['Meal_name'] ?? ''
-        );
-        
-        if (imageUrl.startsWith('http')) {
-          try {
-            // Preload the image into cache silently
-            cn.CachedNetworkImageProvider(imageUrl)
-              .resolve(ImageConfiguration())
-              .addListener(
-                ImageStreamListener(
-                  (_, __) {},
-                  onError: (dynamic error, StackTrace? stackTrace) {
-                    // Silently handle errors during preloading
-                    debugPrint('Error preloading image: $error');
-                  },
-                ),
-              );
-          } catch (e) {
-            debugPrint('Error setting up image preload: $e');
-          }
-        }
-      }
-    }
-  }
-
   @override
   void dispose() {
-    _scrollController.removeListener(_onScroll);
-    _scrollController.dispose();
     _refreshIconController.dispose();
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     _debounce?.cancel();
-    _filteredMealsNotifier.dispose();
+    _filteredMealsNotifier.dispose(); // Dispose the notifier
     super.dispose();
   }
 
   void _startRefreshAnimation() {
-    if (!_refreshIconController.isAnimating) {
-      _refreshIconController.repeat(
-        period: const Duration(seconds: 1),
-      );
-    }
+    _refreshIconController.repeat();
   }
 
   void _stopRefreshAnimation() {
-    if (_refreshIconController.isAnimating) {
-      _refreshIconController.stop();
-      _refreshIconController.reset();
-    }
+    _refreshIconController.stop();
+    _refreshIconController.reset();
   }
 
   @override
@@ -563,14 +437,18 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
             builder: (context, child) {
               return IconButton(
                 icon: Transform.rotate(
-                  angle: _isLoadingMeals ? _refreshIconController.value * 6.3 : 0, // 2pi radians
+                  angle: _isLoadingMeals
+                      ? _refreshIconController.value * 6.3
+                      : 0, // 2pi radians
                   child: const Icon(Icons.refresh),
                 ),
                 tooltip: _isLoadingMeals ? 'Refreshing...' : 'Refresh',
                 onPressed: _isLoadingMeals
                     ? null
                     : () {
-                        _forceRefreshMeals();
+                        _startRefreshAnimation();
+                        _fetchMealsAndPreprocess()
+                            .whenComplete(_stopRefreshAnimation);
                       },
               );
             },
@@ -597,43 +475,11 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
         child: FutureBuilder<void>(
           future: _initialFetchFuture,
           builder: (context, snapshot) {
-            if (_isLoadingMeals && _allMeals.isEmpty) {
+            if (_isLoadingMeals && _Onlymeals.isEmpty) {
               // Show shimmer only on initial load
               return _buildLoadingShimmerGrid();
             }
             if (snapshot.connectionState == ConnectionState.done &&
-                _fetchError.isNotEmpty) {
-              // Show error state if fetch completed with an error
-              return _buildErrorState(_fetchError);
-            }
-            // Use ValueListenableBuilder to reactively build the grid
-            return ValueListenableBuilder<List<Map<String, dynamic>>>(
-              valueListenable: _filteredMealsNotifier,
-              builder: (context, filteredMeals, _) {
-                if (!_isLoadingMeals && filteredMeals.isEmpty) {
-                  // Show empty state if not loading and filtered list is empty
-                  return _buildEmptyState(
-                      isSearching: _searchController.text.isNotEmpty);
-                }
-                // Build the grid with current filtered meals
-                return _buildMealGrid(context, filteredMeals);
-              },
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  // Helper for AppBar Search Field
-  Widget _buildSearchField() {
-    return SizedBox(
-      height: 40, // Maintain height
-      child: TextField(
-        controller: _searchController,
-        style: const TextStyle(
-            color: kColorTextOnPrimary, fontSize: 15), // White text
-        cursorColor: kColorPrimaryLight, // Teal cursor
         decoration: InputDecoration(
           hintText: 'Search meals, cuisines...',
           hintStyle: TextStyle(color: kColorTextOnPrimary.withOpacity(0.7)),
@@ -672,26 +518,72 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
 
   // Loading Shimmer Grid
   Widget _buildLoadingShimmerGrid() {
-    return Shimmer.fromColors(
-      baseColor: kShimmerBaseColor,
-      highlightColor: kShimmerHighlightColor,
-      child: GridView.builder(
-        padding: const EdgeInsets.all(8.0), // Consistent padding
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          crossAxisSpacing: 10.0, // Slightly more spacing
-          mainAxisSpacing: 10.0,
-          childAspectRatio: 0.85, // Adjust ratio for shimmer card
-        ),
-        itemCount: 8, // Show a fixed number of shimmer placeholders
-        itemBuilder: (context, index) {
-          return Container(
+    return GridView.builder(
+      padding: const EdgeInsets.all(8.0),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 0.7,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+      ),
+      itemCount: 6, // Show 6 shimmer placeholders
+      itemBuilder: (context, index) {
+        return Shimmer.fromColors(
+          baseColor: kShimmerBaseColor,
+          highlightColor: kShimmerHighlightColor,
+          child: Container(
             decoration: BoxDecoration(
-              color: Colors.white, // Placeholder background
+              color: Colors.white,
               borderRadius: BorderRadius.circular(12),
             ),
-          );
-        },
+          ),
+        );
+      },
+    );
+  }
+
+  // Thinking Message
+  Widget _buildThinkingMessage() {
+    return Positioned(
+      top: 16.0,
+      left: 0,
+      right: 0,
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+          decoration: BoxDecoration(
+            color: kColorPrimary.withOpacity(0.9),
+            borderRadius: BorderRadius.circular(20.0),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black12,
+                blurRadius: 8.0,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.0,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+              const SizedBox(width: 8.0),
+              Text(
+                'Thinking...',
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -711,7 +603,7 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
           Text(
             isSearching
                 ? "No meals found matching your search."
-                : "No meals available right now.",
+                : "No recommendations available right now.",
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
           ),
@@ -766,30 +658,22 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
   // Actual Meal Grid
   Widget _buildMealGrid(
       BuildContext context, List<Map<String, dynamic>> meals) {
-    // Trigger initial preload when the grid is first built
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_isPreloadingEnabled) {
-        _preloadImages();
-      }
-    });
-    
     return GridView.builder(
-      controller: _scrollController,
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(8.0), // Adjusted padding
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        childAspectRatio: 0.75,
-        crossAxisSpacing: 8,
-        mainAxisSpacing: 8,
+        crossAxisCount: 2, // Keep 2 columns for mobile
+        crossAxisSpacing: 10.0, // Increased spacing
+        mainAxisSpacing: 10.0, // Increased spacing
+        childAspectRatio: 0.85, // Adjusted aspect ratio
       ),
       itemCount: meals.length,
       itemBuilder: (context, index) {
         final meal = meals[index];
-        // Use PascalCase keys
-        String title = meal['Meal_name'] ?? 'Unknown Meal';
+        // Use lowercase keys to match API response
+        String title = meal['meal_name'] ?? 'Unknown Meal';
         String imagePath =
-            meal['Image_link'] ?? 'assets/images/mealimageplaceholder.jpg';
-        String mealId = meal['Meal_id']?.toString() ?? 'unknown-$index';
+            meal['image_link'] ?? 'assets/images/mealimageplaceholder.jpg';
+        String mealId = meal['meal_id']?.toString() ?? 'unknown-$index';
 
         // Use helper to process image path (Handles GDrive, HTTP, Assets, Placeholders)
         String displayImagePath = _processImagePath(imagePath, title);
@@ -921,7 +805,7 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
   // Helper function for navigation to detail page
   void _navigateToMealDetail(Map<String, dynamic> mealFromGrid) {
     // Find the full meal data from the original list to ensure all fields are present
-    final fullMealData = _allMeals.firstWhere(
+    final fullMealData = _Onlymeals.firstWhere(
       (m) => m['Meal_id'] == mealFromGrid['Meal_id'], // Use PascalCase key
       orElse: () {
         print(
@@ -969,24 +853,41 @@ class _AllMealsScreenState extends State<AllMealsScreen> with SingleTickerProvid
       complementaryImageLinks.add(imageUrl);
     }
 
-    // Create a mutable copy to add the processed images
-    final Map<String, dynamic> mealToSend = Map.from(fullMealData);
+    // Create a mutable copy to add the processed images and convert keys to PascalCase
+    final Map<String, dynamic> mealToSend = Map.from(fullMealData).map((key, value) {
+      final pascalKey = key[0].toUpperCase() + key.substring(1);
+      return MapEntry(pascalKey, value);
+    });
+
+    // Ensure price field exists and is properly formatted
+    if (mealToSend['Price'] != null) {
+      mealToSend['Price'] = double.tryParse(mealToSend['Price'].toString()) ?? 0.0;
+    } else {
+      mealToSend['Price'] = 0.0;
+    }
 
     // Efficient complementary image extraction
     // Build a lookup map from meal name (lowercased) to image link for all main meals
     final Map<String, String> mealNameToImageLink = {
-      for (final m in _allMeals)
+      for (final m in _Onlymeals)
         if ((m['Meal_name'] ?? '').toString().trim().isNotEmpty)
           m['Meal_name'].toString().toLowerCase():
-              m['Image_link'] ?? 'assets/images/cover.png'
+              m['image_link'] ?? 'assets/images/cover.png'
     };
 
     // For each complementary dish, get its image link from the map, else use placeholder
-    final List<String> complementary_image_links =
-        complementaryDishNames.map((dishName) {
+    List<String> complementary_image_links = [];
+    List<String> complementary_dish_names = [];
+    
+    for (String dishName in complementaryDishNames) {
       final key = dishName.toLowerCase();
-      return mealNameToImageLink[key] ?? 'assets/images/cover.png';
-    }).toList();
+      final imageUrl = mealNameToImageLink[key] ?? 'assets/images/cover.png';
+      complementary_image_links.add(imageUrl);
+      complementary_dish_names.add(dishName);
+    }
+
+    mealToSend['complementary_images'] = complementary_image_links;
+    mealToSend['Complementary_dishes'] = complementary_dish_names;
 
     mealToSend['complementary_images'] = complementary_image_links;
 

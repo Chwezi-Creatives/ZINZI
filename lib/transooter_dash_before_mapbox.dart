@@ -20,7 +20,8 @@ import 'package:zinzi2/chef_verification_helper.dart'; // For verification dialo
 
 // --- Environment Variables ---
 // Ensure loaded in main.dart: await dotenv.load(fileName: ".env");
-final String apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url/api';
+final String apibaseurl =
+    dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url/api';
 final String? imgurClientId = dotenv.env['IMGUR_CLIENT_ID'];
 
 // Path for placeholder image (ensure this exists)
@@ -250,6 +251,7 @@ class Order {
     }
     return null;
   }
+
   final int orderId;
   final int? userId;
   final String orderType;
@@ -322,7 +324,7 @@ class Order {
   String get pickupAddress {
     // Prioritize the new pickupLocation field if available
     if (pickupLocation != null && pickupLocation!.isNotEmpty) {
-       // Similar parsing logic for pickup location if it contains coordinates
+      // Similar parsing logic for pickup location if it contains coordinates
       try {
         List<String> parts = pickupLocation!.split(',');
         if (parts.length > 2 &&
@@ -359,8 +361,10 @@ class Order {
   String get estimatedDistance =>
       orderType == 'meal' ? '3.2 km' : '4.5 km'; // Example
   // Placeholder for earnings - needs calculation or API field
-  double get earnings => orderType == 'meal' ? 8.50 : 10.75; // Example based on total price for now
-      //totalPrice * 0.1; // Example: 10% of total price, adjust as needed
+  double get earnings => orderType == 'meal'
+      ? 8.50
+      : 10.75; // Example based on total price for now
+  //totalPrice * 0.1; // Example: 10% of total price, adjust as needed
 
   // Placeholder for order items - needs detailed structure if available
   List<String> get orderItems {
@@ -368,8 +372,8 @@ class Order {
       return ['$productName x$quantity'];
     }
     if (orderType.toLowerCase() == 'meal' && mealName != null) {
-       return ['$mealName x$quantity'];
-     }
+      return ['$mealName x$quantity'];
+    }
     return ['Item details unavailable'];
   }
 
@@ -427,8 +431,8 @@ class Order {
       chefId: parseIntNullable(json['chef_id']),
       producerId: parseIntNullable(json['producer_id']),
       transporterId: parseIntNullable(json['transporter_id']),
-      orderDate: parseDate(
-          getStringSafe(json['order_date']) ?? DateTime.now().toIso8601String()),
+      orderDate: parseDate(getStringSafe(json['order_date']) ??
+          DateTime.now().toIso8601String()),
       deliveryAddress: getStringSafe(json['delivery_address']) ??
           'Address not provided', // Use safe getter
       pickupLocation: getStringSafe(
@@ -440,7 +444,8 @@ class Order {
       paymentMode: getStringSafe(json['payment_mode']),
       amountPaid: parseDoubleNullable(json['amount_paid']), // Use safe parser
       transactionId: getStringSafe(json['transaction_id']),
-      quantity: parseIntSafe(json['quantity'], defaultValue: 1), // Use safe parser
+      quantity:
+          parseIntSafe(json['quantity'], defaultValue: 1), // Use safe parser
       mealName: getStringSafe(json['meal_name']), // Compatibility
       ingredients: getStringSafe(json['ingredients']),
       producerName: getStringSafe(json['producer_name']),
@@ -945,10 +950,13 @@ class TransporterApiService {
     } else if (transporterId is String) {
       transporterIdStr = transporterId;
     } else {
-      throw Exception('Transporter ID is of unexpected type: ${transporterId.runtimeType}');
+      throw Exception(
+          'Transporter ID is of unexpected type: ${transporterId.runtimeType}');
     }
-    final Uri uri = Uri.parse('$apibaseurl/rr/orders?transporter_id=$transporterIdStr');
-    print("Fetching available orders for transporter $transporterIdStr from: $uri");
+    final Uri uri =
+        Uri.parse('$apibaseurl/rr/orders?transporter_id=$transporterIdStr');
+    print(
+        "Fetching available orders for transporter $transporterIdStr from: $uri");
     try {
       final response =
           await http.get(uri, headers: _getWriteHeaders(requiresAuth: true));
@@ -988,7 +996,7 @@ class TransporterApiService {
       // Parse transporterId to int
       final int? transporterIdInt = int.tryParse(transporterId);
       if (transporterIdInt == null) {
-          throw Exception('Invalid transporter ID format');
+        throw Exception('Invalid transporter ID format');
       }
 
       final response = await http.patch(
@@ -996,7 +1004,8 @@ class TransporterApiService {
         headers: _getWriteHeaders(requiresAuth: true),
         body: jsonEncode({
           'transporter_id': transporterIdInt, // Send transporter ID as int
-          'order_status': Order.STATUS_ASSIGNED // Use the 'assigned' status from your model
+          'order_status':
+              Order.STATUS_ASSIGNED // Use the 'assigned' status from your model
         }),
       );
       if (response.statusCode == 200 || response.statusCode == 204) {
@@ -1044,7 +1053,7 @@ class TransporterDashNew extends StatefulWidget {
       print('[Splash][TransporterDash] Error: Empty transporter ID provided');
       return;
     }
-    
+
     // --- Profile Cache ---
     const String profileKey = 'transporter_profile_cache_new_v2';
     const String profileTsKey = 'transporter_profile_cache_timestamp_new_v2';
@@ -1064,7 +1073,8 @@ class TransporterDashNew extends StatefulWidget {
     }
     if (!profileCacheValid) {
       try {
-        final profile = await TransporterApiService.fetchTransporterProfile(transporterId);
+        final profile =
+            await TransporterApiService.fetchTransporterProfile(transporterId);
         await UserCache.saveData(profileKey, profile.toJson());
         await UserCache.saveData(profileTsKey, now.toIso8601String());
         print('[Splash][TransporterDash] Profile cache updated');
@@ -1072,7 +1082,8 @@ class TransporterDashNew extends StatefulWidget {
         print('[Splash][TransporterDash] Profile preload error: $e');
       }
     } else {
-      print('[Splash][TransporterDash] Profile preload skipped: Cache still valid');
+      print(
+          '[Splash][TransporterDash] Profile preload skipped: Cache still valid');
     }
 
     // --- Orders ---
@@ -1092,19 +1103,19 @@ class TransporterDashNew extends StatefulWidget {
           TransporterApiService.fetchAllTransporterOrders(transporterId),
           TransporterApiService.fetchAvailableOrders(),
         ]);
-        
+
         final transporterOrders = results[0] as List<Order>;
         final availableOrders = results[1] as List<Order>;
-        
+
         // Combine and serialize
         final List<Order> combinedOrders = [
           ...transporterOrders,
           ...availableOrders,
         ];
-        
-        final List<Map<String, dynamic>> serializedOrders = 
+
+        final List<Map<String, dynamic>> serializedOrders =
             combinedOrders.map((order) => order.toJson()).toList();
-            
+
         await UserCache.saveData(ordersKey, serializedOrders);
         await UserCache.saveData(ordersTsKey, now.toIso8601String());
         print('[Splash][TransporterDash] Orders cache updated');
@@ -1112,7 +1123,8 @@ class TransporterDashNew extends StatefulWidget {
         print('[Splash][TransporterDash] Orders preload error: $e');
       }
     } else {
-      print('[Splash][TransporterDash] Orders preload skipped: Cache still valid');
+      print(
+          '[Splash][TransporterDash] Orders preload skipped: Cache still valid');
     }
   }
 
@@ -1131,14 +1143,14 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   static const String _profileCacheKey = 'transporter_profile_cache_new_v2';
   static const String _profileCacheTimestampKey =
       'transporter_profile_cache_timestamp_new_v2';
-      
+
   // --- Caching for Orders ---
   static List<Order>? _ordersCache;
   static DateTime? _ordersCacheTimestamp;
   static const String _ordersCacheKey = 'transporter_orders_cache';
-  static const String _ordersCacheTimestampKey = 
+  static const String _ordersCacheTimestampKey =
       'transporter_orders_cache_timestamp';
-  
+
   int _selectedDrawerIndex = 0; // 0: Dashboard, 1: Deliveries, 2: Profile
   TransporterProfile? _transporterProfile;
   List<Order> _allOrders = []; // Combined list of orders
@@ -1258,36 +1270,36 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
       _profileCacheTimestamp = null;
     }
   }
-  
+
   // Load orders cache from UserCache
   Future<bool> _loadOrdersCacheFromPrefs() async {
     final cachedData = await UserCache.getData(_ordersCacheKey);
     final timestampData = await UserCache.getData(_ordersCacheTimestampKey);
-    
+
     if (cachedData is List && timestampData is String) {
       try {
         final DateTime? cacheTime = DateTime.tryParse(timestampData)?.toLocal();
-        final bool cacheIsValid = cacheTime != null && 
+        final bool cacheIsValid = cacheTime != null &&
             DateTime.now().difference(cacheTime).inMinutes < 15;
-            
+
         if (cacheIsValid) {
-          final List<Order> orders = (cachedData as List)
-              .map((json) => Order.fromJson(json))
-              .toList();
+          final List<Order> orders =
+              (cachedData as List).map((json) => Order.fromJson(json)).toList();
           // Sort orders by orderDate descending (latest first)
           orders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
-          _allOrders = orders;    
+          _allOrders = orders;
           _ordersCache = orders;
           _ordersCacheTimestamp = cacheTime;
-          
+
           // Update UI with cached data
           if (mounted) {
             setStateIfMounted(() {
               _isLoading = false; // Turn off loading indicator
             });
           }
-          
-          print("Loaded ${orders.length} orders from cache. Timestamp: $_ordersCacheTimestamp");
+
+          print(
+              "Loaded ${orders.length} orders from cache. Timestamp: $_ordersCacheTimestamp");
           return true;
         } else {
           print("Orders cache expired. Cache time: $cacheTime");
@@ -1308,27 +1320,28 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     }
     return false;
   }
-  
+
   // Save orders to cache
   Future<void> _saveOrdersCacheToPrefs(List<Order> orders) async {
     try {
       // Sort orders by orderDate descending (latest first) before saving
       orders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
-      final List<Map<String, dynamic>> serializedOrders = 
+      final List<Map<String, dynamic>> serializedOrders =
           orders.map((order) => order.toJson()).toList();
-          
+
       await UserCache.saveData(_ordersCacheKey, serializedOrders);
       final now = DateTime.now();
       await UserCache.saveData(_ordersCacheTimestampKey, now.toIso8601String());
-      
+
       _ordersCache = orders;
       _ordersCacheTimestamp = now;
-      print("Saved ${orders.length} orders to cache. Timestamp: $_ordersCacheTimestamp");
+      print(
+          "Saved ${orders.length} orders to cache. Timestamp: $_ordersCacheTimestamp");
     } catch (e) {
       print("Error saving orders to cache: $e");
     }
   }
-  
+
   // Save cache to UserCache
   Future<void> _saveProfileCacheToPrefs(TransporterProfile profile) async {
     try {
@@ -1344,7 +1357,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
       print("Error saving profile to cache: $e");
     }
   }
-  
+
   // Helper to safely call setState only if the widget is still mounted
   void setStateIfMounted(VoidCallback fn) {
     if (mounted) {
@@ -1443,7 +1456,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         });
       }
     } catch (error, stackTrace) {
-      print("Error fetching fresh transporter profile (new): $error\n$stackTrace");
+      print(
+          "Error fetching fresh transporter profile (new): $error\n$stackTrace");
       if (mounted) {
         // Only show error prominently if there's no cached data at all
         if (_transporterProfile == null) {
@@ -1481,10 +1495,10 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
 
     // Trigger profile initialization/fetch (cache-first) - runs concurrently
     _initializeTransporterProfile(); // Don't await this, let it run
-    
+
     // 1. Load orders from cache if available
     bool loadedOrdersFromCache = await _loadOrdersCacheFromPrefs();
-    
+
     // 2. Always fetch fresh data in background
     try {
       // Fetch orders and payments concurrently
@@ -1512,7 +1526,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           _isLoading = false; // Done loading general data
           _errorMessage = null;
         });
-        
+
         // Save orders to cache for next time
         await _saveOrdersCacheToPrefs(combinedOrders);
       }
@@ -1660,19 +1674,26 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             CircleAvatar(
               radius: 16,
               backgroundColor: _primaryTeal.withOpacity(0.1),
-              backgroundImage: (_transporterProfile?.profileImageUrl != null && _transporterProfile!.profileImageUrl!.isNotEmpty)
-                  ? CachedNetworkImageProvider(_transporterProfile!.profileImageUrl!)
+              backgroundImage: (_transporterProfile?.profileImageUrl != null &&
+                      _transporterProfile!.profileImageUrl!.isNotEmpty)
+                  ? CachedNetworkImageProvider(
+                      _transporterProfile!.profileImageUrl!)
                   : const AssetImage('assets/images/proffr.png'),
-              onBackgroundImageError: (_transporterProfile?.profileImageUrl != null && _transporterProfile!.profileImageUrl!.isNotEmpty)
-                  ? (_, __) {
-                      print("Error loading profile image: ${_transporterProfile?.profileImageUrl}");
-                    }
-                  : null,
-              child: (_transporterProfile?.profileImageUrl == null || _transporterProfile!.profileImageUrl!.isEmpty) &&
+              onBackgroundImageError:
+                  (_transporterProfile?.profileImageUrl != null &&
+                          _transporterProfile!.profileImageUrl!.isNotEmpty)
+                      ? (_, __) {
+                          print(
+                              "Error loading profile image: ${_transporterProfile?.profileImageUrl}");
+                        }
+                      : null,
+              child: (_transporterProfile?.profileImageUrl == null ||
+                          _transporterProfile!.profileImageUrl!.isEmpty) &&
                       _transporterProfile?.name.isNotEmpty == true
                   ? Text(
                       _transporterProfile!.name[0].toUpperCase(),
-                      style: TextStyle(color: _primaryTeal, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                          color: _primaryTeal, fontWeight: FontWeight.bold),
                     )
                   : null,
             ),
@@ -1720,19 +1741,28 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             accountEmail: Text(_transporterProfile?.email ?? 'rider@email.com'),
             currentAccountPicture: CircleAvatar(
               backgroundColor: _lightTeal,
-              backgroundImage: (_transporterProfile?.profileImageUrl != null && _transporterProfile!.profileImageUrl!.isNotEmpty)
-                  ? CachedNetworkImageProvider(_transporterProfile!.profileImageUrl!)
+              backgroundImage: (_transporterProfile?.profileImageUrl != null &&
+                      _transporterProfile!.profileImageUrl!.isNotEmpty)
+                  ? CachedNetworkImageProvider(
+                      _transporterProfile!.profileImageUrl!)
                   : const AssetImage('assets/images/proffr.png'),
-              onBackgroundImageError: (_transporterProfile?.profileImageUrl != null && _transporterProfile!.profileImageUrl!.isNotEmpty)
-                  ? (_, __) {
-                      print("Error loading drawer image: ${_transporterProfile?.profileImageUrl}");
-                    }
-                  : null,
-              child: (_transporterProfile?.profileImageUrl == null || _transporterProfile!.profileImageUrl!.isEmpty) &&
+              onBackgroundImageError:
+                  (_transporterProfile?.profileImageUrl != null &&
+                          _transporterProfile!.profileImageUrl!.isNotEmpty)
+                      ? (_, __) {
+                          print(
+                              "Error loading drawer image: ${_transporterProfile?.profileImageUrl}");
+                        }
+                      : null,
+              child: (_transporterProfile?.profileImageUrl == null ||
+                          _transporterProfile!.profileImageUrl!.isEmpty) &&
                       _transporterProfile?.name.isNotEmpty == true
                   ? Text(
                       _transporterProfile!.name[0].toUpperCase(),
-                      style: TextStyle(fontSize: 30, color: _darkTeal, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                          fontSize: 30,
+                          color: _darkTeal,
+                          fontWeight: FontWeight.bold),
                     )
                   : null,
             ),
@@ -2105,7 +2135,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             p.createdAt.isAfter(todayStart) &&
             p.createdAt.isBefore(todayEnd) &&
             (p.disbursementTransactionStatus.toLowerCase() == 'successful' ||
-             p.disbursementTransactionStatus.toLowerCase() == 'completed')) // Include 'completed' if used
+                p.disbursementTransactionStatus.toLowerCase() ==
+                    'completed')) // Include 'completed' if used
         .fold(0.0, (sum, p) => sum + p.amount);
 
     // Add earnings from orders completed today IF no corresponding payment exists
@@ -2119,7 +2150,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             p.createdAt.isAfter(todayStart) &&
             p.createdAt.isBefore(todayEnd) &&
             (p.disbursementTransactionStatus.toLowerCase() == 'successful' ||
-            p.disbursementTransactionStatus.toLowerCase() == 'completed') );
+                p.disbursementTransactionStatus.toLowerCase() == 'completed'));
         if (!paymentExistsToday) {
           total += order.earnings; // Use calculated earnings
         }
@@ -2133,7 +2164,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     // Same as provided
     return _buildInfoCard(
         title: 'Today\'s Earnings',
-        value: 'ugx ${earnings.toStringAsFixed(0)}', // No decimals for UGX maybe? Adjust if needed.
+        value:
+            'ugx ${earnings.toStringAsFixed(0)}', // No decimals for UGX maybe? Adjust if needed.
         icon: Icons.attach_money,
         iconBgColor: _green.withOpacity(0.1),
         iconColor: _green,
@@ -2285,8 +2317,10 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   List<Order> _getScheduledOrders() {
     // Scheduled could mean assigned/accepted but not yet started
     return _allOrders
-        .where((o) => [Order.STATUS_ASSIGNED.toLowerCase(), Order.STATUS_ACCEPTED.toLowerCase()]
-            .contains(o.orderStatus.toLowerCase()))
+        .where((o) => [
+              Order.STATUS_ASSIGNED.toLowerCase(),
+              Order.STATUS_ACCEPTED.toLowerCase()
+            ].contains(o.orderStatus.toLowerCase()))
         .toList()
       ..sort((a, b) => a.orderDate.compareTo(b.orderDate)); // Soonest first
   }
@@ -2429,12 +2463,16 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     if (statusLower == Order.STATUS_ASSIGNED.toLowerCase()) return 'Assigned';
     if (statusLower == Order.STATUS_ACCEPTED.toLowerCase()) return 'Accepted';
     if (statusLower == Order.STATUS_PICKED_UP.toLowerCase()) return 'Picked Up';
-    if (statusLower == Order.STATUS_ON_THE_WAY.toLowerCase() || statusLower == Order.STATUS_DELIVERING.toLowerCase()) return 'On The Way';
+    if (statusLower == Order.STATUS_ON_THE_WAY.toLowerCase() ||
+        statusLower == Order.STATUS_DELIVERING.toLowerCase())
+      return 'On The Way';
     if (statusLower == Order.STATUS_DELIVERED.toLowerCase()) return 'Delivered';
     if (statusLower == Order.STATUS_COMPLETED.toLowerCase()) return 'Completed';
     if (statusLower == Order.STATUS_CANCELLED.toLowerCase()) return 'Cancelled';
     // Capitalize first letter as a fallback
-    return apiStatus.isNotEmpty ? apiStatus[0].toUpperCase() + apiStatus.substring(1) : 'Unknown';
+    return apiStatus.isNotEmpty
+        ? apiStatus[0].toUpperCase() + apiStatus.substring(1)
+        : 'Unknown';
   }
 
   Widget _buildScheduledDeliveriesCard(List<Order> scheduledOrders) {
@@ -2514,7 +2552,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                 children: [
                   Text('Dist: ${order.estimatedDistance}',
                       style: TextStyle(color: _grey, fontSize: 13)),
-                  Text('ugx ${order.earnings.toStringAsFixed(0)}', // Use calculated earnings, format UGX
+                  Text(
+                      'ugx ${order.earnings.toStringAsFixed(0)}', // Use calculated earnings, format UGX
                       style: TextStyle(
                           color: _green,
                           fontWeight: FontWeight.bold,
@@ -2706,7 +2745,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   // *** START: Method Added for Navigation ***
   Future<void> _launchGoogleMapsNavigation(LatLng destination) async {
     // Construct the Google Maps URL
-    final url = 'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving';
+    final url =
+        'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving';
 
     // Check if the URL can be launched
     if (await canLaunch(url)) {
@@ -2755,7 +2795,10 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         )),
       ]);
     } else if (isCompleted) {
-      statusColor = (status.toLowerCase() == Order.STATUS_CANCELLED.toLowerCase()) ? _red : _green;
+      statusColor =
+          (status.toLowerCase() == Order.STATUS_CANCELLED.toLowerCase())
+              ? _red
+              : _green;
       statusText =
           _getStatusText(status); // Show actual completed/cancelled status
       actionButton = SizedBox(
@@ -2810,7 +2853,9 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                         fontSize: 12)),
               ),
             ]),
-            Text(DateFormat('MMM d, yyyy, h:mm a').format(order.orderDate), // More specific date format
+            Text(
+                DateFormat('MMM d, yyyy, h:mm a')
+                    .format(order.orderDate), // More specific date format
                 style: TextStyle(color: _grey, fontSize: 12)), // Date
             SizedBox(height: 12),
             _buildAddressRow(Icons.storefront, order.pickupAddress), // Pickup
@@ -2843,13 +2888,15 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                         _launchGoogleMapsNavigation(LatLng(lat, lng));
                         return; // Exit after successful launch attempt
                       } else {
-                         print("Failed to parse lat/lng from: ${addressParts[0]}, ${addressParts[1]}");
+                        print(
+                            "Failed to parse lat/lng from: ${addressParts[0]}, ${addressParts[1]}");
                       }
                     } else {
                       print("Address parts length < 2: ${addressParts.length}");
                     }
                     // If parsing fails or coordinates are not available
-                    _showErrorSnackBar('Could not parse delivery location coordinates from address: "${order.deliveryAddress}"');
+                    _showErrorSnackBar(
+                        'Could not parse delivery location coordinates from address: "${order.deliveryAddress}"');
                   },
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _primaryTeal,
@@ -2884,8 +2931,10 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     return Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
       _buildInfoChip('Dist: ${order.estimatedDistance}'),
       _buildInfoChip('Time: ${order.estimatedTime}'),
-      _buildInfoChip('Earn: ugx ${order.earnings.toStringAsFixed(0)}', // Format UGX
-          color: _green, fontWeight: FontWeight.bold),
+      _buildInfoChip(
+          'Earn: ugx ${order.earnings.toStringAsFixed(0)}', // Format UGX
+          color: _green,
+          fontWeight: FontWeight.bold),
     ]);
   }
 
@@ -3045,15 +3094,18 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                 CircleAvatar(
                   radius: 50,
                   backgroundColor: _lightTeal,
-                   backgroundImage: _profileImageFile != null
+                  backgroundImage: _profileImageFile != null
                       ? FileImage(_profileImageFile!) as ImageProvider
                       : (_transporterProfile?.profileImageUrl != null
-                          ? CachedNetworkImageProvider(_transporterProfile!.profileImageUrl!) // Use CachedNetworkImage
+                          ? CachedNetworkImageProvider(_transporterProfile!
+                              .profileImageUrl!) // Use CachedNetworkImage
                           : null),
-                   onBackgroundImageError: (_, __) { // Handle image load errors
-                     print("Error loading profile header image: ${_transporterProfile?.profileImageUrl}");
-                     // Optionally display placeholder icon here if needed
-                   },
+                  onBackgroundImageError: (_, __) {
+                    // Handle image load errors
+                    print(
+                        "Error loading profile header image: ${_transporterProfile?.profileImageUrl}");
+                    // Optionally display placeholder icon here if needed
+                  },
                   child: (_profileImageFile == null &&
                           _transporterProfile?.profileImageUrl == null)
                       ? Icon(Icons.person, size: 60, color: _primaryTeal)
@@ -3079,7 +3131,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           SizedBox(height: 4),
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             // Chips: Vehicle Type & Rating
-            if (_transporterProfile?.vehicleType != null && _transporterProfile!.vehicleType!.isNotEmpty)
+            if (_transporterProfile?.vehicleType != null &&
+                _transporterProfile!.vehicleType!.isNotEmpty)
               Chip(
                   label: Text(_transporterProfile!.vehicleType!,
                       style: TextStyle(fontSize: 12, color: _darkTeal)),
@@ -3131,8 +3184,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     double completionRate = totalDeliveries > 0 ? 98.0 : 100.0; // Placeholder
     double totalEarnings = _payments
         .where((p) =>
-             (p.disbursementTransactionStatus.toLowerCase() == 'successful' ||
-              p.disbursementTransactionStatus.toLowerCase() == 'completed') )
+            (p.disbursementTransactionStatus.toLowerCase() == 'successful' ||
+                p.disbursementTransactionStatus.toLowerCase() == 'completed'))
         .fold(0.0, (sum, p) => sum + p.amount);
 
     return Card(
@@ -3162,8 +3215,10 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             _buildStatItem(Icons.check_circle_outline,
                 '${completionRate.toStringAsFixed(0)}%', 'Completion',
                 color: _green),
-            _buildStatItem(Icons.account_balance_wallet_outlined,
-                'ugx ${totalEarnings.toStringAsFixed(0)}', 'Earnings', // Format UGX
+            _buildStatItem(
+                Icons.account_balance_wallet_outlined,
+                'ugx ${totalEarnings.toStringAsFixed(0)}',
+                'Earnings', // Format UGX
                 color: _green),
           ]),
         ]),
@@ -3319,8 +3374,10 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           'image': uploadedImageUrl,
       };
       // Clean data (remove unchanged fields - optional but good practice)
-      updateData.removeWhere((key, value) => value == _transporterProfile?.toJson()[key]);
-      updateData.removeWhere((key, value) => value == null || (value is String && value.isEmpty));
+      updateData.removeWhere(
+          (key, value) => value == _transporterProfile?.toJson()[key]);
+      updateData.removeWhere(
+          (key, value) => value == null || (value is String && value.isEmpty));
 
       // 3. Call API to update profile if data changed
       if (updateData.isNotEmpty) {
@@ -3486,19 +3543,19 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
       // Include vehicle_type if it's part of the update AND editable
       // 'vehicle_type': _transporterProfile?.vehicleType, // Example: Use existing type or make editable
     };
-    updateData.removeWhere(
-        (key, value) => value == null || (value is String && value.isEmpty)); // Clean empty fields
+    updateData.removeWhere((key, value) =>
+        value == null ||
+        (value is String && value.isEmpty)); // Clean empty fields
 
     // Optional: Remove unchanged values to minimize payload
     if (_transporterProfile != null) {
-       final currentProfileMap = _transporterProfile!.toJson();
-       updateData.removeWhere((key, value) => currentProfileMap[key] == value);
+      final currentProfileMap = _transporterProfile!.toJson();
+      updateData.removeWhere((key, value) => currentProfileMap[key] == value);
     }
-
 
     try {
       if (updateData.isNotEmpty) {
-         print("Sending vehicle update data: $updateData");
+        print("Sending vehicle update data: $updateData");
         bool success = await TransporterApiService.updateTransporterProfile(
             widget.transporterId, updateData);
         if (!success)
@@ -3714,7 +3771,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   // TODO: Wire this up to the actual orders list from the dashboard state if needed
   List<Order> _allOrders = [];
 
-  bool _navigationTriggered = false; // Track if navigation was started for this order
+  bool _navigationTriggered =
+      false; // Track if navigation was started for this order
   // State vars same as provided
 
   // Method to get user-friendly status text (copied from main state)
@@ -3724,11 +3782,15 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     if (statusLower == Order.STATUS_ASSIGNED.toLowerCase()) return 'Assigned';
     if (statusLower == Order.STATUS_ACCEPTED.toLowerCase()) return 'Accepted';
     if (statusLower == Order.STATUS_PICKED_UP.toLowerCase()) return 'Picked Up';
-    if (statusLower == Order.STATUS_ON_THE_WAY.toLowerCase() || statusLower == Order.STATUS_DELIVERING.toLowerCase()) return 'On The Way';
+    if (statusLower == Order.STATUS_ON_THE_WAY.toLowerCase() ||
+        statusLower == Order.STATUS_DELIVERING.toLowerCase())
+      return 'On The Way';
     if (statusLower == Order.STATUS_DELIVERED.toLowerCase()) return 'Delivered';
     if (statusLower == Order.STATUS_COMPLETED.toLowerCase()) return 'Completed';
     if (statusLower == Order.STATUS_CANCELLED.toLowerCase()) return 'Cancelled';
-    return apiStatus.isNotEmpty ? apiStatus[0].toUpperCase() + apiStatus.substring(1) : 'Unknown';
+    return apiStatus.isNotEmpty
+        ? apiStatus[0].toUpperCase() + apiStatus.substring(1)
+        : 'Unknown';
   }
 
   late Order _currentOrder;
@@ -3744,9 +3806,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     super.initState();
     _currentOrder = widget.order;
     // Show verification immediately if status is on_the_way and needs verification
-    _isVerificationVisible =
-        _currentOrder.orderStatus.toLowerCase() == Order.STATUS_ON_THE_WAY.toLowerCase() &&
-            _needsVerification();
+    _isVerificationVisible = _currentOrder.orderStatus.toLowerCase() ==
+            Order.STATUS_ON_THE_WAY.toLowerCase() &&
+        _needsVerification();
   }
 
   @override
@@ -3807,7 +3869,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
   // *** START: Method Added for Navigation (Copied) ***
   Future<void> _launchGoogleMapsNavigation(LatLng destination) async {
-    final url = 'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving';
+    final url =
+        'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving';
 
     if (await canLaunch(url)) {
       await launch(url);
@@ -3871,7 +3934,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     String? nextStatus = _getNextStatus();
     if (nextStatus == null) {
       // This case implies we are at 'on_the_way' and need verification
-      if (_currentOrder.orderStatus.toLowerCase() == Order.STATUS_ON_THE_WAY.toLowerCase() &&
+      if (_currentOrder.orderStatus.toLowerCase() ==
+              Order.STATUS_ON_THE_WAY.toLowerCase() &&
           _needsVerification()) {
         setState(() => _isVerificationVisible = true); // Show verification card
         _showSnackBar("Please enter verification code.", isError: false);
@@ -3879,7 +3943,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         print(
             "No further status update available for ${_currentOrder.orderStatus}");
         // Optionally show a snackbar if no action is available
-         _showSnackBar("Order is already ${_getStatusText(_currentOrder.orderStatus)}.", isError: false);
+        _showSnackBar(
+            "Order is already ${_getStatusText(_currentOrder.orderStatus)}.",
+            isError: false);
       }
       return;
     }
@@ -3890,36 +3956,61 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   Future<void> _handleVerifyCode() async {
     String code = _verificationCodeController.text.trim();
     if (code.length != 6) {
-      // Basic validation
       _showErrorSnackBar('Please enter a 6-digit verification code.');
       return;
     }
-    FocusScope.of(context).unfocus(); // Dismiss keyboard
+    FocusScope.of(context).unfocus();
 
-    // --- Verification Logic ---
     _showLoadingSnackbar("Verifying Code...");
-    setState(() => _isUpdatingStatus = true); // Use combined flag
+    setState(() => _isUpdatingStatus = true);
 
     try {
-      // **TODO: Replace with actual API call to verify code**
-      // bool isCodeValid = await ApiService.verifyDeliveryCode(orderId: _currentOrder.orderId, code: code);
-      await Future.delayed(Duration(seconds: 1)); // Simulate network
-      bool isCodeValid = code == "123456"; // ** SIMULATED VALID CODE **
+      final prefs = await SharedPreferences.getInstance();
+      final userType = prefs.getString('user_type')?.toLowerCase() ?? '';
+      final userId = prefs.getString('user_id');
 
-      if (!isCodeValid) {
-        throw Exception("Invalid verification code.");
+      if (userId == null) throw Exception('Transporter ID not found');
+
+      final apiBaseUrl =
+          dotenv.env['API_BASE_URL-intranet'] ?? 'https://api.example.com';
+      final response = await http
+          .patch(
+            Uri.parse('$apiBaseUrl/rr/orders/${_currentOrder.orderId}/status'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'transporter_id': userId,
+              'completion_code': code,
+              'order_status': 'completed'
+            }),
+          )
+          .timeout(Duration(seconds: 15));
+
+      if (response.statusCode != 200) {
+        throw Exception('API Error: ${response.statusCode}');
       }
 
-      // If code is valid, update status to 'delivered'
-      await _performStatusUpdate(Order.STATUS_DELIVERED, isVerification: true);
-      _verificationCodeController.clear(); // Clear code field on success
+      final responseData = jsonDecode(response.body);
+      if (responseData['success'] != true) {
+        throw Exception(responseData['message'] ?? 'Verification failed');
+      }
+
+      await _performStatusUpdate('completed', isVerification: true);
+      _verificationCodeController.clear();
+
+      // Update order list if exists
+      if (_allOrders.any((o) => o.orderId == _currentOrder.orderId)) {
+        setState(() {
+          _currentOrder = _currentOrder.copyWith(orderStatus: 'completed');
+        });
+      }
     } catch (e) {
       _dismissLoadingSnackbar();
-      print("Verification or final update failed: $e");
-      if (mounted) _showErrorSnackBar('Verification failed: ${e.toString()}');
-      setState(() => _isUpdatingStatus = false); // Reset flag on error
+      print("Verification failed: $e");
+      if (mounted)
+        _showErrorSnackBar(
+            'Verification failed: ${e.toString().replaceAll('Exception: ', '')}');
+      setState(() => _isUpdatingStatus = false);
     }
-    // No finally here, state is reset inside performStatusUpdate or on error
   }
 
   // Helper to perform the actual API call and state update
@@ -3927,7 +4018,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       {bool isVerification = false}) async {
     if (!isVerification) {
       // Show loading snackbar only for non-verification updates
-      _showLoadingSnackbar("Updating status to ${_getStatusText(newStatus)}...");
+      _showLoadingSnackbar(
+          "Updating status to ${_getStatusText(newStatus)}...");
     }
     setState(() => _isUpdatingStatus = true);
 
@@ -4038,73 +4130,95 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               child: SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _isUpdatingStatus ? null : () async {
-                    setState(() => _isUpdatingStatus = true);
-                    try {
-                      // Prepare ID logic (copied from verification helper)
-                      final prefs = await SharedPreferences.getInstance();
-                      final userType = prefs.getString('user_type');
-                      final userId = prefs.getString('user_id');
-                      final chefId = prefs.getString('chef_user_id');
-                      String? idToSend;
-                      String idKey;
-                      if (userType != null && userType.toLowerCase() == 'transporter') {
-                        idToSend = userId;
-                        idKey = 'transporter_id';
-                      } else {
-                        idToSend = chefId;
-                        idKey = 'chef_id';
-                      }
-                      if (idToSend == null) throw Exception('User ID not found. Please log in again.');
-                      final apiBaseUrl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://api.example.com';
-                      final uri = Uri.parse('${apiBaseUrl}/rr/orders/${_currentOrder.orderId}/status');
-                      final response = await http.patch(
-                        uri,
-                        headers: {
-                          'Content-Type': 'application/json',
-                          'Accept': 'application/json',
-                        },
-                        body: jsonEncode({
-                          idKey: idToSend,
-                          'order_status': 'completed',
-                        }),
-                      ).timeout(const Duration(seconds: 15));
-                      if (response.statusCode == 200) {
-                        // Now show verification dialog
-                        final verified = await ChefVerificationHelper.showVerificationDialog(context, _currentOrder);
-                        if (verified) {
-                          // After verification, update status to completed
+                  onPressed: _isUpdatingStatus
+                      ? null
+                      : () async {
+                          setState(() => _isUpdatingStatus = true);
                           try {
+                            // Prepare ID logic (copied from verification helper)
                             final prefs = await SharedPreferences.getInstance();
                             final userType = prefs.getString('user_type');
                             final userId = prefs.getString('user_id');
                             final chefId = prefs.getString('chef_user_id');
                             String? idToSend;
                             String idKey;
-                            if (userType != null && userType.toLowerCase() == 'transporter') {
+                            if (userType != null &&
+                                userType.toLowerCase() == 'transporter') {
                               idToSend = userId;
                               idKey = 'transporter_id';
                             } else {
                               idToSend = chefId;
                               idKey = 'chef_id';
                             }
-                            if (idToSend == null) throw Exception('User ID not found. Please log in again.');
-                            final apiBaseUrl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://api.example.com';
-                            final uri = Uri.parse('${apiBaseUrl}/rr/orders/${_currentOrder.orderId}/status');
-                            final response = await http.patch(
-                              uri,
-                              headers: {
-                                'Content-Type': 'application/json',
-                                'Accept': 'application/json',
-                              },
-                              body: jsonEncode({
-                                idKey: idToSend,
-                                'order_status': 'completed',
-                              }),
-                            ).timeout(const Duration(seconds: 15));
+                            if (idToSend == null)
+                              throw Exception(
+                                  'User ID not found. Please log in again.');
+                            final apiBaseUrl =
+                                dotenv.env['API_BASE_URL-intranet'] ??
+                                    'https://api.example.com';
+                            final uri = Uri.parse(
+                                '${apiBaseUrl}/rr/orders/${_currentOrder.orderId}/status');
+                            final response = await http
+                                .patch(
+                                  uri,
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    'Accept': 'application/json',
+                                  },
+                                  body: jsonEncode({
+                                    idKey: idToSend,
+                                    'order_status': 'completed',
+                                  }),
+                                )
+                                .timeout(const Duration(seconds: 15));
                             if (response.statusCode == 200) {
-                              // TODO: Optionally refresh order from backend after marking as completed
-                              /*
+                              // Now show verification dialog
+                              final verified = await ChefVerificationHelper
+                                  .showVerificationDialog(
+                                      context, _currentOrder);
+                              if (verified) {
+                                // After verification, update status to completed
+                                try {
+                                  final prefs =
+                                      await SharedPreferences.getInstance();
+                                  final userType = prefs.getString('user_type');
+                                  final userId = prefs.getString('user_id');
+                                  final chefId =
+                                      prefs.getString('chef_user_id');
+                                  String? idToSend;
+                                  String idKey;
+                                  if (userType != null &&
+                                      userType.toLowerCase() == 'transporter') {
+                                    idToSend = userId;
+                                    idKey = 'transporter_id';
+                                  } else {
+                                    idToSend = chefId;
+                                    idKey = 'chef_id';
+                                  }
+                                  if (idToSend == null)
+                                    throw Exception(
+                                        'User ID not found. Please log in again.');
+                                  final apiBaseUrl =
+                                      dotenv.env['API_BASE_URL-intranet'] ??
+                                          'https://api.example.com';
+                                  final uri = Uri.parse(
+                                      '${apiBaseUrl}/rr/orders/${_currentOrder.orderId}/status');
+                                  final response = await http
+                                      .patch(
+                                        uri,
+                                        headers: {
+                                          'Content-Type': 'application/json',
+                                          'Accept': 'application/json',
+                                        },
+                                        body: jsonEncode({
+                                          idKey: idToSend,
+                                          'order_status': 'completed',
+                                        }),
+                                      )
+                                      .timeout(const Duration(seconds: 15));
+                                  if (response.statusCode == 200) {
+                                    // TODO: Optionally refresh order from backend after marking as completed
+                                    /*
                               try {
                                 final orderUri = Uri.parse('${apiBaseUrl}/rr/orders/${_currentOrder.orderId}');
                                 final orderResp = await http.get(orderUri, headers: {
@@ -4130,35 +4244,42 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                 _showSuccessSnackBar('Order marked as completed (local update, failed to refresh from backend)!');
                               }
                               */
-                              setState(() {
-                                _currentOrder = _currentOrder.copyWith(orderStatus: 'completed');
-                                // Also update in _allOrders if present so it appears in completed tab
-                                final idx = _allOrders.indexWhere((o) => o.orderId == _currentOrder.orderId);
-                                if (idx != -1) {
-                                  _allOrders[idx] = _currentOrder;
+                                    setState(() {
+                                      _currentOrder = _currentOrder.copyWith(
+                                          orderStatus: 'completed');
+                                      // Also update in _allOrders if present so it appears in completed tab
+                                      final idx = _allOrders.indexWhere((o) =>
+                                          o.orderId == _currentOrder.orderId);
+                                      if (idx != -1) {
+                                        _allOrders[idx] = _currentOrder;
+                                      }
+                                    });
+                                    _showSuccessSnackBar(
+                                        'Order marked as completed!');
+                                  } else {
+                                    final detail = jsonDecode(response.body);
+                                    _showErrorSnackBar(
+                                        'Failed to mark as completed: ${detail['detail'] ?? response.statusCode}');
+                                  }
+                                } catch (e) {
+                                  _showErrorSnackBar(
+                                      'Failed to mark as completed: $e');
                                 }
-                              });
-                              _showSuccessSnackBar('Order marked as completed!');
+                              } else {
+                                _showErrorSnackBar(
+                                    'Verification failed or cancelled.');
+                              }
                             } else {
                               final detail = jsonDecode(response.body);
-                              _showErrorSnackBar('Failed to mark as completed: ${detail['detail'] ?? response.statusCode}');
+                              _showErrorSnackBar(
+                                  'Failed to trigger code: ${detail['detail'] ?? response.statusCode}');
                             }
                           } catch (e) {
-                            _showErrorSnackBar('Failed to mark as completed: $e');
+                            _showErrorSnackBar('Failed to trigger code: $e');
+                          } finally {
+                            setState(() => _isUpdatingStatus = false);
                           }
-                        } else {
-                          _showErrorSnackBar('Verification failed or cancelled.');
-                        }
-                      } else {
-                        final detail = jsonDecode(response.body);
-                        _showErrorSnackBar('Failed to trigger code: ${detail['detail'] ?? response.statusCode}');
-                      }
-                    } catch (e) {
-                      _showErrorSnackBar('Failed to trigger code: $e');
-                    } finally {
-                      setState(() => _isUpdatingStatus = false);
-                    }
-                  },
+                        },
                   child: Text('I have arrived'),
                   style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.orange,
@@ -4177,9 +4298,11 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   icon: Icon(Icons.phone, color: _primaryTeal),
                   label: Text('Contact Customer'),
                   onPressed: () async {
-                    final customerPhone = _currentOrder.userPhone ?? "(256) 7YY-YYY-YYY";
+                    final customerPhone =
+                        _currentOrder.userPhone ?? "(256) 7YY-YYY-YYY";
                     if (customerPhone.isNotEmpty) {
-                      final Uri telUri = Uri(scheme: 'tel', path: customerPhone);
+                      final Uri telUri =
+                          Uri(scheme: 'tel', path: customerPhone);
                       if (await canLaunchUrl(telUri)) {
                         await launchUrl(telUri);
                       } else {
@@ -4257,7 +4380,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                 return;
               }
             }
-            _showErrorSnackBar('Could not parse delivery location coordinates from address: "${_currentOrder.deliveryAddress}"');
+            _showErrorSnackBar(
+                'Could not parse delivery location coordinates from address: "${_currentOrder.deliveryAddress}"');
           },
           child: Image.asset(
             'assets/images/go.png',
@@ -4296,9 +4420,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   isAddress: true),
               _buildDetailRow(Icons.phone_outlined, restaurantPhone),
               Divider(height: 24, color: _lightTeal),
-              _buildDetailRow(Icons.person_outline, 'Customer', isTitle: true), // Added Customer Title
-               _buildDetailRow(Icons.location_on_outlined, 'Delivery Address',
-                   isTitle: false), // Changed to non-title
+              _buildDetailRow(Icons.person_outline, 'Customer',
+                  isTitle: true), // Added Customer Title
+              _buildDetailRow(Icons.location_on_outlined, 'Delivery Address',
+                  isTitle: false), // Changed to non-title
               _buildDetailRow(null, _currentOrder.simplifiedDeliveryAddress,
                   isAddress: true),
               _buildDetailRow(Icons.phone_outlined, customerPhone),
@@ -4313,10 +4438,14 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                       child:
                           Text('• $item', style: TextStyle(color: _darkTeal))))
                   .toList(),
-              if (_currentOrder.notes != null && _currentOrder.notes!.isNotEmpty && _currentOrder.notes!.toLowerCase() != 'no special instructions') ...[
+              if (_currentOrder.notes != null &&
+                  _currentOrder.notes!.isNotEmpty &&
+                  _currentOrder.notes!.toLowerCase() !=
+                      'no special instructions') ...[
                 SizedBox(height: 16),
                 _buildDetailRow(Icons.notes_outlined, 'Notes:', isTitle: true),
-                _buildDetailRow(null, _currentOrder.notes!, isAddress: true), // Display notes
+                _buildDetailRow(null, _currentOrder.notes!,
+                    isAddress: true), // Display notes
               ],
               SizedBox(height: 16),
               _buildOrderInfoRow(_currentOrder), // Reuses helper
@@ -4329,7 +4458,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   icon: Icon(Icons.directions, size: 18),
                   label: Text('Directions to Delivery Location'),
                   onPressed: () {
-                    final addressParts = _currentOrder.deliveryAddress.split(',');
+                    final addressParts =
+                        _currentOrder.deliveryAddress.split(',');
                     if (addressParts.length >= 2) {
                       final lat = double.tryParse(addressParts[0].trim());
                       final lng = double.tryParse(addressParts[1].trim());
@@ -4341,12 +4471,14 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                         _launchGoogleMapsNavigation(LatLng(lat, lng));
                         return; // Exit after successful launch attempt
                       } else {
-                        print("Failed to parse lat/lng from: ${addressParts[0]}, ${addressParts[1]}");
+                        print(
+                            "Failed to parse lat/lng from: ${addressParts[0]}, ${addressParts[1]}");
                       }
                     } else {
-                       print("Address parts length < 2: ${addressParts.length}");
+                      print("Address parts length < 2: ${addressParts.length}");
                     }
-                    _showErrorSnackBar('Could not parse delivery location coordinates from address: "${_currentOrder.deliveryAddress}"');
+                    _showErrorSnackBar(
+                        'Could not parse delivery location coordinates from address: "${_currentOrder.deliveryAddress}"');
                   },
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _primaryTeal,
@@ -4357,7 +4489,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               // *** END: Navigation Button Added ***
             ])));
   }
- // *** END MODIFIED _buildOrderDetailsCard ***
+  // *** END MODIFIED _buildOrderDetailsCard ***
 
   Widget _buildDetailRow(IconData? icon, String text,
       {bool isTitle = false, bool isAddress = false}) {
@@ -4376,7 +4508,11 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   style: TextStyle(
                       fontSize: isTitle ? 15 : 14,
                       fontWeight: isTitle ? FontWeight.w600 : FontWeight.normal,
-                      color: isTitle ? _darkTeal : (isAddress ? _darkTeal : _grey) , // Address uses dark teal
+                      color: isTitle
+                          ? _darkTeal
+                          : (isAddress
+                              ? _darkTeal
+                              : _grey), // Address uses dark teal
                       height: 1.3)))
         ]));
   }
@@ -4386,8 +4522,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     return Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
       _buildInfoChip('Dist: ${order.estimatedDistance}'),
       _buildInfoChip('Time: ${order.estimatedTime}'),
-      _buildInfoChip('Earn: ugx ${order.earnings.toStringAsFixed(0)}', // Format UGX
-          color: _green, fontWeight: FontWeight.bold)
+      _buildInfoChip(
+          'Earn: ugx ${order.earnings.toStringAsFixed(0)}', // Format UGX
+          color: _green,
+          fontWeight: FontWeight.bold)
     ]);
   }
 
@@ -4408,29 +4546,30 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   // Renamed from _buildStatusCard for clarity
   Widget _buildStatusTimelineCard() {
     // Same structure as _buildStatusCard, just uses timeline items
-     bool isAcceptedMet = _isStatusMet([
-       Order.STATUS_ACCEPTED.toLowerCase(),
-       Order.STATUS_ASSIGNED.toLowerCase(), // Treat assigned as accepted for timeline
-       Order.STATUS_PICKED_UP.toLowerCase(),
-       Order.STATUS_ON_THE_WAY.toLowerCase(),
-       Order.STATUS_DELIVERED.toLowerCase(),
-       Order.STATUS_COMPLETED.toLowerCase()
-     ]);
-     bool isPickedUpMet = _isStatusMet([
-       Order.STATUS_PICKED_UP.toLowerCase(),
-       Order.STATUS_ON_THE_WAY.toLowerCase(),
-       Order.STATUS_DELIVERED.toLowerCase(),
-       Order.STATUS_COMPLETED.toLowerCase()
-     ]);
-     bool isOnTheWayMet = _isStatusMet([
-       Order.STATUS_ON_THE_WAY.toLowerCase(),
-       Order.STATUS_DELIVERED.toLowerCase(),
-       Order.STATUS_COMPLETED.toLowerCase()
-     ]);
-     bool isDeliveredMet = _isStatusMet([
-       Order.STATUS_DELIVERED.toLowerCase(),
-       Order.STATUS_COMPLETED.toLowerCase()
-     ]);
+    bool isAcceptedMet = _isStatusMet([
+      Order.STATUS_ACCEPTED.toLowerCase(),
+      Order.STATUS_ASSIGNED
+          .toLowerCase(), // Treat assigned as accepted for timeline
+      Order.STATUS_PICKED_UP.toLowerCase(),
+      Order.STATUS_ON_THE_WAY.toLowerCase(),
+      Order.STATUS_DELIVERED.toLowerCase(),
+      Order.STATUS_COMPLETED.toLowerCase()
+    ]);
+    bool isPickedUpMet = _isStatusMet([
+      Order.STATUS_PICKED_UP.toLowerCase(),
+      Order.STATUS_ON_THE_WAY.toLowerCase(),
+      Order.STATUS_DELIVERED.toLowerCase(),
+      Order.STATUS_COMPLETED.toLowerCase()
+    ]);
+    bool isOnTheWayMet = _isStatusMet([
+      Order.STATUS_ON_THE_WAY.toLowerCase(),
+      Order.STATUS_DELIVERED.toLowerCase(),
+      Order.STATUS_COMPLETED.toLowerCase()
+    ]);
+    bool isDeliveredMet = _isStatusMet([
+      Order.STATUS_DELIVERED.toLowerCase(),
+      Order.STATUS_COMPLETED.toLowerCase()
+    ]);
 
     return Card(
         elevation: 1,
@@ -4450,17 +4589,11 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   'You accepted this order',
                   isAcceptedMet),
               _buildStatusItem(
-                  'Order Picked Up',
-                  'You picked up the order',
-                  isPickedUpMet),
+                  'Order Picked Up', 'You picked up the order', isPickedUpMet),
               _buildStatusItem(
-                  'On The Way',
-                  'You are delivering the order',
-                   isOnTheWayMet),
+                  'On The Way', 'You are delivering the order', isOnTheWayMet),
               _buildStatusItem(
-                  'Delivered',
-                  _getDeliveredSubtitle(),
-                  isDeliveredMet,
+                  'Delivered', _getDeliveredSubtitle(), isDeliveredMet,
                   isLast: true,
                   needsVerification: _needsVerification() && !isDeliveredMet),
               // Action button moved outside this card in the main body build method
@@ -4475,9 +4608,15 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         : (needsVerification
             ? Icons.access_time // Icon for verification needed
             : Icons.radio_button_unchecked); // Icon for pending step
-    Color iconColor = isCompleted ? _green : (needsVerification ? Colors.orange.shade700 : _grey); // Different color for verification step
+    Color iconColor = isCompleted
+        ? _green
+        : (needsVerification
+            ? Colors.orange.shade700
+            : _grey); // Different color for verification step
     Color textColor = isCompleted ? _darkTeal : _grey;
-    Color subtitleColor = isCompleted ? _grey : (needsVerification ? Colors.orange.shade700 : _grey);
+    Color subtitleColor = isCompleted
+        ? _grey
+        : (needsVerification ? Colors.orange.shade700 : _grey);
 
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Column(children: [
@@ -4501,7 +4640,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
                             color: textColor)),
-                    Text(subtitle, style: TextStyle(fontSize: 13, color: subtitleColor)) // Use subtitleColor
+                    Text(subtitle,
+                        style: TextStyle(
+                            fontSize: 13,
+                            color: subtitleColor)) // Use subtitleColor
                   ]))),
     ]);
   }
@@ -4513,9 +4655,12 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
   String _getDeliveredSubtitle() {
     String currentStatusLower = _currentOrder.orderStatus.toLowerCase();
-    if (_isStatusMet([Order.STATUS_DELIVERED.toLowerCase(), Order.STATUS_COMPLETED.toLowerCase()]))
-      return 'Order successfully delivered';
-    if (_needsVerification() && currentStatusLower == Order.STATUS_ON_THE_WAY.toLowerCase())
+    if (_isStatusMet([
+      Order.STATUS_DELIVERED.toLowerCase(),
+      Order.STATUS_COMPLETED.toLowerCase()
+    ])) return 'Order successfully delivered';
+    if (_needsVerification() &&
+        currentStatusLower == Order.STATUS_ON_THE_WAY.toLowerCase())
       return 'Verify delivery with code';
     return 'Pending delivery completion';
   }
@@ -4621,8 +4766,10 @@ class EarningsHistoryScreen extends StatelessWidget {
                 // Calculate daily total ONLY for successful/completed payments
                 double dailyTotal = dailyPayments
                     .where((p) =>
-                        p.disbursementTransactionStatus.toLowerCase() == 'successful' ||
-                        p.disbursementTransactionStatus.toLowerCase() == 'completed')
+                        p.disbursementTransactionStatus.toLowerCase() ==
+                            'successful' ||
+                        p.disbursementTransactionStatus.toLowerCase() ==
+                            'completed')
                     .fold(0.0, (sum, p) => sum + p.amount);
                 String formattedDate =
                     DateFormat('EEEE, MMM d, yyyy').format(date);
@@ -4695,7 +4842,9 @@ class EarningsHistoryScreen extends StatelessWidget {
         statusColor = _grey;
         statusIcon = Icons.help_outline;
         // Capitalize if unknown but not empty
-        statusText = statusText.isNotEmpty ? statusText[0].toUpperCase() + statusText.substring(1) : 'Unknown';
+        statusText = statusText.isNotEmpty
+            ? statusText[0].toUpperCase() + statusText.substring(1)
+            : 'Unknown';
     }
     return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8.0),

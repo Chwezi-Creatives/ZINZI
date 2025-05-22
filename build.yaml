@@ -1,0 +1,162 @@
+targets:
+  $default:
+    builders:
+      json_serializable:
+        options:
+          any_map: true
+          checked: true
+          enable_to_json: true
+      freezed:
+        options:
+          generate_for_subclasses: true
+          all_to_json: true
+          all_from_json: true
+
+environment:
+  sdk: ^3.5.4
+
+build_to: cache
+
+build:
+  build_to: cache
+  build_on: source
+  generate_for:
+    - lib/**
+    - test/**
+
+analyze:
+  exclude:
+    - build/**
+    - test/**
+    - .dart_tool/**
+    - .flutter_tool/**
+    - .packages
+    - .pub
+    - **.dart_tool/**
+    - **.flutter_tool/**
+    - **.packages
+    - **.pub
+
+analyzer:
+  exclude:
+    - build/**
+    - test/**
+    - .dart_tool/**
+    - .flutter_tool/**
+    - .packages
+    - .pub
+    - **.dart_tool/**
+    - **.flutter_tool/**
+    - **.packages
+    - **.pub
+
+linter:
+  rules:
+    always_declare_return_types: true
+    always_require_non_null_named_parameters: true
+    avoid_annotating_with_dynamic: true
+    avoid_as: true
+    avoid_bool_literals_in_conditional_expressions: true
+    avoid_catches_without_on_clauses: true
+    avoid_empty_else: true
+    avoid_init_to_null: true
+    avoid_null_checks_in_equality_operators: true
+    avoid_relative_lib_imports: true
+    avoid_renaming_method_parameters: true
+    avoid_return_types_on_setters: true
+    avoid_returning_null_for_void: true
+    avoid_single_cascade_in_expression_statements: true
+    avoid_types_as_parameter_names: true
+    avoid_types_on_closure_parameters: true
+    avoid_unnecessary_containers: true
+    avoid_unused_constructor_parameters: true
+    avoid_void_async: true
+    camel_case_extensions: true
+    cancel_subscriptions: true
+    cascade_invocations: true
+    comment_references: true
+    constant_identifier_names: true
+    control_flow_in_finally: true
+    directives_ordering: true
+    empty_catches: true
+    empty_constructor_bodies: true
+    empty_statements: true
+    file_names: true
+    flutter_style_todos: true
+    hash_and_equals: true
+    implementation_imports: true
+    invariant_booleans: true
+    iterable_contains_unrelated_type: true
+    join_return_with_assignment: true
+    library_names: true
+    library_prefixes: true
+    lines_longer_than_80_chars: true
+    literal_only_boolean_expressions: true
+    no_adjacent_strings_in_list: true
+    no_duplicate_case_values: true
+    no_empty_pattern: true
+    no_leading_underscores_for_library_prefixes: true
+    no_leading_underscores_for_local_identifiers: true
+    non_constant_identifier_names: true
+    omit_local_variable_types: true
+    one_member_abstracts: true
+    only_throw_errors: true
+    override_on_non_overriding_member: true
+    package_api_docs: true
+    package_names: true
+    package_prefixed_library_names: true
+    prefer_adjacent_string_concatenation: true
+    prefer_collection_literals: true
+    prefer_conditional_assignment: true
+    prefer_const_constructors: true
+    prefer_const_constructors_in_immutables: true
+    prefer_const_declarations: true
+    prefer_contains: true
+    prefer_double_quotes: true
+    prefer_expression_function_bodies: true
+    prefer_final_fields: true
+    prefer_final_locals: true
+    prefer_for_elements_to_map_fromentries: true
+    prefer_if_elements_to_conditional_expressions: true
+    prefer_if_null_operators: true
+    prefer_inlined_adds: true
+    prefer_interpolation_to_compose_strings: true
+    prefer_is_empty: true
+    prefer_is_not_empty: true
+    prefer_is_not_operator: true
+    prefer_mixin: true
+    prefer_single_quotes: true
+    prefer_spread_collections: true
+    prefer_typing_uninitialized_variables: true
+    prefer_void_to_null: true
+    sort_child_properties_last: true
+    sort_pub_dependencies: true
+    strict_increments: true
+    super_goes_last: true
+    test_types_in_equals: true
+    type_annotate_public_apis: true
+    unawaited_futures: true
+    unnecessary_brace_in_string_interps: true
+    unnecessary_const: true
+    unnecessary_lambdas: true
+    unnecessary_new: true
+    unnecessary_null_aware_assignments: true
+    unnecessary_null_checks: true
+    unnecessary_overrides: true
+    unnecessary_this: true
+    unrelated_type_equality_checks: true
+    valid_regexps: true
+    void_checks: true
+
+watch:
+  inputs:
+    - lib/**
+    - test/**
+    - .dart_tool/**
+    - .flutter_tool/**
+    - .packages
+    - .pub
+    - **.dart_tool/**
+    - **.flutter_tool/**
+    - **.packages
+    - **.pub

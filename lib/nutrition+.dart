@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 import 'package:http/http.dart' as http;
-import 'user_cache.dart';
-import 'cache_config.dart';
+import 'package:zinzi2/app_drawer_unified.dart';
+import 'package:zinzi2/user_cache.dart';
+import 'package:zinzi2/cache_config.dart';
+import 'package:zinzi2/utils/image_utils.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image/cached_network_image.dart' as cn;
 import 'package:shimmer/shimmer.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'nutri_detail.dart';
 
@@ -18,7 +22,6 @@ const Color primaryTextColor = Color(0xFF333333);
 const Color secondaryTextColor = Color(0xFF666666);
 const Color priceColor = primaryTeal;
 const Color errorIconColor = Colors.grey;
-
 
 // Supplement Model
 class Supplement {
@@ -349,6 +352,11 @@ if (apiBaseUrl != null) {
 }
 
 class _NutritionPageState extends State<NutritionPage> with TickerProviderStateMixin {
+  // Scroll controller for preloading
+  final ScrollController _scrollController = ScrollController();
+  final int _preloadThreshold = 15; // Number of items before the end to start preloading
+  bool _isPreloadingEnabled = true; // Always enable preloading
+  bool _isLoadingMore = false; // Track if we're currently loading more items
   Future<void> manualRefreshFromAppBar() async {
     setState(() {
       spicesLoading = true;
@@ -394,16 +402,37 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
       vsync: this,
       duration: const Duration(seconds: 1),
     );
+    
+    // Initialize scroll controller
+    _scrollController.addListener(_onScroll);
+    
+    // Initial data fetch
     _fetchSpices();
     _fetchHerbals();
     _fetchSupplements();
     _fetchGadgets();
+    
+    // Initial preload after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _preloadImages();
+      }
+    });
   }
 
   @override
   void dispose() {
+    // Remove scroll listener first to prevent callbacks after disposal
+    _scrollController.removeListener(_onScroll);
+    
+    // Dispose controllers
     _refreshIconController.dispose();
     _tabController.dispose();
+    _scrollController.dispose();
+    
+    // Cancel any pending operations
+    // Add any other cleanup here
+    
     super.dispose();
   }
 
@@ -830,39 +859,149 @@ class _NutritionPageState extends State<NutritionPage> with TickerProviderStateM
   }
 
   String? getDisplayImageUrl(String? url) {
-    if (url == null) return null;
-    final RegExp driveShare =
-        RegExp(r'^https://drive.google.com/file/d/(.*?)/');
-    final RegExp driveShare2 =
-        RegExp(r'^https://drive.google.com/open\?id=(.*?)(&|#|\\s|\n|\r|\s|$)');
-    final match = driveShare.firstMatch(url) ?? driveShare2.firstMatch(url);
-    if (match != null && match.groupCount >= 1) {
-      final id = match.group(1);
-      return 'https://drive.google.com/uc?export=view&id=$id';
+    if (url == null || url.isEmpty) return null;
+    return ImageUtils.processImageUrl(url);
+  }
+
+  // Handle scroll events for preloading
+  void _onScroll() {
+    // Check if widget is still mounted and preloading is enabled
+    if (!mounted || !_isPreloadingEnabled) return;
+    
+    // Check if scroll controller is still attached
+    if (!_scrollController.hasClients) return;
+    
+    try {
+      final position = _scrollController.position;
+      if (!position.hasContentDimensions) return;
+      
+      final threshold = 0.7; // Start preloading when 70% scrolled
+      final maxScroll = position.maxScrollExtent;
+      final currentScroll = position.pixels;
+      
+      if (maxScroll <= 0) return; // List not yet laid out or has no scroll
+      
+      if (currentScroll >= (maxScroll * threshold)) {
+        _preloadImages();
+      }
+    } catch (e) {
+      // Ignore any errors during scroll handling
+      debugPrint('Scroll handling error: $e');
     }
-    return url;
+  }
+
+  // Preload images that are about to be visible
+  void _preloadImages() {
+    // Check if widget is still mounted and preloading is enabled
+    if (!mounted || !_isPreloadingEnabled) return;
+    
+    // Check if scroll controller is still attached
+    if (!_scrollController.hasClients) return;
+    
+    // Get current tab items
+    List<dynamic> currentItems = [];
+    switch (_tabController.index) {
+      case 0:
+        currentItems = fetchedSpices;
+        break;
+      case 1:
+        currentItems = fetchedHerbals;
+        break;
+      case 2:
+        currentItems = fetchedSupplements;
+        break;
+      case 3:
+        currentItems = fetchedGadgets;
+        break;
+    }
+    
+    if (currentItems.isEmpty) return;
+    
+    // Calculate visible items
+    final firstVisibleIndex = (_scrollController.position.pixels / 200).floor();
+    final lastVisibleIndex = ((_scrollController.position.pixels + 
+        MediaQuery.of(context).size.height) / 200).ceil();
+    
+    // Preload images for items slightly beyond the visible area
+    final preloadStart = firstVisibleIndex.clamp(0, currentItems.length - 1);
+    final preloadEnd = (lastVisibleIndex + _preloadThreshold)
+        .clamp(0, currentItems.length - 1);
+    
+    for (int i = preloadStart; i <= preloadEnd; i++) {
+      if (i >= 0 && i < currentItems.length) {
+        final item = currentItems[i];
+        String? imageUrl;
+        
+        if (item is NutritionItem) {
+          imageUrl = getDisplayImageUrl(item.imagePath);
+        } else if (item is Herbal) {
+          imageUrl = getDisplayImageUrl(item.imageUrl);
+        } else if (item is Supplement) {
+          imageUrl = getDisplayImageUrl(item.imageUrl);
+        } else if (item is Gadget) {
+          imageUrl = getDisplayImageUrl(item.imageUrl);
+        }
+        
+        if (imageUrl != null && imageUrl.startsWith('http')) {
+          try {
+            // Preload the image into cache silently
+            cn.CachedNetworkImageProvider(imageUrl)
+              .resolve(ImageConfiguration())
+              .addListener(
+                ImageStreamListener(
+                  (_, __) {},
+                  onError: (dynamic error, StackTrace? stackTrace) {
+                    // Silently handle errors during preloading
+                    debugPrint('Error preloading image: $error');
+                  },
+                ),
+              );
+          } catch (e) {
+            debugPrint('Error setting up image preload: $e');
+          }
+        }
+      }
+    }
   }
 
   Widget _buildCategoryGrid<T>(List<T> items, BuildContext context, {String? defaultItemImagePath, String? label}) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12.0, 12.0, 12.0, 0),
-      child: GridView.builder(
-        physics: const ClampingScrollPhysics(),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          crossAxisSpacing: 12.0,
-          mainAxisSpacing: 12.0,
-          childAspectRatio: 0.80,
-        ),
-        itemCount: items.length,
-        itemBuilder: (BuildContext context, int index) {
-          return AnimatedOpacity(
-            opacity: 1.0,
-            duration: Duration(milliseconds: 400 + (index % 5 * 100)),
-            curve: Curves.easeOut,
-            child: _buildItemCard<T>(items[index], context, label: label, defaultItemImagePath: defaultItemImagePath),
-          );
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (ScrollNotification scrollInfo) {
+          if (scrollInfo is ScrollEndNotification) {
+            _scrollController.removeListener(_onScroll);
+            _scrollController.addListener(_onScroll);
+            _preloadImages();
+          }
+          return false;
         },
+        child: GridView.builder(
+          controller: _scrollController,
+          physics: const ClampingScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: 12.0,
+            mainAxisSpacing: 12.0,
+            childAspectRatio: 0.80,
+          ),
+          itemCount: items.length,
+          itemBuilder: (BuildContext context, int index) {
+            // Preload images for the first few items
+            if (index < 10) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _preloadImages();
+              });
+            }
+            
+            return AnimatedOpacity(
+              opacity: 1.0,
+              duration: Duration(milliseconds: 400 + (index % 5 * 100)),
+              curve: Curves.easeOut,
+              child: _buildItemCard<T>(items[index], context, label: label, defaultItemImagePath: defaultItemImagePath),
+            );
+          },
+        ),
       ),
     );
   }

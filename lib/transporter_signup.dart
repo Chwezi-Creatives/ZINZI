@@ -283,12 +283,14 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
           if (transporterId != null) {
             final prefs = await SharedPreferences.getInstance();
             await prefs.setString('transporter_id', transporterId.toString());
-            await prefs.setString('user_type', 'transporter'); // Changed to lowercase for consistency
+            await prefs.setString('user_type',
+                'transporter'); // Changed to lowercase for consistency
             await prefs.setBool('is_logged_in', true);
-await Future.delayed(
-    const Duration(milliseconds: 100)); // Small delay
+
+            await Future.delayed(
+                const Duration(milliseconds: 100)); // Small delay
 // Register FCM token with user info (async, do not await)
-FCMService.registerTokenWithUserInfo();
+            FCMService.registerTokenWithUserInfo();
           }
           if (!mounted) return; // Check mount status again after delay
           _showSnackBar('Signup successful!',

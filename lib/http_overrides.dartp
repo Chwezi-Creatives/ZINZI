@@ -1,14 +1,22 @@
-import 'dart:io';
+// Use conditional import to handle web platform
+import 'dart:io' if (dart.library.js) 'dart:html' as io;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
-class MyHttpOverrides extends HttpOverrides {
+// This class is only used on non-web platforms
+class MyHttpOverrides extends io.HttpOverrides {
   final List<int> certificate;
 
   MyHttpOverrides(this.certificate);
 
   @override
-  HttpClient createHttpClient(SecurityContext? context) {
+  io.HttpClient createHttpClient(io.SecurityContext? context) {
+    // Skip for web platform
+    if (kIsWeb) {
+      throw UnsupportedError('HttpOverrides not supported on web platform');
+    }
+
     // Create a SecurityContext with custom trusted certificates
-    final securityContext = SecurityContext(withTrustedRoots: true);
+    final securityContext = io.SecurityContext(withTrustedRoots: true);
     try {
       securityContext.setTrustedCertificatesBytes(certificate);
     } catch (e) {
@@ -20,7 +28,7 @@ class MyHttpOverrides extends HttpOverrides {
 
     // Accept self-signed certificates
     client.badCertificateCallback =
-        (X509Certificate cert, String host, int port) {
+        (io.X509Certificate cert, String host, int port) {
       print('Accepting self-signed certificate from $host:$port');
       return true;
     };

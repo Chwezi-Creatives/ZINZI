@@ -17,6 +17,7 @@ import 'package:zinzi2/cache_config.dart'; // <<< IMPORT CacheConfig
 import 'package:zinzi2/notifications/notification_provider.dart'; // Added import
 import 'package:zinzi2/user_cache.dart'; // <<< IMPORT UserCache
 import 'package:zinzi2/signup_or_Login.dart';
+import 'package:zinzi2/utils/route_observer.dart';
 
 // --- UI Constants ---
 const Color primaryTeal = Color(0xFF00796B); // Teal 700 (Matched ChefDash)
@@ -1235,7 +1236,7 @@ class ProducerDash22 extends StatefulWidget {
   State<ProducerDash22> createState() => _ProducerDash22State();
 }
 
-class _ProducerDash22State extends State<ProducerDash22> {
+class _ProducerDash22State extends State<ProducerDash22> with WidgetsBindingObserver, RouteAware {
   // --- State fields ---
   int _currentIndex = 0;
   ProducerProfile? _profile;
@@ -1281,9 +1282,10 @@ class _ProducerDash22State extends State<ProducerDash22> {
   final GlobalKey<FormState> _produceFormKey = GlobalKey<FormState>();
   final GlobalKey<FormState> _profileFormKey = GlobalKey<FormState>();
 
-  // Polling Timer & Refresh State
+  // Polling & State Management
   Timer? _pollingTimer;
   bool _isRefreshing = false; // Tracks manual refresh or polling refresh
+  bool _isRouteActive = false; // Tracks if the current route is active
 
   // Notification Provider (Added)
   late final NotificationProvider notificationProvider;
@@ -1299,30 +1301,109 @@ class _ProducerDash22State extends State<ProducerDash22> {
     // Get notification provider instance
     notificationProvider =
         Provider.of<NotificationProvider>(context, listen: false);
+        
+    // Add lifecycle observer
+    WidgetsBinding.instance.addObserver(this);
 
     // Initial data fetch
     _fetchAllData();
 
-    // Start polling for orders
-    _startPolling();
+    // Initial route check
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _isRouteActive = ModalRoute.of(context)?.isCurrent ?? false;
+        if (_currentIndex == 1 && _isRouteActive) {
+          _startPolling();
+        }
+      }
+    });
 
     // Listen for notification refreshes
     notificationProvider.addListener(_handleNotificationRefresh);
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      final routeObserver = RouteObserverProvider.of(context);
+      routeObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void didPush() {
+    _updateRouteStatus(true);
+  }
+
+  @override
+  void didPopNext() {
+    _updateRouteStatus(true);
+  }
+  
+  @override
+  void didPushNext() {
+    _updateRouteStatus(false);
+  }
+  
+  @override
+  void didPop() {
+    _updateRouteStatus(false);
+  }
+  
+  void _updateRouteStatus(bool isActive) {
+    if (!mounted) return;
+    
+    setState(() {
+      _isRouteActive = isActive;
+    });
+    
+    if (isActive && _currentIndex == 1) {
+      _startPolling();
+    } else {
+      _pollingTimer?.cancel();
+      _pollingTimer = null;
+    }
+  }
+
+  @override
   void dispose() {
-    // Dispose timers and controllers
+    // Cancel any active polling
     _pollingTimer?.cancel();
+    
+    // Dispose controllers
     _profileNameController.dispose();
     _profilePhoneController.dispose();
     _profileLocationController.dispose();
-    _disposeProduceEditControllers(); // Dispose produce controllers
+    _disposeProduceEditControllers();
 
     // Remove notification listener
     notificationProvider.removeListener(_handleNotificationRefresh);
+    
+    // Remove lifecycle observer
+    WidgetsBinding.instance.removeObserver(this);
 
     super.dispose();
+  }
+  
+  // Route handling methods are implemented above
+  
+  // Handle app lifecycle changes
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // App came back to the foreground
+      if (_isRouteActive && _currentIndex == 1) {
+        _startPolling();
+        // Do an immediate fetch to get fresh data
+        _fetchOrdersAndProduce();
+      }
+    } else if (state == AppLifecycleState.paused) {
+      // App went to the background
+      _pollingTimer?.cancel();
+      _pollingTimer = null;
+    }
   }
 
   // Handles refresh triggered by notification
@@ -1334,21 +1415,53 @@ class _ProducerDash22State extends State<ProducerDash22> {
   }
 
   // Starts the periodic timer for fetching orders
+  // Handle tab changes to control polling
+  void _onTabChanged(int newIndex) {
+    setState(() {
+      _currentIndex = newIndex;
+    });
+    
+    if (newIndex == 1 && _isRouteActive) {
+      // Switched to orders tab and route is active
+      _startPolling();
+    } else {
+      // Switched away from orders tab or route is not active
+      _pollingTimer?.cancel();
+      _pollingTimer = null;
+    }
+  }
+
   void _startPolling() {
-    _pollingTimer?.cancel(); // Cancel any existing timer
+    // Don't start polling if not on orders tab or route is not active
+    if (_currentIndex != 1 || !_isRouteActive) {
+      return;
+    }
+    
+    // Cancel any existing timer
+    _pollingTimer?.cancel();
+    
     _pollingTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
-      // Increased interval
-      // Only poll if mounted and not currently editing/refreshing manually
-      if (mounted &&
+      // Only poll if:
+      // 1. Widget is still mounted
+      // 2. On orders tab
+      // 3. Route is currently active
+      // 4. Not currently editing profile or produce
+      // 5. Not already refreshing
+      if (mounted && 
+          _currentIndex == 1 && 
+          _isRouteActive &&
           !_isEditingProfile &&
           !_isRefreshing &&
           _editingProduceId == null) {
         print("[ProducerDash] Polling for new orders...");
-        _fetchOrdersAndProduce(
-            forceRefresh:
-                false); // Fetch orders/produce without forcing cache invalidation
+        _fetchOrdersAndProduce(forceRefresh: false);
+      } else if (!_isRouteActive || _currentIndex != 1) {
+        // If we're no longer on the orders tab or route is not active, stop polling
+        timer.cancel();
       }
     });
+    
+    print("[ProducerDash] Started polling for orders");
   }
 
   void _disposeProduceEditControllers() {
@@ -1700,44 +1813,12 @@ class _ProducerDash22State extends State<ProducerDash22> {
     // Note: Produce edit controllers (_produceNameController etc.) handled when entering edit mode
   }
 
-  // Sort orders by status priority then date
+  // Sort orders by date only (newest first)
   void _sortOrders() {
     _orders.sort((a, b) {
-      int statusCompare = _statusPriority(a.orderStatus)
-          .compareTo(_statusPriority(b.orderStatus));
-      if (statusCompare != 0) return statusCompare;
-      // If status is the same, sort by newest first
+      // Sort by newest first
       return b.orderDate.compareTo(a.orderDate);
     });
-  }
-
-  // Assign priority to order statuses for sorting
-  int _statusPriority(String status) {
-    // Lower numbers appear first
-    switch (status.toLowerCase()) { // Normalize status to lowercase for all logic
-      case Order.STATUS_PENDING:
-        return 0;
-      case 'accepted': // Order.STATUS_ACCEPTED.toLowerCase()
-        return 1;
-      case 'preparing': // Order.STATUS_PREPARING.toLowerCase()
-        return 2;
-      case 'ready for pickup': // Order.STATUS_READY_FOR_PICKUP.toLowerCase()
-        return 3;
-      case 'assigned': // Order.STATUS_ASSIGNED.toLowerCase()
-        return 4;
-      case 'dispatched': // Order.STATUS_DISPATCHED.toLowerCase()
-        return 5;
-      case 'out for delivery': // Order.STATUS_OUT_FOR_DELIVERY.toLowerCase()
-        return 6;
-      case 'delivered': // Order.STATUS_DELIVERED.toLowerCase()
-        return 7;
-      case 'completed': // Order.STATUS_COMPLETED.toLowerCase()
-        return 8;
-      case 'cancelled': // Order.STATUS_CANCELLED.toLowerCase()
-        return 9;
-      default:
-        return 10; // Unknown statuses last
-    }
   }
 
   // Sync stock selection UI from profile data
@@ -2901,6 +2982,7 @@ class _ProducerDash22State extends State<ProducerDash22> {
           if (index != _currentIndex && mounted) {
             _cancelAllEdits(); // Cancel edits when switching tabs
             setState(() => _currentIndex = index);
+            _onTabChanged(index); // Handle tab change for polling
           }
         },
         backgroundColor: whiteColor.withOpacity(0.98),
@@ -3700,10 +3782,11 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
   // Build Order Action Buttons based on status
   Widget _buildOrderActions(Order order) {
-  // DEBUG: Print order ID and status to diagnose status mismatches
-  // Remove or comment out after debugging
-  // ignore: avoid_print
-  print('[OrderActions] Order ${order.orderId} status: "${order.orderStatus}"');
+    // DEBUG: Print order ID and status to diagnose status mismatches
+    // Remove or comment out after debugging
+    // ignore: avoid_print
+    print(
+        '[OrderActions] Order ${order.orderId} status: "${order.orderStatus}"');
     List<Widget> buttons = [];
     String status = order.orderStatus;
 
@@ -3720,9 +3803,11 @@ class _ProducerDash22State extends State<ProducerDash22> {
           isDestructive: true));
     }
 
-    switch (status.toLowerCase()) { // Normalize status to lowercase for all logic
+    switch (status.toLowerCase()) {
+      // Normalize status to lowercase for all logic
       case 'pending':
-        buttons.add(_actionButton('Accept', () => _updateSimpleOrderStatus(order, 'accepted')));
+        buttons.add(_actionButton(
+            'Accept', () => _updateSimpleOrderStatus(order, 'accepted')));
         break;
       case 'accepted':
       case 'preparing':
@@ -4233,7 +4318,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
 
   // --- Status Color and Icon Helpers ---
   Color _getStatusColor(String status) {
-    switch (status.toLowerCase()) { // Normalize status to lowercase for all logic
+    switch (status.toLowerCase()) {
+      // Normalize status to lowercase for all logic
       case Order.STATUS_PENDING:
         return pendingColor;
       case 'accepted': // Order.STATUS_ACCEPTED.toLowerCase()
@@ -4260,7 +4346,8 @@ class _ProducerDash22State extends State<ProducerDash22> {
   }
 
   IconData _getStatusIcon(String status) {
-    switch (status.toLowerCase()) { // Normalize status to lowercase for all logic
+    switch (status.toLowerCase()) {
+      // Normalize status to lowercase for all logic
       case Order.STATUS_PENDING:
         return Icons.pending_actions_outlined;
       case 'accepted': // Order.STATUS_ACCEPTED.toLowerCase()

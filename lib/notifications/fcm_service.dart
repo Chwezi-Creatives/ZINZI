@@ -11,12 +11,21 @@ import 'notification_provider.dart';
 import 'notification_model.dart';
 
 // Import FlutterLocalNotifications package only for mobile platforms
+// We'll conditionally use this based on platform detection
+// This avoids the web build error with flutter_local_notifications
+// ignore: uri_does_not_exist
 import 'package:flutter_local_notifications/flutter_local_notifications.dart'
-    if (dart.library.js_util) 'package:flutter_local_notifications/flutter_local_notifications_web.dart' // This is a placeholder, as web doesn't use local notifications
-    show AndroidFlutterLocalNotificationsPlugin, AndroidInitializationSettings,
-         AndroidNotificationChannel, AndroidNotificationDetails,
-         DarwinInitializationSettings, FlutterLocalNotificationsPlugin,
-         Importance, InitializationSettings, NotificationDetails, Priority;
+    show
+        AndroidFlutterLocalNotificationsPlugin,
+        AndroidInitializationSettings,
+        AndroidNotificationChannel,
+        AndroidNotificationDetails,
+        DarwinInitializationSettings,
+        FlutterLocalNotificationsPlugin,
+        Importance,
+        InitializationSettings,
+        NotificationDetails,
+        Priority;
 
 // Global navigator key for navigation
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -36,14 +45,16 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 class FCMService {
   // Initialize Firebase Messaging instance
-  static final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
+  static final FirebaseMessaging _firebaseMessaging =
+      FirebaseMessaging.instance;
 
   // Initialize FlutterLocalNotificationsPlugin (only for mobile)
   static final FlutterLocalNotificationsPlugin? _notifications =
       kIsWeb ? null : FlutterLocalNotificationsPlugin();
 
   // Default notification channel
-  static const AndroidNotificationChannel _defaultChannel = AndroidNotificationChannel(
+  static const AndroidNotificationChannel _defaultChannel =
+      AndroidNotificationChannel(
     'zinzi_channel',
     'Zinzi Notifications',
     description: 'Channel for Zinzi app notifications',
@@ -72,17 +83,21 @@ class FCMService {
       if (userType != null) {
         switch (userType) {
           case 'chef':
-            userId = prefs.getString('chef_user_id') ?? prefs.getInt('ChefID')?.toString();
+            userId = prefs.getString('chef_user_id') ??
+                prefs.getInt('ChefID')?.toString();
             break;
           case 'producer':
-            userId = prefs.getString('producer_id') ?? prefs.getInt('ProducerID')?.toString();
+            userId = prefs.getString('producer_id') ??
+                prefs.getInt('ProducerID')?.toString();
             break;
           case 'transporter':
-            userId = prefs.getString('transporter_id') ?? prefs.getInt('TransporterID')?.toString();
+            userId = prefs.getString('transporter_id') ??
+                prefs.getInt('TransporterID')?.toString();
             break;
           case 'user':
           default:
-            userId = prefs.getString('user_id') ?? prefs.getInt('user_id')?.toString();
+            userId = prefs.getString('user_id') ??
+                prefs.getInt('user_id')?.toString();
             break;
         }
       }
@@ -93,7 +108,8 @@ class FCMService {
         final String? initial = await FirebaseMessaging.instance.getToken();
         if (initial != null) _registerToken(initial);
       } else {
-        print('FCM token registration skipped: user_id or user_type missing (should occur only before login/signup)');
+        print(
+            'FCM token registration skipped: user_id or user_type missing (should occur only before login/signup)');
       }
     } catch (e) {
       print('FCM initialization error: $e');
@@ -130,10 +146,9 @@ class FCMService {
       FirebaseMessaging.onMessage.listen(_handleMessage);
 
       // Set up background message handler (when app was closed and opened via notification)
-      FirebaseMessaging.instance.getInitialMessage()
-          .then((m) {
-            if (m != null) _handleMessage(m);
-          });
+      FirebaseMessaging.instance.getInitialMessage().then((m) {
+        if (m != null) _handleMessage(m);
+      });
 
       // Handle when a notification opens the app
       FirebaseMessaging.onMessageOpenedApp.listen(_handleMessage);
@@ -147,11 +162,12 @@ class FCMService {
     try {
       // Request permissions
       await FirebaseMessaging.instance.requestPermission(
-        alert: true, badge: true, sound: true, provisional: false);
+          alert: true, badge: true, sound: true, provisional: false);
 
       // Configure how foreground notifications appear
-      await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
-        alert: true, badge: true, sound: true);
+      await FirebaseMessaging.instance
+          .setForegroundNotificationPresentationOptions(
+              alert: true, badge: true, sound: true);
 
       // Set up local notifications
       const AndroidInitializationSettings androidInit =
@@ -160,24 +176,22 @@ class FCMService {
       const InitializationSettings init =
           InitializationSettings(android: androidInit);
 
-      await _notifications?.initialize(
-        init,
-        onDidReceiveNotificationResponse: (details) =>
-            _handleNotificationTap(details.payload)
-      );
+      await _notifications?.initialize(init,
+          onDidReceiveNotificationResponse: (details) =>
+              _handleNotificationTap(details.payload));
 
       // Create notification channel
-      await _notifications?.resolvePlatformSpecificImplementation<
+      await _notifications
+          ?.resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>()
           ?.createNotificationChannel(_defaultChannel);
 
       // Set up message handlers
       FirebaseMessaging.onMessage.listen(_showNotification);
       FirebaseMessaging.onMessageOpenedApp.listen(_handleMessage);
-      FirebaseMessaging.instance.getInitialMessage()
-          .then((m) {
-            if (m != null) _showNotification(m);
-          });
+      FirebaseMessaging.instance.getInitialMessage().then((m) {
+        if (m != null) _showNotification(m);
+      });
 
       // Register background handler
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
@@ -191,35 +205,31 @@ class FCMService {
     try {
       // Request permissions
       await FirebaseMessaging.instance.requestPermission(
-        alert: true, badge: true, sound: true, provisional: false);
+          alert: true, badge: true, sound: true, provisional: false);
 
       // Configure how foreground notifications appear
-      await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
-        alert: true, badge: true, sound: true);
+      await FirebaseMessaging.instance
+          .setForegroundNotificationPresentationOptions(
+              alert: true, badge: true, sound: true);
 
       // Set up local notifications
-      final DarwinInitializationSettings iosInit =
-          DarwinInitializationSettings(
-            requestAlertPermission: true,
-            requestBadgePermission: true,
-            requestSoundPermission: true);
+      final DarwinInitializationSettings iosInit = DarwinInitializationSettings(
+          requestAlertPermission: true,
+          requestBadgePermission: true,
+          requestSoundPermission: true);
 
-      final InitializationSettings init =
-          InitializationSettings(iOS: iosInit);
+      final InitializationSettings init = InitializationSettings(iOS: iosInit);
 
-      await _notifications?.initialize(
-        init,
-        onDidReceiveNotificationResponse: (details) =>
-            _handleNotificationTap(details.payload)
-      );
+      await _notifications?.initialize(init,
+          onDidReceiveNotificationResponse: (details) =>
+              _handleNotificationTap(details.payload));
 
       // Set up message handlers
       FirebaseMessaging.onMessage.listen(_showNotification);
       FirebaseMessaging.onMessageOpenedApp.listen(_handleMessage);
-      FirebaseMessaging.instance.getInitialMessage()
-          .then((m) {
-            if (m != null) _showNotification(m);
-          });
+      FirebaseMessaging.instance.getInitialMessage().then((m) {
+        if (m != null) _showNotification(m);
+      });
 
       // Register background handler
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
@@ -237,7 +247,8 @@ class FCMService {
 
       // Check notification preferences
       final prefs = await SharedPreferences.getInstance();
-      bool notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
+      bool notificationsEnabled =
+          prefs.getBool('notifications_enabled') ?? true;
 
       // Configure the notification channel based on user preferences
       final AndroidNotificationChannel channel = AndroidNotificationChannel(
@@ -253,7 +264,8 @@ class FCMService {
 
       // Create the channel if on Android
       if (Platform.isAndroid) {
-        await _notifications?.resolvePlatformSpecificImplementation<
+        await _notifications
+            ?.resolvePlatformSpecificImplementation<
                 AndroidFlutterLocalNotificationsPlugin>()
             ?.createNotificationChannel(channel);
       }
@@ -309,7 +321,8 @@ class FCMService {
   }
 
   // Helper method to add a notification to the provider
-  static void _addNotificationToProvider(BuildContext context, RemoteMessage message) {
+  static void _addNotificationToProvider(
+      BuildContext context, RemoteMessage message) {
     try {
       final notificationProvider = Provider.of<NotificationProvider>(
         context,
@@ -318,10 +331,11 @@ class FCMService {
 
       // Create a notification model
       final notification = NotificationModel(
-        id: message.messageId ?? DateTime.now().millisecondsSinceEpoch.toString(),
+        id: message.messageId ??
+            DateTime.now().millisecondsSinceEpoch.toString(),
         type: message.data['type'] ?? 'order_status_changed',
         message: message.notification?.body ??
-                'Order status updated to ${message.data['order_status'] ?? "unknown"}',
+            'Order status updated to ${message.data['order_status'] ?? "unknown"}',
         data: message.data,
         timestamp: DateTime.now(),
         isRead: false,
@@ -364,10 +378,8 @@ class FCMService {
         final route = routeMap[userType] ?? '/order_details';
 
         // Navigate
-        navigator.pushNamed(
-          route,
-          arguments: {'order_id': orderId, 'status': status}
-        );
+        navigator.pushNamed(route,
+            arguments: {'order_id': orderId, 'status': status});
       }
     } catch (error) {
       print('Error handling notification tap: $error');
@@ -379,7 +391,8 @@ class FCMService {
     try {
       // Check if notifications are enabled
       final prefs = await SharedPreferences.getInstance();
-      bool notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
+      bool notificationsEnabled =
+          prefs.getBool('notifications_enabled') ?? true;
 
       if (!notificationsEnabled) {
         print('Notifications are disabled by user preference');
@@ -394,20 +407,20 @@ class FCMService {
       switch (userType) {
         case 'chef':
           userId = prefs.getString('chef_user_id') ??
-                  prefs.getInt('ChefID')?.toString();
+              prefs.getInt('ChefID')?.toString();
           break;
         case 'producer':
           userId = prefs.getString('producer_id') ??
-                  prefs.getInt('ProducerID')?.toString();
+              prefs.getInt('ProducerID')?.toString();
           break;
         case 'transporter':
           userId = prefs.getString('transporter_id') ??
-                  prefs.getInt('TransporterID')?.toString();
+              prefs.getInt('TransporterID')?.toString();
           break;
         case 'user':
         default:
-          userId = prefs.getString('user_id') ??
-                  prefs.getInt('user_id')?.toString();
+          userId =
+              prefs.getString('user_id') ?? prefs.getInt('user_id')?.toString();
           break;
       }
 
@@ -442,7 +455,10 @@ class FCMService {
         'user_type': userType,
         'user_id': userId
       };
-      print('[FCM] Registering token. Endpoint: ' + endpoint + ', Payload: ' + payload.toString());
+      print('[FCM] Registering token. Endpoint: ' +
+          endpoint +
+          ', Payload: ' +
+          payload.toString());
       final response = await http.post(
         Uri.parse(endpoint),
         headers: {
@@ -454,7 +470,8 @@ class FCMService {
       if (response.statusCode == 200) {
         print('Token registered successfully');
       } else {
-        print('Failed to register token: ${response.statusCode} - ${response.body}');
+        print(
+            'Failed to register token: ${response.statusCode} - ${response.body}');
       }
     } catch (e) {
       print('Error registering token: $e');
@@ -502,8 +519,9 @@ class FCMService {
       if (kIsWeb) return;
 
       // Update Android notification channel based on preference
-      final androidPlugin = _notifications?.resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>();
+      final androidPlugin =
+          _notifications?.resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>();
 
       if (androidPlugin != null) {
         // Create an appropriate channel based on preferences
@@ -529,7 +547,8 @@ class FCMService {
   static Future<void> deactivateTokenWithBackend() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final token = await _firebaseMessaging.getToken(); // Uses static _firebaseMessaging
+      final token =
+          await _firebaseMessaging.getToken(); // Uses static _firebaseMessaging
       if (token == null) {
         print('[FCM] No token available for deactivation');
         return;
@@ -540,17 +559,21 @@ class FCMService {
       String? userId;
       switch (userType) {
         case 'chef':
-          userId = prefs.getString('chef_user_id') ?? prefs.getInt('ChefID')?.toString();
+          userId = prefs.getString('chef_user_id') ??
+              prefs.getInt('ChefID')?.toString();
           break;
         case 'producer':
-          userId = prefs.getString('producer_id') ?? prefs.getInt('ProducerID')?.toString();
+          userId = prefs.getString('producer_id') ??
+              prefs.getInt('ProducerID')?.toString();
           break;
         case 'transporter':
-          userId = prefs.getString('transporter_id') ?? prefs.getInt('TransporterID')?.toString();
+          userId = prefs.getString('transporter_id') ??
+              prefs.getInt('TransporterID')?.toString();
           break;
         case 'user':
         default:
-          userId = prefs.getString('user_id') ?? prefs.getInt('user_id')?.toString();
+          userId =
+              prefs.getString('user_id') ?? prefs.getInt('user_id')?.toString();
           break;
       }
       if (userId == null || userId.isEmpty) {
@@ -569,7 +592,10 @@ class FCMService {
         'user_type': userType,
         'user_id': userId,
       };
-      print('[FCM] Deactivating token. Endpoint: ' + endpoint + ', Payload: ' + payload.toString());
+      print('[FCM] Deactivating token. Endpoint: ' +
+          endpoint +
+          ', Payload: ' +
+          payload.toString());
       final response = await http.post(
         Uri.parse(endpoint),
         headers: {
@@ -580,7 +606,8 @@ class FCMService {
       if (response.statusCode == 200) {
         print('[FCM] Token deactivated successfully');
       } else {
-        print('[FCM] Failed to deactivate token: ${response.statusCode} - ${response.body}');
+        print(
+            '[FCM] Failed to deactivate token: ${response.statusCode} - ${response.body}');
       }
     } catch (e) {
       print('[FCM] Error deactivating token: $e');

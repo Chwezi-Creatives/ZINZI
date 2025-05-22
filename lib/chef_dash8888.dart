@@ -18,6 +18,7 @@ import 'package:geolocator/geolocator.dart'; // For location fetching
 import 'package:zinzi2/user_cache.dart';
 import 'package:zinzi2/cache_config.dart'; // <<< IMPORT CacheConfig
 import 'package:zinzi2/chef_verification_helper.dart'; // Import verification helper
+import 'package:zinzi2/utils/image_utils.dart'; // Import ImageUtils for URL processing
 
 // --- Consistent Color Palette (from chefsignup222.dart) ---
 const Color primaryTeal = Color(0xFF00796B); // Teal 700
@@ -621,7 +622,7 @@ class ApiService {
     print("Fetching profile from: $uri");
 
     try {
-      final response = await http.get(uri).timeout(const Duration(seconds: 20));
+      final response = await http.get(uri).timeout(const Duration(seconds: 23));
       if (response.statusCode == 200) {
         final dynamic rawData = json.decode(response.body);
         final dynamic handledData = _handleApiResponse(rawData);
@@ -686,7 +687,7 @@ class ApiService {
             headers: _getWriteHeaders(),
             body: jsonEncode(profileData),
           )
-          .timeout(const Duration(seconds: 20));
+          .timeout(const Duration(seconds: 25));
 
       if (response.statusCode == 200 || response.statusCode == 204) {
         print("Profile update successful for chef $chefId");
@@ -722,7 +723,7 @@ class ApiService {
             headers: _getWriteHeaders(),
             body: jsonEncode(payload),
           )
-          .timeout(const Duration(seconds: 20));
+          .timeout(const Duration(seconds: 25));
       if (response.statusCode == 200 || response.statusCode == 204) {
         print('Profile image updated successfully with Imgur link.');
         return imgurUrl;
@@ -782,7 +783,7 @@ class ApiService {
     print("Fetching orders from: $uri");
 
     try {
-      final response = await http.get(uri).timeout(const Duration(seconds: 20));
+      final response = await http.get(uri).timeout(const Duration(seconds: 25));
       if (response.statusCode == 200) {
         final dynamic rawData = json.decode(response.body);
         final dynamic ordersList = _handleApiResponse(rawData);
@@ -943,7 +944,7 @@ class ApiService {
             headers: _getWriteHeaders(),
             body: jsonEncode(body),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 25));
 
       if (response.statusCode == 200 || response.statusCode == 204) {
         return true;
@@ -1157,33 +1158,11 @@ class CachedImageWithShimmer extends StatelessWidget {
   });
 
   String? _getDirectImageLink(String? url) {
-    if (url == null ||
-        url.isEmpty ||
-        !(url.startsWith('http://') || url.startsWith('https://'))) {
+    if (url == null || url.isEmpty) {
       return null;
     }
-    if (url.contains('drive.google.com')) {
-      try {
-        Uri uri = Uri.parse(url);
-        String? fileId;
-        if (uri.pathSegments.contains('d')) {
-          int idIndex = uri.pathSegments.indexOf('d');
-          if (idIndex >= 0 && idIndex + 1 < uri.pathSegments.length) {
-            fileId = uri.pathSegments[idIndex + 1];
-          }
-        } else if (uri.queryParameters.containsKey('id')) {
-          fileId = uri.queryParameters['id'];
-        }
-        if (fileId != null && fileId.isNotEmpty && !fileId.contains('/')) {
-          fileId = fileId.split('&').first;
-          return 'https://drive.google.com/uc?export=view&id=$fileId';
-        }
-      } catch (e) {
-        print("Error parsing GDrive URL: $url - $e");
-      }
-      return null;
-    }
-    return url;
+    // Use the centralized ImageUtils for consistent URL processing
+    return ImageUtils.processImageUrl(url);
   }
 
   @override
@@ -1210,6 +1189,7 @@ class CachedImageWithShimmer extends StatelessWidget {
         },
       );
     } else {
+      // Process URL through our standardized image URL handler
       final String? processedUrl = _getDirectImageLink(imageUrl);
       if (processedUrl == null || processedUrl.isEmpty) {
         imageWidget = _buildErrorWidget(context, shimmerBase, shimmerHighlight);

@@ -19,6 +19,8 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="A new Flutter project.">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#000000">
 
   <!-- iOS meta tags & icons -->
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -29,12 +31,29 @@
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
+  <!-- Preload critical assets -->
+  <link rel="preload" href="main.dart.js" as="script">
+  <link rel="preload" href="assets/FontManifest.json" as="fetch">
+  <link rel="preload" href="assets/fonts/MaterialIcons-Regular.otf" as="font" type="font/otf" crossorigin>
+
   <title>zinzi2</title>
   <link rel="manifest" href="manifest.json">
   <!-- Google Maps JavaScript API -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDqbiGKI-dtc6QZV9VSgXRp1Viqu5a3A1w"></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDqbiGKI-dtc6QZV9VSgXRp1Viqu5a3A1w" defer></script>
+  
+  <!-- Service Worker -->
+  <script src="flutter_service_worker.js" defer></script>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
+  <!-- Performance monitoring -->
+  <script>
+    // Performance monitoring
+    window.addEventListener('load', () => {
+      performance.mark('load');
+      performance.measure('load_time', 'start', 'load');
+      console.log(`App load time: ${performance.getEntriesByName('load_time')[0].duration}ms`);
+    });
+  </script>
 </body>
 </html>

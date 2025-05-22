@@ -629,12 +629,12 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       else if (producer != null &&
           producer['name'] != null &&
           producer['name'].isNotEmpty)
-        sourceInfo = 'Fresh from: ${producer['name']}';
+        sourceInfo = 'From: ${producer['name']}';
       else if (chef != null && chef['chefid'] != null)
         sourceInfo = 'Cooked by: Chef ID ${chef['chefid']}'; // Use chefid
       else if (producer != null && producer['producer_id'] != null)
         sourceInfo =
-            'Fresh from: Producer ID ${producer['producer_id']}'; // Use producer_id
+            'From: Producer ID ${producer['producer_id']}'; // Use producer_id
 
       return _buildMealItemCardContent(
           context,

@@ -10,7 +10,7 @@ import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
 // import 'notifications/fcm_service.dart'; // Removed duplicate, one below is fine
-import 'package:zinzi2/allmeals.dart';
+import 'package:zinzi2/onlymeals.dart';
 // import 'package:zinzi2/blogview.dart'; // Not used directly here
 // import 'package:zinzi2/cart.dart' as cart; // Not used directly here
 // import 'package:zinzi2/onboard.dart'; // Not used directly here
@@ -29,6 +29,9 @@ import 'package:intl/intl.dart'; // For date formatting
 import 'package:flutter/services.dart'; // For input formatters
 
 // --- Re-add Color Constants (or import from a shared file) ---
+// Imgur configuration
+String imgurClientID = dotenv.env['IMGUR_CLIENT_ID'] ?? '';
+
 const Color kColorPrimaryDark = Color(0xFF004D40);
 const Color kColorPrimary = Color(0xFF00796B);
 const Color kColorPrimaryLight = Color(0xFF4DB6AC);
@@ -76,7 +79,8 @@ class ProfilePage extends StatefulWidget {
     }
     if (!cacheValid) {
       try {
-        final apiBaseUrlForPreload = dotenv.env['API_BASE_URL'] ?? // Use a different var name to avoid confusion if needed
+        final apiBaseUrlForPreload = dotenv.env[
+                'API_BASE_URL'] ?? // Use a different var name to avoid confusion if needed
             dotenv.env['API_BASE_URL-intranet'] ??
             'https://default.url';
         int? userId = prefs.getInt('user_id');
@@ -242,6 +246,24 @@ class _ProfilePageState extends State<ProfilePage>
     'Nut-Free',
     'None'
   ];
+  
+  // Cuisine preferences
+  List<String> _selectedCuisines = [];
+  final List<String> _cuisineOptions = [
+    'African',
+    'East frican',
+    'American',
+    'Asian',
+    'Chinese',
+    'French',
+    'Indian',
+    'Italian',
+    'Japanese',
+    'Mediterranean',
+    'Mexican',
+    'Thai',
+    'Other'
+  ];
 
   // --- Animation ---
   late final AnimationController _refreshIconController;
@@ -337,7 +359,8 @@ class _ProfilePageState extends State<ProfilePage>
         _fetchMetrics();
         _fetchPreferences();
       } else {
-        print("[Profile] Cache incomplete or invalid. Fetching fresh user details.");
+        print(
+            "[Profile] Cache incomplete or invalid. Fetching fresh user details.");
         await _fetchData(); // Fetches all details, metrics, prefs
       }
     } else {
@@ -363,7 +386,8 @@ class _ProfilePageState extends State<ProfilePage>
   Future<void> _loadUserIdAndType() async {
     final prefs = await SharedPreferences.getInstance();
     final userIdStr = prefs.getString('user_id');
-    _userId = userIdStr != null ? int.tryParse(userIdStr) : prefs.getInt('user_id');
+    _userId =
+        userIdStr != null ? int.tryParse(userIdStr) : prefs.getInt('user_id');
     _userType = prefs.getString('user_type');
     print("Loaded User ID: $_userId, User Type: $_userType");
   }
@@ -437,7 +461,8 @@ class _ProfilePageState extends State<ProfilePage>
           await prefs.setInt('user_details_cache_timestamp',
               DateTime.now().millisecondsSinceEpoch);
         } else {
-          print('Failed to parse user details from API response: $responseData');
+          print(
+              'Failed to parse user details from API response: $responseData');
           _userDetails = {}; // Clear or set to default on parse failure
         }
       } else {
@@ -506,7 +531,8 @@ class _ProfilePageState extends State<ProfilePage>
         now.difference(DateTime.fromMillisecondsSinceEpoch(cachedTimestamp)) <
             CacheConfig.metricsCacheDuration) {
       print("Using cached metrics data");
-      print("Metrics Data Structure (from cache): ${json.encode(cachedMetrics)}");
+      print(
+          "Metrics Data Structure (from cache): ${json.encode(cachedMetrics)}");
       _updateStateWithMetrics(cachedMetrics);
       if (mounted) setState(() => _isLoadingMetrics = false);
       return;
@@ -521,24 +547,30 @@ class _ProfilePageState extends State<ProfilePage>
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        print("Metrics Data Structure (from API): ${json.encode(responseData)}");
-        
+        print(
+            "Metrics Data Structure (from API): ${json.encode(responseData)}");
+
         // Extract metrics from response - handle the nested 'metrics' array structure
         Map<String, dynamic> metricsMap = {};
-        if (responseData.containsKey('metrics') && responseData['metrics'] is List && responseData['metrics'].isNotEmpty) {
+        if (responseData.containsKey('metrics') &&
+            responseData['metrics'] is List &&
+            responseData['metrics'].isNotEmpty) {
           // Get the first metrics entry from the array
           metricsMap = Map<String, dynamic>.from(responseData['metrics'][0]);
           print("Extracted metrics: ${json.encode(metricsMap)}");
           _updateStateWithMetrics(metricsMap);
           await UserCache.saveData('user_metrics_cache', metricsMap);
-          await prefs.setInt('user_metrics_cache_timestamp', now.millisecondsSinceEpoch);
+          await prefs.setInt(
+              'user_metrics_cache_timestamp', now.millisecondsSinceEpoch);
         } else if (responseData.containsKey('data')) {
           metricsMap = Map<String, dynamic>.from(responseData['data']);
           _updateStateWithMetrics(metricsMap);
           await UserCache.saveData('user_metrics_cache', metricsMap);
-          await prefs.setInt('user_metrics_cache_timestamp', now.millisecondsSinceEpoch);
+          await prefs.setInt(
+              'user_metrics_cache_timestamp', now.millisecondsSinceEpoch);
         } else {
-          print("Metrics Data Structure (from API): ${json.encode(responseData)}");
+          print(
+              "Metrics Data Structure (from API): ${json.encode(responseData)}");
           _updateStateWithMetrics(responseData);
         }
       } else {
@@ -578,14 +610,23 @@ class _ProfilePageState extends State<ProfilePage>
       };
 
       if (!_isEditingMetrics) {
-        _selectedAgeRange = _userMetrics['age_range'] != 'N/A' ? _userMetrics['age_range'] : null;
-        if (_selectedAgeRange != null && !_ageRanges.contains(_selectedAgeRange)) _selectedAgeRange = null;
+        _selectedAgeRange = _userMetrics['age_range'] != 'N/A'
+            ? _userMetrics['age_range']
+            : null;
+        if (_selectedAgeRange != null &&
+            !_ageRanges.contains(_selectedAgeRange)) _selectedAgeRange = null;
 
-        _selectedSex = _userMetrics['sex'] != 'N/A' ? _userMetrics['sex'] : null;
-        if (_selectedSex != null && !_sexs.contains(_selectedSex)) _selectedSex = null;
-        
-        _selectedActivityLevel = _userMetrics['activity_level'] != 'N/A' ? _userMetrics['activity_level'] : null;
-        if (_selectedActivityLevel != null && !_activityLevels.contains(_selectedActivityLevel)) _selectedActivityLevel = null;
+        _selectedSex =
+            _userMetrics['sex'] != 'N/A' ? _userMetrics['sex'] : null;
+        if (_selectedSex != null && !_sexs.contains(_selectedSex))
+          _selectedSex = null;
+
+        _selectedActivityLevel = _userMetrics['activity_level'] != 'N/A'
+            ? _userMetrics['activity_level']
+            : null;
+        if (_selectedActivityLevel != null &&
+            !_activityLevels.contains(_selectedActivityLevel))
+          _selectedActivityLevel = null;
 
         _weightKg = _tryParseDouble(_userMetrics['weight']) ?? 0;
         _heightCm = _tryParseDouble(_userMetrics['height']) ?? 0;
@@ -613,12 +654,13 @@ class _ProfilePageState extends State<ProfilePage>
         now.difference(DateTime.fromMillisecondsSinceEpoch(cachedTimestamp)) <
             CacheConfig.preferencesCacheDuration) {
       print("[Profile] Using cached user preferences.");
-      print("Preferences Data Structure (from cache): ${json.encode(cachedPrefs)}");
+      print(
+          "Preferences Data Structure (from cache): ${json.encode(cachedPrefs)}");
       _updateStateWithPreferences(cachedPrefs);
       if (mounted) setState(() => _isLoadingPreferences = false);
       return;
     }
-    
+
     print('[Profile] API fetch: Fetching user preferences...');
     final url = '$apiBaseUrl/rr/preferences/$_userId';
     try {
@@ -628,24 +670,30 @@ class _ProfilePageState extends State<ProfilePage>
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        print("Preferences Data Structure (from API): ${json.encode(responseData)}");
-        
+        print(
+            "Preferences Data Structure (from API): ${json.encode(responseData)}");
+
         // Extract preferences from response - handle the nested 'preferences' array structure
         Map<String, dynamic> prefsMap = {};
-        if (responseData.containsKey('preferences') && responseData['preferences'] is List && responseData['preferences'].isNotEmpty) {
+        if (responseData.containsKey('preferences') &&
+            responseData['preferences'] is List &&
+            responseData['preferences'].isNotEmpty) {
           // Get the first preferences entry from the array
           prefsMap = Map<String, dynamic>.from(responseData['preferences'][0]);
           print("Extracted preferences: ${json.encode(prefsMap)}");
           _updateStateWithPreferences(prefsMap);
           await UserCache.saveData('user_preferences_cache', prefsMap);
-          await prefs.setInt('user_preferences_cache_timestamp', now.millisecondsSinceEpoch);
+          await prefs.setInt(
+              'user_preferences_cache_timestamp', now.millisecondsSinceEpoch);
         } else if (responseData.containsKey('data')) {
           prefsMap = Map<String, dynamic>.from(responseData['data']);
           _updateStateWithPreferences(prefsMap);
           await UserCache.saveData('user_preferences_cache', prefsMap);
-          await prefs.setInt('user_preferences_cache_timestamp', now.millisecondsSinceEpoch);
+          await prefs.setInt(
+              'user_preferences_cache_timestamp', now.millisecondsSinceEpoch);
         } else {
-          print("Preferences Data Structure (from API): ${json.encode(responseData)}");
+          print(
+              "Preferences Data Structure (from API): ${json.encode(responseData)}");
           _updateStateWithPreferences(responseData);
         }
       } else {
@@ -664,31 +712,54 @@ class _ProfilePageState extends State<ProfilePage>
   }
 
   void _updateStateWithPreferences(Map<String, dynamic> prefData) {
-     if (!mounted) return;
+    if (!mounted) return;
+    
     setState(() {
       _userPreferences = {
         'goals': prefData['goals'] ?? 'N/A',
         'diet_type': prefData['diet_type'] ?? 'N/A',
         'food_restrictions': _listToString(prefData['food_restrictions'], emptyValue: 'None'),
-        'cuisine_preferences': _listToString(prefData['cuisine_preferences'], emptyValue: 'N/A'),
+        'cuisine_preferences': _listToString(prefData['cuisine_preferences'], emptyValue: 'all'),
       };
+      
+      _isLoadingPreferences = false;
+      
+      // Load cuisine preferences
+      final cuisinePrefs = getCaseInsensitive(prefData, 'cuisine_preferences');
+      if (cuisinePrefs != null) {
+        if (cuisinePrefs is List) {
+          _selectedCuisines = List<String>.from(cuisinePrefs.whereType<String>());
+        } else if (cuisinePrefs is String && cuisinePrefs.isNotEmpty) {
+          // Handle case where cuisine_preferences is a comma-separated string
+          _selectedCuisines = cuisinePrefs.split(',').map((e) => e.trim()).toList();
+        } else {
+          _selectedCuisines = [];
+        }
+      } else {
+        _selectedCuisines = [];
+      }
 
       if (!_isEditingPreferences) {
         _selectedGoal = _userPreferences['goals'] != 'N/A' ? _userPreferences['goals'] : null;
-         if (_selectedGoal != null && !_goalsOptions.contains(_selectedGoal)) _selectedGoal = null;
+        if (_selectedGoal != null && !_goalsOptions.contains(_selectedGoal)) {
+          _selectedGoal = null;
+        }
 
         _selectedDietType = _userPreferences['diet_type'] != 'N/A' ? _userPreferences['diet_type'] : null;
-        if (_selectedDietType != null && !_dietTypeOptions.contains(_selectedDietType)) _selectedDietType = null;
+        if (_selectedDietType != null && !_dietTypeOptions.contains(_selectedDietType)) {
+          _selectedDietType = null;
+        }
 
         String? currentRestrictionDisplay = _userPreferences['food_restrictions'];
         if (currentRestrictionDisplay == 'None') {
-            _selectedFoodRestriction = 'None';
+          _selectedFoodRestriction = 'None';
         } else if (currentRestrictionDisplay != null && currentRestrictionDisplay != 'N/A') {
-            String firstItem = currentRestrictionDisplay.split(',').first.trim();
-            _selectedFoodRestriction = _foodRestrictionsOptions.contains(firstItem) ? firstItem : null;
+          String firstItem = currentRestrictionDisplay.split(',').first.trim();
+          _selectedFoodRestriction = _foodRestrictionsOptions.contains(firstItem) ? firstItem : null;
         } else {
-            _selectedFoodRestriction = null;
+          _selectedFoodRestriction = null;
         }
+        
         if (_selectedFoodRestriction != null && !_foodRestrictionsOptions.contains(_selectedFoodRestriction)) {
           _selectedFoodRestriction = null;
         }
@@ -728,7 +799,7 @@ class _ProfilePageState extends State<ProfilePage>
       }
     } catch (e) {
       print("Error picking image: $e");
-      if(mounted) _showErrorSnackBar('Error picking image: $e');
+      if (mounted) _showErrorSnackBar('Error picking image: $e');
     }
   }
 
@@ -737,50 +808,65 @@ class _ProfilePageState extends State<ProfilePage>
       _showErrorSnackBar('User ID not found. Cannot upload image.');
       return;
     }
-    _showSuccessSnackBar('Uploading image...'); // Temporary feedback
+    _showSuccessSnackBar('processing image...'); // Temporary feedback
 
-    final url = '$apiBaseUrl/rr/upload_profile_image/$_userId';
     try {
-      var request = http.MultipartRequest('POST', Uri.parse(url));
-      request.files.add(await http.MultipartFile.fromPath('profile_image', imageFile.path));
-      
-      // If you need to send other headers, like an auth token:
-      // SharedPreferences prefs = await SharedPreferences.getInstance();
-      // String? token = prefs.getString('auth_token');
-      // if (token != null) {
-      //   request.headers['Authorization'] = 'Bearer $token';
-      // }
+      // Upload to Imgur first
+      Future<String?> uploadImageToImgur(File imageFile) async {
+        try {
+          final uploadUrl = Uri.parse('https://api.imgur.com/3/image');
+          final request = http.MultipartRequest('POST', uploadUrl);
+          request.headers['Authorization'] = '$imgurClientID';
+          request.files
+              .add(await http.MultipartFile.fromPath('image', imageFile.path));
 
-      final response = await request.send().timeout(const Duration(seconds: 30));
+          final response = await request.send();
+          final responseData = await response.stream.bytesToString();
+          final jsonResult = jsonDecode(responseData);
+          return jsonResult['data']['link']?.toString();
+        } catch (e) {
+          print('Imgur upload error: \\$e');
+          return null;
+        }
+      }
+
+      final imgurUrl = await uploadImageToImgur(imageFile);
 
       if (!mounted) return;
 
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        final responseBody = await response.stream.bytesToString();
-        final responseData = json.decode(responseBody);
-        final newImageUrl = responseData['image_url']; // Adjust based on your API response
+      if (imgurUrl != null) {
+        // Now send the Imgur URL to the user details endpoint
+        final url = '$apiBaseUrl/rr/users/$_userId';
+        final response = await http
+            .patch(
+              Uri.parse(url),
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: json.encode({
+                'image': imgurUrl,
+              }),
+            )
+            .timeout(const Duration(seconds: 30));
 
-        if (newImageUrl != null) {
+        if (response.statusCode == 200) {
           setState(() {
-            _profileImageUrl = newImageUrl; // Update with URL from server
+            _profileImageUrl = imgurUrl;
             _profileImagePath = null; // Clear local path if server URL is used
           });
-          // Update userDetails map and cache if necessary
-           _userDetails['image'] = newImageUrl;
-           await UserCache.saveData('user_details_cache', _userDetails);
-
+          // Update userDetails map and cache
+          _userDetails['image'] = imgurUrl;
+          await UserCache.saveData('user_details_cache', _userDetails);
+          await _saveImageToPrefs(''); // Clear local path pref
           _showSuccessSnackBar('Profile image updated successfully!');
-          await _saveImageToPrefs(''); // Clear local path pref if server URL is used
         } else {
-          _showErrorSnackBar('Image uploaded, but URL not found in response.');
+          _showErrorSnackBar('Failed to update profile with Imgur URL');
         }
       } else {
-        final responseBody = await response.stream.bytesToString();
-        print('Failed to upload image. Status: ${response.statusCode}, Body: $responseBody');
-        _showErrorSnackBar('Failed to upload image. Server error: ${response.statusCode}');
+        _showErrorSnackBar('Failed to upload image to Imgur');
       }
     } on TimeoutException {
-       if (mounted) _showErrorSnackBar('Image upload timed out.');
+      if (mounted) _showErrorSnackBar('Image upload timed out.');
     } catch (e) {
       print("Error uploading image: $e");
       if (mounted) _showErrorSnackBar('Error uploading image: $e');
@@ -805,7 +891,6 @@ class _ProfilePageState extends State<ProfilePage>
   }
   // *** END OF RECONSTRUCTED/MISSING METHODS ***
 
-
   Future<void> _saveEditedData() async {
     String endpointPath = '';
     Map<String, dynamic> dataToUpdate = {};
@@ -815,7 +900,7 @@ class _ProfilePageState extends State<ProfilePage>
 
     if (_isEditingUserDetails) {
       sectionBeingSaved = 'details';
-      endpointPath = '/rr/rusers/$_userId';
+      endpointPath = '/rr/users/$_userId';
       cacheKeyToInvalidate = 'user_details_cache';
       successMessage = 'User details updated successfully!';
       dataToUpdate = {
@@ -863,7 +948,10 @@ class _ProfilePageState extends State<ProfilePage>
         }
       }
       double? bmr;
-      if (_weightKg > 0 && _heightCm > 0 && _selectedAgeRange != null && _selectedSex != null) {
+      if (_weightKg > 0 &&
+          _heightCm > 0 &&
+          _selectedAgeRange != null &&
+          _selectedSex != null) {
         int age = 30; // Default age if parsing fails
         final ageMatch = RegExp(r'\d+').firstMatch(_selectedAgeRange!);
         if (ageMatch != null) {
@@ -884,7 +972,8 @@ class _ProfilePageState extends State<ProfilePage>
           'Very Active': 1.725,
           'Extra Active': 1.9 // Added just in case
         };
-        dailyCalories = bmr * (activityMultipliers[_selectedActivityLevel!] ?? 1.2);
+        dailyCalories =
+            bmr * (activityMultipliers[_selectedActivityLevel!] ?? 1.2);
       }
 
       // Create a flat metrics object with only the allowed fields as per backend requirements
@@ -898,10 +987,10 @@ class _ProfilePageState extends State<ProfilePage>
         // Note: Backend will calculate these dependent values automatically
         // We don't need to send them as they'll be computed server-side
       };
-      
+
       // Remove null values
       dataToUpdate.removeWhere((key, value) => value == null);
-      
+
       print("Sending metrics update: ${json.encode(dataToUpdate)}");
 
       setState(() {
@@ -916,27 +1005,29 @@ class _ProfilePageState extends State<ProfilePage>
         _userMetrics['ideal_weight'] = idealWeight;
         _userMetrics['bmi_category'] = bmiCategory;
         _userMetrics['bmr'] = bmr?.toStringAsFixed(1) ?? 'N/A';
-        _userMetrics['daily_calories'] = dailyCalories?.toStringAsFixed(1) ?? 'N/A';
+        _userMetrics['daily_calories'] =
+            dailyCalories?.toStringAsFixed(1) ?? 'N/A';
         _isEditingMetrics = false;
       });
     } else if (_isEditingPreferences) {
       sectionBeingSaved = 'preferences';
-      endpointPath = '/rr/preferences/$_userId';
+      endpointPath = '/rr/users/$_userId/preferences';
       cacheKeyToInvalidate = 'user_preferences_cache';
       successMessage = 'Preferences updated successfully!';
-      
+
       List<String> restrictionsToSend = [];
       if (_selectedFoodRestriction != null &&
           _selectedFoodRestriction != 'None') {
         restrictionsToSend.add(_selectedFoodRestriction!);
       }
 
+      // Always include cuisine_preferences, even if empty, to clear existing preferences when needed
       dataToUpdate = {
         'goals': _selectedGoal,
         'diet_type': _selectedDietType,
-        'food_restrictions': restrictionsToSend.isNotEmpty ? restrictionsToSend : null, // Send null if empty, or API might expect empty list
+        'food_restrictions': restrictionsToSend.isNotEmpty ? restrictionsToSend : [],
+        'cuisine_preferences': _selectedCuisines, // Send empty list if no cuisines selected
       };
-      dataToUpdate.removeWhere((key, value) => value == null);
 
       setState(() {
         _userPreferences['goals'] = _selectedGoal ?? 'N/A';
@@ -971,7 +1062,7 @@ class _ProfilePageState extends State<ProfilePage>
           _showSuccessSnackBar(successMessage);
           if (cacheKeyToInvalidate.isNotEmpty) {
             await UserCache.removeData(cacheKeyToInvalidate);
-             // Also remove timestamp to force fresh fetch
+            // Also remove timestamp to force fresh fetch
             final prefs = await SharedPreferences.getInstance();
             await prefs.remove('${cacheKeyToInvalidate}_timestamp');
           }
@@ -1013,7 +1104,7 @@ class _ProfilePageState extends State<ProfilePage>
       }
       if (dataToUpdate.isEmpty) {
         print("No changes detected to save. Exiting edit mode.");
-         // Exit edit mode even if no data to PATCH, as user might have just hit save without changes
+        // Exit edit mode even if no data to PATCH, as user might have just hit save without changes
         setState(() {
           _isEditingUserDetails = false;
           _isEditingMetrics = false;
@@ -1031,28 +1122,37 @@ class _ProfilePageState extends State<ProfilePage>
 
       // Reload controllers from the original data maps
       if (_userDetails.isNotEmpty) {
-        _userDetailsNameController.text = getCaseInsensitive(_userDetails, 'Name') ?? '';
-        _userDetailsEmailController.text = getCaseInsensitive(_userDetails, 'Email') ?? '';
-        _userDetailsPhoneController.text = getCaseInsensitive(_userDetails, 'Phone_Number') ?? '';
-        _userDetailsLocationController.text = getCaseInsensitive(_userDetails, 'Location') ?? '';
+        _userDetailsNameController.text =
+            getCaseInsensitive(_userDetails, 'Name') ?? '';
+        _userDetailsEmailController.text =
+            getCaseInsensitive(_userDetails, 'Email') ?? '';
+        _userDetailsPhoneController.text =
+            getCaseInsensitive(_userDetails, 'Phone_Number') ?? '';
+        _userDetailsLocationController.text =
+            getCaseInsensitive(_userDetails, 'Location') ?? '';
       }
 
       if (_userMetrics.isNotEmpty) {
-        double? currentWeightKg = _tryParseDouble(getCaseInsensitive(_userMetrics,'weight'));
-        double? currentHeightCm = _tryParseDouble(getCaseInsensitive(_userMetrics,'height'));
+        double? currentWeightKg =
+            _tryParseDouble(getCaseInsensitive(_userMetrics, 'weight'));
+        double? currentHeightCm =
+            _tryParseDouble(getCaseInsensitive(_userMetrics, 'height'));
 
-        _selectedAgeRange = getCaseInsensitive(_userMetrics,'age_range') != 'N/A'
-            ? getCaseInsensitive(_userMetrics,'age_range')
-            : null;
+        _selectedAgeRange =
+            getCaseInsensitive(_userMetrics, 'age_range') != 'N/A'
+                ? getCaseInsensitive(_userMetrics, 'age_range')
+                : null;
         if (_selectedAgeRange != null &&
             !_ageRanges.contains(_selectedAgeRange)) _selectedAgeRange = null;
-        _selectedSex =
-            getCaseInsensitive(_userMetrics,'sex') != 'N/A' ? getCaseInsensitive(_userMetrics,'sex') : null;
+        _selectedSex = getCaseInsensitive(_userMetrics, 'sex') != 'N/A'
+            ? getCaseInsensitive(_userMetrics, 'sex')
+            : null;
         if (_selectedSex != null && !_sexs.contains(_selectedSex))
           _selectedSex = null;
-        _selectedActivityLevel = getCaseInsensitive(_userMetrics,'activity_level') != 'N/A'
-            ? getCaseInsensitive(_userMetrics,'activity_level')
-            : null;
+        _selectedActivityLevel =
+            getCaseInsensitive(_userMetrics, 'activity_level') != 'N/A'
+                ? getCaseInsensitive(_userMetrics, 'activity_level')
+                : null;
         if (_selectedActivityLevel != null &&
             !_activityLevels.contains(_selectedActivityLevel))
           _selectedActivityLevel = null;
@@ -1061,7 +1161,8 @@ class _ProfilePageState extends State<ProfilePage>
         _updateWeightControllerBasedOnUnit();
         _heightCm = currentHeightCm ?? 0;
         _updateHeightControllerBasedOnUnit();
-      } else { // Default if _userMetrics is empty
+      } else {
+        // Default if _userMetrics is empty
         _selectedAgeRange = null;
         _selectedSex = null;
         _selectedActivityLevel = null;
@@ -1072,14 +1173,15 @@ class _ProfilePageState extends State<ProfilePage>
       }
 
       if (_userPreferences.isNotEmpty) {
-        _selectedGoal = getCaseInsensitive(_userPreferences,'goals') != 'N/A'
-            ? getCaseInsensitive(_userPreferences,'goals')
+        _selectedGoal = getCaseInsensitive(_userPreferences, 'goals') != 'N/A'
+            ? getCaseInsensitive(_userPreferences, 'goals')
             : null;
         if (_selectedGoal != null && !_goalsOptions.contains(_selectedGoal))
           _selectedGoal = null;
-        _selectedDietType = getCaseInsensitive(_userPreferences,'diet_type') != 'N/A'
-            ? getCaseInsensitive(_userPreferences,'diet_type')
-            : null;
+        _selectedDietType =
+            getCaseInsensitive(_userPreferences, 'diet_type') != 'N/A'
+                ? getCaseInsensitive(_userPreferences, 'diet_type')
+                : null;
         if (_selectedDietType != null &&
             !_dietTypeOptions.contains(_selectedDietType))
           _selectedDietType = null;
@@ -1089,13 +1191,17 @@ class _ProfilePageState extends State<ProfilePage>
         _selectedFoodRestriction = (firstRestriction != null &&
                 _foodRestrictionsOptions.contains(firstRestriction))
             ? firstRestriction
-            : (getCaseInsensitive(_userPreferences, 'food_restrictions') == 'None' ? 'None' : null);
+            : (getCaseInsensitive(_userPreferences, 'food_restrictions') ==
+                    'None'
+                ? 'None'
+                : null);
 
         if (_selectedFoodRestriction != null &&
             !_foodRestrictionsOptions.contains(_selectedFoodRestriction)) {
           _selectedFoodRestriction = null;
         }
-      } else { // Default if _userPreferences is empty
+      } else {
+        // Default if _userPreferences is empty
         _selectedGoal = null;
         _selectedDietType = null;
         _selectedFoodRestriction = null;
@@ -1117,7 +1223,8 @@ class _ProfilePageState extends State<ProfilePage>
     if (value != null && value >= 0) {
       if (_weightUnit == 'kg') {
         _weightKg = value;
-      } else { // lbs
+      } else {
+        // lbs
         _weightKg = value * 0.453592; // lbs to kg
       }
     } else {
@@ -1148,7 +1255,8 @@ class _ProfilePageState extends State<ProfilePage>
       } else {
         _heightCm = 0;
       }
-    } else { // ft/in
+    } else {
+      // ft/in
       final String feetText = _heightFeetController.text.trim();
       final String inchesText = _heightInchesController.text.trim();
       final double feet =
@@ -1169,7 +1277,8 @@ class _ProfilePageState extends State<ProfilePage>
     if (_weightUnit == 'kg') {
       _weightController.text =
           _weightKg > 0 ? _weightKg.toStringAsFixed(1) : '';
-    } else { // lbs
+    } else {
+      // lbs
       double lbs = _weightKg / 0.453592; // kg to lbs
       _weightController.text = lbs > 0 ? lbs.toStringAsFixed(1) : '';
     }
@@ -1184,7 +1293,8 @@ class _ProfilePageState extends State<ProfilePage>
       if (_heightFeetController.text.isNotEmpty) _heightFeetController.clear();
       if (_heightInchesController.text.isNotEmpty)
         _heightInchesController.clear();
-    } else { // ft/in
+    } else {
+      // ft/in
       if (_heightCm > 0) {
         double totalInches = _heightCm / 2.54; // cm to total inches
         double feet = (totalInches ~/ 12).toDouble(); // Integer part for feet
@@ -1264,25 +1374,29 @@ class _ProfilePageState extends State<ProfilePage>
     await FCMService.deactivateTokenWithBackend();
     final prefs = await SharedPreferences.getInstance();
     await UserCache.clearAllData(); // Clears all UserCache entries
-    
+
     // More targeted removal from SharedPreferences
     final keysToRemove = <String>{
-        'user_id', 'user_type', 'auth_token', // Common auth keys
-        'image_path', // Specific to this page's local image caching
-        'user_details_cache_timestamp', 
-        'user_metrics_cache_timestamp',
-        'user_preferences_cache_timestamp'
+      'user_id', 'user_type', 'auth_token', // Common auth keys
+      'image_path', // Specific to this page's local image caching
+      'user_details_cache_timestamp',
+      'user_metrics_cache_timestamp',
+      'user_preferences_cache_timestamp'
     };
     // Remove general user session keys by pattern if any exist
     final allKeys = prefs.getKeys();
-    final patterns = [RegExp(r'_id\b', caseSensitive: false), RegExp(r'_user_type\b', caseSensitive: false), RegExp(r'token\b', caseSensitive: false)];
+    final patterns = [
+      RegExp(r'_id\b', caseSensitive: false),
+      RegExp(r'_user_type\b', caseSensitive: false),
+      RegExp(r'token\b', caseSensitive: false)
+    ];
     for (final key in allKeys) {
-        if (patterns.any((p) => p.hasMatch(key))) {
-            keysToRemove.add(key);
-        }
+      if (patterns.any((p) => p.hasMatch(key))) {
+        keysToRemove.add(key);
+      }
     }
     for (final key in keysToRemove) {
-        await prefs.remove(key);
+      await prefs.remove(key);
     }
     print("Logged out, removed keys: $keysToRemove");
 
@@ -1316,7 +1430,8 @@ class _ProfilePageState extends State<ProfilePage>
     );
   }
 
-  InputDecoration _buildInputDecoration(String label, {IconData? prefixIcon, String? hintText}) {
+  InputDecoration _buildInputDecoration(String label,
+      {IconData? prefixIcon, String? hintText}) {
     return InputDecoration(
       labelText: label,
       hintText: hintText,
@@ -1390,10 +1505,11 @@ class _ProfilePageState extends State<ProfilePage>
   Widget build(BuildContext context) {
     bool isEditingAnySection =
         _isEditingUserDetails || _isEditingMetrics || _isEditingPreferences;
-    
+
     // Show main shimmer if _isLoading is true AND (userDetails is empty AND no fetchError has occurred yet)
     // This prevents shimmer from showing if there's an error message to display or if some data is already loaded.
-    bool showOverallShimmer = _isLoading && _userDetails.isEmpty && _fetchError.isEmpty;
+    bool showOverallShimmer =
+        _isLoading && _userDetails.isEmpty && _fetchError.isEmpty;
 
     return Scaffold(
       backgroundColor: kColorBackground,
@@ -1429,8 +1545,7 @@ class _ProfilePageState extends State<ProfilePage>
                     child: const Icon(Icons.refresh),
                   ),
                   tooltip: isFetchingAnyData ? 'Refreshing...' : 'Refresh',
-                  onPressed:
-                      isFetchingAnyData ? null : _fetchData,
+                  onPressed: isFetchingAnyData ? null : _fetchData,
                 );
               },
             ),
@@ -1443,7 +1558,9 @@ class _ProfilePageState extends State<ProfilePage>
         color: kColorPrimary,
         child: showOverallShimmer
             ? _buildLoadingShimmer()
-            : _fetchError.isNotEmpty && _userDetails.isEmpty // Show error only if absolutely no user details loaded
+            : _fetchError.isNotEmpty &&
+                    _userDetails
+                        .isEmpty // Show error only if absolutely no user details loaded
                 ? _buildErrorState(_fetchError)
                 : ListView(
                     padding: const EdgeInsets.all(16.0),
@@ -1453,18 +1570,28 @@ class _ProfilePageState extends State<ProfilePage>
                       const SizedBox(height: 24.0),
 
                       // Individual section shimmers or content
-                      _isLoadingUserDetails && _userDetails.isEmpty // Shimmer for user details only if truly loading and empty
-                          ? _buildShimmerCard(itemCount: 5, title: "User Details")
+                      _isLoadingUserDetails &&
+                              _userDetails
+                                  .isEmpty // Shimmer for user details only if truly loading and empty
+                          ? _buildShimmerCard(
+                              itemCount: 5, title: "User Details")
                           : _buildUserDetailsCard(),
                       const SizedBox(height: 16.0),
 
-                      _isLoadingMetrics && _userMetrics.isEmpty // Shimmer for metrics
-                          ? _buildShimmerCard(itemCount: 8, title: "Health Metrics") // Adjusted item count for typical metrics display
+                      _isLoadingMetrics &&
+                              _userMetrics.isEmpty // Shimmer for metrics
+                          ? _buildShimmerCard(
+                              itemCount: 8,
+                              title:
+                                  "Health Metrics") // Adjusted item count for typical metrics display
                           : _buildMetricsCard(),
                       const SizedBox(height: 16.0),
 
-                      _isLoadingPreferences && _userPreferences.isEmpty // Shimmer for preferences
-                          ? _buildShimmerCard(itemCount: 3, title: "Preferences")
+                      _isLoadingPreferences &&
+                              _userPreferences
+                                  .isEmpty // Shimmer for preferences
+                          ? _buildShimmerCard(
+                              itemCount: 3, title: "Preferences")
                           : _buildPreferencesCard(),
                       const SizedBox(height: 24.0),
 
@@ -1489,16 +1616,27 @@ class _ProfilePageState extends State<ProfilePage>
             children: [
               const CircleAvatar(radius: 60, backgroundColor: Colors.white),
               const SizedBox(height: 12),
-              Container(height: 20, width: 150, color: Colors.white, margin: const EdgeInsets.symmetric(vertical: 4)),
-              Container(height: 16, width: 200, color: Colors.white, margin: const EdgeInsets.symmetric(vertical: 4)),
+              Container(
+                  height: 20,
+                  width: 150,
+                  color: Colors.white,
+                  margin: const EdgeInsets.symmetric(vertical: 4)),
+              Container(
+                  height: 16,
+                  width: 200,
+                  color: Colors.white,
+                  margin: const EdgeInsets.symmetric(vertical: 4)),
             ],
           ),
           const SizedBox(height: 24.0),
-          _buildShimmerCard(itemCount: 5, title: "User Details"), // User Details Shimmer
+          _buildShimmerCard(
+              itemCount: 5, title: "User Details"), // User Details Shimmer
           const SizedBox(height: 16.0),
-          _buildShimmerCard(itemCount: 8, title: "Health Metrics"), // Metrics Shimmer
+          _buildShimmerCard(
+              itemCount: 8, title: "Health Metrics"), // Metrics Shimmer
           const SizedBox(height: 16.0),
-          _buildShimmerCard(itemCount: 3, title: "Preferences"), // Preferences Shimmer
+          _buildShimmerCard(
+              itemCount: 3, title: "Preferences"), // Preferences Shimmer
         ],
       ),
     );
@@ -1517,9 +1655,14 @@ class _ProfilePageState extends State<ProfilePage>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (title != null) ...[
-              Container(height: 20, width: title.length * 8.0, color: Colors.white), // Approx width
+              Container(
+                  height: 20,
+                  width: title.length * 8.0,
+                  color: Colors.white), // Approx width
               const SizedBox(height: 12),
-              const Divider(color: kColorDivider, height: 1), // Show divider in shimmer too
+              const Divider(
+                  color: kColorDivider,
+                  height: 1), // Show divider in shimmer too
               const SizedBox(height: 12),
             ],
             ...List.generate(
@@ -1529,15 +1672,25 @@ class _ProfilePageState extends State<ProfilePage>
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(height: 22, width: 22, color: Colors.white), // Icon placeholder
+                    Container(
+                        height: 22,
+                        width: 22,
+                        color: Colors.white), // Icon placeholder
                     const SizedBox(width: 16),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(height: 14, width: 80, color: Colors.white), // Label placeholder
+                          Container(
+                              height: 14,
+                              width: 80,
+                              color: Colors.white), // Label placeholder
                           const SizedBox(height: 6),
-                          Container(height: 16, width: 120 + (index % 3 * 20.0), color: Colors.white), // Value placeholder (varying width)
+                          Container(
+                              height: 16,
+                              width: 120 + (index % 3 * 20.0),
+                              color: Colors
+                                  .white), // Value placeholder (varying width)
                         ],
                       ),
                     )
@@ -1550,7 +1703,6 @@ class _ProfilePageState extends State<ProfilePage>
       ),
     );
   }
-
 
   // --- Error State Widget ---
   Widget _buildErrorState(String message) {
@@ -1608,17 +1760,19 @@ class _ProfilePageState extends State<ProfilePage>
       if (file.existsSync()) {
         displayImage = FileImage(file);
       } else {
-        displayImage = const AssetImage('assets/images/proffr.png'); // Fallback if local file missing
+        displayImage = const AssetImage(
+            'assets/images/proffr.png'); // Fallback if local file missing
       }
     } else {
       displayImage = const AssetImage('assets/images/proffr.png');
     }
 
-    String displayName = getCaseInsensitive<String>(_userDetails, 'Name') ?? 
-                         (_isLoadingUserDetails && _userDetails.isEmpty ? 'Loading...' : 'User Name');
-    String displayEmail = getCaseInsensitive<String>(_userDetails, 'Email') ?? 
-                          (_isLoadingUserDetails && _userDetails.isEmpty ? '' : 'No Email');
-
+    String displayName = getCaseInsensitive<String>(_userDetails, 'Name') ??
+        (_isLoadingUserDetails && _userDetails.isEmpty
+            ? 'Loading...'
+            : 'User Name');
+    String displayEmail = getCaseInsensitive<String>(_userDetails, 'Email') ??
+        (_isLoadingUserDetails && _userDetails.isEmpty ? '' : 'No Email');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -1633,12 +1787,16 @@ class _ProfilePageState extends State<ProfilePage>
                 backgroundColor: kColorPrimaryLightest,
                 backgroundImage: displayImage,
                 onBackgroundImageError: (exception, stackTrace) {
-                  print("Error loading profile image from provider: $exception");
+                  print(
+                      "Error loading profile image from provider: $exception");
                   // Optionally, set to a default image directly in state if error occurs
                 },
-                child: (_profileImageUrl == null || _profileImageUrl!.isEmpty) && 
-                       (_profileImagePath == null || _profileImagePath!.isEmpty)
-                    ? Icon(Icons.person, size: 60, color: kColorPrimary.withOpacity(0.5))
+                child: (_profileImageUrl == null ||
+                            _profileImageUrl!.isEmpty) &&
+                        (_profileImagePath == null ||
+                            _profileImagePath!.isEmpty)
+                    ? Icon(Icons.person,
+                        size: 60, color: kColorPrimary.withOpacity(0.5))
                     : null, // Show person icon only if no image is set at all
               ),
               Container(
@@ -1647,7 +1805,10 @@ class _ProfilePageState extends State<ProfilePage>
                     color: kColorPrimary,
                     shape: BoxShape.circle,
                     boxShadow: [
-                      BoxShadow(color: Colors.black26, blurRadius: 3, offset: Offset(1,1))
+                      BoxShadow(
+                          color: Colors.black26,
+                          blurRadius: 3,
+                          offset: Offset(1, 1))
                     ]),
                 child: const Icon(Icons.edit,
                     size: 18, color: kColorTextOnPrimary),
@@ -1683,8 +1844,9 @@ class _ProfilePageState extends State<ProfilePage>
     required bool isEditing,
     required VoidCallback onEdit,
   }) {
-    bool isAnyOtherSectionEditing = (_isEditingUserDetails || _isEditingMetrics || _isEditingPreferences) && !isEditing;
-
+    bool isAnyOtherSectionEditing =
+        (_isEditingUserDetails || _isEditingMetrics || _isEditingPreferences) &&
+            !isEditing;
 
     return Card(
       elevation: 1.0,
@@ -1708,7 +1870,8 @@ class _ProfilePageState extends State<ProfilePage>
                         color: kColorPrimaryDark),
                   ),
                 ),
-                if (!isEditing && !isAnyOtherSectionEditing) // Show edit button only if no other section is being edited
+                if (!isEditing &&
+                    !isAnyOtherSectionEditing) // Show edit button only if no other section is being edited
                   IconButton(
                     icon: const Icon(Icons.edit_outlined,
                         size: 22, color: kColorPrimary),
@@ -1742,7 +1905,8 @@ class _ProfilePageState extends State<ProfilePage>
   }
 
   String _formatJoinedDate(String? dateString) {
-    if (dateString == null || dateString == 'N/A' || dateString.isEmpty) return 'N/A';
+    if (dateString == null || dateString == 'N/A' || dateString.isEmpty)
+      return 'N/A';
     try {
       // Attempt to parse common ISO 8601 format first
       DateTime dateTime = DateTime.parse(dateString).toLocal();
@@ -1758,10 +1922,12 @@ class _ProfilePageState extends State<ProfilePage>
   void _startLocationHintAnimation() {
     _locationHintTimer?.cancel();
     _locationHintDots = 0;
-    _locationHintTimer = Timer.periodic(const Duration(milliseconds: 400), (timer) {
+    _locationHintTimer =
+        Timer.periodic(const Duration(milliseconds: 400), (timer) {
       if (!mounted || !_isFetchingLocation) {
         timer.cancel();
-        if (mounted && !_isFetchingLocation) setState(() => _locationHintDots = 0);
+        if (mounted && !_isFetchingLocation)
+          setState(() => _locationHintDots = 0);
         return;
       }
       if (mounted) {
@@ -1793,7 +1959,8 @@ class _ProfilePageState extends State<ProfilePage>
             _isFetchingLocation = false;
             _userDetailsLocationController.text = ''; // Ensure it's clear
           });
-          _showErrorSnackBar('Location services are disabled. Please enable GPS.');
+          _showErrorSnackBar(
+              'Location services are disabled. Please enable GPS.');
         }
         return;
       }
@@ -1806,7 +1973,8 @@ class _ProfilePageState extends State<ProfilePage>
         }
       }
       if (permission == LocationPermission.deniedForever) {
-        throw Exception('Location permissions permanently denied. Please enable in app settings.');
+        throw Exception(
+            'Location permissions permanently denied. Please enable in app settings.');
       }
 
       Position position = await Geolocator.getCurrentPosition(
@@ -1814,14 +1982,19 @@ class _ProfilePageState extends State<ProfilePage>
         timeLimit: const Duration(seconds: 15), // Timeout for position fetching
       );
 
-      String displayAddress = "Lat: ${position.latitude.toStringAsFixed(4)}, Lon: ${position.longitude.toStringAsFixed(4)}";
-      String coordsForStorage = "${position.latitude},${position.longitude}"; // For storage
+      String displayAddress =
+          "Lat: ${position.latitude.toStringAsFixed(4)}, Lon: ${position.longitude.toStringAsFixed(4)}";
+      String coordsForStorage =
+          "${position.latitude},${position.longitude}"; // For storage
 
       // Attempt reverse geocoding (optional, can fail gracefully)
       try {
         // Using a free reverse geocoding service, replace if you have a preferred one or API key
-        final String geocodeApiUrl = 'https://geocode.maps.co/reverse?lat=${position.latitude}&lon=${position.longitude}';
-        final geocodeResponse = await http.get(Uri.parse(geocodeApiUrl)).timeout(const Duration(seconds: 10));
+        final String geocodeApiUrl =
+            'https://geocode.maps.co/reverse?lat=${position.latitude}&lon=${position.longitude}';
+        final geocodeResponse = await http
+            .get(Uri.parse(geocodeApiUrl))
+            .timeout(const Duration(seconds: 10));
         if (geocodeResponse.statusCode == 200) {
           final geocodeData = json.decode(geocodeResponse.body);
           if (geocodeData['display_name'] != null) {
@@ -1834,18 +2007,17 @@ class _ProfilePageState extends State<ProfilePage>
         print('Error during reverse geocoding: $e');
         // Falls back to Lat/Lon display
       }
-      
-      if(mounted) {
+
+      if (mounted) {
         _stopLocationHintAnimation();
         setState(() {
           // Store the more detailed address for display, but consider what to save to backend (coords or full address)
-          _userDetailsLocationController.text = displayAddress; 
+          _userDetailsLocationController.text = displayAddress;
           // If you want to store just coordinates, you'd use coordsForStorage when saving.
           _isFetchingLocation = false;
         });
         _showSuccessSnackBar('Location acquired!');
       }
-
     } on TimeoutException catch (_) {
       if (mounted) {
         _stopLocationHintAnimation();
@@ -1856,13 +2028,15 @@ class _ProfilePageState extends State<ProfilePage>
         _showErrorSnackBar('Getting location timed out.');
       }
     } catch (e) {
-       if (mounted) {
+      if (mounted) {
         _stopLocationHintAnimation();
         setState(() {
           _isFetchingLocation = false;
-          _userDetailsLocationController.text = 'Failed: ${e.toString().replaceFirst("Exception: ", "")}';
+          _userDetailsLocationController.text =
+              'Failed: ${e.toString().replaceFirst("Exception: ", "")}';
         });
-        _showErrorSnackBar('Error getting location: ${e.toString().replaceFirst("Exception: ", "")}');
+        _showErrorSnackBar(
+            'Error getting location: ${e.toString().replaceFirst("Exception: ", "")}');
       }
     }
   }
@@ -1882,14 +2056,16 @@ class _ProfilePageState extends State<ProfilePage>
             child: TextFormField(
               controller: _userDetailsLocationController,
               readOnly: true, // Location is set by the button
-              style: GoogleFonts.poppins(color: kColorTextPrimary, fontSize: 14),
+              style:
+                  GoogleFonts.poppins(color: kColorTextPrimary, fontSize: 14),
               decoration: _buildInputDecoration(
                 "Location Address", // Changed label
                 prefixIcon: Icons.location_on_outlined,
                 hintText: currentHintText,
               ).copyWith(
                 // Ensure content padding works well with multiline
-                 contentPadding: const EdgeInsets.symmetric(vertical: 14.0, horizontal: 12.0),
+                contentPadding: const EdgeInsets.symmetric(
+                    vertical: 14.0, horizontal: 12.0),
               ),
               maxLines: 2, // Allow for longer addresses
               // No validator needed for readOnly field set programmatically
@@ -1897,11 +2073,14 @@ class _ProfilePageState extends State<ProfilePage>
           ),
           const SizedBox(width: 8),
           Padding(
-            padding: const EdgeInsets.only(top: 4.0), // Adjust button position slightly
+            padding: const EdgeInsets.only(
+                top: 4.0), // Adjust button position slightly
             child: IconButton(
               icon: Icon(Icons.my_location, color: kColorPrimaryDark),
               tooltip: 'Get Current Location',
-              onPressed: _isFetchingLocation ? null : _getCurrentLocation, // Disable while fetching
+              onPressed: _isFetchingLocation
+                  ? null
+                  : _getCurrentLocation, // Disable while fetching
             ),
           ),
         ],
@@ -1909,23 +2088,26 @@ class _ProfilePageState extends State<ProfilePage>
     );
   }
 
-
   // --- Grouped Info Row Helper (Corrected definition) ---
   Widget _buildGroupedInfoRows(List<Widget> children, bool isEditing) {
     if (isEditing) {
       // In edit mode, just a simple column of children (input fields)
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: children.map((child) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4.0), // Add some spacing between edit fields
-          child: child,
-        )).toList(),
+        children: children
+            .map((child) => Padding(
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 4.0), // Add some spacing between edit fields
+                  child: child,
+                ))
+            .toList(),
       );
     }
 
     // In display mode, group items visually
     List<Widget> groupedChildren = [];
-    List<Widget> buffer = []; // To hold non-CustomGroupContainer items to be grouped
+    List<Widget> buffer =
+        []; // To hold non-CustomGroupContainer items to be grouped
 
     for (var child in children) {
       if (child is CustomGroupContainer) {
@@ -1935,7 +2117,8 @@ class _ProfilePageState extends State<ProfilePage>
             Container(
               margin: const EdgeInsets.symmetric(vertical: 4),
               decoration: BoxDecoration(
-                border: Border.all(color: kColorBorder.withOpacity(0.7), width: 1),
+                border:
+                    Border.all(color: kColorBorder.withOpacity(0.7), width: 1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Column(
@@ -1948,7 +2131,8 @@ class _ProfilePageState extends State<ProfilePage>
         }
         // Add the CustomGroupContainer directly
         groupedChildren.add(Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4.0), // Consistent vertical margin
+          padding: const EdgeInsets.symmetric(
+              vertical: 4.0), // Consistent vertical margin
           child: child,
         ));
       } else {
@@ -1974,11 +2158,9 @@ class _ProfilePageState extends State<ProfilePage>
       );
     }
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: groupedChildren
-    );
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: groupedChildren);
   }
-
 
   // --- Card Content Widgets ---
   Widget _buildUserDetailsCard() {
@@ -1988,75 +2170,90 @@ class _ProfilePageState extends State<ProfilePage>
       onEdit: () {
         setState(() {
           _isEditingUserDetails = true;
-          _isEditingMetrics = false; // Ensure other sections are not in edit mode
+          _isEditingMetrics =
+              false; // Ensure other sections are not in edit mode
           _isEditingPreferences = false;
           // Populate controllers from current state
-          _userDetailsNameController.text = getCaseInsensitive<String>(_userDetails, 'Name') ?? '';
-          _userDetailsEmailController.text = getCaseInsensitive<String>(_userDetails, 'Email') ?? '';
-          _userDetailsPhoneController.text = getCaseInsensitive<String>(_userDetails, 'Phone_Number') ?? '';
-          _userDetailsLocationController.text = getCaseInsensitive<String>(_userDetails, 'Location') ?? '';
+          _userDetailsNameController.text =
+              getCaseInsensitive<String>(_userDetails, 'Name') ?? '';
+          _userDetailsEmailController.text =
+              getCaseInsensitive<String>(_userDetails, 'Email') ?? '';
+          _userDetailsPhoneController.text =
+              getCaseInsensitive<String>(_userDetails, 'Phone_Number') ?? '';
+          _userDetailsLocationController.text =
+              getCaseInsensitive<String>(_userDetails, 'Location') ?? '';
         });
       },
       children: _isEditingUserDetails
-       ? [ // Widgets for editing user details
-            _buildTextField(
-              controller: _userDetailsNameController,
-              label: 'Name',
-              icon: Icons.person_outline,
-            ),
-            _buildTextField(
-              controller: _userDetailsEmailController,
-              label: 'Email',
-              icon: Icons.email_outlined,
-              keyboardType: TextInputType.emailAddress,
-            ),
-            _buildTextField(
-              controller: _userDetailsPhoneController,
-              label: 'Phone',
-              icon: Icons.phone_outlined,
-              keyboardType: TextInputType.phone,
-            ),
-            _buildLocationField(), // Special field for location editing
-       ]
-       : [ // Widgets for displaying user details
-        _buildInfoRow(
-          icon: Icons.badge_outlined,
-          label: 'User ID',
-          value: getCaseInsensitive(_userDetails, 'User_Id')?.toString() ?? 'N/A',
-          isEditing: false,
-        ),
-        _buildInfoRow(
-          icon: Icons.person_outline,
-          label: 'Name',
-          value: getCaseInsensitive<String>(_userDetails, 'Name') ?? 'N/A',
-          isEditing: false,
-        ),
-        _buildInfoRow(
-          icon: Icons.email_outlined,
-          label: 'Email',
-          value: getCaseInsensitive<String>(_userDetails, 'Email') ?? 'N/A',
-          isEditing: false,
-        ),
-        _buildInfoRow(
-          icon: Icons.phone_outlined,
-          label: 'Phone',
-          value: getCaseInsensitive<String>(_userDetails, 'Phone_Number') ?? 'N/A',
-          isEditing: false,
-        ),
-        _buildInfoRow(
-          icon: Icons.location_on_outlined,
-          label: 'Location',
-          value: getCaseInsensitive<String>(_userDetails, 'Location') ?? 'N/A',
-          isEditing: false,
-          maxLines: 2,
-        ),
-        _buildInfoRow(
-          icon: Icons.calendar_today_outlined,
-          label: 'Joined',
-          value: _formatJoinedDate(getCaseInsensitive(_userDetails, 'Registration_Date')),
-          isEditing: false,
-        ),
-      ],
+          ? [
+              // Widgets for editing user details
+              _buildTextField(
+                controller: _userDetailsNameController,
+                label: 'Name',
+                icon: Icons.person_outline,
+              ),
+              _buildTextField(
+                controller: _userDetailsEmailController,
+                label: 'Email',
+                icon: Icons.email_outlined,
+                keyboardType: TextInputType.emailAddress,
+              ),
+              _buildTextField(
+                controller: _userDetailsPhoneController,
+                label: 'Phone',
+                icon: Icons.phone_outlined,
+                keyboardType: TextInputType.phone,
+              ),
+              _buildLocationField(), // Special field for location editing
+            ]
+          : [
+              // Widgets for displaying user details
+              _buildInfoRow(
+                icon: Icons.badge_outlined,
+                label: 'User ID',
+                value:
+                    getCaseInsensitive(_userDetails, 'User_Id')?.toString() ??
+                        'N/A',
+                isEditing: false,
+              ),
+              _buildInfoRow(
+                icon: Icons.person_outline,
+                label: 'Name',
+                value:
+                    getCaseInsensitive<String>(_userDetails, 'Name') ?? 'N/A',
+                isEditing: false,
+              ),
+              _buildInfoRow(
+                icon: Icons.email_outlined,
+                label: 'Email',
+                value:
+                    getCaseInsensitive<String>(_userDetails, 'Email') ?? 'N/A',
+                isEditing: false,
+              ),
+              _buildInfoRow(
+                icon: Icons.phone_outlined,
+                label: 'Phone',
+                value:
+                    getCaseInsensitive<String>(_userDetails, 'Phone_Number') ??
+                        'N/A',
+                isEditing: false,
+              ),
+              _buildInfoRow(
+                icon: Icons.location_on_outlined,
+                label: 'Location',
+                value: getCaseInsensitive<String>(_userDetails, 'Location') ??
+                    'N/A',
+                isEditing: false,
+                maxLines: 2,
+              ),
+              _buildInfoRow(
+                icon: Icons.calendar_today_outlined,
+                label: 'Joined',
+                value: _formatJoinedDate(
+                    getCaseInsensitive(_userDetails, 'Registration_Date')),
+                isEditing: false,
+              ),
+            ],
     );
   }
 
@@ -2069,24 +2266,34 @@ class _ProfilePageState extends State<ProfilePage>
           _isEditingMetrics = true;
           _isEditingUserDetails = false;
           _isEditingPreferences = false;
-          
+
           // Populate controllers and selected values from _userMetrics
-          double? currentWeightKg = _tryParseDouble(getCaseInsensitive(_userMetrics, 'weight'));
-          double? currentHeightCm = _tryParseDouble(getCaseInsensitive(_userMetrics, 'height'));
+          double? currentWeightKg =
+              _tryParseDouble(getCaseInsensitive(_userMetrics, 'weight'));
+          double? currentHeightCm =
+              _tryParseDouble(getCaseInsensitive(_userMetrics, 'height'));
 
-          _selectedAgeRange = getCaseInsensitive(_userMetrics, 'age_range') != 'N/A'
-              ? getCaseInsensitive(_userMetrics, 'age_range')
-              : null;
-          if (_selectedAgeRange != null && !_ageRanges.contains(_selectedAgeRange)) _selectedAgeRange = null;
-          
-          _selectedSex = getCaseInsensitive(_userMetrics, 'sex') != 'N/A' ? getCaseInsensitive(_userMetrics, 'sex') : null;
-          if (_selectedSex != null && !_sexs.contains(_selectedSex)) _selectedSex = null;
+          _selectedAgeRange =
+              getCaseInsensitive(_userMetrics, 'age_range') != 'N/A'
+                  ? getCaseInsensitive(_userMetrics, 'age_range')
+                  : null;
+          if (_selectedAgeRange != null &&
+              !_ageRanges.contains(_selectedAgeRange)) _selectedAgeRange = null;
 
-          _selectedActivityLevel = getCaseInsensitive(_userMetrics, 'activity_level') != 'N/A'
-              ? getCaseInsensitive(_userMetrics, 'activity_level')
+          _selectedSex = getCaseInsensitive(_userMetrics, 'sex') != 'N/A'
+              ? getCaseInsensitive(_userMetrics, 'sex')
               : null;
-          if (_selectedActivityLevel != null && !_activityLevels.contains(_selectedActivityLevel)) _selectedActivityLevel = null;
-          
+          if (_selectedSex != null && !_sexs.contains(_selectedSex))
+            _selectedSex = null;
+
+          _selectedActivityLevel =
+              getCaseInsensitive(_userMetrics, 'activity_level') != 'N/A'
+                  ? getCaseInsensitive(_userMetrics, 'activity_level')
+                  : null;
+          if (_selectedActivityLevel != null &&
+              !_activityLevels.contains(_selectedActivityLevel))
+            _selectedActivityLevel = null;
+
           _weightKg = currentWeightKg ?? 0;
           _heightCm = currentHeightCm ?? 0;
           _updateWeightControllerBasedOnUnit(); // Populates _weightController
@@ -2094,133 +2301,160 @@ class _ProfilePageState extends State<ProfilePage>
         });
       },
       children: _isEditingMetrics
-        ? _buildMetricsEditingWidgets()
-        : [ 
-            _buildInfoRow(
-              icon: Icons.height_outlined,
-              label: 'Height',
-              value: getCaseInsensitive(_userMetrics, 'height') != 'N/A' && getCaseInsensitive(_userMetrics, 'height') != null
-                  ? '${getCaseInsensitive(_userMetrics, 'height')} cm'
-                  : 'N/A',
-              isEditing: false,
-            ),
-            _buildInfoRow(
-              icon: Icons.fitness_center_outlined,
-              label: 'Weight',
-              value: getCaseInsensitive(_userMetrics, 'weight') != 'N/A' && getCaseInsensitive(_userMetrics, 'weight') != null
-                  ? '${getCaseInsensitive(_userMetrics, 'weight')} kg'
-                  : 'N/A',
-              isEditing: false,
-            ),
-            CustomGroupContainer( 
-              child: Container( 
-                decoration: BoxDecoration( // Inner container to ensure consistent border if CustomGroupContainer doesn't provide one
-                  border: _isEditingMetrics ? Border.all(color: Colors.transparent) : Border.all(color: kColorBorder.withOpacity(0.7), width: 1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _buildInfoRow(
-                      icon: Icons.monitor_weight_outlined,
-                      label: 'BMI',
-                      value: getCaseInsensitive(_userMetrics, 'bmi') ?? 'N/A',
-                      isEditing: false,
-                    ),
-                    _buildInfoRow(
-                      icon: Icons.accessibility_new_outlined,
-                      label: 'BMI Category',
-                      value: getCaseInsensitive(_userMetrics, 'bmi_category') ?? 'N/A',
-                      isEditing: false,
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(left: 16.0, right: 16.0, bottom: 12.0, top: 0.0),
-                      child: _buildBmiVisualIndicator(_tryParseDouble(getCaseInsensitive(_userMetrics, 'bmi'))),
-                    ),
-                  ],
+          ? _buildMetricsEditingWidgets()
+          : [
+              _buildInfoRow(
+                icon: Icons.height_outlined,
+                label: 'Height',
+                value: getCaseInsensitive(_userMetrics, 'height') != 'N/A' &&
+                        getCaseInsensitive(_userMetrics, 'height') != null
+                    ? '${getCaseInsensitive(_userMetrics, 'height')} cm'
+                    : 'N/A',
+                isEditing: false,
+              ),
+              _buildInfoRow(
+                icon: Icons.fitness_center_outlined,
+                label: 'Weight',
+                value: getCaseInsensitive(_userMetrics, 'weight') != 'N/A' &&
+                        getCaseInsensitive(_userMetrics, 'weight') != null
+                    ? '${getCaseInsensitive(_userMetrics, 'weight')} kg'
+                    : 'N/A',
+                isEditing: false,
+              ),
+              CustomGroupContainer(
+                child: Container(
+                  decoration: BoxDecoration(
+                    // Inner container to ensure consistent border if CustomGroupContainer doesn't provide one
+                    border: _isEditingMetrics
+                        ? Border.all(color: Colors.transparent)
+                        : Border.all(
+                            color: kColorBorder.withOpacity(0.7), width: 1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildInfoRow(
+                        icon: Icons.monitor_weight_outlined,
+                        label: 'BMI',
+                        value: getCaseInsensitive(_userMetrics, 'bmi') ?? 'N/A',
+                        isEditing: false,
+                      ),
+                      _buildInfoRow(
+                        icon: Icons.accessibility_new_outlined,
+                        label: 'BMI Category',
+                        value:
+                            getCaseInsensitive(_userMetrics, 'bmi_category') ??
+                                'N/A',
+                        isEditing: false,
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(
+                            left: 16.0, right: 16.0, bottom: 12.0, top: 0.0),
+                        child: _buildBmiVisualIndicator(_tryParseDouble(
+                            getCaseInsensitive(_userMetrics, 'bmi'))),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            CustomGroupContainer( 
-              child: Container(
-                 decoration: BoxDecoration(
-                  border: _isEditingMetrics ? Border.all(color: Colors.transparent) : Border.all(color: kColorBorder.withOpacity(0.7), width: 1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _buildInfoRow(
-                      icon: Icons.directions_run_outlined,
-                      label: 'Activity Level',
-                      value: getCaseInsensitive(_userMetrics, 'activity_level') ?? 'N/A',
-                      isEditing: false,
-                    ),
-                    _buildInfoRow(
-                      icon: Icons.cake_outlined,
-                      label: 'Age Range',
-                      value: getCaseInsensitive(_userMetrics, 'age_range') ?? 'N/A',
-                      isEditing: false,
-                    ),
-                  ],
+              CustomGroupContainer(
+                child: Container(
+                  decoration: BoxDecoration(
+                    border: _isEditingMetrics
+                        ? Border.all(color: Colors.transparent)
+                        : Border.all(
+                            color: kColorBorder.withOpacity(0.7), width: 1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildInfoRow(
+                        icon: Icons.directions_run_outlined,
+                        label: 'Activity Level',
+                        value: getCaseInsensitive(
+                                _userMetrics, 'activity_level') ??
+                            'N/A',
+                        isEditing: false,
+                      ),
+                      _buildInfoRow(
+                        icon: Icons.cake_outlined,
+                        label: 'Age Range',
+                        value: getCaseInsensitive(_userMetrics, 'age_range') ??
+                            'N/A',
+                        isEditing: false,
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            _buildInfoRow(
-              icon: Icons.wc_outlined,
-              label: 'Sex',
-              value: getCaseInsensitive(_userMetrics, 'sex') ?? 'N/A',
-              isEditing: false,
-            ),
-            _buildInfoRow( // Ideal Weight
-              icon: Icons.scale_outlined,
-              label: 'Ideal Weight (Est.)',
-              value: getCaseInsensitive(_userMetrics, 'ideal_weight') != 'N/A' && getCaseInsensitive(_userMetrics, 'ideal_weight') != null
-                  ? '${getCaseInsensitive(_userMetrics, 'ideal_weight')} kg'
-                  : 'N/A',
-              isEditing: false,
-            ),
-            _buildInfoRow(
-              icon: Icons.bolt_outlined, 
-              label: 'BMR (Est.)',
-              value: getCaseInsensitive(_userMetrics, 'bmr') != 'N/A' && getCaseInsensitive(_userMetrics, 'bmr') != null
-                  ? '${getCaseInsensitive(_userMetrics, 'bmr')} kcal'
-                  : 'N/A',
-              isEditing: false,
-            ),
-            _buildInfoRow(
-              icon: Icons.restaurant_outlined,
-              label: 'Daily Calories (Est.)',
-              value: getCaseInsensitive(_userMetrics, 'daily_calories') != 'N/A' && getCaseInsensitive(_userMetrics, 'daily_calories') != null
-                  ? '${getCaseInsensitive(_userMetrics, 'daily_calories')} kcal'
-                  : 'N/A',
-              isEditing: false,
-            ),
-             _buildInfoRow( // Other medical metrics - assuming they are less frequently edited manually
-              icon: Icons.opacity_outlined,
-              label: 'Cholesterol',
-              value: getCaseInsensitive(_userMetrics,'cholesterol_level') ?? 'N/A',
-              isEditing: false, // Not editable in this version
-            ),
-            _buildInfoRow(
-              icon: Icons.favorite_border_outlined,
-              label: 'Blood Pressure (Sys/Dia)',
-              value: '${getCaseInsensitive(_userMetrics,'sys_bp') ?? 'N/A'} / ${getCaseInsensitive(_userMetrics,'dia_bp') ?? 'N/A'}',
-              isEditing: false, // Not editable
-            ),
-            _buildInfoRow(
-              icon: Icons.monitor_heart_outlined,
-              label: 'Pulse',
-              value: getCaseInsensitive(_userMetrics,'pulse') ?? 'N/A',
-              isEditing: false, // Not editable
-            ),
-            _buildInfoRow(
-              icon: Icons.update_outlined,
-              label: 'Last Recorded',
-              value: _formatJoinedDate(getCaseInsensitive(_userMetrics, 'recorded_at')),
-              isEditing: false,
-            ),
-          ],
+              _buildInfoRow(
+                icon: Icons.wc_outlined,
+                label: 'Sex',
+                value: getCaseInsensitive(_userMetrics, 'sex') ?? 'N/A',
+                isEditing: false,
+              ),
+              _buildInfoRow(
+                // Ideal Weight
+                icon: Icons.scale_outlined,
+                label: 'Ideal Weight (Est.)',
+                value: getCaseInsensitive(_userMetrics, 'ideal_weight') !=
+                            'N/A' &&
+                        getCaseInsensitive(_userMetrics, 'ideal_weight') != null
+                    ? '${getCaseInsensitive(_userMetrics, 'ideal_weight')} kg'
+                    : 'N/A',
+                isEditing: false,
+              ),
+              _buildInfoRow(
+                icon: Icons.bolt_outlined,
+                label: 'BMR (Est.)',
+                value: getCaseInsensitive(_userMetrics, 'bmr') != 'N/A' &&
+                        getCaseInsensitive(_userMetrics, 'bmr') != null
+                    ? '${getCaseInsensitive(_userMetrics, 'bmr')} kcal'
+                    : 'N/A',
+                isEditing: false,
+              ),
+              _buildInfoRow(
+                icon: Icons.restaurant_outlined,
+                label: 'Daily Calories (Est.)',
+                value: getCaseInsensitive(_userMetrics, 'daily_calories') !=
+                            'N/A' &&
+                        getCaseInsensitive(_userMetrics, 'daily_calories') !=
+                            null
+                    ? '${getCaseInsensitive(_userMetrics, 'daily_calories')} kcal'
+                    : 'N/A',
+                isEditing: false,
+              ),
+              _buildInfoRow(
+                // Other medical metrics - assuming they are less frequently edited manually
+                icon: Icons.opacity_outlined,
+                label: 'Cholesterol',
+                value: getCaseInsensitive(_userMetrics, 'cholesterol_level') ??
+                    'N/A',
+                isEditing: false, // Not editable in this version
+              ),
+              _buildInfoRow(
+                icon: Icons.favorite_border_outlined,
+                label: 'Blood Pressure (Sys/Dia)',
+                value:
+                    '${getCaseInsensitive(_userMetrics, 'sys_bp') ?? 'N/A'} / ${getCaseInsensitive(_userMetrics, 'dia_bp') ?? 'N/A'}',
+                isEditing: false, // Not editable
+              ),
+              _buildInfoRow(
+                icon: Icons.monitor_heart_outlined,
+                label: 'Pulse',
+                value: getCaseInsensitive(_userMetrics, 'pulse') ?? 'N/A',
+                isEditing: false, // Not editable
+              ),
+              _buildInfoRow(
+                icon: Icons.update_outlined,
+                label: 'Last Recorded',
+                value: _formatJoinedDate(
+                    getCaseInsensitive(_userMetrics, 'recorded_at')),
+                isEditing: false,
+              ),
+            ],
     );
   }
 
@@ -2228,19 +2462,29 @@ class _ProfilePageState extends State<ProfilePage>
     String calculatedBmi = _calculateBmi(_heightCm, _weightKg);
     // For BMR and Daily Calories preview during editing:
     double? bmrPreview;
-    if (_weightKg > 0 && _heightCm > 0 && _selectedAgeRange != null && _selectedSex != null) {
-        int age = 30;
-        final ageMatch = RegExp(r'\d+').firstMatch(_selectedAgeRange!);
-        if (ageMatch != null) age = int.tryParse(ageMatch.group(0)!) ?? 30;
-        if (_selectedSex == 'Male') bmrPreview = 10 * _weightKg + 6.25 * _heightCm - 5 * age + 5;
-        else bmrPreview = 10 * _weightKg + 6.25 * _heightCm - 5 * age - 161;
+    if (_weightKg > 0 &&
+        _heightCm > 0 &&
+        _selectedAgeRange != null &&
+        _selectedSex != null) {
+      int age = 30;
+      final ageMatch = RegExp(r'\d+').firstMatch(_selectedAgeRange!);
+      if (ageMatch != null) age = int.tryParse(ageMatch.group(0)!) ?? 30;
+      if (_selectedSex == 'Male')
+        bmrPreview = 10 * _weightKg + 6.25 * _heightCm - 5 * age + 5;
+      else
+        bmrPreview = 10 * _weightKg + 6.25 * _heightCm - 5 * age - 161;
     }
     double? dailyCaloriesPreview;
     if (bmrPreview != null && _selectedActivityLevel != null) {
-        final activityMultipliers = {'Sedentary': 1.2, 'Lightly Active': 1.375, 'Moderately Active': 1.55, 'Very Active': 1.725};
-        dailyCaloriesPreview = bmrPreview * (activityMultipliers[_selectedActivityLevel!] ?? 1.2);
+      final activityMultipliers = {
+        'Sedentary': 1.2,
+        'Lightly Active': 1.375,
+        'Moderately Active': 1.55,
+        'Very Active': 1.725
+      };
+      dailyCaloriesPreview =
+          bmrPreview * (activityMultipliers[_selectedActivityLevel!] ?? 1.2);
     }
-
 
     return [
       _buildDropdownField<String>(
@@ -2277,37 +2521,43 @@ class _ProfilePageState extends State<ProfilePage>
               value: calculatedBmi,
               isEditing: false, // Display only
             ),
-             if (calculatedBmi != 'N/A') Padding(
-                padding: const EdgeInsets.only(left: 16.0, right: 16.0, bottom: 8.0),
+            if (calculatedBmi != 'N/A')
+              Padding(
+                padding:
+                    const EdgeInsets.only(left: 16.0, right: 16.0, bottom: 8.0),
                 child: _buildBmiVisualIndicator(_tryParseDouble(calculatedBmi)),
-            ),
+              ),
             _buildInfoRow(
               icon: Icons.bolt_outlined,
               label: 'BMR (Est. Preview)',
-              value: bmrPreview != null ? '${bmrPreview.toStringAsFixed(0)} kcal' : 'N/A',
+              value: bmrPreview != null
+                  ? '${bmrPreview.toStringAsFixed(0)} kcal'
+                  : 'N/A',
               isEditing: false, // Display only
             ),
             _buildInfoRow(
               icon: Icons.restaurant_menu_outlined,
               label: 'Daily Calories (Est. Preview)',
-              value: dailyCaloriesPreview != null ? '${dailyCaloriesPreview.toStringAsFixed(0)} kcal' : 'N/A',
+              value: dailyCaloriesPreview != null
+                  ? '${dailyCaloriesPreview.toStringAsFixed(0)} kcal'
+                  : 'N/A',
               isEditing: false, // Display only
             ),
           ],
         ),
       ),
-       // Display non-editable metrics for context if needed
+      // Display non-editable metrics for context if needed
       _buildInfoRow(
         icon: Icons.opacity_outlined,
         label: 'Cholesterol (Last Known)',
-        value: getCaseInsensitive(_userMetrics,'cholesterol_level') ?? 'N/A',
+        value: getCaseInsensitive(_userMetrics, 'cholesterol_level') ?? 'N/A',
         isEditing: false,
       ),
       _buildInfoRow(
         icon: Icons.favorite_border_outlined,
         label: 'Blood Pressure (Last Known)',
         value:
-            '${getCaseInsensitive(_userMetrics,'sys_bp') ?? 'N/A'} / ${getCaseInsensitive(_userMetrics,'dia_bp') ?? 'N/A'}',
+            '${getCaseInsensitive(_userMetrics, 'sys_bp') ?? 'N/A'} / ${getCaseInsensitive(_userMetrics, 'dia_bp') ?? 'N/A'}',
         isEditing: false,
       ),
     ];
@@ -2326,23 +2576,32 @@ class _ProfilePageState extends State<ProfilePage>
           _selectedGoal = getCaseInsensitive(_userPreferences, 'goals') != 'N/A'
               ? getCaseInsensitive(_userPreferences, 'goals')
               : null;
-          if (_selectedGoal != null && !_goalsOptions.contains(_selectedGoal)) _selectedGoal = null;
+          if (_selectedGoal != null && !_goalsOptions.contains(_selectedGoal))
+            _selectedGoal = null;
 
-          _selectedDietType = getCaseInsensitive(_userPreferences, 'diet_type') != 'N/A'
-              ? getCaseInsensitive(_userPreferences, 'diet_type')
-              : null;
-          if (_selectedDietType != null && !_dietTypeOptions.contains(_selectedDietType)) _selectedDietType = null;
+          _selectedDietType =
+              getCaseInsensitive(_userPreferences, 'diet_type') != 'N/A'
+                  ? getCaseInsensitive(_userPreferences, 'diet_type')
+                  : null;
+          if (_selectedDietType != null &&
+              !_dietTypeOptions.contains(_selectedDietType))
+            _selectedDietType = null;
 
-          String? currentRestrictionDisplay = getCaseInsensitive(_userPreferences, 'food_restrictions');
+          String? currentRestrictionDisplay =
+              getCaseInsensitive(_userPreferences, 'food_restrictions');
           if (currentRestrictionDisplay == 'None') {
             _selectedFoodRestriction = 'None';
-          } else if (currentRestrictionDisplay != null && currentRestrictionDisplay != 'N/A') {
-            String firstItem = currentRestrictionDisplay.split(',').first.trim();
-            _selectedFoodRestriction = _foodRestrictionsOptions.contains(firstItem) ? firstItem : null;
+          } else if (currentRestrictionDisplay != null &&
+              currentRestrictionDisplay != 'N/A') {
+            String firstItem =
+                currentRestrictionDisplay.split(',').first.trim();
+            _selectedFoodRestriction =
+                _foodRestrictionsOptions.contains(firstItem) ? firstItem : null;
           } else {
             _selectedFoodRestriction = null;
           }
-           if (_selectedFoodRestriction != null && !_foodRestrictionsOptions.contains(_selectedFoodRestriction)) {
+          if (_selectedFoodRestriction != null &&
+              !_foodRestrictionsOptions.contains(_selectedFoodRestriction)) {
             _selectedFoodRestriction = null;
           }
         });
@@ -2368,14 +2627,20 @@ class _ProfilePageState extends State<ProfilePage>
         isEditing: false,
       ),
       _buildInfoRow(
-        icon: Icons.no_food_outlined, label: 'Food Restrictions',
-        value: getCaseInsensitive(_userPreferences, 'food_restrictions') ?? 'None',
-        isEditing: false, maxLines: 3,
+        icon: Icons.no_food_outlined,
+        label: 'Food Restrictions',
+        value:
+            getCaseInsensitive(_userPreferences, 'food_restrictions') ?? 'None',
+        isEditing: false,
+        maxLines: 3,
       ),
       _buildInfoRow(
-        icon: Icons.ramen_dining_outlined, label: 'Cuisine Preferences',
-        value: getCaseInsensitive(_userPreferences, 'cuisine_preferences') ?? 'Not Set',
-        isEditing: false, maxLines: 3,
+        icon: Icons.ramen_dining_outlined,
+        label: 'Cuisine Preferences',
+        value: getCaseInsensitive(_userPreferences, 'cuisine_preferences') ??
+            'Not Set',
+        isEditing: false,
+        maxLines: 3,
       ),
       const SizedBox(height: 16),
       _buildMealRecommendationsButton(),
@@ -2399,20 +2664,87 @@ class _ProfilePageState extends State<ProfilePage>
         onChanged: (value) => setState(() => _selectedDietType = value),
       ),
       _buildDropdownField<String>(
-        label: 'Food Restrictions (Primary)', icon: Icons.no_food_outlined,
+        label: 'Food Restrictions (Primary)', 
+        icon: Icons.no_food_outlined,
         currentValue: _selectedFoodRestriction,
         options: _foodRestrictionsOptions, // Includes "None"
         hint: "Select primary restriction",
-        onChanged: (value) =>
-            setState(() => _selectedFoodRestriction = value),
+        onChanged: (value) => setState(() => _selectedFoodRestriction = value),
       ),
-      // Cuisine preferences are not editable in this version, show display value
-       _buildInfoRow(
-        icon: Icons.ramen_dining_outlined, label: 'Cuisine Preferences (Current)',
-        value: getCaseInsensitive(_userPreferences, 'cuisine_preferences') ?? 'Not Set',
-        isEditing: false, maxLines: 3,
+      const SizedBox(height: 8),
+      // Cuisine preferences multi-select
+      Padding(
+        padding: const EdgeInsets.only(left: 8.0, right: 8.0, bottom: 8.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8.0, left: 4.0),
+              child: Row(
+                children: [
+                  Icon(Icons.ramen_dining_outlined, size: 20, color: Colors.grey[700]),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Cuisine Preferences',
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Wrap(
+              spacing: 8.0,
+              runSpacing: 8.0,
+              children: _cuisineOptions.map((cuisine) {
+                final isSelected = _selectedCuisines.contains(cuisine);
+                return FilterChip(
+                  label: Text(cuisine),
+                  selected: isSelected,
+                  onSelected: (selected) {
+                    setState(() {
+                      if (selected) {
+                        _selectedCuisines.add(cuisine);
+                      } else {
+                        _selectedCuisines.remove(cuisine);
+                      }
+                    });
+                  },
+                  selectedColor: kColorPrimary.withOpacity(0.2),
+                  checkmarkColor: kColorPrimary,
+                  labelStyle: GoogleFonts.poppins(
+                    color: isSelected ? kColorPrimary : Colors.grey[800],
+                    fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
+                  ),
+                  backgroundColor: Colors.grey[200],
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    side: BorderSide(
+                      color: isSelected ? kColorPrimary : Colors.grey[300]!,
+                      width: 1,
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+            if (_selectedCuisines.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0, left: 4.0),
+                child: Text(
+                  'Select your favorite cuisines',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
-      const SizedBox(height: 16),
+      const SizedBox(height: 8),
       _buildMealRecommendationsButton(),
     ];
   }
@@ -2423,7 +2755,7 @@ class _ProfilePageState extends State<ProfilePage>
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const AllMealsScreen()),
+            MaterialPageRoute(builder: (context) => const OnlymealsScreen()),
           );
         },
         style: ElevatedButton.styleFrom(
@@ -2443,7 +2775,7 @@ class _ProfilePageState extends State<ProfilePage>
       padding: const EdgeInsets.symmetric(vertical: 16.0),
       child: TextButton.icon(
         icon: Icon(Icons.logout, color: Colors.red.shade700),
-        label: Text('Logout',
+        label: Text("Don't Logout",
             style:
                 GoogleFonts.poppins(color: Colors.red.shade700, fontSize: 16)),
         onPressed: _logout,
@@ -2460,8 +2792,10 @@ class _ProfilePageState extends State<ProfilePage>
     required IconData icon,
     required String label,
     required String value,
-    required bool isEditing, // This parameter is now less used directly by _buildInfoRow itself for TextField creation
-    TextEditingController? controller, // Kept for potential direct use, but _buildUserDetailsCard now provides TextFields directly
+    required bool
+        isEditing, // This parameter is now less used directly by _buildInfoRow itself for TextField creation
+    TextEditingController?
+        controller, // Kept for potential direct use, but _buildUserDetailsCard now provides TextFields directly
     TextInputType? keyboardType,
     int? maxLines = 1,
   }) {
@@ -2470,7 +2804,7 @@ class _ProfilePageState extends State<ProfilePage>
     final valueStyle =
         GoogleFonts.poppins(color: kColorTextPrimary, fontSize: 15);
 
-    // This widget is now primarily for DISPLAY purposes. 
+    // This widget is now primarily for DISPLAY purposes.
     // Editing fields are constructed directly in _buildUserDetailsCard, _buildMetricsEditingWidgets etc.
     // If 'isEditing' is true and a controller is passed, it implies a TextField would be built by the caller.
     // Here, we always build the display version.
@@ -2481,12 +2815,11 @@ class _ProfilePageState extends State<ProfilePage>
       maxLines: maxLines,
       overflow: TextOverflow.ellipsis,
     );
-    
+
     // If a controller is provided, it implies this row MIGHT be part of an edit form,
     // but _buildInfoRow itself doesn't create the TextField.
     // The padding adjustment for icon is based on whether it's a simple display or part of a form-like structure.
     bool isPotentiallyInForm = controller != null;
-
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10.0),
@@ -2495,30 +2828,30 @@ class _ProfilePageState extends State<ProfilePage>
         children: [
           Padding(
             // Adjust icon alignment slightly if it's likely next to a form field (even if read-only)
-            padding: EdgeInsets.only(top: isPotentiallyInForm ? 3.0 : 1.0), 
+            padding: EdgeInsets.only(top: isPotentiallyInForm ? 3.0 : 1.0),
             child: Icon(icon, color: kColorPrimary, size: 22),
           ),
           const SizedBox(width: 16),
           Expanded(
-            child: Column( 
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(label, style: labelStyle),
-                    const SizedBox(height: 4),
-                    contentWidget, // Always display content for _buildInfoRow
-                  ],
-                ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: labelStyle),
+                const SizedBox(height: 4),
+                contentWidget, // Always display content for _buildInfoRow
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-
   // --- Weight Input Row (for Editing Metrics) ---
   Widget _buildWeightInputRow() {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0), // Reduced vertical padding
+      padding:
+          const EdgeInsets.symmetric(vertical: 4.0), // Reduced vertical padding
       child: Row(
         crossAxisAlignment:
             CrossAxisAlignment.start, // Align items to the top of the row
@@ -2526,12 +2859,14 @@ class _ProfilePageState extends State<ProfilePage>
           Expanded(
             child: TextFormField(
               controller: _weightController,
-              decoration: _buildInputDecoration('Weight', // Label inside the input decoration
+              decoration: _buildInputDecoration(
+                  'Weight', // Label inside the input decoration
                   prefixIcon: Icons.fitness_center_outlined),
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
               inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')) // Allow numbers and one decimal point
+                FilteringTextInputFormatter.allow(RegExp(
+                    r'^\d*\.?\d*')) // Allow numbers and one decimal point
               ],
               style:
                   GoogleFonts.poppins(color: kColorTextPrimary, fontSize: 15),
@@ -2539,7 +2874,8 @@ class _ProfilePageState extends State<ProfilePage>
           ),
           const SizedBox(width: 10),
           Padding(
-            padding: const EdgeInsets.only(top: 4.0), // Align ToggleButtons with TextFormField content
+            padding: const EdgeInsets.only(
+                top: 4.0), // Align ToggleButtons with TextFormField content
             child: ToggleButtons(
               isSelected: _weightSelection,
               onPressed: _updateWeightUnit,
@@ -2547,15 +2883,18 @@ class _ProfilePageState extends State<ProfilePage>
               selectedColor: Colors.white,
               color: kColorPrimary,
               fillColor: kColorPrimary,
-              constraints:
-                  const BoxConstraints(minHeight: 48.0, minWidth: 48.0), // Ensure buttons are tappable
+              constraints: const BoxConstraints(
+                  minHeight: 48.0,
+                  minWidth: 48.0), // Ensure buttons are tappable
               children: <Widget>[
                 Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('kg', style: GoogleFonts.poppins(fontSize: 14))),
+                    child:
+                        Text('kg', style: GoogleFonts.poppins(fontSize: 14))),
                 Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('lbs', style: GoogleFonts.poppins(fontSize: 14))),
+                    child:
+                        Text('lbs', style: GoogleFonts.poppins(fontSize: 14))),
               ],
             ),
           ),
@@ -2575,10 +2914,10 @@ class _ProfilePageState extends State<ProfilePage>
             child: _heightUnit == 'cm'
                 ? TextFormField(
                     controller: _heightCmController,
-                    decoration: _buildInputDecoration('Height', 
+                    decoration: _buildInputDecoration('Height',
                         prefixIcon: Icons.height_outlined,
                         hintText: 'cm' // Hint for unit
-                    ),
+                        ),
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [
@@ -2587,19 +2926,23 @@ class _ProfilePageState extends State<ProfilePage>
                     style: GoogleFonts.poppins(
                         color: kColorTextPrimary, fontSize: 15),
                   )
-                : Row( // For ft/in input
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start, 
+                : Row(
+                    // For ft/in input
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       // Common prefix icon for ft/in mode
                       Padding(
-                        padding: const EdgeInsets.only(top: 12.0, right: 8.0), // Align icon with text field content
-                        child: Icon(Icons.height_outlined, color: kColorPrimary, size: 20),
+                        padding: const EdgeInsets.only(
+                            top: 12.0,
+                            right: 8.0), // Align icon with text field content
+                        child: Icon(Icons.height_outlined,
+                            color: kColorPrimary, size: 20),
                       ),
                       Expanded(
                         child: TextFormField(
                           controller: _heightFeetController,
-                          decoration: _buildInputDecoration('Height (ft)', prefixIcon: null), // No redundant icon
+                          decoration: _buildInputDecoration('Height (ft)',
+                              prefixIcon: null), // No redundant icon
                           keyboardType: TextInputType.number,
                           inputFormatters: [
                             FilteringTextInputFormatter.digitsOnly
@@ -2612,7 +2955,8 @@ class _ProfilePageState extends State<ProfilePage>
                       Expanded(
                         child: TextFormField(
                           controller: _heightInchesController,
-                          decoration: _buildInputDecoration('(in)', prefixIcon: null), // Label for inches
+                          decoration: _buildInputDecoration('(in)',
+                              prefixIcon: null), // Label for inches
                           keyboardType: const TextInputType.numberWithOptions(
                               decimal: true),
                           inputFormatters: [
@@ -2628,7 +2972,7 @@ class _ProfilePageState extends State<ProfilePage>
           ),
           const SizedBox(width: 10),
           Padding(
-            padding: const EdgeInsets.only(top: 4.0), 
+            padding: const EdgeInsets.only(top: 4.0),
             child: ToggleButtons(
               isSelected: _heightSelection,
               onPressed: _updateHeightUnit,
@@ -2641,10 +2985,12 @@ class _ProfilePageState extends State<ProfilePage>
               children: <Widget>[
                 Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('cm', style: GoogleFonts.poppins(fontSize: 14))),
+                    child:
+                        Text('cm', style: GoogleFonts.poppins(fontSize: 14))),
                 Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('ft', style: GoogleFonts.poppins(fontSize: 14))),
+                    child:
+                        Text('ft', style: GoogleFonts.poppins(fontSize: 14))),
               ],
             ),
           ),
@@ -2677,19 +3023,22 @@ class _ProfilePageState extends State<ProfilePage>
 
     // Determine category and color based on BMI value
     // Use API category if available and valid, otherwise calculate
-    String apiCategory = getCaseInsensitive(_userMetrics,'bmi_category') ?? '';
+    String apiCategory = getCaseInsensitive(_userMetrics, 'bmi_category') ?? '';
     bool useApiCategoryText = apiCategory.isNotEmpty && apiCategory != 'N/A';
 
     if (bmiValue < underweightThreshold) {
       barColor = Colors.blue.shade300;
       categoryText = useApiCategoryText ? apiCategory : 'Underweight';
-    } else if (bmiValue >= normalMinThreshold && bmiValue <= normalMaxThreshold) {
+    } else if (bmiValue >= normalMinThreshold &&
+        bmiValue <= normalMaxThreshold) {
       barColor = Colors.green.shade400;
       categoryText = useApiCategoryText ? apiCategory : 'Normal';
-    } else if (bmiValue >= overweightMinThreshold && bmiValue <= overweightMaxThreshold) {
+    } else if (bmiValue >= overweightMinThreshold &&
+        bmiValue <= overweightMaxThreshold) {
       barColor = Colors.orange.shade400;
       categoryText = useApiCategoryText ? apiCategory : 'Overweight';
-    } else { // bmiValue > overweightMaxThreshold (i.e., >= 30.0)
+    } else {
+      // bmiValue > overweightMaxThreshold (i.e., >= 30.0)
       barColor = Colors.red.shade400;
       categoryText = useApiCategoryText ? apiCategory : 'Obese';
     }
@@ -2699,32 +3048,34 @@ class _ProfilePageState extends State<ProfilePage>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          height: 10, // Slightly thicker bar
-          decoration: BoxDecoration(
-            // Could be a gradient or segmented bar in future
-            color: Colors.grey.shade200, // Background for the bar track
-            borderRadius: BorderRadius.circular(5),
-          ),
-          child: Align( // Align the actual colored bar within the track
-            alignment: Alignment.centerLeft,
-            child: FractionallySizedBox(
-              // Width factor could represent position on a scale, but simple color is fine for now
-              // For simplicity, full width with the category color
-              widthFactor: 1.0, 
-              child: Container(
-                 decoration: BoxDecoration(
+            height: 10, // Slightly thicker bar
+            decoration: BoxDecoration(
+              // Could be a gradient or segmented bar in future
+              color: Colors.grey.shade200, // Background for the bar track
+              borderRadius: BorderRadius.circular(5),
+            ),
+            child: Align(
+              // Align the actual colored bar within the track
+              alignment: Alignment.centerLeft,
+              child: FractionallySizedBox(
+                // Width factor could represent position on a scale, but simple color is fine for now
+                // For simplicity, full width with the category color
+                widthFactor: 1.0,
+                child: Container(
+                  decoration: BoxDecoration(
                     color: barColor,
                     borderRadius: BorderRadius.circular(5),
                   ),
+                ),
               ),
-            ),
-          )
-        ),
+            )),
         const SizedBox(height: 6),
         Text(
           categoryText,
           style: GoogleFonts.poppins(
-              fontSize: 13, color: barColor, fontWeight: FontWeight.w500), // Slightly larger font
+              fontSize: 13,
+              color: barColor,
+              fontWeight: FontWeight.w500), // Slightly larger font
         )
       ],
     );
@@ -2747,11 +3098,13 @@ T? getCaseInsensitive<T>(Map? map, String key) {
       }
       if (T == double) {
         if (entry.value is num) return (entry.value as num).toDouble() as T;
-        if (entry.value is String) return double.tryParse(entry.value as String) as T?;
+        if (entry.value is String)
+          return double.tryParse(entry.value as String) as T?;
       }
       if (T == int) {
-         if (entry.value is num) return (entry.value as num).toInt() as T;
-         if (entry.value is String) return int.tryParse(entry.value as String) as T?;
+        if (entry.value is num) return (entry.value as num).toInt() as T;
+        if (entry.value is String)
+          return int.tryParse(entry.value as String) as T?;
       }
       // Fallback for other types if direct cast might work or if specific conversion is not handled
       try {
@@ -2770,7 +3123,8 @@ double? _tryParseDouble(dynamic value) {
   if (value is double) return value;
   if (value is int) return value.toDouble();
   if (value is String) {
-    if (value.trim().isEmpty || value.trim().toLowerCase() == 'n/a') return null;
+    if (value.trim().isEmpty || value.trim().toLowerCase() == 'n/a')
+      return null;
     return double.tryParse(value);
   }
   return null;
