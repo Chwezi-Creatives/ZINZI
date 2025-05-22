@@ -35,9 +35,66 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   try {
     print('Handling a background message: ${message.messageId}');
-    // Background handlers don't have access to UI, so just log it
-    // We'll handle showing notifications elsewhere
     print('Background message data: ${message.data}');
+
+    // Initialize FlutterLocalNotificationsPlugin for background handling
+    // Ensure you have the necessary imports at the top of the file
+    final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+        FlutterLocalNotificationsPlugin();
+
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/ic_launcher'); // Use your app icon
+
+    const InitializationSettings initializationSettings =
+        InitializationSettings(android: initializationSettingsAndroid);
+
+    await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+
+    // Create an Android Notification Channel (can be the same as foreground)
+    const AndroidNotificationChannel channel = AndroidNotificationChannel(
+      'zinzi_channel', // Same ID as in foreground
+      'Zinzi Notifications',
+      description: 'Channel for Zinzi app notifications',
+      importance: Importance.max,
+      playSound: true,
+      showBadge: true,
+      enableLights: true,
+      enableVibration: true,
+    );
+
+    // Create the channel
+    await flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(channel);
+
+    // Show the notification
+    if (message.notification != null) {
+      await flutterLocalNotificationsPlugin.show(
+        message.hashCode, // Unique ID for the notification
+        message.notification!.title,
+        message.notification!.body,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            channel.id,
+            channel.name,
+            channelDescription: channel.description,
+            importance: channel.importance,
+            priority: Priority.high,
+            showWhen: true,
+            playSound: true,
+            enableLights: true,
+            enableVibration: true,
+            fullScreenIntent: true,
+          ),
+        ),
+        payload: jsonEncode(message.data), // Pass data as payload
+      );
+      print('Background notification shown.');
+    } else {
+      print('Background message received but no notification payload to show.');
+    }
+
   } catch (e) {
     print('Error in firebaseMessagingBackgroundHandler: $e');
   }
