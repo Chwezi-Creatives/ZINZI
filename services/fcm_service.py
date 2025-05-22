@@ -23,11 +23,41 @@ class FirebaseMessagingService:
         """Initialize Firebase only when needed."""
         if not self._firebase_initialized:
             if not firebase_admin._apps:
+                import urllib3
+                
+                # Configure connection pool with urllib3
+                http_client = urllib3.PoolManager(
+                    num_pools=1,  # Single pool for all requests
+                    maxsize=30,    # Increased from default 10
+                    block=True,    # Block when no free connections are available
+                    timeout=urllib3.Timeout(connect=30.0, read=30.0),
+                    retries=urllib3.Retry(
+                        total=3,
+                        backoff_factor=0.5,
+                        status_forcelist=[500, 502, 503, 504]
+                    )
+                )
+                
                 service_account_path = os.path.join(os.path.dirname(__file__), '..', 'zinzi-fcm2-firebase-adminsdk-fbsvc-d81e9633e7.json')
                 cred = credentials.Certificate(service_account_path)
-                firebase_admin.initialize_app(cred, {
-                    'projectId': 'zinzi-fcm2'
-                })
+                
+                # Initialize Firebase with default HTTP client but configure it through environment
+                firebase_admin.initialize_app(cred, {'projectId': 'zinzi-fcm2'})
+                
+                # Configure the default HTTP client used by firebase_admin
+                import requests
+                session = requests.Session()
+                adapter = requests.adapters.HTTPAdapter(
+                    pool_connections=30,
+                    pool_maxsize=30,
+                    max_retries=3,
+                    pool_block=True
+                )
+                session.mount('https://', adapter)
+                
+                # This will ensure all firebase admin requests use our session
+                firebase_admin._auth.get_auth_service()._session = session
+                
             self._firebase_initialized = True
 
 
