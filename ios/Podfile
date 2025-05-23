@@ -12,13 +12,11 @@ target 'Runner' do
   use_modular_headers!
 
   flutter_application_path = '../..'
+  # This line loads the plugins from the .flutter-plugins file
   load File.join(flutter_application_path, '.flutter-plugins')
-
-  # Add the following line to include the Firebase pods
-  pod 'Firebase/Core'
-  pod 'Firebase/Messaging'
 
   target 'RunnerTests' do
     inherit! :search_paths
+    # Pods for testing
   end
 end
