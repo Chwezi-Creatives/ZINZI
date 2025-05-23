@@ -1,22 +1,17 @@
-# Uncomment this line to define a global platform for your project
+# Uncomment the next line to define a global platform for your project
 platform :ios, '13.0'
 
-# CocoaPods analytics sends logs at the end of the install phase.
-# Set this to false to disable it.
-# ENV['COCOAPODS_DISABLE_STATS'] = 'true'
-
-project 'Runner.xcodeproj'
-
 target 'Runner' do
+  # Comment the next line if you don't want to use dynamic frameworks
   use_frameworks!
-  use_modular_headers!
 
-  flutter_application_path = '../..'
-  # This line loads the plugins from the .flutter-plugins file
+  # Pods for Runner
+
+flutter_application_path = '../..'
   load File.join(flutter_application_path, '.flutter-plugins')
-
   target 'RunnerTests' do
     inherit! :search_paths
     # Pods for testing
   end
+
 end
