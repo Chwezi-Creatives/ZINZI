@@ -856,103 +856,65 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
 
   // Helper function for navigation to detail page
   void _navigateToMealDetail(Map<String, dynamic> mealFromGrid) {
-    // Find the full meal data from the original list to ensure all fields are present
-    final fullMealData = _Onlymeals.firstWhere(
-      (m) => m['Meal_id'] == mealFromGrid['Meal_id'], // Use PascalCase key
-      orElse: () {
-        print(
-            "Warning: Could not find full meal data for ID ${mealFromGrid['Meal_id']}. Using potentially incomplete data from grid."); // Use PascalCase key
-        return mealFromGrid; // Fallback to potentially incomplete data
-      },
-    );
+    try {
+      // Create a deep copy of the meal data to avoid modifying the original
+      final Map<String, dynamic> mealToSend = Map<String, dynamic>.from(mealFromGrid);
+      
+      // Ensure consistent key casing (PascalCase)
+      final Map<String, dynamic> normalizedMeal = {};
+      mealToSend.forEach((key, value) {
+        // Convert first letter to uppercase for consistency
+        final normalizedKey = key.isNotEmpty 
+            ? key[0].toUpperCase() + key.substring(1)
+            : key;
+        normalizedMeal[normalizedKey] = value;
+      });
 
-    // --- Prepare complementary images ---
-    List<String> complementaryDishNames = [];
-    final dynamic complementaryDishesData =
-        fullMealData['Complementary_dishes']; // Use PascalCase key
-
-    if (complementaryDishesData is String) {
-      complementaryDishNames = complementaryDishesData
-          .split(',')
-          .map((s) => s.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
-    } else if (complementaryDishesData is List) {
-      complementaryDishNames = List<String>.from(complementaryDishesData
-          .map((e) => e.toString().trim())
-          .where((s) => s.isNotEmpty));
-    }
-
-    List<String> complementaryImageLinks = [];
-    const String placeholderImage =
-        'assets/images/cover.png'; // Define placeholder
-
-    for (String dishName in complementaryDishNames) {
-      // Find the complementary dish in the lookup map
-      final complementaryMeal = _mealMapByName[dishName.toLowerCase()];
-      String imageUrl = placeholderImage; // Default to placeholder
-
-      // Use PascalCase key for image link lookup
-      if (complementaryMeal != null &&
-          complementaryMeal['Image_link'] != null) {
-        imageUrl = _processImagePath(
-            complementaryMeal['Image_link'], dishName); // Use PascalCase key
-      } else {
-        // Log if complementary meal or its image link wasn't found
-        print(
-            "Complementary dish '$dishName' or its image not found. Using placeholder.");
+      // Ensure all required fields have values
+      normalizedMeal['Meal_name'] = normalizedMeal['Meal_name'] ?? 'Unknown Meal';
+      normalizedMeal['Image_link'] = normalizedMeal['Image_link'] ?? 'assets/images/mealimageplaceholder.jpg';
+      normalizedMeal['Description'] = normalizedMeal['Description'] ?? 'No description available';
+      
+      // Handle price field
+      if (normalizedMeal['price'] == null && normalizedMeal['Price'] != null) {
+        normalizedMeal['price'] = normalizedMeal['Price'];
       }
-      complementaryImageLinks.add(imageUrl);
+      normalizedMeal['price'] = double.tryParse(normalizedMeal['price']?.toString() ?? '0') ?? 0.0;
+      normalizedMeal['Price'] = normalizedMeal['price']; // Ensure both cases are set
+
+      // Remove all complementary dishes related data
+      normalizedMeal.remove('Complementary_dishes');
+      normalizedMeal.remove('complementary_images');
+      normalizedMeal.remove('complementary_dishes');
+      normalizedMeal.remove('best_served_with');
+      
+      // Debug log the meal data being passed
+      debugPrint('=== NAVIGATING TO MEAL DETAIL ===');
+      debugPrint('Meal ID: ${normalizedMeal['Meal_id']}');
+      debugPrint('Meal Name: ${normalizedMeal['Meal_name']}');
+      debugPrint('All Meal Data: $normalizedMeal');
+      debugPrint('===============================');
+
+      // Navigate to the meal detail screen with the complete meal data
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => meal_detail.MealDetailScreen(meal: normalizedMeal),
+        ),
+      ).then((_) {
+        debugPrint('=== RETURNED FROM MEAL DETAIL ===');
+      });
+    } catch (e) {
+      print('Error navigating to meal detail: $e');
+      // Show error to user
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error loading meal details. Please try again.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
-
-    // Create a mutable copy to add the processed images and convert keys to PascalCase
-    final Map<String, dynamic> mealToSend = Map.from(fullMealData).map((key, value) {
-      final pascalKey = key[0].toUpperCase() + key.substring(1);
-      return MapEntry(pascalKey, value);
-    });
-
-    // Ensure price field exists and is properly formatted (use lowercase key)
-    if (mealToSend['price'] != null) {
-      mealToSend['price'] = double.tryParse(mealToSend['price'].toString()) ?? 0.0;
-    } else if (mealToSend['Price'] != null) {
-      mealToSend['price'] = double.tryParse(mealToSend['Price'].toString()) ?? 0.0;
-    } else {
-      mealToSend['price'] = 0.0;
-    }
-    // For backward compatibility, ensure both cases are set
-    mealToSend['Price'] = mealToSend['price'];
-
-    // Efficient complementary image extraction
-    // Build a lookup map from meal name (lowercased) to image link for all main meals
-    final Map<String, String> mealNameToImageLink = {
-      for (final m in _Onlymeals)
-        if ((m['Meal_name'] ?? '').toString().trim().isNotEmpty)
-          m['Meal_name'].toString().toLowerCase():
-              m['image_link'] ?? 'assets/images/cover.png'
-    };
-
-    // For each complementary dish, get its image link from the map, else use placeholder
-    List<String> complementary_image_links = [];
-    List<String> complementary_dish_names = [];
-    
-    for (String dishName in complementaryDishNames) {
-      final key = dishName.toLowerCase();
-      final imageUrl = mealNameToImageLink[key] ?? 'assets/images/cover.png';
-      complementary_image_links.add(imageUrl);
-      complementary_dish_names.add(dishName);
-    }
-
-    mealToSend['complementary_images'] = complementary_image_links;
-    mealToSend['Complementary_dishes'] = complementary_dish_names;
-
-    mealToSend['complementary_images'] = complementary_image_links;
-
-    // Navigate
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => meal_detail.MealDetailScreen(meal: mealToSend),
-      ),
-    );
   }
 }
