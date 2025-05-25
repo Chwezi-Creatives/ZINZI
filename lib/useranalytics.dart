@@ -348,19 +348,25 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard> with Ti
     return totalCalories / entriesInPeriod.length;
   }
   
-  final Map<String, List<double>> recommendedCaloriesData = {
-    'D': List.filled(7, 1500.0),
-    'W': List.filled(4, 1500.0 * 7),
-    'M': List.filled(4, 1550.0 * 7),
-    '6M': List.filled(6, 1600.0 * 30),
-  };
+  Map<String, List<double>> get recommendedCaloriesData {
+    final dailyCalories = (_metricsData?.metrics['daily_calories'] as num?)?.toDouble() ?? 2000.0;
+    return {
+      'D': List.filled(7, dailyCalories),
+      'W': List.filled(4, dailyCalories * 7),
+      'M': List.filled(4, dailyCalories * 7), // Monthly view shows weekly data (4 weeks)
+      '6M': List.filled(6, dailyCalories * 30), // 6-month view shows monthly data (30 days)
+    };
+  }
   
-  final Map<String, List<double>> recommendedWeightData = {
-    'D': List.filled(7, 76.0),
-    'W': List.filled(4, 76.0),
-    'M': List.filled(4, 75.0),
-    '6M': List.filled(6, 74.0),
-  };
+  Map<String, List<double>> get recommendedWeightData {
+    final idealWeight = double.tryParse((_metricsData?.metrics['ideal_weight'] as String?) ?? '0') ?? 70.0;
+    return {
+      'D': List.filled(7, idealWeight),
+      'W': List.filled(4, idealWeight),
+      'M': List.filled(4, idealWeight),
+      '6M': List.filled(6, idealWeight),
+    };
+  }
   
   final Map<String, double> macroData = {'Protein': 30, 'Carbs': 50, 'Fats': 20};
   final Map<String, double> cuisineData = {'Continental': 45, 'Asian': 35, 'Other': 20};

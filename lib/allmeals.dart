@@ -208,48 +208,101 @@ class _AllMealsScreenState extends State<AllMealsScreen>
 
   /// Force refresh meals data, invalidating cache
   Future<void> _forceRefreshMeals() async {
-    if (_isLoadingMeals) return; // Prevent multiple simultaneous refreshes
+    if (_isLoadingMeals) {
+      print('[AllMeals] Refresh already in progress, skipping duplicate request');
+      return; // Prevent multiple simultaneous refreshes
+    }
 
-    setState(() {
-      _isLoadingMeals = true;
-      _fetchError = '';
-    });
+    print('[AllMeals] Starting forced refresh of meals data...');
+    
+    // Store current data to restore if fetch fails
+    final List<Map<String, dynamic>> currentMeals = List.from(_allMeals);
+    
+    // Show refresh indicator in app bar
     _startRefreshAnimation();
+    
+    // Show a snackbar to indicate refresh is happening
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Refreshing meals...'),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+          margin: EdgeInsets.only(bottom: 24, left: 16, right: 16),
+        ),
+      );
+    }
 
     try {
+      setState(() {
+        _isLoadingMeals = true;
+        _fetchError = '';
+      });
+      
       final meals = await _fetchMeals();
 
       if (mounted) {
-        // Update cache and UI
-        _allMeals = meals;
-        _AllMealsScreenState._mealsCache =
-            List<Map<String, dynamic>>.from(meals);
-        _AllMealsScreenState._mealsCacheTimestamp = DateTime.now();
+        // Only update if we got new data
+        if (meals.isNotEmpty) {
+          _allMeals = meals;
+          _AllMealsScreenState._mealsCache = List<Map<String, dynamic>>.from(meals);
+          _AllMealsScreenState._mealsCacheTimestamp = DateTime.now();
 
-        // Persist updated cache
-        await UserCache.saveData(
-            _mealsCacheKey, _AllMealsScreenState._mealsCache);
-        await UserCache.saveData(_mealsCacheTimestampKey,
-            _AllMealsScreenState._mealsCacheTimestamp!.toIso8601String());
+          // Persist updated cache
+          await UserCache.saveData(
+              _mealsCacheKey, _AllMealsScreenState._mealsCache);
+          await UserCache.saveData(_mealsCacheTimestampKey,
+              _AllMealsScreenState._mealsCacheTimestamp!.toIso8601String());
 
-        _buildMealLookupMap();
-        _filterMeals(_searchController.text); // Re-apply current search filter
-
-        setState(() {
-          _isLoadingMeals = false;
-        });
+          _buildMealLookupMap();
+          _filterMeals(_searchController.text);
+          
+          // Show success message
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Meals updated'),
+                duration: Duration(seconds: 2),
+                behavior: SnackBarBehavior.floating,
+                margin: EdgeInsets.only(bottom: 24, left: 16, right: 16),
+              ),
+            );
+          }
+        }
+        
+        if (mounted) {
+          setState(() {
+            _isLoadingMeals = false;
+          });
+        }
       }
     } catch (e) {
       if (mounted) {
         print('Error during force refresh: $e');
+        
+        // Restore previous data
+        if (currentMeals.isNotEmpty) {
+          _allMeals = currentMeals;
+          _buildMealLookupMap();
+          _filterMeals(_searchController.text);
+        }
+        
+        // Show error message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to refresh. Using cached data.'),
+            duration: Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            margin: EdgeInsets.only(bottom: 24, left: 16, right: 16),
+          ),
+        );
+        
         setState(() {
           _isLoadingMeals = false;
-          _fetchError = 'Failed to refresh. Please try again.';
+          _fetchError = currentMeals.isEmpty 
+              ? 'Failed to load meals. Please check your connection.'
+              : 'Failed to refresh. Using cached data.';
         });
-        // Keep showing the existing data if available
-        if (_allMeals.isEmpty) {
-          _filteredMealsNotifier.value = [];
-        }
       }
     } finally {
       if (mounted) {
@@ -259,51 +312,107 @@ class _AllMealsScreenState extends State<AllMealsScreen>
   }
 
   Future<void> _fetchMealsAndPreprocess() async {
-    if (_isLoadingMeals) return; // Prevent multiple simultaneous fetches
-
-    // Only show loading indicator if we don't have cached data
-    if (_allMeals.isEmpty) {
+    // Don't fetch if already loading
+    if (_isLoadingMeals) return;
+    
+    // Check if we have cache that might be stale (older than 1 hour)
+    final bool hasStaleCache = _AllMealsScreenState._mealsCache.isNotEmpty && 
+                              _AllMealsScreenState._mealsCacheTimestamp != null &&
+                              DateTime.now().difference(_AllMealsScreenState._mealsCacheTimestamp!).inHours >= 1;
+    
+    // If we have no data at all, we need to show loading
+    final bool hasNoData = _allMeals.isEmpty;
+    
+    // If we have no data, we need to show loading state
+    if (hasNoData) {
       setState(() {
         _isLoadingMeals = true;
       });
+    } else if (hasStaleCache) {
+      // If we have stale data, show a subtle indicator that refresh is happening
+      // but don't show full loading state to avoid UI jumps
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Refreshing meals...'),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+          margin: EdgeInsets.only(bottom: 24, left: 16, right: 16),
+        ),
+      );
     }
 
     _fetchError = ''; // Reset error on new fetch
 
     try {
+      print('[AllMeals] Fetching fresh meals data...');
       final meals = await _fetchMeals();
+      
       if (mounted) {
-        // Check if widget is still mounted
-        _allMeals = meals;
-        _AllMealsScreenState._mealsCache =
-            List<Map<String, dynamic>>.from(meals);
-        _AllMealsScreenState._mealsCacheTimestamp = DateTime.now();
+        // Only update if we got new data
+        if (meals.isNotEmpty) {
+          _allMeals = meals;
+          _AllMealsScreenState._mealsCache = List<Map<String, dynamic>>.from(meals);
+          _AllMealsScreenState._mealsCacheTimestamp = DateTime.now();
 
-        // Persist cache using UserCache
-        await UserCache.saveData(
-            _mealsCacheKey, _AllMealsScreenState._mealsCache);
-        await UserCache.saveData(
-            _mealsCacheTimestampKey, _mealsCacheTimestamp!.toIso8601String());
+          // Persist cache using UserCache
+          await UserCache.saveData(
+              _mealsCacheKey, _AllMealsScreenState._mealsCache);
+          await UserCache.saveData(
+              _mealsCacheTimestampKey, _AllMealsScreenState._mealsCacheTimestamp!.toIso8601String());
 
-        _buildMealLookupMap();
-        _filterMeals(_searchController.text); // Re-apply current search filter
+          _buildMealLookupMap();
+          _filterMeals(_searchController.text); // Re-apply current search filter
+        }
 
-        setState(() {
-          _isLoadingMeals = false;
-        });
+        if (mounted) {
+          setState(() {
+            _isLoadingMeals = false;
+          });
+          
+          // Show success message if we had stale data
+          if (hasStaleCache && meals.isNotEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Meals updated'),
+                duration: Duration(seconds: 2),
+                behavior: SnackBarBehavior.floating,
+                margin: EdgeInsets.only(bottom: 24, left: 16, right: 16),
+              ),
+            );
+          }
+        }
       }
     } catch (e) {
       if (mounted) {
         print('Error fetching new meals in background: $e');
-        // If there was no cached data, show the error state.
-        if (_allMeals.isEmpty) {
+        
+        // If we have no data at all, show error state
+        if (hasNoData) {
           setState(() {
             _isLoadingMeals = false;
             _fetchError = "Failed to load meals. Please try again.";
-            _filteredMealsNotifier.value = []; // Clear meals on error
+            _filteredMealsNotifier.value = [];
           });
+        } else {
+          // If we have cached data, just show a subtle error message
+          print('Using cached data due to fetch error');
+          if (mounted) {
+            setState(() {
+              _isLoadingMeals = false;
+            });
+            
+            if (hasStaleCache) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Using cached data. Could not refresh.'),
+                  duration: Duration(seconds: 3),
+                  behavior: SnackBarBehavior.floating,
+                  margin: EdgeInsets.only(bottom: 24, left: 16, right: 16),
+                ),
+              );
+            }
+          }
         }
-        // If cached data is present, just log the error and keep showing cached data.
       }
     }
   }
@@ -367,7 +476,17 @@ class _AllMealsScreenState extends State<AllMealsScreen>
   Future<void> _fetchUserDetails() async {
     // Keep implementation as before, ensure setState is used correctly
     final prefs = await SharedPreferences.getInstance();
-    final userId = prefs.getInt('user_id');
+    
+    // Handle both int and String user_id cases
+    dynamic rawUserId = prefs.get('user_id');
+    int? userId;
+    
+    if (rawUserId is int) {
+      userId = rawUserId;
+    } else if (rawUserId is String) {
+      userId = int.tryParse(rawUserId);
+    }
+    
     if (userId == null) {
       setState(() => _isLoadingUserDetails = false);
       print("No user ID found in SharedPreferences.");
