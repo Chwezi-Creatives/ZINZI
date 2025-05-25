@@ -1089,16 +1089,54 @@ class MealRecommendation4:
         return 0
 
     def _match_allergies(self, meal: Dict) -> int:
-        meal_allergies = (meal.get("allergies") or "").strip().lower()
-        user_restrictions = [r.lower() for r in (self.user_preferences.get("food_restrictions") or [])]
+        # Get meal's allergy information as a list, handling both string and list inputs
+        meal_allergies = meal.get("allergies") or ""
+        if isinstance(meal_allergies, str):
+            meal_allergies = [a.strip().lower() for a in meal_allergies.split(',') if a.strip()]
+        else:
+            meal_allergies = [str(a).strip().lower() for a in meal_allergies if a and str(a).strip()]
         
+        # Get user's food restrictions (allergies)
+        user_restrictions = [r.strip().lower() for r in (self.user_preferences.get("food_restrictions") or [])]
+        
+        # If no user restrictions, allow the meal
         if not user_restrictions:
-            return 1  # No restrictions to match against
+            return 1
             
+        # If meal has no allergy info, be safe and filter it out
         if not meal_allergies:
-            return 0  # If meal has no allergy info, be safe and filter it out
+            logging.warning(f"Meal {meal.get('meal_id', 'unknown')} has no allergy information. Filtering out for safety.")
+            return 0
             
-        return 0 if any(restriction in meal_allergies for restriction in user_restrictions) else 1
+        # Define the robust allergy mapping
+        ALLERGY_MAPPING = {
+            'nut-free': ['peanut allergy', 'tree nut allergy'],
+            'dairy-free': ['dairy allergy'],
+            'gluten-free': ['gluten allergy'],
+            'none': []
+        }
+        
+        # Check each user restriction against the meal's allergies
+        for restriction in user_restrictions:
+            # Get the allergies to exclude based on the restriction
+            allergies_to_exclude = ALLERGY_MAPPING.get(restriction.lower(), [])
+            
+            # If the restriction is 'none', no allergies to exclude
+            if restriction.lower() == 'none':
+                continue
+                
+            # If no allergies to exclude for this restriction, skip
+            if not allergies_to_exclude:
+                continue
+                
+            # Check if any of the meal's allergies match the exclusions
+            for meal_allergy in meal_allergies:
+                if any(excluded in meal_allergy for excluded in allergies_to_exclude):
+                    logging.info(f"Excluding meal {meal.get('meal_id', 'unknown')} - contains {meal_allergy} "
+                                 f"which conflicts with user's {restriction} restriction")
+                    return 0
+                    
+        return 1
 
     def _match_cuisine(self, meal: Dict) -> int:
         """Enhanced cuisine matching using robust mappings"""
