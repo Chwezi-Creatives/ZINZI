@@ -647,121 +647,192 @@ class AuthenticationAndUsers(BaseRepository):
         if metric_id: logger.info(f"Created metric ID: {metric_id}"); return {"metric_id": metric_id}
         else: raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Metric creation failed.")
 
+    async def _recalculate_daily_calories(self, conn: asyncpg.Connection, user_id: int):
+        """
+        Recalculate and update daily calories asynchronously.
+        This is a helper method that can be called without blocking the main request.
+        """
+        try:
+            # Fetch the latest metrics for the user
+            metric_row = await conn.fetchrow(
+                """
+                SELECT weight, height, age_range, sex, activity_level
+                FROM user_metrics 
+                WHERE user_id = $1 
+                LIMIT 1
+                """,
+                user_id
+            )
+            
+            if not metric_row:
+                logger.warning(f"Cannot recalculate calories: No metrics found for user_id: {user_id}")
+                return
+                
+            # Fetch user preferences for goals
+            pref_row = await conn.fetchrow(
+                """
+                SELECT goals FROM user_preferences 
+                WHERE user_id = $1 
+                LIMIT 1
+                """,
+                user_id
+            )
+            
+            weight = metric_row['weight']
+            height = metric_row['height']
+            age_range = metric_row['age_range']
+            sex = metric_row['sex']
+            activity_level = metric_row['activity_level']
+            goals = pref_row['goals'] if pref_row and 'goals' in pref_row else 'maintain weight'
+
+            # Calculate all dependent values
+            calc = CalculationLogic()
+            bmi = calc.calculate_bmi(weight, height)
+            bmr = calc.calculate_bmr(weight, height, age_range, sex)
+            ideal_weight = calc.calculate_ideal_weight(height, sex)
+            
+            # Calculate and adjust calories based on weight goal
+            daily_calories = calc.calculate_daily_calories(bmr, activity_level, goals) if bmr else 0
+            bmi_category = calc.calculate_bmi_category(bmi)
+            
+            # Update the database with new calculated values
+            await conn.execute(
+                """
+                UPDATE user_metrics 
+                SET bmi = $1,
+                    bmr = $2,
+                    ideal_weight = $3,
+                    daily_calories = $4,
+                    bmi_category = $5,
+                    recorded_at = NOW()
+                WHERE user_id = $6
+                """,
+                float(bmi) if bmi is not None else None,
+                float(bmr) if bmr is not None else None,
+                str(ideal_weight) if ideal_weight is not None else None,
+                float(daily_calories) if daily_calories is not None else None,
+                str(bmi_category) if bmi_category is not None else None,
+                user_id
+            )
+            logger.info(f"Asynchronously updated daily calories to {daily_calories} for user_id: {user_id} (goal: {goals})")
+            
+        except Exception as e:
+            logger.error(f"Error in _recalculate_daily_calories for user_id {user_id}: {e}", exc_info=True)
+
     async def update_metric(self, conn: asyncpg.Connection, user_id: int, updates: Dict[str, Any]):
         # Update independent fields for latest metric row for this user
         updates_lower = lowercase_keys(updates)
         set_clauses = []
         params = []
         idx = 1
-        allowed = ['age_range','weight','height','bmi','ideal_weight','daily_calories','cholesterol_level','sys_bp','dia_bp','pulse','sex','activity_level']
+        allowed = ['age_range','weight','height','bmi','ideal_weight','daily_calories',
+                 'cholesterol_level','sys_bp','dia_bp','pulse','sex','activity_level','goals']
+        
         if not updates_lower:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No updates.")
+            
         # Strictly map and validate update keys
         unknown_keys = [k for k in updates_lower if k not in allowed]
         if unknown_keys:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown or misspelled fields: {', '.join(unknown_keys)}. Allowed fields: {', '.join(allowed)}.")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail=f"Unknown or misspelled fields: {', '.join(unknown_keys)}. Allowed fields: {', '.join(allowed)}."
+            )
+            
         # Define expected types for each field
         field_types = {
             'age_range': str,
             'weight': float,
             'height': float,
             'bmi': float,
-            'ideal weight': float,
-            'daily calories': float,
+            'ideal_weight': float,
+            'daily_calories': float,
             'cholesterol_level': float,
             'sys_bp': float,
             'dia_bp': float,
             'pulse': float,
             'sex': str,
             'activity_level': str,
+            'goals': str
         }
+        
         # Log the update payload and types for debugging
-        logger.info(f"update_metric: updates_lower={updates_lower}")
-        for k, v in updates_lower.items():
-            logger.info(f"Field '{k}': value={v} (type={type(v)})")
+        logger.info(f"update_metric: user_id={user_id}, updates={updates_lower}")
+        
+        # Process updates
         for k in allowed:
             if k in updates_lower:
-                set_clauses.append(f"{k}=${idx}")
                 v = updates_lower[k]
                 # Strict validation for string fields
-                if k in ['age_range', 'sex', 'activity_level']:
+                if k in ['age_range', 'sex', 'activity_level', 'goals']:
                     if v is not None and not isinstance(v, str):
-                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Field '{k}' must be a string, got {type(v).__name__}: {v}")
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST, 
+                            detail=f"Field '{k}' must be a string, got {type(v).__name__}: {v}"
+                        )
                 # Cast to correct type if not None
                 if v is not None and k in field_types:
                     try:
                         v = field_types[k](v)
-                    except Exception:
-                        # Fallback: leave as is if casting fails
-                        pass
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Failed to cast {k}={v} to {field_types[k].__name__}: {e}")
+                        continue
+                
+                set_clauses.append(f"{k}=${idx}")
                 params.append(v)
                 idx += 1
+        
         if not set_clauses:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields.")
-        # Patch all user_metrics rows for this user_id (no ordering, no subquery)
-        sql = f"UPDATE user_metrics SET {', '.join(set_clauses)} WHERE user_id = ${idx}"
-        params.append(user_id)
-        await self._execute_query(conn, sql, tuple(params))
-        logger.info(f"Updated metrics for user_id: {user_id}")
-
-        # Fetch any (first) metric row for this user_id to get dependent fields
-        metric_row = await conn.fetchrow(
-            "SELECT weight, height, age_range, sex, activity_level FROM user_metrics WHERE user_id = $1 LIMIT 1",
-            user_id
-        )
-        if not metric_row:
-            logger.warning(f"Metric row not found for dependent update for user_id: {user_id}")
-            return
-        weight = metric_row['weight']
-        height = metric_row['height']
-        age_range = metric_row['age_range']
-        sex = metric_row['sex']
-        activity_level = metric_row['activity_level']
-
-        # Compute dependent values using CalculationLogic
-        calc = CalculationLogic()
-        bmi = calc.calculate_bmi(weight, height)
-        bmr = calc.calculate_bmr(weight, height, age_range, sex)
-        ideal_weight = calc.calculate_ideal_weight(height, sex)
-        daily_calories = calc.calculate_daily_calories(bmr, activity_level)
-        bmi_category = calc.calculate_bmi_category(bmi)
-
-        # Patch all user_metrics rows for this user_id with dependent fields
-        dep_sql = """
-            UPDATE user_metrics SET 
-                bmi = $1,
-                bmr = $2,
-                ideal_weight = $3,
-                daily_calories = $4,
-                bmi_category = $5
-            WHERE user_id = $6
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields to update.")
+        
+        # Update the user metrics
+        update_sql = f"""
+            UPDATE user_metrics 
+            SET {', '.join(set_clauses)}, recorded_at = NOW()
+            WHERE user_id = ${idx}
+            RETURNING *
         """
-        # Ensure correct types for asyncpg (floats for numbers, str for category)
-        # Cast dependent fields to correct types based on DB schema
-        # Numerical: bmi, bmr, ideal_weight, daily_calories; Text: bmi_category
-        await conn.execute(
-            dep_sql,
-            float(bmi) if bmi is not None else None,
-            float(bmr) if bmr is not None else None,
-            str(ideal_weight) if ideal_weight is not None else None,  # ensure string
-            float(daily_calories) if daily_calories is not None else None,
-            str(bmi_category) if bmi_category is not None else None,
-            user_id
-        )
-        logger.info(f"Recomputed dependent fields for user_id: {user_id} (all metric rows)")
-
-        # Always insert a new entry in metrics_history whenever weight is updated
-        if 'weight' in updates_lower:
-            try:
-                # Use the new weight value from the update, not the possibly unchanged value from the DB
-                weight_f = float(updates_lower['weight'])
-                await conn.execute(
-                    "INSERT INTO metrics_history (user_id, weight, logged_at) VALUES ($1, $2, NOW())",
-                    user_id, weight_f
-                )
-                logger.info(f"Logged new weight {weight_f} for user {user_id} in metrics_history (logged_at).")
-            except Exception as e:
-                logger.warning(f"Failed to log weight in metrics_history: {e}")
+        
+        try:
+            # Execute the update and get the updated row
+            updated_row = await conn.fetchrow(update_sql, *params, user_id)
+            if not updated_row:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User metrics not found")
+                
+            logger.info(f"Updated metrics for user_id: {user_id}")
+            
+            # Check if we need to trigger a recalculation of daily calories
+            needs_recalculation = any(field in updates_lower for field in ['weight', 'height', 'age_range', 'sex', 'activity_level', 'goals'])
+            
+            if needs_recalculation:
+                # Start an async task to recalculate daily calories without blocking
+                asyncio.create_task(self._recalculate_daily_calories(conn, user_id))
+                logger.info(f"Started async recalculation of daily calories for user_id: {user_id}")
+            
+            # Always insert a new entry in metrics_history whenever weight is updated
+            if 'weight' in updates_lower:
+                try:
+                    weight_f = float(updates_lower['weight'])
+                    logger.info(f"[METRICS_HISTORY] Preparing to log weight update - User: {user_id}, New Weight: {weight_f}")
+                    result = await conn.execute(
+                        """
+                        INSERT INTO metrics_history (user_id, weight, logged_at) 
+                        VALUES ($1, $2, NOW())
+                        """,
+                        user_id, weight_f
+                    )
+                    logger.info(f"[METRICS_HISTORY] Successfully logged new weight {weight_f} for user {user_id} in metrics_history. Rows affected: {result}")
+                except Exception as e:
+                    logger.error(f"[METRICS_HISTORY] Failed to log weight in metrics_history. User: {user_id}, Error: {e}", exc_info=True)
+            
+            return {"message": "Metrics updated successfully", "user_id": user_id}
+            
+        except Exception as e:
+            logger.error(f"Error updating metrics for user_id {user_id}: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to update metrics: {str(e)}"
+            )
 
     async def list_metrics(self, conn: asyncpg.Connection, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
         # ... (implementation uses _execute_query with conn) ...
@@ -2467,14 +2538,48 @@ class CalculationLogic:
         except Exception as e:
             logger.warning(f"BMR calc err: w={weight},h={height},age={age_range},sex={sex}. {e}")
             return 0
-    def calculate_daily_calories(self, bmr, activity_level):
-        try: bmr_f=float(bmr)
-        except: logger.warning(f"Invalid BMR for TDEE: {bmr}"); return 0
-        act_level=str(activity_level).strip().lower().replace(" ","_") if activity_level else 'sedentary'
-        mults={'sedentary':1.2,'lightly_active':1.375,'moderately_active':1.55,'very_active':1.725,'extremely_active':1.9,'extra_active':1.9}
-        mult=mults.get(act_level,1.2)
-        if act_level not in mults: logger.warning(f"Unknown activity '{activity_level}', using sedentary.")
-        return round(bmr_f * mult)
+    def calculate_daily_calories(self, bmr, activity_level, goals=None):
+        """
+        Calculate daily calories based on BMR, activity level, and weight goal.
+        
+        Args:
+            bmr: Basal Metabolic Rate
+            activity_level: User's activity level
+            goals: Optional weight goal ('weight loss', 'maintain weight', 'muscle gain')
+            
+        Returns:
+            int: Adjusted daily calorie target
+        """
+        try:
+            bmr_f = float(bmr)
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid BMR for TDEE: {bmr}")
+            return 0
+            
+        # Get activity multiplier
+        act_level = str(activity_level).strip().lower().replace(" ","_") if activity_level else 'sedentary'
+        mults = {
+            'sedentary': 1.2,
+            'lightly_active': 1.375,
+            'moderately_active': 1.55,
+            'very_active': 1.725,
+            'extremely_active': 1.9,
+            'extra_active': 1.9
+        }
+        mult = mults.get(act_level, 1.2)
+        if act_level not in mults:
+            logger.warning(f"Unknown activity '{activity_level}', using sedentary.")
+            
+        # Calculate base TDEE
+        daily_calories = round(bmr_f * mult)
+        
+        # Apply weight goal adjustments if provided
+        if goals == 'Weight Loss':
+            daily_calories = int(daily_calories * 0.85)  # 15% reduction for weight loss
+        elif goals == 'Muscle Gain':
+            daily_calories = int(daily_calories * 1.20)  # 20% increase for muscle muscle gain
+            
+        return daily_calories
 
 
 # --- GetAllMeals Class ---
@@ -3825,16 +3930,28 @@ async def list_user_metrics_endpoint(user_id: int = Path(..., gt=0), conn: async
     """List metrics for a specific user by user ID."""
     repo = AuthenticationAndUsers()
     metrics = await repo.list_metrics(conn, user_id=user_id)
-    if not metrics:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Metrics not found for user ID {user_id}")
     return {"metrics": metrics}
-
 @app.put('/rr/metrics/{user_id}')
 @app.patch('/rr/metrics/{user_id}')
 async def update_metric_endpoint(user_id: int, updates: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
     """Update a user metric by user ID."""
     repo = AuthenticationAndUsers()
     await repo.update_metric(conn, user_id, updates)
+    
+    # Trigger async recalculation if weight is in updates
+    if 'weight' in updates:
+        # Create a new database connection for the background task
+        async def _recalculate():
+            try:
+                async with db_pool.acquire() as task_conn:
+                    await repo._recalculate_daily_calories(task_conn, user_id)
+                    logger.info(f"Completed async recalculation of daily calories for user {user_id} after weight update")
+            except Exception as e:
+                logger.error(f"Error in background recalculation for user {user_id}: {str(e)}", exc_info=True)
+        
+        asyncio.create_task(_recalculate())
+        logger.info(f"Triggered async recalculation of daily calories for user {user_id} after weight update")
+    
     return {"message": f"Metric for user {user_id} updated successfully."}
 
 
@@ -3944,6 +4061,20 @@ async def update_user_preferences_endpoint(
         # Get the updated preferences
         updated_prefs = await repo.list_preferences(conn, user_id=user_id)
         logger.info(f"Successfully updated preferences for user {user_id}")
+        
+        # Trigger async recalculation if goals is in updates
+        if 'goals' in updates:
+            # Create a new database connection for the background task
+            async def _recalculate():
+                try:
+                    async with db_pool.acquire() as task_conn:
+                        await repo._recalculate_daily_calories(task_conn, user_id)
+                        logger.info(f"Completed async recalculation of daily calories for user {user_id} after preferences update")
+                except Exception as e:
+                    logger.error(f"Error in background recalculation for user {user_id}: {str(e)}", exc_info=True)
+            
+            asyncio.create_task(_recalculate())
+            logger.info(f"Triggered async recalculation of daily calories for user {user_id} after preferences update")
         
         return {
             "message": "Preferences updated successfully.",

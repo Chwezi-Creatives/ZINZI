@@ -372,12 +372,30 @@ class MealRecommendation4:
         tdee = bmr * activity_factors.get(activity_level, 1.2)
 
         goals = self.user_preferences.get("goals")
+    
+        # Define adjustment percentages (can be customized as needed)
+        ADJUSTMENT_MULTIPLIERS = {
+            "weight loss": 0.15,  # 15% reduction for weight loss
+            "muscle gain": 0.20,  # 20% increase for muscle gain
+            "maintenance": 0.0    # No adjustment for maintenance
+        }
+    
+        # Get the appropriate multiplier based on goal
+        adjustment_percent = ADJUSTMENT_MULTIPLIERS.get(goals, 0.0)
+    
+        # Apply the adjustment
         if goals == "weight loss":
-            tdee -= 500
+            tdee *= (1 - adjustment_percent)  # Reduce calories for weight loss
         elif goals == "muscle gain":
-            tdee += 500
-
-        return round(tdee, 1)
+            tdee *= (1 + adjustment_percent)  # Increase calories for muscle gain
+    
+        # Ensure minimum calorie threshold (e.g., never go below 1200 calories for safety)
+        MINIMUM_CALORIES = 1200
+        tdee = max(round(tdee, 1), MINIMUM_CALORIES)
+    
+        logging.info(f"Adjusted TDEE for {goals}: {tdee} calories (using {adjustment_percent*100}% {'reduction' if goals == 'weight loss' else 'increase' if goals == 'muscle gain' else 'no adjustment'})")
+    
+        return tdee
 
     def _has_user_data_changed(self):
         """Check if current user data differs from previously stored hash."""
@@ -584,7 +602,10 @@ class MealRecommendation4:
                     # If no meals left and filter isn't strict, try without it
                     logging.warning(f"No meals remaining after {filter_name}, but it's not a strict requirement. Trying without it.")
                     filtered_meals = meals.copy()  # Reset to before this filter
-                    applied_filters.pop()  # Remove the last filter
+                    if applied_filters:  # Only pop if there are filters to remove
+                        applied_filters.pop()  # Remove the last filter
+                    else:
+                        logging.warning(f"No filters to remove when trying to skip {filter_name}")
                 elif not filtered_meals and is_strict:
                     logging.error(f"No meals remaining after strict filter: {filter_name} (value: {filter_value})")
                     break
