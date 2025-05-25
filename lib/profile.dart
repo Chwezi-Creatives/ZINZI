@@ -250,8 +250,9 @@ class _ProfilePageState extends State<ProfilePage>
   // Cuisine preferences
   List<String> _selectedCuisines = [];
   final List<String> _cuisineOptions = [
+    'All'
     'African',
-    'East frican',
+    'East African',
     'American',
     'Asian',
     'Chinese',
