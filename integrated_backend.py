@@ -2920,10 +2920,6 @@ async def update_chef_status_endpoint(chef_id: int, status_update: dict = Body(.
 # === New  version 4 Meal Recommendation Endpoint ---
 meal_recommender = None  # Lazy-initialized meal recommender
 
-# Global cache for meal recommendations
-meal_recommenders = {}
-meal_data_cache = {}
-
 @app.get("/rr/meals2/{user_id}")
 async def get_meal_recommendations(user_id: int, conn: asyncpg.Connection = Depends(get_db)):
     """
@@ -2933,37 +2929,25 @@ async def get_meal_recommendations(user_id: int, conn: asyncpg.Connection = Depe
         user_id: User ID for whom to generate recommendations
     
     Returns:
-        List of recommended meals
+        List of recommended meals with success status
     """
-    global meal_recommenders, meal_data_cache
-    
     try:
-        # Check if we have cached results for this user
-        cache_key = f"user_{user_id}"
-        if cache_key in meal_data_cache:
-            cache_time, recommendations = meal_data_cache[cache_key]
-            # Cache valid for 1 hour
-            if datetime.now() - cache_time < timedelta(hours=1):
-                return {"recommended_meals": recommendations, "success": True}
+        # Always create a new instance to ensure fresh data
+        # This is important to detect changes in user preferences/metrics
+        from meal_algorithm4 import MealRecommendation4
+        recommender = MealRecommendation4(user_id)
         
-        # Initialize meal recommender on first request
-        if user_id not in meal_recommenders:
-            # Import here to avoid circular imports
-            from meal_algorithm4 import MealRecommendation4
-            # Preload the meal recommender at startup
-            meal_recommenders[user_id] = MealRecommendation4(user_id)
-        
-        # Get recommendations
-        recommendations = meal_recommenders[user_id].recommend_meals()
-        
-        # Cache the results
-        meal_data_cache[cache_key] = (datetime.now(), recommendations)
+        # Get recommendations (will handle caching internally)
+        recommendations = recommender.recommend_meals()
         
         return {"recommended_meals": recommendations, "success": True}
         
     except Exception as e:
         logger.error(f"Error generating meal recommendations: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate meal recommendations")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail="Failed to generate meal recommendations"
+        )
 
 @app.get("/rr/meal_calories/{meal_id}")
 async def get_meal_calories(meal_id: str, conn: asyncpg.Connection = Depends(get_db)):
