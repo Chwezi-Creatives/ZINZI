@@ -109,10 +109,21 @@ class MealDetailScreen extends StatefulWidget {
 
     if (cachedData != null && timestampData != null) {
       try {
-        print('[MealDetail] Cache hit: Loaded producers from cache');
+        print('[MealDetail Cache] Raw producers data from UserCache.getData: $cachedData');
         _producersCache = List<dynamic>.from(cachedData);
         _producersCacheTimestamp = DateTime.parse(timestampData);
-      } catch (_) {
+        if (_producersCache.isNotEmpty) {
+          print('[MealDetail Cache] First producer in _producersCache after UserCache load: ${_producersCache.first}');
+          // Specifically log is_email_verified for the first cached item if it exists
+          final firstProducerCached = _producersCache.first as Map<String, dynamic>;
+          print('[MealDetail Cache] is_email_verified for first cached producer: ${firstProducerCached['is_email_verified']} (Type: ${firstProducerCached['is_email_verified']?.runtimeType})');
+        } else {
+          print('[MealDetail Cache] _producersCache is empty after loading from UserCache.');
+        }
+        print('[MealDetail] Cache hit: Loaded producers from cache (MealDetailScreen._producersCache updated).');
+      } catch (e, s) {
+        print('[MealDetail Cache] Error processing data from UserCache for producers: $e');
+        print('[MealDetail Cache] Stacktrace: $s');
         _producersCache = [];
         _producersCacheTimestamp = null;
       }
@@ -372,7 +383,16 @@ class _MealDetailScreenState extends State<MealDetailScreen>
           isLoadingChefs = true; // No cache, definitely loading
         }
         if (MealDetailScreen._producersCache.isNotEmpty) {
-          producers = MealDetailScreen._producersCache;
+          producers = MealDetailScreen._producersCache; // Assigning from static cache to state variable
+          // Log the state variable 'producers' immediately after assignment
+          if (producers.isNotEmpty) {
+            final firstProducerInState = producers.first as Map<String, dynamic>;
+            print('[MealDetail _loadData setState] First producer in STATE now: ${producers.first}');
+            print('[MealDetail _loadData setState] is_email_verified for first producer in STATE: ${firstProducerInState['is_email_verified']} (Type: ${firstProducerInState['is_email_verified']?.runtimeType})');
+          } else {
+            print('[MealDetail _loadData setState] producers state variable is empty after assignment from static cache.');
+          }
+          // End of added log
           if (producersCacheValid && !forceRefresh) isLoadingProducers = false;
         } else {
           isLoadingProducers = true; // No cache, definitely loading
@@ -705,22 +725,32 @@ class _MealDetailScreenState extends State<MealDetailScreen>
           
           // Handle is_email_verified field
           dynamic rawVerified = producerData['is_email_verified'];
+          print('[MealDetail] Producer "${name}": Raw "is_email_verified" value is "$rawVerified", type is ${rawVerified.runtimeType}');
           bool? isVerified;
           if (rawVerified is bool) {
             isVerified = rawVerified;
+            print('[MealDetail] Producer "${name}": Parsed as bool. isVerified = $isVerified');
           } else if (rawVerified is String) {
-            if (rawVerified.toLowerCase() == 'true') {
+            String lowerCaseString = rawVerified.toLowerCase();
+            print('[MealDetail] Producer "${name}": Raw value is String "$rawVerified". Lowercase: "$lowerCaseString"');
+            if (lowerCaseString == 'true') {
               isVerified = true;
-            } else if (rawVerified.toLowerCase() == 'false') {
+            } else if (lowerCaseString == 'false') {
               isVerified = false;
             }
+            print('[MealDetail] Producer "${name}": After string parsing. isVerified = $isVerified');
           } else if (rawVerified is int) {
+            print('[MealDetail] Producer "${name}": Raw value is int "$rawVerified".');
             if (rawVerified == 1) {
               isVerified = true;
             } else if (rawVerified == 0) {
               isVerified = false;
             }
+            print('[MealDetail] Producer "${name}": After int parsing. isVerified = $isVerified');
+          } else {
+            print('[MealDetail] Producer "${name}": "is_email_verified" is not bool, String, or int. Type: ${rawVerified.runtimeType}. Value: "$rawVerified"');
           }
+          print('[MealDetail] Producer "${name}": Final isVerified before mapping: $isVerified');
           
           final mappedProducer = {
             'producer_id': id,
@@ -2218,7 +2248,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                                   color: kColorPrimaryDark)), // Darker text
                           if (chef['is_email_verified'] != null) // Check if the flag exists
                             Padding(
-                              padding: const EdgeInsets.only(left: 4.0),
+                              padding: const EdgeInsets.only(left: 8.0),
                               child: Icon(
                                 Icons.verified,
                                 color: chef['is_email_verified'] == true ? Colors.green : Colors.grey,
@@ -2425,10 +2455,13 @@ class _MealDetailScreenState extends State<MealDetailScreen>
 
   // Helper method to build the producer list with provided data
   Widget _buildProducerListWithData(List<dynamic> producersToDisplay) {
+    // ----- START FIX -----
     print('=== Building producer list with ${producersToDisplay.length} items ===');
     producersToDisplay.forEach((producer) {
+      // This print helps confirm if 'is_email_verified' is present and its value
       print('Producer in list: ${producer['name']}, is_email_verified: ${producer['is_email_verified']}');
     });
+    // ----- END FIX -----
      return ListView.builder(
        key: ValueKey('producer_list_${producersToDisplay.length}'), // Add key
       itemCount: producersToDisplay.length,
@@ -2501,26 +2534,28 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // ----- START FIX: Add verification icon for producer -----
                         Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(producerName,
-                              style: GoogleFonts.poppins(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                  color: kColorPrimaryDark)), // Darker text
-                          if (producer['is_email_verified'] != null) // Check if the flag exists
-                            Padding(
-                              padding: const EdgeInsets.only(left: 4.0),
-                              child: Icon(
-                                Icons.verified,
-                                color: producer['is_email_verified'] == true ? Colors.green : Colors.grey,
-                                size: 16.0,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(producerName,
+                                style: GoogleFonts.poppins(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: kColorPrimaryDark)),
+                            if (producer['is_email_verified'] != null) // Check if the flag exists
+                              Padding(
+                                padding: const EdgeInsets.only(left: 8.0),
+                                child: Icon(
+                                  Icons.verified,
+                                  color: producer['is_email_verified'] == true ? Colors.green : Colors.grey,
+                                  size: 16.0,
+                                ),
                               ),
-                            ),
-                        ],
-                      ),
-                      SizedBox(height: 3),
+                          ],
+                        ),
+                        // ----- END FIX -----
+                        SizedBox(height: 3),
                         Row(
                             children: List.generate(
                                 5,
