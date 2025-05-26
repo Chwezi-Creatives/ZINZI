@@ -8,7 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io'; // For File
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/produ_dash22.dart';
+import 'package:zinzi2/verification.dart';
 import 'notifications/fcm_service.dart';
 
 // --- Hardcoded Colors ---
@@ -361,7 +361,7 @@ class _ProducerSignUpPageState extends State<ProducerSignUpPage> {
           // Navigate to the next screen
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (context) => ProducerDash22()),
+            MaterialPageRoute(builder: (context) => EmailVerificationPage()),
           );
         } else {
           // --- FAILURE ---

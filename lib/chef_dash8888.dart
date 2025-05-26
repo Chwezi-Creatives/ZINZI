@@ -177,6 +177,7 @@ class ChefProfile {
   String? specialties; // Comma-separated String
   String? teamSize;
   bool isActive;
+  bool isEmailVerified;
   String? equipment; // Comma-separated String
   File? localImageFile; // For local image editing
   Map<String, dynamic>? pricing;
@@ -199,6 +200,7 @@ class ChefProfile {
     this.specialties,
     this.teamSize,
     required this.isActive,
+    this.isEmailVerified = false,
     this.equipment,
     this.pricing,
     this.localImageFile,
@@ -266,6 +268,10 @@ class ChefProfile {
           ? json['is_active']
           : (json['is_active']?.toString().toLowerCase() == 'true' ||
               json['is_active'] == 1),
+      isEmailVerified: json['is_email_verified'] is bool
+          ? json['is_email_verified']
+          : (json['is_email_verified']?.toString().toLowerCase() == 'true' ||
+              json['is_email_verified'] == 1),
       equipment: _joinListSafe(json['equipment']),
       pricing: json['pricing'] is Map<String, dynamic>
           ? Map<String, dynamic>.from(json['pricing'])
@@ -2471,10 +2477,35 @@ class _ProfileTabState extends State<ProfileTab>
                           : Text(
                               profile.name.isEmpty ? '(No Name)' : profile.name,
                               style: textTheme.headlineSmall),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       Text(profile.chefType,
                           style: textTheme.titleMedium
                               ?.copyWith(color: colorScheme.secondary)),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Icon(
+                            profile.isEmailVerified
+                                ? Icons.verified
+                                : Icons.email_outlined,
+                            size: 14,
+                            color: profile.isEmailVerified
+                                ? Colors.green
+                                : Colors.orange,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            profile.isEmailVerified
+                                ? 'Email Verified'
+                                : 'Email Not Verified',
+                            style: textTheme.labelSmall?.copyWith(
+                              color: profile.isEmailVerified
+                                  ? Colors.green
+                                  : Colors.orange,
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),

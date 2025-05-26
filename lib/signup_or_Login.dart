@@ -11,7 +11,7 @@ import 'package:zinzi2/prodsignup.dart';
 import 'package:zinzi2/producer_login_modular.dart';
 import 'package:zinzi2/signup_page.dart';
 import 'package:zinzi2/user_login_modular.dart';
-import 'package:zinzi2/stakeholdersignup.dart';
+import 'package:zinzi2/stakeholdersignup.dart' as stakeholder_signup;
 import 'package:zinzi2/stk_login_modular.dart';
 
 // --- Constants ---
@@ -22,10 +22,12 @@ const Color accentTeal = Color(0xFF009688); // Secondary actions, highlights
 const Color lightTeal = Color(0xFFB2DFDB); // Borders, subtle backgrounds
 const Color lighterTeal = Color(0xFFE0F2F1); // Background gradient
 const Color whiteColor = Colors.white;
-const Color subtleTextColor = Color(0xFF616161); // Adjusted for slightly better contrast
+const Color subtleTextColor =
+    Color(0xFF616161); // Adjusted for slightly better contrast
 const Color errorColor = Color(0xFFD32F2F);
 const Color disabledColor = Colors.grey;
-const Color cardBackgroundColor = Colors.white70; // Slightly opaque white for the card
+const Color cardBackgroundColor =
+    Colors.white70; // Slightly opaque white for the card
 
 // --- Main Widget ---
 class SignUpOrLoginPage extends StatefulWidget {
@@ -35,16 +37,19 @@ class SignUpOrLoginPage extends StatefulWidget {
   State<SignUpOrLoginPage> createState() => _SignUpOrLoginPageState();
 }
 
-class _SignUpOrLoginPageState extends State<SignUpOrLoginPage> with TickerProviderStateMixin {
+class _SignUpOrLoginPageState extends State<SignUpOrLoginPage>
+    with TickerProviderStateMixin {
   // --- State ---
   late AnimationController _entryAnimationController;
   late Animation<Offset> _slideAnimationCard;
-  late Animation<double> _fadeAnimationContent; // Fade in card content + buttons
+  late Animation<double>
+      _fadeAnimationContent; // Fade in card content + buttons
 
   late AnimationController _mascotController;
   late Animation<Offset> _mascotFloat;
 
-  final List<String> roles = const [ // Made const
+  final List<String> roles = const [
+    // Made const
     "User",
     "Chef",
     "Producer",
@@ -62,7 +67,8 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage> with TickerProvid
     // Combined entry animation controller
     _entryAnimationController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 900), // Slightly longer for smoother feel
+      duration: const Duration(
+          milliseconds: 900), // Slightly longer for smoother feel
     );
 
     // Card slides up
@@ -80,7 +86,8 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage> with TickerProvid
     _fadeAnimationContent = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _entryAnimationController,
-        curve: const Interval(0.3, 1.0, curve: Curves.easeIn), // Start fade after 30% of slide
+        curve: const Interval(0.3, 1.0,
+            curve: Curves.easeIn), // Start fade after 30% of slide
       ),
     );
 
@@ -93,7 +100,8 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage> with TickerProvid
     _mascotFloat = Tween<Offset>(
       begin: const Offset(0, -0.05), // Subtler float
       end: const Offset(0, 0.05),
-    ).animate(CurvedAnimation(parent: _mascotController, curve: Curves.easeInOut));
+    ).animate(
+        CurvedAnimation(parent: _mascotController, curve: Curves.easeInOut));
 
     // Start animations after a short delay
     Future.delayed(const Duration(milliseconds: 100), () {
@@ -126,7 +134,8 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage> with TickerProvid
             child: child,
           );
         },
-        transitionDuration: const Duration(milliseconds: 450), // Slightly longer duration
+        transitionDuration:
+            const Duration(milliseconds: 450), // Slightly longer duration
       ),
     );
   }
@@ -178,27 +187,27 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage> with TickerProvid
           targetPage = const TransporterSignUpPage();
           break;
         case 'Stakeholder':
-          targetPage = const StakeholderSignUpPage();
+          targetPage = const stakeholder_signup.StakeholderSignUpPage();
           break;
       }
-       if (targetPage != null) {
+      if (targetPage != null) {
         _navigateToPage(targetPage);
       }
     } else {
-       _showValidationError();
+      _showValidationError();
     }
   }
 
-   void _showValidationError() {
-     ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select your role first.'),
-          backgroundColor: errorColor,
-          behavior: SnackBarBehavior.floating, // Modern look
-          duration: Duration(seconds: 2),
-        ),
-      );
-   }
+  void _showValidationError() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Please select your role first.'),
+        backgroundColor: errorColor,
+        behavior: SnackBarBehavior.floating, // Modern look
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
 
   // --- Build Method ---
   @override
@@ -206,7 +215,8 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage> with TickerProvid
     // Set status bar style for better integration with the gradient
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark.copyWith(
       statusBarColor: Colors.transparent, // Make status bar transparent
-      statusBarIconBrightness: Brightness.dark, // Icons dark for light background
+      statusBarIconBrightness:
+          Brightness.dark, // Icons dark for light background
     ));
 
     return Scaffold(
@@ -220,44 +230,47 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage> with TickerProvid
             end: Alignment.bottomRight,
           ),
         ),
-        child: SafeArea( // Ensures content is below status bar
+        child: SafeArea(
+          // Ensures content is below status bar
           child: Center(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(24.0), // Consistent padding
               // Add ConstrainedBox to limit the width of the content column
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 500), // Set a max width (adjust as needed)
+                constraints: const BoxConstraints(
+                    maxWidth: 500), // Set a max width (adjust as needed)
                 child: Form(
                   key: _formKey,
                   child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Optional Mascot
-                    SlideTransition(
-                      position: _mascotFloat,
-                      child: Image.asset(
-                        "assets/images/acc.png", // Ensure this path is correct
-                        height: 70, // Slightly smaller
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Optional Mascot
+                      SlideTransition(
+                        position: _mascotFloat,
+                        child: Image.asset(
+                          "assets/images/acc.png", // Ensure this path is correct
+                          height: 70, // Slightly smaller
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 20), // Increased spacing
+                      const SizedBox(height: 20), // Increased spacing
 
-                    // Animated Card
-                    SlideTransition(
-                      position: _slideAnimationCard,
-                      child: _buildRoleSelectionCard(),
-                    ),
-                    const SizedBox(height: 35), // Increased spacing
+                      // Animated Card
+                      SlideTransition(
+                        position: _slideAnimationCard,
+                        child: _buildRoleSelectionCard(),
+                      ),
+                      const SizedBox(height: 35), // Increased spacing
 
-                    // Animated Buttons
-                    FadeTransition(
-                      opacity: _fadeAnimationContent, // Fade buttons in with content
-                      child: _buildActionButtons(),
-                    ),
-                    const SizedBox(height: 20), // Bottom padding
-                  ],
-                ),
-               ), // Close Form
+                      // Animated Buttons
+                      FadeTransition(
+                        opacity:
+                            _fadeAnimationContent, // Fade buttons in with content
+                        child: _buildActionButtons(),
+                      ),
+                      const SizedBox(height: 20), // Bottom padding
+                    ],
+                  ),
+                ), // Close Form
               ), // Close ConstrainedBox
             ),
           ),
@@ -274,13 +287,15 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage> with TickerProvid
     // final isTablet = MediaQuery.of(context).size.width > 600;
     // final cardWidth = isTablet ? 500.0 : null; // Let it expand on mobile
 
-    return ClipRRect( // Clip the BackdropFilter effect
+    return ClipRRect(
+      // Clip the BackdropFilter effect
       borderRadius: BorderRadius.circular(25.0), // Softer corners
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8), // More subtle blur
         child: Container(
           // width: cardWidth, // Removed width property
-          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 30.0), // Generous padding
+          padding: const EdgeInsets.symmetric(
+              horizontal: 24.0, vertical: 30.0), // Generous padding
           decoration: BoxDecoration(
             // Removed color, border, and boxShadow to blend with background
             color: Colors.transparent, // Explicitly set to transparent
@@ -342,29 +357,39 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage> with TickerProvid
         // labelStyle: const TextStyle(color: primaryTeal), // Removed labelStyle
         hintText: 'Select Your Role', // Keep hint text as placeholder
         hintStyle: TextStyle(color: subtleTextColor.withOpacity(0.8)),
-        prefixIcon: const Icon(Icons.person_outline, color: primaryTeal, size: 22),
+        prefixIcon:
+            const Icon(Icons.person_outline, color: primaryTeal, size: 22),
         filled: false, // Set to false to make it transparent
         // fillColor: whiteColor.withOpacity(0.8), // Removed fill color
-        contentPadding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 16.0), // Comfortable padding
+        contentPadding: const EdgeInsets.symmetric(
+            vertical: 16.0, horizontal: 16.0), // Comfortable padding
         // Use UnderlineInputBorder for a minimalist look
-        border: UnderlineInputBorder( // Default border (usually not visible)
+        border: UnderlineInputBorder(
+          // Default border (usually not visible)
           borderSide: BorderSide(color: subtleTextColor.withOpacity(0.5)),
         ),
-        enabledBorder: UnderlineInputBorder( // Border when enabled but not focused
+        enabledBorder: UnderlineInputBorder(
+          // Border when enabled but not focused
           borderSide: BorderSide(color: subtleTextColor.withOpacity(0.5)),
         ),
-        focusedBorder: const UnderlineInputBorder( // Border when focused
-          borderSide: BorderSide(color: primaryTeal, width: 2.0), // Thicker highlight
+        focusedBorder: const UnderlineInputBorder(
+          // Border when focused
+          borderSide:
+              BorderSide(color: primaryTeal, width: 2.0), // Thicker highlight
         ),
-        errorBorder: const UnderlineInputBorder( // Border when there's an error
+        errorBorder: const UnderlineInputBorder(
+          // Border when there's an error
           borderSide: BorderSide(color: errorColor, width: 1.0),
         ),
-         focusedErrorBorder: const UnderlineInputBorder( // Border when focused with an error
-          borderSide: BorderSide(color: errorColor, width: 2.0), // Thicker error highlight
+        focusedErrorBorder: const UnderlineInputBorder(
+          // Border when focused with an error
+          borderSide: BorderSide(
+              color: errorColor, width: 2.0), // Thicker error highlight
         ),
       ),
       isExpanded: true,
-      icon: const Icon(Icons.keyboard_arrow_down_rounded, color: primaryTeal), // Rounded icon
+      icon: const Icon(Icons.keyboard_arrow_down_rounded,
+          color: primaryTeal), // Rounded icon
       dropdownColor: lighterTeal, // Match background theme slightly
       // Add a disabled header item to the list
       items: [
@@ -387,7 +412,8 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage> with TickerProvid
             value: role,
             child: Text(
               role,
-              style: const TextStyle(fontSize: 16, color: darkTeal), // Clear text
+              style:
+                  const TextStyle(fontSize: 16, color: darkTeal), // Clear text
             ),
           );
         }),
@@ -395,9 +421,9 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage> with TickerProvid
       onChanged: (String? newValue) {
         // Prevent setting state if the disabled header (null value) is somehow passed
         if (newValue != null) {
-           setState(() {
-             selectedRole = newValue;
-           });
+          setState(() {
+            selectedRole = newValue;
+          });
         }
         // Alternatively, handle the null case explicitly if needed,
         // but `enabled: false` should prevent selection.
@@ -407,20 +433,20 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage> with TickerProvid
 
   /// Builds the Sign Up and Log In action buttons.
   Widget _buildActionButtons() {
-     // Common Button Style
-      final ButtonStyle elevatedButtonStyle = ElevatedButton.styleFrom(
-          backgroundColor: primaryTeal,
-          foregroundColor: whiteColor,
-          minimumSize: const Size(double.infinity, 52), // Consistent height
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(15), // Match dropdown/card
-          ),
-          elevation: 3,
-          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-        );
+    // Common Button Style
+    final ButtonStyle elevatedButtonStyle = ElevatedButton.styleFrom(
+      backgroundColor: primaryTeal,
+      foregroundColor: whiteColor,
+      minimumSize: const Size(double.infinity, 52), // Consistent height
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(15), // Match dropdown/card
+      ),
+      elevation: 3,
+      textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+    );
 
-      // Removed outlinedButtonStyle as it's no longer needed for the primary layout
+    // Removed outlinedButtonStyle as it's no longer needed for the primary layout
 
     return Column(
       children: [
@@ -434,11 +460,13 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage> with TickerProvid
 
         // "Don't have an account?" Row
         Row(
-          mainAxisAlignment: MainAxisAlignment.center, // Center the text and button
+          mainAxisAlignment:
+              MainAxisAlignment.center, // Center the text and button
           children: [
             Text(
               "Don't have an account?",
-              style: TextStyle(fontSize: 14, color: subtleTextColor.withOpacity(0.9)),
+              style: TextStyle(
+                  fontSize: 14, color: subtleTextColor.withOpacity(0.9)),
             ),
             const SizedBox(width: 6), // Space between text and button
             // Sign Up Text Button (Secondary Action)
@@ -447,7 +475,8 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage> with TickerProvid
               style: TextButton.styleFrom(
                 padding: EdgeInsets.zero, // Remove default padding
                 minimumSize: Size.zero, // Allow minimum size
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap, // Reduce tap area
+                tapTargetSize:
+                    MaterialTapTargetSize.shrinkWrap, // Reduce tap area
                 foregroundColor: accentTeal, // Use accent color for the link
               ),
               child: const Text(

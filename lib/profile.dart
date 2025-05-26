@@ -499,6 +499,7 @@ class _ProfilePageState extends State<ProfilePage>
         'Phone_Number': userData['phone_number'] ?? 'N/A',
         'Location': userData['location'] ?? 'N/A',
         'Registration_Date': userData['registration_date'] ?? 'N/A',
+        'is_email_verified': userData['is_email_verified'] ?? false,
         'image': userData['image'],
       };
       _profileImageUrl = _userDetails['image']; // This comes from API
@@ -864,7 +865,7 @@ class _ProfilePageState extends State<ProfilePage>
           _showErrorSnackBar('Failed to update profile with Imgur URL');
         }
       } else {
-        _showErrorSnackBar('Failed to upload image to Imgur');
+        _showErrorSnackBar('Failed to upload image to Image server');
       }
     } on TimeoutException {
       if (mounted) _showErrorSnackBar('Image upload timed out.');
@@ -1828,11 +1829,41 @@ class _ProfilePageState extends State<ProfilePage>
         ),
         const SizedBox(height: 6),
         if (displayEmail.isNotEmpty && displayEmail != 'No Email')
-          Text(
-            displayEmail,
-            style:
-                GoogleFonts.poppins(fontSize: 15, color: kColorTextSecondary),
-            textAlign: TextAlign.center,
+          Column(
+            children: [
+              Text(
+                displayEmail,
+                style: GoogleFonts.poppins(
+                    fontSize: 15, color: kColorTextSecondary),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.verified,
+                    size: 16,
+                    color: _userDetails['is_email_verified'] == true
+                        ? Colors.green
+                        : Colors.grey,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _userDetails['is_email_verified'] == true
+                        ? 'Verified'
+                        : 'Unverified',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: _userDetails['is_email_verified'] == true
+                          ? Colors.green
+                          : Colors.grey,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
       ],
     );

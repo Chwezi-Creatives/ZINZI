@@ -7,7 +7,8 @@ import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:zinzi2/user_metrics.dart';
+// import 'package:zinzi2/user_metrics.dart';
+import 'package:zinzi2/verification.dart'; // Import verification page
 import 'notifications/fcm_service.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
@@ -19,11 +20,13 @@ const Color primaryTeal = Color(0xFF00796B);
 const Color darkTeal = Color(0xFF004D40);
 const Color subtleTextColor = Color(0xFF616161);
 const Color errorColor = Color(0xFFD32F2F);
-const Color appBarColor = Color(0xFF004D40); // Darker teal for AppBar like login
+const Color appBarColor =
+    Color(0xFF004D40); // Darker teal for AppBar like login
 const Color whiteColor = Colors.white;
 
 // Get Imgur Client ID from environment variables (same as chef signup)
-final imgurClientID = dotenv.env['IMGUR_CLIENT_ID'] ?? ''; // Keep image upload logic for now
+final imgurClientID =
+    dotenv.env['IMGUR_CLIENT_ID'] ?? ''; // Keep image upload logic for now
 
 class UserSignUpPage extends StatefulWidget {
   const UserSignUpPage({super.key});
@@ -32,12 +35,14 @@ class UserSignUpPage extends StatefulWidget {
   _UserSignUpPageState createState() => _UserSignUpPageState();
 }
 
-class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProviderStateMixin {
+class _UserSignUpPageState extends State<UserSignUpPage>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _confirmPasswordController = TextEditingController(); // Controller for confirm password
+  final TextEditingController _confirmPasswordController =
+      TextEditingController(); // Controller for confirm password
   final TextEditingController _imageUrlController = TextEditingController();
 
   bool _isLoading = false; // General loading for final submit
@@ -83,7 +88,8 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
     _profilePicScaleAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _controller,
-        curve: const Interval(0.1, 0.7, curve: Curves.easeOutBack), // Staggered start, overshoot effect
+        curve: const Interval(0.1, 0.7,
+            curve: Curves.easeOutBack), // Staggered start, overshoot effect
       ),
     );
 
@@ -114,7 +120,7 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
   }
 
   void _checkPasswordStrength(String password) {
-     // Simplified logic for example, adjust as needed
+    // Simplified logic for example, adjust as needed
     setState(() {
       if (password.isEmpty) {
         _passwordStrengthMessage = '';
@@ -145,31 +151,31 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
       try {
         String imageUrl = await uploadImageToImgur(_profileImage!);
         _imageUrlController.text = imageUrl; // Set the actual Imgur URL
-         if (mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-             content: Text('Profile image uploaded successfully!'),
-             backgroundColor: primaryTeal,
-           ));
-         }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Profile image uploaded successfully!'),
+            backgroundColor: primaryTeal,
+          ));
+        }
       } catch (e) {
-         print("Image upload error: $e");
-         if (mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-             content: Text('Image upload failed: $e'),
-             backgroundColor: errorColor,
-           ));
-           // Optionally clear the selected image if upload fails
-           setState(() {
-             _profileImage = null;
-           });
-         }
-         _imageUrlController.clear(); // Clear controller on error
+        print("Image upload error: $e");
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Image upload failed: $e'),
+            backgroundColor: errorColor,
+          ));
+          // Optionally clear the selected image if upload fails
+          setState(() {
+            _profileImage = null;
+          });
+        }
+        _imageUrlController.clear(); // Clear controller on error
       } finally {
-         if (mounted) {
-           setState(() {
-             _isUploadingProfileImage = false; // Stop loading indicator
-           });
-         }
+        if (mounted) {
+          setState(() {
+            _isUploadingProfileImage = false; // Stop loading indicator
+          });
+        }
       }
     }
   }
@@ -177,7 +183,7 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
   // Actual Imgur upload implementation
   Future<String> uploadImageToImgur(File image) async {
     if (imgurClientID.isEmpty) {
-       throw Exception('Imgur Client ID is not configured in .env file.');
+      throw Exception('Imgur Client ID is not configured in .env file.');
     }
 
     final String uploadUrl = 'https://api.imgur.com/3/image';
@@ -186,22 +192,25 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
     request.headers['Authorization'] = 'Client-ID $imgurClientID';
     request.files.add(await http.MultipartFile.fromPath('image', image.path));
 
-    final response = await request.send().timeout(const Duration(seconds: 30)); // Add timeout
+    final response = await request
+        .send()
+        .timeout(const Duration(seconds: 30)); // Add timeout
     final responseData = await http.Response.fromStream(response);
 
     if (response.statusCode == 200) {
       final jsonResponse = json.decode(responseData.body);
-      if (jsonResponse['success'] == true && jsonResponse['data']?['link'] != null) {
+      if (jsonResponse['success'] == true &&
+          jsonResponse['data']?['link'] != null) {
         return jsonResponse['data']['link']; // Returns the image URL
       } else {
         throw Exception('Imgur upload failed: Invalid response structure.');
       }
     } else {
       print('Failed to upload image: ${responseData.body}');
-      throw Exception('Failed to upload image. Status Code: ${response.statusCode}');
+      throw Exception(
+          'Failed to upload image. Status Code: ${response.statusCode}');
     }
   }
-
 
   Future<void> _signUp() async {
     if (!_formKey.currentState!.validate()) return;
@@ -213,21 +222,22 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
     // Ensure an image URL is present (either uploaded or default)
     String finalImageUrl = _imageUrlController.text.trim();
     if (finalImageUrl.isEmpty) {
-       // Check if a profile image was selected but failed to upload
-       if (_profileImage != null) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Profile image upload failed previously. Please try selecting again or proceed without one.'),
-            backgroundColor: errorColor,
-          ));
-          setState(() => _isLoading = false);
-          return; // Stop signup if upload failed and wasn't resolved
-       } else {
-          // Use default placeholder only if no image was ever selected
-          finalImageUrl = "https://via.placeholder.com/150/00796B/FFFFFF?text=User";
-          print("Using default placeholder image.");
-       }
+      // Check if a profile image was selected but failed to upload
+      if (_profileImage != null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'Profile image upload failed previously. Please try selecting again or proceed without one.'),
+          backgroundColor: errorColor,
+        ));
+        setState(() => _isLoading = false);
+        return; // Stop signup if upload failed and wasn't resolved
+      } else {
+        // Use default placeholder only if no image was ever selected
+        finalImageUrl =
+            "https://via.placeholder.com/150/00796B/FFFFFF?text=User";
+        print("Using default placeholder image.");
+      }
     }
-
 
     try {
       final response = await http.post(
@@ -248,29 +258,40 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setInt('user_id', userId);
-        await prefs.setString('user_type', 'User'); // Set user type in SharedPreferences
-        await prefs.setString('user_email', _emailController.text.trim()); // Set user email in SharedPreferences
-        await prefs.setBool('is_logged_in', true); // Set logged in status in SharedPreferences
+        await prefs.setString(
+            'user_type', 'User'); // Set user type in SharedPreferences
+        await prefs.setString(
+            'user_email',
+            _emailController.text
+                .trim()); // Set user email in SharedPreferences
+        await prefs.setBool(
+            'is_logged_in', true); // Set logged in status in SharedPreferences
 
         // Register FCM token with user info (async, do not await)
         FCMService.registerTokenWithUserInfo();
 
         // Navigate using the transition method
-        Navigator.pushReplacement( // Use pushReplacement if you don't want to go back here
+        Navigator.pushReplacement(
+          // Use pushReplacement if you don't want to go back here
           context,
-          _createSlideFadeTransition(const UserMetricsPage()),
+          _createSlideFadeTransition(
+              const EmailVerificationPage()), // Navigate to verification page
         );
       } else {
         // Improved error handling for specific backend messages
-        String displayMessage = 'Signup failed. Please try again.'; // Default message
+        String displayMessage =
+            'Signup failed. Please try again.'; // Default message
         try {
           final errorResponse = json.decode(response.body);
           final backendMessage = errorResponse['message'] as String?;
 
           if (backendMessage != null) {
             // Check for the specific "already registered" error
-            if (backendMessage.toLowerCase().contains('is already registered')) {
-              displayMessage = 'This email address is already registered. Please use a different email or log in.';
+            if (backendMessage
+                .toLowerCase()
+                .contains('is already registered')) {
+              displayMessage =
+                  'This email address is already registered. Please use a different email or log in.';
             } else {
               // Use the backend message if it's not the specific one we handled
               displayMessage = backendMessage;
@@ -287,18 +308,18 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
         ));
       }
     } catch (error) {
-       print("Signup Error: $error"); // Log the error
+      print("Signup Error: $error"); // Log the error
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('An error occurred. Please try again later.'),
-         backgroundColor: errorColor,
+        backgroundColor: errorColor,
       ));
     } finally {
       // Ensure isLoading is set to false even if the widget is disposed during async operation
-       if (mounted) {
-         setState(() {
-           _isLoading = false;
-         });
-       }
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -307,7 +328,8 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
     // Set status bar style - Icons should be light on dark background
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light.copyWith(
       statusBarColor: appBarColor, // Match AppBar color
-      statusBarIconBrightness: Brightness.light, // Icons light for dark background
+      statusBarIconBrightness:
+          Brightness.light, // Icons light for dark background
     ));
 
     return Scaffold(
@@ -341,47 +363,63 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0), // Add vertical padding
-              child: FadeTransition( // Keep fade animation
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 24.0, vertical: 20.0), // Add vertical padding
+              child: FadeTransition(
+                // Keep fade animation
                 opacity: _fadeAnimation,
-                child: Form( // Wrap content in Form
+                child: Form(
+                  // Wrap content in Form
                   key: _formKey,
                   child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center, // Center content vertically
+                    mainAxisAlignment:
+                        MainAxisAlignment.center, // Center content vertically
                     children: [
                       // Keep Slide animation for the top section
                       SlideTransition(
                         position: _slideAnimation,
-                        child: Column( // Keep original structure for image/card
+                        child: Column(
+                          // Keep original structure for image/card
                           children: [
                             // Wrap GestureDetector in ScaleTransition and add loading indicator
                             ScaleTransition(
                               scale: _profilePicScaleAnimation,
-                              child: Stack( // Use Stack to overlay loading indicator
+                              child: Stack(
+                                // Use Stack to overlay loading indicator
                                 alignment: Alignment.center,
                                 children: [
                                   GestureDetector(
-                                    onTap: _isUploadingProfileImage ? null : pickImage, // Disable tap during upload
+                                    onTap: _isUploadingProfileImage
+                                        ? null
+                                        : pickImage, // Disable tap during upload
                                     child: CircleAvatar(
                                       radius: 60, // Adjust the radius for size
                                       backgroundColor: Colors.grey[300],
-                                      backgroundImage: _profileImage != null ? FileImage(_profileImage!) : null,
-                                      child: (_profileImage == null && !_isUploadingProfileImage)
-                                          ? const Icon(Icons.add_a_photo, size: 30, color: darkTeal)
+                                      backgroundImage: _profileImage != null
+                                          ? FileImage(_profileImage!)
+                                          : null,
+                                      child: (_profileImage == null &&
+                                              !_isUploadingProfileImage)
+                                          ? const Icon(Icons.add_a_photo,
+                                              size: 30, color: darkTeal)
                                           : null,
                                     ),
                                   ),
                                   // Loading indicator overlay
                                   if (_isUploadingProfileImage)
                                     Container(
-                                      width: 120, height: 120, // Match CircleAvatar diameter
+                                      width: 120,
+                                      height:
+                                          120, // Match CircleAvatar diameter
                                       decoration: BoxDecoration(
                                         color: Colors.black.withOpacity(0.5),
                                         shape: BoxShape.circle,
                                       ),
                                       child: const Center(
                                         child: CircularProgressIndicator(
-                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                                  Colors.white),
                                           strokeWidth: 3,
                                         ),
                                       ),
@@ -406,13 +444,15 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontSize: 14,
-                                color: darkTeal.withOpacity(0.8), // Use consistent color
+                                color: darkTeal
+                                    .withOpacity(0.8), // Use consistent color
                               ),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 20), // Reduced spacing to push content up
+                      const SizedBox(
+                          height: 20), // Reduced spacing to push content up
                       // Form fields Column
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -421,7 +461,9 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
                             controller: _nameController,
                             label: "Name",
                             icon: Icons.person,
-                            validator: (value) => value?.trim().isEmpty ?? true ? "Enter your name" : null,
+                            validator: (value) => value?.trim().isEmpty ?? true
+                                ? "Enter your name"
+                                : null,
                           ),
                           const SizedBox(height: 16),
                           _buildTextField(
@@ -429,14 +471,15 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
                             label: "Email",
                             icon: Icons.email,
                             validator: (value) {
-                                if (value == null || value.trim().isEmpty) {
-                                  return "Enter your email";
-                                }
-                                final emailRegex = RegExp(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$");
-                                if (!emailRegex.hasMatch(value.trim())) {
-                                  return "Enter a valid email address";
-                                }
-                                return null;
+                              if (value == null || value.trim().isEmpty) {
+                                return "Enter your email";
+                              }
+                              final emailRegex = RegExp(
+                                  r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$");
+                              if (!emailRegex.hasMatch(value.trim())) {
+                                return "Enter a valid email address";
+                              }
+                              return null;
                             },
                           ),
                           const SizedBox(height: 16),
@@ -446,16 +489,19 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
                             icon: Icons.lock,
                             obscureText: true,
                             validator: (value) {
-                                final trimmedValue = value?.trim();
-                                if (trimmedValue == null || trimmedValue.isEmpty) {
-                                  return "Enter your password";
-                                }
-                                // Add more password validation if needed
-                                return null;
+                              final trimmedValue = value?.trim();
+                              if (trimmedValue == null ||
+                                  trimmedValue.isEmpty) {
+                                return "Enter your password";
+                              }
+                              // Add more password validation if needed
+                              return null;
                             },
-                            onChanged: _checkPasswordStrength, // Pass function directly
+                            onChanged:
+                                _checkPasswordStrength, // Pass function directly
                           ),
-                          const SizedBox(height: 16), // Spacing before confirm password
+                          const SizedBox(
+                              height: 16), // Spacing before confirm password
                           // Add Confirm Password Field
                           _buildTextField(
                             controller: _confirmPasswordController,
@@ -466,7 +512,8 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
                               if (value == null || value.trim().isEmpty) {
                                 return "Please confirm your password";
                               }
-                              if (value.trim() != _passwordController.text.trim()) {
+                              if (value.trim() !=
+                                  _passwordController.text.trim()) {
                                 return "Passwords do not match";
                               }
                               return null;
@@ -476,13 +523,16 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
                           const SizedBox(height: 10),
                           // Password strength indicator (remains linked to the first password field)
                           if (_passwordController.text.isNotEmpty) ...[
-                             Padding(
-                               padding: const EdgeInsets.only(left: 12.0), // Align with text field
-                               child: Text(
-                                 _passwordStrengthMessage,
-                                 style: TextStyle(color: _passwordStrengthColor, fontSize: 12),
-                               ),
-                             ),
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                  left: 12.0), // Align with text field
+                              child: Text(
+                                _passwordStrengthMessage,
+                                style: TextStyle(
+                                    color: _passwordStrengthColor,
+                                    fontSize: 12),
+                              ),
+                            ),
                             const SizedBox(height: 5),
                             LinearProgressIndicator(
                               value: _passwordStrengthMessage == 'Strong'
@@ -506,16 +556,22 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
                               child: ElevatedButton(
                                 onPressed: _isLoading ? null : _signUp,
                                 style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(vertical: 16),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 16),
                                   shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12), // Match login style
+                                    borderRadius: BorderRadius.circular(
+                                        12), // Match login style
                                   ),
-                                  backgroundColor: Colors.teal, // Match login style
+                                  backgroundColor:
+                                      Colors.teal, // Match login style
                                   foregroundColor: Colors.white, // Text color
-                                  minimumSize: const Size(double.infinity, 60), // Match login style
-                                  textStyle: GoogleFonts.poppins( // Match login style
+                                  minimumSize: const Size(
+                                      double.infinity, 60), // Match login style
+                                  textStyle: GoogleFonts.poppins(
+                                      // Match login style
                                       fontSize: 16,
-                                      fontWeight: FontWeight.bold, // Keep bold from signup
+                                      fontWeight: FontWeight
+                                          .bold, // Keep bold from signup
                                       color: Colors.white),
                                 ),
                                 child: _isLoading
@@ -558,7 +614,8 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
       onChanged: onChanged,
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: GoogleFonts.poppins(color: Colors.teal), // Match login style
+        labelStyle:
+            GoogleFonts.poppins(color: Colors.teal), // Match login style
         // hintText: label, // Remove hint text like login
         // hintStyle: TextStyle(color: subtleTextColor.withOpacity(0.5)), // Remove hint style
         // Use OutlineInputBorder like login
@@ -566,26 +623,31 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
           borderRadius: BorderRadius.circular(8), // Match login style
           borderSide: BorderSide.none, // Match login style
         ),
-        enabledBorder: OutlineInputBorder( // Add enabledBorder for consistency
+        enabledBorder: OutlineInputBorder(
+          // Add enabledBorder for consistency
           borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide.none,
         ),
-        focusedBorder: OutlineInputBorder( // Add focusedBorder for consistency
+        focusedBorder: OutlineInputBorder(
+          // Add focusedBorder for consistency
           borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide.none,
         ),
-        errorBorder: OutlineInputBorder( // Add errorBorder for consistency
+        errorBorder: OutlineInputBorder(
+          // Add errorBorder for consistency
           borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide.none,
         ),
-        focusedErrorBorder: OutlineInputBorder( // Add focusedErrorBorder for consistency
+        focusedErrorBorder: OutlineInputBorder(
+          // Add focusedErrorBorder for consistency
           borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide.none,
         ),
         prefixIcon: Icon(icon, color: Colors.teal), // Match login style
         filled: true, // Match login style
         fillColor: Colors.white.withOpacity(0.6), // Match login style
-        contentPadding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 10.0), // Adjust padding if needed
+        contentPadding: const EdgeInsets.symmetric(
+            vertical: 16.0, horizontal: 10.0), // Adjust padding if needed
       ),
       obscureText: obscureText,
       style: const TextStyle(color: darkTeal), // Keep text color
@@ -602,7 +664,8 @@ class _UserSignUpPageState extends State<UserSignUpPage> with SingleTickerProvid
         const end = Offset.zero;
         const curve = Curves.easeOut;
 
-        var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+        var tween =
+            Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
         var offsetAnimation = animation.drive(tween);
         var fadeAnimation = animation.drive(CurveTween(curve: curve));
 

@@ -3299,9 +3299,37 @@ class _ProducerDash22State extends State<ProducerDash22> with WidgetsBindingObse
                               profile.producerType!.isNotEmpty)
                             Padding(
                                 padding: const EdgeInsets.only(top: 2.0),
-                                child: Text(profile.producerType!,
-                                    style: const TextStyle(
-                                        fontSize: 14, color: subtleText))),
+                                child: Row(
+                                  children: [
+                                    Text(profile.producerType!,
+                                        style: const TextStyle(
+                                            fontSize: 14, color: subtleText)),
+                                    if (profile.isEmailVerified != null) ...[
+                                      const SizedBox(width: 8),
+                                      Icon(
+                                        Icons.verified,
+                                        size: 14,
+                                        color: profile.isEmailVerified! 
+                                            ? Colors.green 
+                                            : Colors.grey,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        profile.isEmailVerified! 
+                                            ? 'Verified' 
+                                            : 'Not Verified',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: profile.isEmailVerified!
+                                              ? Colors.green
+                                              : Colors.grey,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
                           if (profile.rating != null && profile.rating! > 0)
                             Padding(
                                 padding: const EdgeInsets.only(top: 8.0),

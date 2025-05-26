@@ -60,6 +60,8 @@ class ProducerSelectorBottomSheetState extends State<ProducerSelectorBottomSheet
                     separatorBuilder: (context, index) => Divider(),
                     itemBuilder: (context, index) {
                       final producer = filtered[index];
+                      final isEmailVerified = producer['is_email_verified'];
+
                       return Card(
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
@@ -67,42 +69,57 @@ class ProducerSelectorBottomSheetState extends State<ProducerSelectorBottomSheet
                         elevation: 2,
                         child: ListTile(
                           leading: Icon(Icons.store, color: Colors.teal),
-                          title: Text(producer['name'] ?? 'Producer'),
+                          title: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  producer['name'] ?? 'Producer',
+                                  style: TextStyle(fontWeight: FontWeight.w500),
+                                ),
+                              ),
+                              if (isEmailVerified != null)
+                                Icon(
+                                  Icons.verified,
+                                  color: isEmailVerified ? Colors.green : Colors.grey,
+                                  size: 16.0,
+                                ),
+                            ],
+                          ),
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               if (producer['location'] != null)
                                 Row(
-  children: [
-    Icon(Icons.location_on, size: 14, color: Colors.grey),
-    SizedBox(width: 4),
-    Expanded(
-      child: Text(
-        producer['location'],
-        style: TextStyle(fontSize: 13),
-        overflow: TextOverflow.ellipsis,
-      ),
-    ),
-  ],
-),
+                                  children: [
+                                    Icon(Icons.location_on, size: 14, color: Colors.grey),
+                                    SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        producer['location'],
+                                        style: TextStyle(fontSize: 13),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               if (producer['type'] != null)
                                 Row(
-  children: [
-    Icon(
-      producer['type'] == 'Company' ? Icons.business : Icons.person,
-      size: 14,
-      color: Colors.grey,
-    ),
-    SizedBox(width: 4),
-    Expanded(
-      child: Text(
-        producer['type'],
-        style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic),
-        overflow: TextOverflow.ellipsis,
-      ),
-    ),
-  ],
-),
+                                  children: [
+                                    Icon(
+                                      producer['type'] == 'Company' ? Icons.business : Icons.person,
+                                      size: 14,
+                                      color: Colors.grey,
+                                    ),
+                                    SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        producer['type'],
+                                        style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                             ],
                           ),
                           trailing: Icon(Icons.arrow_forward_ios, size: 16, color: Colors.teal),

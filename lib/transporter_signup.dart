@@ -9,8 +9,9 @@ import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shimmer/shimmer.dart';
-import 'package:zinzi2/Transporter_login.dart';
-import 'package:zinzi2/transooter_dash_before_mapbox.dart';
+// import 'package:zinzi2/Transporter_login.dart';
+// import 'package:zinzi2/transooter_dash_before_mapbox.dart';
+import 'package:zinzi2/verification.dart'; // Import verification page
 import 'notifications/fcm_service.dart';
 
 // --- Hardcoded Colors ---
@@ -298,8 +299,8 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
-              builder: (context) => TransporterDashNew(
-                  transporterId: transporterId.toString()), // Pass ID
+              builder: (context) =>
+                  EmailVerificationPage(), // Navigate to verification page
             ),
           );
         } else {
@@ -739,7 +740,7 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
             Navigator.pushReplacement(
                 context,
                 MaterialPageRoute(
-                    builder: (_) => const TransporterLoginPage()));
+                    builder: (_) => const EmailVerificationPage()));
           },
           style: TextButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 6),

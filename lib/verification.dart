@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:zinzi2/transooter_dash_before_mapbox.dart';
 import 'user_metrics.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'chef_dash8888.dart'; // Import for Chef Dashboard
+import 'produ_dash22.dart'; // Import for Producer Dashboard
 
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ??
     'https://default.url'; // Ensure API base URL is available
@@ -20,34 +23,43 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
   final TextEditingController _codeController = TextEditingController();
   bool _isLoading = false;
   String? _userId; // Initialize userId as nullable string
-  bool _isUserIdLoaded = false; // Track whether the user ID has been loaded
+  String? _userType; // Initialize userType as nullable string
+  String? _transporterId; // Add state variable for transporter ID
+  bool _isUserDataLoaded =
+      false; // Track whether user data (ID and type) has been loaded
 
   @override
   void initState() {
     super.initState();
-    _loadUserId(); // Load user ID on initialization
+    _loadUserData(); // Load user data on initialization
   }
 
-  Future<void> _loadUserId() async {
+  Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
     // Try to get user_id as string first, fall back to int for backward compatibility
-    final loadedUserId = prefs.getString('user_id') ?? 
-                       prefs.getInt('user_id')?.toString();
+    final loadedUserId =
+        prefs.getString('user_id') ?? prefs.getInt('user_id')?.toString();
+    final loadedUserType = prefs.getString('user_type');
+    final loadedTransporterId = prefs.getString('transporter_id') ??
+        prefs.getString('user_id'); // Load transporter ID
 
     setState(() {
       _userId = loadedUserId; // Set the loaded user ID
-      _isUserIdLoaded = true; // Mark that the user ID has been loaded
+      _userType = loadedUserType; // Set the loaded user type
+      _transporterId = loadedTransporterId; // Set the loaded transporter ID
+      _isUserDataLoaded = true; // Mark that user data has been loaded
     });
   }
 
   Future<void> _verifyEmail() async {
-    // Ensure both userId and form state are valid before proceeding
-    if (!_isUserIdLoaded ||
+    // Ensure user data and form state are valid before proceeding
+    if (!_isUserDataLoaded ||
         _userId == null ||
+        _userType == null ||
         !_formKey.currentState!.validate()) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text(
-            'Please make sure you have entered the code and the user ID is available.'),
+            'Please make sure you have entered the code and user data is available.'),
       ));
       return;
     }
@@ -57,9 +69,10 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
     });
 
     try {
-      // Convert user ID to int for the API if needed
-      final userIdInt = int.tryParse(_userId ?? '');
-      
+      // Convert user ID to int for the API
+      final userIdInt = int.tryParse(
+          _userId!); // Use non-null assertion as _userId is checked above
+
       if (userIdInt == null) {
         throw Exception('Invalid user ID format');
       }
@@ -72,13 +85,49 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
         body: jsonEncode({
           'user_id': userIdInt,
           'verification_code': _codeController.text.trim(),
+          'user_type': _userType, // Include user_type
         }),
       );
 
       if (response.statusCode == 200) {
+        // Navigate based on user type
+        Widget nextPage;
+        switch (_userType) {
+          case 'user':
+            nextPage = const UserMetricsPage();
+            break;
+          case 'chef':
+            nextPage = const ChefDash88new();
+            break;
+          case 'producer':
+            nextPage = const ProducerDash22();
+            break;
+          case 'transporter':
+            // Pass transporterId to the Transporter dashboard
+            if (_transporterId != null) {
+              nextPage = TransporterDashNew(
+                  transporterId:
+                      _transporterId!); // Assuming TransporterDashBeforeMapbox takes transporterId
+            } else {
+              // Handle case where transporterId is not available
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Transporter ID not found.'),
+              ));
+              setState(() {
+                _isLoading = false; // Reset loading state
+              });
+              return; // Stop navigation
+            }
+            break;
+          default:
+            // Default navigation or error handling for unknown user types
+            nextPage = const UserMetricsPage(); // Or an error page
+            break;
+        }
+
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (context) => const UserMetricsPage()),
+          MaterialPageRoute(builder: (context) => nextPage),
         );
       } else {
         final responseData = json.decode(response.body);
@@ -100,7 +149,7 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
   @override
   Widget build(BuildContext context) {
     // Display loading dialog until user ID is loaded
-    if (!_isUserIdLoaded) {
+    if (!_isUserDataLoaded) {
       return Scaffold(
         appBar: AppBar(
           title: const Text('Email Verification'),

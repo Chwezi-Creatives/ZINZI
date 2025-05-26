@@ -33,6 +33,7 @@ class ChefData {
       'rating': 3.0,
       'location': 'KAMPALA',
       'chefid': 1, // Example ID
+      'is_email_verified': true, // Added field
     },
     {
       'image': 'assets/images/dante.jpg',
@@ -41,6 +42,7 @@ class ChefData {
       'rating': 2.0,
       'location': 'MAWANDA Rd',
       'chefid': 2, // Example ID
+      'is_email_verified': false, // Added field
     },
     // Add placeholder image path for safety if needed
     {
@@ -49,7 +51,8 @@ class ChefData {
       'price': 0.0,
       'rating': 0.0,
       'location': 'N/A',
-      'chefid': -1 // Default ID
+      'chefid': -1, // Default ID
+      'is_email_verified': null, // Added field (will not show icon)
     },
   ];
 }
@@ -532,8 +535,28 @@ class _MealDetailScreenState extends State<MealDetailScreen>
         'rating': fallbackChef['rating'] ?? 0.0,
         'location': fallbackChef['location'] ?? 'Unknown Location',
         'chefid': fallbackChef['chefid'] ?? index,
+        'is_email_verified': fallbackChef['is_email_verified'], // Added for fallback
       };
     }
+    // Ensure 'is_email_verified' is correctly parsed as bool or null
+    dynamic rawVerified = chef['is_email_verified'];
+    bool? isVerified;
+    if (rawVerified is bool) {
+      isVerified = rawVerified;
+    } else if (rawVerified is String) {
+      if (rawVerified.toLowerCase() == 'true') {
+        isVerified = true;
+      } else if (rawVerified.toLowerCase() == 'false') {
+        isVerified = false;
+      }
+    } else if (rawVerified is int) {
+      if (rawVerified == 1) {
+        isVerified = true;
+      } else if (rawVerified == 0) {
+        isVerified = false;
+      }
+    }
+  
     return {
       'image': chef['image'] ?? 'assets/images/placeholderchef.jpeg',
       'name': chef['name'] ?? 'Unknown Chef',
@@ -541,6 +564,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
       'rating': _parsePrice(chef['rating']),
       'location': chef['location'] ?? 'Unknown Location',
       'chefid': chef['chefid'] ?? index,
+      'is_email_verified': isVerified, // Added field from API
     };
   }
 
@@ -584,6 +608,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
 
   // --- Fetch Producers Logic ---
    Future<void> fetchProducers() async {
+    print('=== Starting fetchProducers ===');
     if (_isFetchingProducers || !mounted) return;
 
     if(mounted) setState(() => _isFetchingProducers = true);
@@ -599,31 +624,116 @@ class _MealDetailScreenState extends State<MealDetailScreen>
       List<dynamic> producerRawList = [];
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
+        print('[MealDetail] Raw Producer Response Data: $responseData'); // Log raw response
+
         if (responseData is List) {
           producerRawList = responseData;
-        } else if (responseData is Map<String, dynamic> && responseData['data'] is List) {
-          producerRawList = responseData['data'];
+          print('[MealDetail] Producers: Parsed as direct list.');
+        } else if (responseData is Map<String, dynamic>) {
+          bool listFound = false;
+          if (responseData['data'] is List) {
+            producerRawList = responseData['data'];
+            listFound = true;
+            print('[MealDetail] Producers: Parsed list from "data" key.');
+          } else if (responseData['producers'] is List) {
+            producerRawList = responseData['producers'];
+            listFound = true;
+            print('[MealDetail] Producers: Parsed list from "producers" key.');
+          }
+
+          if (!listFound) {
+            // Fallback: iterate over map values to find a list
+            for (var key in responseData.keys) {
+              if (responseData[key] is List) {
+                producerRawList = responseData[key];
+                listFound = true;
+                print('[MealDetail] Producers: Parsed list from generic map key "$key".');
+                break;
+              }
+            }
+          }
+
+          if (!listFound) {
+            // Handle cases where 'data' or 'producers' might be a single object
+            if (responseData['data'] is Map<String, dynamic>) {
+              producerRawList = [responseData['data']];
+              listFound = true;
+              print('[MealDetail] Producers: "data" was single map, wrapped in list.');
+            } else if (responseData['producers'] is Map<String, dynamic>) {
+              producerRawList = [responseData['producers']];
+              listFound = true;
+              print('[MealDetail] Producers: "producers" was single map, wrapped in list.');
+            }
+          }
+
+          if (!listFound) {
+            print('[MealDetail] Producers: No known list key (data, producers) or generic list found in Map response. Keys: ${responseData.keys}');
+          }
         } else {
-          print('Unexpected response format for producers: $responseData');
+          print('[MealDetail] Producers: Unexpected response format (not List or Map): ${responseData.runtimeType}');
         }
 
-        final mappedProducers = producerRawList.map((producer) {
-          if (producer is! Map<String, dynamic>) {
-             print('Warning: Expected producer data Map, got ${producer.runtimeType}');
-            return {'producer_id': DateTime.now().millisecondsSinceEpoch + producerRawList.indexOf(producer), 'name': 'Invalid Data', 'image': 'assets/images/producerHolder.png', 'Location': 'N/A', 'Rating': 0.0};
+        print('Raw producer data: $producerRawList'); // Debug print
+        
+        print('Raw producer data from API: $producerRawList');
+        final mappedProducers = producerRawList.map((item) {
+          // Determine the actual producer data map
+          // It might be the item itself, or nested under a 'data' key
+          Map<String, dynamic> producerData;
+          if (item is Map<String, dynamic> && item['data'] is Map<String, dynamic>) {
+            producerData = item['data'] as Map<String, dynamic>;
+            print('[MealDetail] Producer item has a nested "data" field. Using item["data"].');
+          } else if (item is Map<String, dynamic>) {
+            producerData = item;
+            print('[MealDetail] Producer item is a direct map. Using item directly.');
+          } else {
+            print('[MealDetail] Warning: Expected producer item to be a Map, got ${item.runtimeType}. Skipping.');
+            // Provide a default structure for invalid items to prevent crashes downstream
+            return {'producer_id': DateTime.now().millisecondsSinceEpoch + producerRawList.indexOf(item), 'name': 'Invalid Data Structure', 'image': 'assets/images/producerHolder.png', 'Location': 'N/A', 'Rating': 0.0, 'is_email_verified': null};
           }
-          final name = producer['name']?.toString().trim() ?? '';
-          final image = producer['image']?.toString().trim() ?? '';
-          final location = producer['location']?.toString().trim() ?? '';
-          final rating = _parsePrice(producer['rating']);
-          final id = producer['producer_id'] ?? DateTime.now().millisecondsSinceEpoch + producerRawList.indexOf(producer);
-          return {
+
+          print('[MealDetail] Processing producer data: $producerData');
+          if (producerData['name'] == null && producerData['producer_id'] == null) {
+             print('[MealDetail] Warning: Producer data seems empty or malformed after unwrapping. Original item: $item');
+          }
+
+          final name = producerData['name']?.toString().trim() ?? '';
+          final image = producerData['image']?.toString().trim() ?? '';
+          final location = producerData['location']?.toString().trim() ?? ''; // Assuming 'location' is the key
+          final rating = _parsePrice(producerData['rating'] ?? producerData['Rating']); // Check for 'rating' or 'Rating'
+          final id = producerData['producer_id'] ?? DateTime.now().millisecondsSinceEpoch + producerRawList.indexOf(item);
+          
+          // Handle is_email_verified field
+          dynamic rawVerified = producerData['is_email_verified'];
+          bool? isVerified;
+          if (rawVerified is bool) {
+            isVerified = rawVerified;
+          } else if (rawVerified is String) {
+            if (rawVerified.toLowerCase() == 'true') {
+              isVerified = true;
+            } else if (rawVerified.toLowerCase() == 'false') {
+              isVerified = false;
+            }
+          } else if (rawVerified is int) {
+            if (rawVerified == 1) {
+              isVerified = true;
+            } else if (rawVerified == 0) {
+              isVerified = false;
+            }
+          }
+          
+          final mappedProducer = {
             'producer_id': id,
             'name': name.isEmpty ? 'Unknown Producer' : name,
             'image': image.isEmpty ? 'assets/images/producerHolder.png' : image,
             'Location': location.isEmpty ? 'Unknown Location' : location,
             'Rating': rating,
+            'is_email_verified': isVerified,
           };
+          print('Mapped producer data: $mappedProducer');
+          print('Producer verification status: is_email_verified = $isVerified');
+          print('Producer data details: name = $name, image = $image, location = $location, rating = $rating');
+          return mappedProducer;
         }).toList();
 
         if (mounted) {
@@ -631,9 +741,9 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                 producers = mappedProducers;
                 // isLoadingProducers = false; // Handled in finally
             });
-             MealDetailScreen._producersCache = mappedProducers;
-             MealDetailScreen._producersCacheTimestamp = DateTime.now();
-             await MealDetailScreen.saveProducersCacheToUserCache(mappedProducers);
+            MealDetailScreen._producersCache = mappedProducers;
+            MealDetailScreen._producersCacheTimestamp = DateTime.now();
+            await MealDetailScreen.saveProducersCacheToUserCache(mappedProducers);
         }
 
       } else {
@@ -2098,12 +2208,26 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(chefName,
-                            style: GoogleFonts.poppins(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                color: kColorPrimaryDark)), // Darker text
-                        SizedBox(height: 3),
+                        Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(chefName,
+                              style: GoogleFonts.poppins(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: kColorPrimaryDark)), // Darker text
+                          if (chef['is_email_verified'] != null) // Check if the flag exists
+                            Padding(
+                              padding: const EdgeInsets.only(left: 4.0),
+                              child: Icon(
+                                Icons.verified,
+                                color: chef['is_email_verified'] == true ? Colors.green : Colors.grey,
+                                size: 16.0,
+                              ),
+                            ),
+                        ],
+                      ),
+                      SizedBox(height: 3),
                         Row(
                             children: List.generate(
                                 5,
@@ -2301,6 +2425,10 @@ class _MealDetailScreenState extends State<MealDetailScreen>
 
   // Helper method to build the producer list with provided data
   Widget _buildProducerListWithData(List<dynamic> producersToDisplay) {
+    print('=== Building producer list with ${producersToDisplay.length} items ===');
+    producersToDisplay.forEach((producer) {
+      print('Producer in list: ${producer['name']}, is_email_verified: ${producer['is_email_verified']}');
+    });
      return ListView.builder(
        key: ValueKey('producer_list_${producersToDisplay.length}'), // Add key
       itemCount: producersToDisplay.length,
@@ -2373,12 +2501,26 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(producerName,
-                            style: GoogleFonts.poppins(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                color: kColorPrimaryDark)), // Darker text
-                        SizedBox(height: 3),
+                        Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(producerName,
+                              style: GoogleFonts.poppins(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: kColorPrimaryDark)), // Darker text
+                          if (producer['is_email_verified'] != null) // Check if the flag exists
+                            Padding(
+                              padding: const EdgeInsets.only(left: 4.0),
+                              child: Icon(
+                                Icons.verified,
+                                color: producer['is_email_verified'] == true ? Colors.green : Colors.grey,
+                                size: 16.0,
+                              ),
+                            ),
+                        ],
+                      ),
+                      SizedBox(height: 3),
                         Row(
                             children: List.generate(
                                 5,

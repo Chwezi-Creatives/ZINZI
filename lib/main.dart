@@ -13,9 +13,13 @@ import 'notifications/notification_provider.dart';
 import 'notifications/fcm_service.dart'
     if (dart.library.js) 'notifications/fcm_service_web.dart' as fcm;
 import 'notifications/notification_badge.dart';
-import 'app_drawer_unified.dart';
-import 'platform_info.dart'; // For OS check
+import 'package:zinzi2/app_drawer_unified.dart';
+import 'package:zinzi2/platform_info.dart'; // For OS check
 import 'package:zinzi2/services/performance_service.dart';
+import 'package:zinzi2/utils/route_observer.dart';
+
+// Create a global route observer
+final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
 
 void main() async {
   // Start performance monitoring
@@ -111,16 +115,20 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return ChangeNotifierProvider<NotificationProvider>(
       create: (_) => NotificationProvider(),
-      child: MaterialApp(
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          primarySwatch: Colors.teal,
-        ),
-        home: Stack(
-          children: [
-            SplashScreen(),
-            const GlobalNotificationBadge(),
-          ],
+      child: RouteObserverProvider(
+        routeObserver: routeObserver,
+        child: MaterialApp(
+          navigatorObservers: [routeObserver],
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            primarySwatch: Colors.teal,
+          ),
+          home: Stack(
+            children: [
+              SplashScreen(),
+              const GlobalNotificationBadge(),
+            ],
+          ),
         ),
       ),
     );
