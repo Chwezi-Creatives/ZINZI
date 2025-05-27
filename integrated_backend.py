@@ -222,8 +222,7 @@ async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
         )
     # Acquire connection from pool; automatically released when block exits
     async with db_pool.acquire() as connection:
-        # Set the session timezone to Africa/Kampala
-        await connection.execute("SET TIMEZONE = 'Africa/Kampala'");
+        # SET TIMEZONE is now handled by the pool's `setup` parameter (init_connection)
         # Optional: Set transaction isolation level or other session settings here if needed
         # await connection.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
         yield connection
@@ -472,16 +471,19 @@ class AuthenticationAndUsers(BaseRepository):
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An error occurred while fetching metrics")
     # Existing methods...
     # Methods now accept 'conn' from Depends(get_db)
-    async def signup_user(self, conn: asyncpg.Connection, name: str, email: str, password: str, image: Optional[str] = None) -> Dict[str, Any]:
+    async def signup_user(self, conn: asyncpg.Connection, name: str, email: str, password: str, user_type: str, image: Optional[str] = None) -> Dict[str, Any]:
         # ... (implementation unchanged, but uses the passed 'conn') ...
         hashed_pw = hash_password(password)
         verification_code = generate_random_code()
         user_id = None
         try:
             async with conn.transaction(): # Use transaction
-                email_query = "SELECT user_id FROM users WHERE lower(email) = lower($1)"
-                existing_email = await conn.fetchval(email_query, email)
-                if existing_email: raise ValueError(f"Email '{email}' is already registered.")
+                # Check for existing email and user_type combination
+                email_user_type_query = "SELECT user_id FROM users WHERE lower(email) = lower($1) AND user_type = $2"
+                existing_user = await conn.fetchval(email_user_type_query, email, user_type)
+                if existing_user: raise ValueError(f"Email '{email}' is already registered for user type '{user_type}'.")
+
+                # Check for existing name (assuming name is unique across all user types)
                 name_query = "SELECT user_id FROM users WHERE lower(name) = lower($1)"
                 existing_name = await conn.fetchval(name_query, name)
                 if existing_name: raise ValueError(f"Name '{name}' is already taken.")
@@ -492,8 +494,13 @@ class AuthenticationAndUsers(BaseRepository):
                     insert_query = "INSERT INTO users (name, email, hashed_password, registration_date, is_email_verified) VALUES ($1, $2, $3, NOW(), FALSE) RETURNING user_id"
                     user_id = await conn.fetchval(insert_query, name, email, hashed_pw)
                 if not user_id: raise asyncpg.PostgresError("User insertion failed to return user_id.")
+
+                # Insert verification code with user_type
+                insert_verification_query = "INSERT INTO email_verifications (user_id, verification_code, user_type, created_at) VALUES ($1, $2, $3, NOW())"
+                await conn.execute(insert_verification_query, user_id, verification_code, user_type)
+
             # self.send_verification_email_gmail(email, verification_code) # Sync call
-            logger.info(f"User '{name}' (ID: {user_id}) registered successfully.")
+            logger.info(f"User '{name}' (ID: {user_id}) registered successfully with user type {user_type}.")
             return {"user_id": user_id, "success": True}
         except ValueError as e:
             logger.warning(f"Signup validation failed for {email}: {e}")
@@ -511,24 +518,23 @@ class AuthenticationAndUsers(BaseRepository):
         except Exception as e:
             logger.error(f"Unexpected error during signup for {email}: {e}", exc_info=True)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected server error occurred.") from e
-
-    async def verify_user_email(self, conn: asyncpg.Connection, user_id: int, verification_code: str) -> None:
+    async def verify_user_email(self, conn: asyncpg.Connection, user_id: int, verification_code: str, user_type: str) -> None:
         # ... (implementation unchanged, uses passed 'conn') ...
-        check_query = "SELECT verification_code FROM email_verifications WHERE user_id = $1 AND verification_code = $2 AND expires_at > NOW()"
+        check_query = "SELECT verification_code FROM email_verifications WHERE user_id = $1 AND verification_code = $2 AND user_type = $3 AND expires_at > NOW()"
         update_query = "UPDATE users SET is_email_verified = TRUE WHERE user_id = $1"
         delete_query = "DELETE FROM email_verifications WHERE user_id = $1 AND verification_code = $2"
         try:
             async with conn.transaction():
-                 code_exists = await conn.fetchval(check_query, user_id, verification_code)
+                 code_exists = await conn.fetchval(check_query, user_id, verification_code, user_type)
                  if not code_exists:
-                     logger.warning(f"Email verification failed for user {user_id}: Invalid or expired code.")
-                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid or expired verification code')
+                     logger.warning(f"Email verification failed for user {user_id} with type {user_type}: Invalid or expired code.")
+                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid or expired verification code or incorrect user type.')
                  await conn.execute(update_query, user_id)
                  await conn.execute(delete_query, user_id, verification_code)
-            logger.info(f"Email successfully verified for user ID {user_id}.")
+            logger.info(f"Email successfully verified for user ID {user_id} with type {user_type}.")
         except HTTPException: raise
         except (asyncpg.PostgresError) as e:
-            logger.error(f"Database error during email verification for user {user_id}: {e}", exc_info=True)
+            logger.error(f"Database error during email verification for user {user_id} with type {user_type}: {e}", exc_info=True)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='An error occurred during email verification.') from e
         except Exception as e:
             logger.error(f"Unexpected error during email verification for user {user_id}: {e}", exc_info=True)
@@ -2900,11 +2906,17 @@ async def signup_user_endpoint(user_data: dict = Body(...), conn: asyncpg.Connec
 async def verify_user_endpoint(verification_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
     # ... (implementation unchanged, uses conn from dependency) ...
     try:
-        user_id=int(verification_data['user_id']); verification_code=verification_data['verification_code']
+        user_id=int(verification_data['user_id']); verification_code=verification_data['verification_code']; user_type=verification_data['user_type']
         if not verification_code: raise ValueError("verification_code required")
-    except:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid input: user_id (int) and verification_code (str) required.')
-    await auth_users.verify_user_email(conn, user_id, verification_code) # Pass conn
+        if not user_type: raise ValueError("user_type required")
+    except KeyError as ke:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Invalid input: Missing field {ke}. user_id (int), verification_code (str), and user_type (str) required.')
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Invalid input: {ve}')
+    except Exception as e:
+        logger.error(f"Unexpected error parsing verification data: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred while processing input.")
+    await auth_users.verify_user_email(conn, user_id, verification_code, user_type) # Pass conn and user_type
     return {'message': 'Email verification successful'}
 
 
