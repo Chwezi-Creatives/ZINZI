@@ -290,8 +290,8 @@ class _AllMealsScreenState extends State<AllMealsScreen>
         // Show error message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to refresh. Using cached data.'),
-            duration: Duration(seconds: 3),
+            content: Text('Failed to refresh. Using last loaded data.'),
+            duration: Duration(seconds: 2),
             behavior: SnackBarBehavior.floating,
             margin: EdgeInsets.only(bottom: 24, left: 16, right: 16),
           ),
@@ -318,7 +318,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
     // Check if we have cache that might be stale (older than 1 hour)
     final bool hasStaleCache = _AllMealsScreenState._mealsCache.isNotEmpty && 
                               _AllMealsScreenState._mealsCacheTimestamp != null &&
-                              DateTime.now().difference(_AllMealsScreenState._mealsCacheTimestamp!).inHours >= 1;
+                              DateTime.now().difference(_AllMealsScreenState._mealsCacheTimestamp!).inHours >= 24;
     
     // If we have no data at all, we need to show loading
     final bool hasNoData = _allMeals.isEmpty;
