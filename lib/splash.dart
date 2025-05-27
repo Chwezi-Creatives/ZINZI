@@ -17,6 +17,7 @@ import 'package:zinzi2/cache_config.dart'; // Import CacheConfig
 import 'package:zinzi2/user_cache.dart'; // Import UserCache
 import 'package:zinzi2/orderhistory.dart'; // Import OrderHistoryScreen for preloading
 import 'package:zinzi2/nutrition+.dart'; // Import NutritionPage for preloading
+import 'package:zinzi2/services/location_service.dart'; // Import LocationService
 
 // --- Hardcoded Color Scheme (Shades of Teal and White/Off-White) ---
 const Color kColorPrimaryDark = Color(0xFF004D40); // Darkest Teal
@@ -189,6 +190,22 @@ class _SplashScreenState extends State<SplashScreen>
       ChooseChefNetwork.preloadCacheForSplash(),
       NutritionPage.preloadCachesForSplash().catchError((e) {
         debugPrint('[SPLASH] Error preloading Nutrition+ data: $e');
+      }),
+      // Add non-blocking location fetching
+      LocationService.instance.fetchAndSetCurrentLocation().then((_) {
+        debugPrint('[SPLASH] Initial location fetch attempt completed (non-blocking).');
+        if (LocationService.instance.currentPosition != null) {
+          debugPrint('[SPLASH] Location fetched: ${LocationService.instance.currentPosition}');
+          if (LocationService.instance.currentAddress != null) {
+            debugPrint('[SPLASH] Address fetched: ${LocationService.instance.currentAddress}');
+          } else {
+            debugPrint('[SPLASH] Address not fetched or geocoding failed for initial fetch.');
+          }
+        } else {
+          debugPrint('[SPLASH] Initial location fetch failed or permission denied. Error: ${LocationService.instance.error}');
+        }
+      }).catchError((e) {
+        debugPrint('[SPLASH] Error during initial location fetch: $e');
       }),
     ];
     

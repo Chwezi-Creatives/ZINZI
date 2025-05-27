@@ -5,10 +5,11 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:geolocator/geolocator.dart';
+// import 'package:geolocator/geolocator.dart'; // Geolocator is now used by LocationService
 import 'package:google_fonts/google_fonts.dart';
 import 'orderstatus polls.dart' as order_status;
 import 'package:zinzi2/cart.dart'; // Import ShoppingCart
+import 'package:zinzi2/services/location_service.dart'; // Import LocationService
 
 final String apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 
@@ -30,13 +31,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
-  final _addressController = TextEditingController();
+  final _addressController = TextEditingController(); // Source of truth for location text
   final _notesController = TextEditingController();
   String _selectedPaymentMethod = 'Momo';
-  bool _isLoading = false;
-  bool _isLocationLoading = false;
+  bool _isLoading = false; // For overall order submission
+  // bool _isLocationLoading = false; // Now driven by LocationService.instance.isLoadingNotifier
   bool _isOptionalInfoExpanded = false;
-  String _location = '';
   late double _scaleFactor;
   late Timer _timer;
 
@@ -53,12 +53,86 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     print('cartItems: ' + widget.items.toString());
     _scaleFactor = 1.0;
     _startAnimation();
-    _getCurrentLocation();
+    _initializeLocation(); // New method to handle location initialization
+
+    // Listen to location updates from the service
+    LocationService.instance.currentAddressNotifier.addListener(_updateLocationFromService);
+    LocationService.instance.currentPositionNotifier.addListener(_updateLocationFromService); // Also listen to position for coordinate display
+    LocationService.instance.isLoadingNotifier.addListener(_updateLoadingStateFromService);
+    LocationService.instance.errorNotifier.addListener(_handleLocationErrorFromService);
+  }
+
+  void _initializeLocation() {
+    final locationService = LocationService.instance;
+    if (locationService.currentAddress != null && locationService.currentAddress!.isNotEmpty) {
+      if (mounted) {
+        setState(() {
+          _addressController.text = locationService.currentAddress!;
+        });
+      }
+      debugPrint('[Checkout] Initialized location from LocationService address: ${locationService.currentAddress}');
+    } else if (locationService.currentPosition != null) {
+      final pos = locationService.currentPosition!;
+      final initialDisplay = "${pos.latitude}, ${pos.longitude}";
+       if (mounted) {
+        setState(() {
+          _addressController.text = initialDisplay;
+        });
+      }
+      debugPrint('[Checkout] Initialized location from LocationService position: $initialDisplay. Triggering geocoding.');
+      // Trigger geocoding if only position is available and address is not
+      locationService.getAddressFromPosition(pos); 
+    } else {
+      debugPrint('[Checkout] No pre-fetched location found. Calling _getCurrentLocation to fetch fresh.');
+      _getCurrentLocation(showSnackbarErrors: false); // Fetch fresh, suppress snackbar for initial auto-fetch
+    }
+  }
+
+  void _updateLocationFromService() {
+    if (!mounted) return;
+    final locationService = LocationService.instance;
+    String displayLocation = _addressController.text; // Default to current text
+
+    if (locationService.currentAddress != null && locationService.currentAddress!.isNotEmpty) {
+      displayLocation = locationService.currentAddress!;
+    } else if (locationService.currentPosition != null) {
+      // Fallback to coordinates if address is not available
+      final pos = locationService.currentPosition!;
+      displayLocation = "${pos.latitude}, ${pos.longitude}";
+    }
+    
+    if (_addressController.text != displayLocation) {
+       setState(() {
+        _addressController.text = displayLocation;
+      });
+    }
+  }
+
+  void _updateLoadingStateFromService() {
+    if (!mounted) return;
+    // This setState call will trigger a rebuild if the loading state changes,
+    // allowing the ValueListenableBuilder for the location TextFormField to update.
+    setState(() {});
+  }
+
+  void _handleLocationErrorFromService() {
+    if (!mounted) return;
+    final error = LocationService.instance.error;
+    if (error != null && error.isNotEmpty) {
+      // Check if we are in a state where we want to show this error (e.g., not during initial silent fetch)
+      // For now, always show if an error is set.
+      _showSnackBar('Location Error: $error');
+      // LocationService.instance.errorNotifier.value = null; // Clear error after showing
+    }
   }
 
   @override
   void dispose() {
     _timer.cancel();
+    LocationService.instance.currentAddressNotifier.removeListener(_updateLocationFromService);
+    LocationService.instance.currentPositionNotifier.removeListener(_updateLocationFromService);
+    LocationService.instance.isLoadingNotifier.removeListener(_updateLoadingStateFromService);
+    LocationService.instance.errorNotifier.removeListener(_handleLocationErrorFromService);
     _nameController.dispose();
     _phoneController.dispose();
     _addressController.dispose();
@@ -68,80 +142,38 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   void _startAnimation() {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
       setState(() {
         _scaleFactor = _scaleFactor == 1.0 ? 0.95 : 1.0;
       });
     });
   }
 
-  Future<void> _getCurrentLocation() async {
+  Future<void> _getCurrentLocation({bool showSnackbarErrors = true}) async {
     if (!mounted) return;
-    setState(() => _isLocationLoading = true);
-    try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        if (mounted) {
-          _showSnackBar('Location services are disabled. Please enable them.');
-          setState(() => _isLocationLoading = false);
-        }
-        return;
-      }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          if (mounted) {
-            _showSnackBar('Location permission denied. Cannot get location.');
-            setState(() => _isLocationLoading = false);
-          }
-          return;
-        }
-      }
-
-      if (permission == LocationPermission.deniedForever) {
-        if (mounted) {
-          _showSnackBar(
-              'Location permission permanently denied. Please enable from app settings.');
-          setState(() => _isLocationLoading = false);
-        }
-        return;
-      }
-
-      Position position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high);
-
-      String apiUrl =
-          'https://geocode.maps.co/reverse?lat=${position.latitude}&lon=${position.longitude}';
-      final response = await http.get(Uri.parse(apiUrl));
-
-      if (!mounted) return;
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        setState(() {
-          _location =
-              "${position.latitude}, ${position.longitude}, ${data['display_name']}";
-        });
-      } else {
-        setState(() {
-          _location = "${position.latitude}, ${position.longitude}";
-        });
-        _showSnackBar('Could not get detailed address, using coordinates.');
-      }
-    } catch (e) {
-      if (mounted) {
-        _showSnackBar('Error getting location: $e');
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLocationLoading = false);
-      }
-    }
+    debugPrint('[Checkout] _getCurrentLocation called. Forcing geocode and address update. showSnackbarErrors: $showSnackbarErrors');
+    
+    // The LocationService will handle its own loading state and error reporting.
+    // The listeners (_updateLocationFromService, _handleLocationErrorFromService, _updateLoadingStateFromService)
+    // will react to changes in the service.
+    // The showSnackbarErrors flag is a bit tricky here because the error handling is via a listener.
+    // If we want to suppress snackbars for a specific call, the listener itself would need to be aware of this context,
+    // or be temporarily detached, which adds complexity.
+    // For now, _handleLocationErrorFromService will show any error set in the service.
+    await LocationService.instance.fetchAndSetCurrentLocation(forceGeocode: true, updateAddressRegardless: true);
+    
+    // If !showSnackbarErrors and an error occurred, the listener would still show it.
+    // This design means errors from the service are always reported via the listener.
+    // If specific suppression is needed for the initial call, _handleLocationErrorFromService
+    // would need a way to know it's an "initial, silent" fetch.
   }
 
   void _showSnackBar(String message,
       {Duration duration = const Duration(seconds: 3)}) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -155,7 +187,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Future<void> _submitOrder() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (_location.trim().isEmpty) {
+    final String deliveryLocation = _addressController.text;
+    if (deliveryLocation.trim().isEmpty) {
       _showSnackBar('Please acquire your delivery location before placing the order.');
       return;
     }
@@ -169,22 +202,21 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
       if (userId == null || userId.isEmpty) {
         _showSnackBar('User is not logged in.');
-        setState(() => _isLoading = false);
+        if (mounted) setState(() => _isLoading = false);
         return;
       }
     } catch (e) {
       print('Error getting user ID: $e');
       _showSnackBar('Failed to get user information. Please try again.');
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
       return;
     }
 
-    // Process each item as a separate order
     List<String> orderIds = [];
     double totalProcessedPrice = 0.0;
+    bool allOrdersSuccessful = true;
 
     for (final item in widget.items) {
-      // Determine order_type for this item
       String orderType = 'meal';
       if (item.containsKey('meal') && item['meal'] is Map && item['meal']['order_type'] != null) {
         orderType = item['meal']['order_type'].toString();
@@ -192,7 +224,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         orderType = item['type'].toString();
       }
 
-      // Prepare order payload for this single item
       Map<String, dynamic> itemPayload;
       if (item['type'] == 'gig') {
         final gigDetails = item['gigDetails'] as Map<String, dynamic>? ?? {};
@@ -202,7 +233,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           'producer_id': gigDetails['producer_id'],
           'gig_details': {
             'gig_type': gigDetails['gig_type'],
-            'location': gigDetails['location'],
+            'location': gigDetails['location'], // This is gig location, not delivery
             'scheduled_date': gigDetails['scheduled_date'],
             'time': gigDetails['time'],
             'estimated_duration': gigDetails['estimated_duration'],
@@ -216,11 +247,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         final meal = item['meal'] as Map<String, dynamic>? ?? {};
         final productIdEntry = meal.entries.firstWhere(
           (e) => e.key.endsWith('_id') && e.key != 'chef_id' && e.key != 'producer_id',
-          orElse: () => const MapEntry('product_id', null),
+          orElse: () => const MapEntry('product_id', null), // Default if no specific _id found
         );
+
         itemPayload = {
           'order_type': orderType,
           'type': orderType,
+          // Ensure the specific product ID (e.g., meal_id, ingredient_id) is included
+          // And also include a generic 'product_id' for potential backend consistency
           productIdEntry.key: productIdEntry.value?.toString(),
           'product_id': productIdEntry.value?.toString(),
           'quantity': (item['quantity'] as num?)?.toInt(),
@@ -231,55 +265,74 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         };
       }
 
-      // Create order payload for this single item
       Map<String, dynamic> orderPayload = {
         'order_type': orderType,
         'user_id': userId.toString(),
-        'items': [itemPayload], // Only one item per order
-        'delivery_address': _location.isNotEmpty ? _location : _addressController.text,
+        'items': [itemPayload],
+        'delivery_address': deliveryLocation,
         'notes': _notesController.text,
         'payment_mode': _selectedPaymentMethod.toLowerCase(),
-        'total_price': (item['price'] as num?)?.toDouble() ?? 0.0,
+        'total_price': (item['price'] as num?)?.toDouble() ?? 0.0, // Price for this specific item's order
         'chef_id': item['selectedchef']?['chefid']?.toString(),
         'producer_id': item['selectedproducer']?['producer_id']?.toString(),
       };
 
-      print('Submitting order for item: ' + item.toString());
+      print('Submitting order for item: ${item['title'] ?? item['gigDetails']?['gig_type'] ?? 'Unknown Item'}');
       print('Order Payload: ' + orderPayload.toString());
 
-      // Submit the order
-      final response = await http.post(
-        Uri.parse('$apibaseurl/rr/Aorders'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode(orderPayload),
-      );
+      try {
+        final response = await http.post(
+          Uri.parse('$apibaseurl/rr/Aorders'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode(orderPayload),
+        );
 
-      if (response.statusCode == 201) {
-        final responseData = json.decode(response.body);
-        final orderId = responseData['order_id'];
-        orderIds.add(orderId.toString());
-        totalProcessedPrice += (item['price'] as num?)?.toDouble() ?? 0.0;
-        print('Successfully submitted order $orderId for item: ' + item.toString());
-        // Remove the successfully ordered item from the cart
-        ShoppingCart.removeItems([item]);
-      } else {
-        throw Exception('Failed to place order for item: ${item.toString()}. Response: ${response.statusCode}');
+        if (response.statusCode == 201) {
+          final responseData = json.decode(response.body);
+          final orderId = responseData['order_id'];
+          orderIds.add(orderId.toString());
+          totalProcessedPrice += (item['price'] as num?)?.toDouble() ?? 0.0;
+          print('Successfully submitted order $orderId for item: ${item['title'] ?? 'Gig'}');
+          ShoppingCart.removeItems([item]); // Assuming item structure is compatible
+        } else {
+          allOrdersSuccessful = false;
+          print('Failed to place order for item: ${item['title'] ?? 'Gig'}. Response: ${response.statusCode}, Body: ${response.body}');
+          _showSnackBar('Failed to place order for ${item['title'] ?? 'Gig'}. Error: ${response.reasonPhrase}');
+          break; // Stop processing further items if one fails
+        }
+      } catch (e) {
+        allOrdersSuccessful = false;
+        print('Exception while placing order for item: ${item['title'] ?? 'Gig'}. Error: $e');
+        _showSnackBar('Error placing order for ${item['title'] ?? 'Gig'}. Please try again.');
+        break; // Stop processing further items if an exception occurs
       }
     }
 
-    // After all orders are processed
-    if (orderIds.isNotEmpty) {
-      // Navigate to order status screen with all order IDs
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => order_status.OrderStatusScreen(
-            userId: userId!,
-            orderIdList: orderIds.map(int.parse).toList(),
-            orderId: int.parse(orderIds.first), // Show first order ID by default
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
+
+    if (allOrdersSuccessful && orderIds.isNotEmpty) {
+      _showSnackBar('All orders placed successfully!', duration: Duration(seconds: 2));
+      await Future.delayed(Duration(seconds: 2)); // Give time for snackbar
+      if(mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => order_status.OrderStatusScreen(
+              userId: userId!,
+              orderIdList: orderIds.map(int.parse).toList(),
+              orderId: int.parse(orderIds.first),
+            ),
           ),
-        ),
-      );
+        );
+      }
+    } else if (orderIds.isNotEmpty && !allOrdersSuccessful) {
+       _showSnackBar('Some orders were placed, but others failed. Check order history.', duration: Duration(seconds: 5));
+       // Optionally navigate to order history or provide a way to see partial success
+    } else if (!allOrdersSuccessful) {
+      // No orders were successful
+      // Snackbars for specific errors would have been shown already
     }
   }
 
@@ -337,7 +390,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           final item = widget.items[i];
                           final bestServedWith = (item['bestservedwith'] as List?)?.cast<Map<String, dynamic>>() ?? [];
                           final chef = item['selectedchef'] as Map<String, dynamic>?;
-                          final chefHasPrice = chef != null && chef['price'] != null && chef['price'] is num;
+                          // final chefHasPrice = chef != null && chef['price'] != null && chef['price'] is num;
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -389,12 +442,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Text(
-                                      '${item['title']} x${item['quantity']}',
-                                      style: GoogleFonts.poppins(
-                                        color: Colors.teal[700],
+                                    Expanded( // Added Expanded for long titles
+                                      child: Text(
+                                        '${item['title']} x${item['quantity']}',
+                                        style: GoogleFonts.poppins(
+                                          color: Colors.teal[700],
+                                        ),
+                                        overflow: TextOverflow.ellipsis, // Handle overflow
                                       ),
                                     ),
+                                    SizedBox(width: 8), // Spacing
                                     Text(
                                       'ugx ${((item['price'] ?? 0.0) * (item['quantity'] ?? 0)).toStringAsFixed(2)}',
                                       style: GoogleFonts.poppins(
@@ -411,22 +468,28 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                     ],
                                   ),
                                 if (bestServedWith.isNotEmpty)
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text('Best Served With:', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black)),
-                                      ...bestServedWith.map((comp) {
-                                        final compName = comp['name']?.toString() ?? comp['title']?.toString() ?? '';
-                                        final compPrice = (comp['price'] is num) ? (comp['price'] as num).toDouble() : 5.0;
-                                        return Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            Text(compName, style: GoogleFonts.poppins(fontSize: 12, color: Colors.teal[800])),
-                                            Text('ugx ${compPrice.toStringAsFixed(2)}', style: GoogleFonts.poppins(fontSize: 12, color: Colors.teal[800])),
-                                          ],
-                                        );
-                                      }).toList(),
-                                    ],
+                                  Padding( // Added padding for complements
+                                    padding: const EdgeInsets.only(top: 4.0, left: 8.0),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text('Complements:', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.teal[700])),
+                                        ...bestServedWith.map((comp) {
+                                          final compName = comp['name']?.toString() ?? comp['title']?.toString() ?? '';
+                                          final compPrice = (comp['price'] is num) ? (comp['price'] as num).toDouble() : 0.0; // Default to 0 if not num
+                                          return Padding(
+                                            padding: const EdgeInsets.only(left: 8.0, top: 2.0),
+                                            child: Row(
+                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                              children: [
+                                                Expanded(child: Text(compName, style: GoogleFonts.poppins(fontSize: 12, color: Colors.teal[800]))),
+                                                Text('ugx ${compPrice.toStringAsFixed(2)}', style: GoogleFonts.poppins(fontSize: 12, color: Colors.teal[800])),
+                                              ],
+                                            ),
+                                          );
+                                        }).toList(),
+                                      ],
+                                    ),
                                   ),
                               ],
                             ],
@@ -441,6 +504,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                               style: GoogleFonts.poppins(
                                 fontWeight: FontWeight.w600,
                                 color: Colors.teal[900],
+                                fontSize: 16,
                               ),
                             ),
                             Text(
@@ -448,6 +512,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                               style: GoogleFonts.poppins(
                                 fontWeight: FontWeight.w600,
                                 color: Colors.teal[900],
+                                fontSize: 16,
                               ),
                             ),
                           ],
@@ -479,26 +544,48 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           ),
                         ),
                         SizedBox(height: 16),
-                        TextFormField(
-                          controller: TextEditingController(text: _location),
-                          decoration: InputDecoration(
-                            labelText: 'Location',
-                            labelStyle: GoogleFonts.poppins(color: Colors.teal[400]),
-                            suffixIcon: _isLocationLoading
-                                ? SizedBox(
-                                    width: 24.0,
-                                    height: 24.0,
-                                    child: CircularProgressIndicator(strokeWidth: 2.0),
-                                  )
-                                : IconButton(
-                                    icon: Icon(Icons.location_on),
-                                    onPressed: _getCurrentLocation,
-                                  ),
-                          ),
-                          validator: (value) => value?.isEmpty ?? true
-                              ? 'Location is required'
-                              : null,
-                          onChanged: (value) => _location = value,
+                        ValueListenableBuilder<bool>(
+                          valueListenable: LocationService.instance.isLoadingNotifier,
+                          builder: (context, isLoadingFromService, child) {
+                            return TextFormField(
+                              controller: _addressController, // Use the main controller
+                              decoration: InputDecoration(
+                                labelText: 'Location',
+                                labelStyle: GoogleFonts.poppins(color: Colors.teal[400]),
+                                suffixIcon: isLoadingFromService
+                                    ? SizedBox(
+                                        width: 24.0,
+                                        height: 24.0,
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(8.0),
+                                          child: CircularProgressIndicator(strokeWidth: 2.0, color: Colors.teal[400]),
+                                        ),
+                                      )
+                                    : IconButton(
+                                        icon: Icon(Icons.refresh, color: Colors.teal[600]),
+                                        tooltip: "Refresh Location",
+                                        onPressed: () => _getCurrentLocation(showSnackbarErrors: true),
+                                      ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8.0),
+                                  borderSide: BorderSide(color: Colors.teal[200]!),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8.0),
+                                  borderSide: BorderSide(color: Colors.teal[600]!, width: 2),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8.0),
+                                  borderSide: BorderSide(color: Colors.teal[300]!),
+                                ),
+                                filled: true,
+                                fillColor: Colors.white.withOpacity(0.8),
+                              ),
+                              validator: (value) => value?.trim().isEmpty ?? true
+                                  ? 'Location is required'
+                                  : null,
+                            );
+                          }
                         ),
                       ],
                     ),
@@ -527,17 +614,69 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           TextFormField(
                             controller: _nameController,
                             decoration: InputDecoration(
-                              labelText: 'Full Name',
-                              prefixIcon: Icon(Icons.person),
+                              labelText: 'Full Name (Optional)',
+                              prefixIcon: Icon(Icons.person_outline, color: Colors.teal[600]),
+                               border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8.0),
+                                borderSide: BorderSide(color: Colors.teal[200]!),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8.0),
+                                borderSide: BorderSide(color: Colors.teal[600]!, width: 2),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8.0),
+                                borderSide: BorderSide(color: Colors.teal[300]!),
+                              ),
+                              filled: true,
+                              fillColor: Colors.white.withOpacity(0.8),
                             ),
+                            style: GoogleFonts.poppins(),
+                          ),
+                          SizedBox(height: 16),
+                          TextFormField(
+                            controller: _phoneController,
+                            decoration: InputDecoration(
+                              labelText: 'Phone Number (Optional)',
+                              prefixIcon: Icon(Icons.phone_outlined, color: Colors.teal[600]),
+                               border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8.0),
+                                borderSide: BorderSide(color: Colors.teal[200]!),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8.0),
+                                borderSide: BorderSide(color: Colors.teal[600]!, width: 2),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8.0),
+                                borderSide: BorderSide(color: Colors.teal[300]!),
+                              ),
+                              filled: true,
+                              fillColor: Colors.white.withOpacity(0.8),
+                            ),
+                            keyboardType: TextInputType.phone,
                             style: GoogleFonts.poppins(),
                           ),
                           SizedBox(height: 16),
                           TextFormField(
                             controller: _notesController,
                             decoration: InputDecoration(
-                              labelText: 'Special Instructions',
-                              prefixIcon: Icon(Icons.notes),
+                              labelText: 'Special Instructions (Optional)',
+                              prefixIcon: Icon(Icons.notes_outlined, color: Colors.teal[600]),
+                               border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8.0),
+                                borderSide: BorderSide(color: Colors.teal[200]!),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8.0),
+                                borderSide: BorderSide(color: Colors.teal[600]!, width: 2),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8.0),
+                                borderSide: BorderSide(color: Colors.teal[300]!),
+                              ),
+                              filled: true,
+                              fillColor: Colors.white.withOpacity(0.8),
                             ),
                             maxLines: 3,
                             style: GoogleFonts.poppins(),
@@ -562,91 +701,60 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Choose a payment method',
+                          'Payment Method',
                           style: GoogleFonts.poppins(
                             fontSize: 18,
                             fontWeight: FontWeight.w600,
                             color: Colors.teal[800],
                           ),
                         ),
-                        SizedBox(height: 16),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.start,
-                          children: [
-                            _buildPaymentMethodChoice('Momo', 'assets/images/momo.png', showImage: true),
-                            SizedBox(width: 12),
-                            _buildPaymentMethodChoice('Airtel', 'assets/images/airtel.png', showImage: false),
-                          ],
+                        RadioListTile<String>(
+                          title: Text('Mobile Money (Momo)', style: GoogleFonts.poppins(color: Colors.teal[700])),
+                          value: 'Momo',
+                          groupValue: _selectedPaymentMethod,
+                          onChanged: (value) => setState(() => _selectedPaymentMethod = value!),
+                          activeColor: Colors.teal[700],
+                        ),
+                        RadioListTile<String>(
+                          title: Text('Card', style: GoogleFonts.poppins(color: Colors.teal[700])),
+                          value: 'Card',
+                          groupValue: _selectedPaymentMethod,
+                          onChanged: (value) => setState(() => _selectedPaymentMethod = value!),
+                          activeColor: Colors.teal[700],
+                        ),
+                        RadioListTile<String>(
+                          title: Text('Cash on Delivery', style: GoogleFonts.poppins(color: Colors.teal[700])),
+                          value: 'Cash',
+                          groupValue: _selectedPaymentMethod,
+                          onChanged: (value) => setState(() => _selectedPaymentMethod = value!),
+                          activeColor: Colors.teal[700],
                         ),
                       ],
                     ),
                   ),
                 ),
                 SizedBox(height: 24),
-
-                // Place Order Button
                 Center(
-                  child: AnimatedScale(
-                    scale: _scaleFactor,
-                    duration: Duration(milliseconds: 500),
-                    curve: Curves.easeInOut,
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _submitOrder,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.teal[800],
-                        foregroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(horizontal: 50, vertical: 15),
-                        textStyle: GoogleFonts.poppins(fontSize: 18),
-                      ),
-                      child: _isLoading
-                          ? CircularProgressIndicator(color: Colors.white)
-                          : Text('Place Order', style: GoogleFonts.poppins()),
-                    ),
-                  ),
+                  child: _isLoading
+                      ? CircularProgressIndicator(color: Colors.teal[700])
+                      : ElevatedButton(
+                          onPressed: _submitOrder,
+                          child: Text('Place Order', style: GoogleFonts.poppins(fontSize: 16)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.teal[700],
+                            foregroundColor: Colors.white,
+                            padding: EdgeInsets.symmetric(horizontal: 50, vertical: 15),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30),
+                            ),
+                            elevation: 3,
+                          ),
+                        ),
                 ),
+                SizedBox(height: 20), // Added some bottom padding
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  // Payment method button widget for payment selection
-  Widget _buildPaymentMethodChoice(String method, String assetPath, {bool showImage = true}) {
-    final bool isSelected = _selectedPaymentMethod == method;
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _selectedPaymentMethod = method;
-        });
-      },
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white, // Always white background
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: isSelected ? Colors.teal.shade700 : Colors.grey.shade300,
-            width: isSelected ? 2 : 1,
-          ),
-        ),
-        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Row(
-          children: [
-            // Only show image if showImage is true
-            if (showImage) ...[
-              Image.asset(assetPath, height: 20, width: 20),
-              SizedBox(width: 8),
-            ],
-            Text(
-              method,
-              style: GoogleFonts.poppins(
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                color: Colors.black87, // Consistent text color
-                fontSize: 14,
-              ),
-            ),
-          ],
         ),
       ),
     );
