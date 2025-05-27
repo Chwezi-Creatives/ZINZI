@@ -187,7 +187,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Future<void> _submitOrder() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final String deliveryLocation = _addressController.text;
+    // Ensure we have the latest location data
+    if (LocationService.instance.currentPosition == null) {
+      await _getCurrentLocation(showSnackbarErrors: true);
+    }
+
+    // Use the full location string from the service, or fall back to the text field
+    final String deliveryLocation = LocationService.instance.fullLocationString ?? _addressController.text;
+    
     if (deliveryLocation.trim().isEmpty) {
       _showSnackBar('Please acquire your delivery location before placing the order.');
       return;
@@ -265,11 +272,18 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         };
       }
 
+      // Include both the full location string and the coordinates in the payload
       Map<String, dynamic> orderPayload = {
         'order_type': orderType,
         'user_id': userId.toString(),
         'items': [itemPayload],
-        'delivery_address': deliveryLocation,
+        'delivery_address': deliveryLocation, // Full location string with coordinates and address
+        'delivery_coordinates': LocationService.instance.currentPosition != null
+            ? {
+                'latitude': LocationService.instance.currentPosition!.latitude,
+                'longitude': LocationService.instance.currentPosition!.longitude,
+              }
+            : null,
         'notes': _notesController.text,
         'payment_mode': _selectedPaymentMethod.toLowerCase(),
         'total_price': (item['price'] as num?)?.toDouble() ?? 0.0, // Price for this specific item's order
@@ -549,9 +563,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           builder: (context, isLoadingFromService, child) {
                             return TextFormField(
                               controller: _addressController, // Use the main controller
+                              readOnly: true, // Make the field read-only
+                              enableInteractiveSelection: false, // Disable text selection
                               decoration: InputDecoration(
                                 labelText: 'Location',
+                                hintText: 'Tap the refresh button to update location',
                                 labelStyle: GoogleFonts.poppins(color: Colors.teal[400]),
+                                hintStyle: GoogleFonts.poppins(color: Colors.teal[200]),
                                 suffixIcon: isLoadingFromService
                                     ? SizedBox(
                                         width: 24.0,
@@ -563,7 +581,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                       )
                                     : IconButton(
                                         icon: Icon(Icons.refresh, color: Colors.teal[600]),
-                                        tooltip: "Refresh Location",
+                                        tooltip: "Update Location",
                                         onPressed: () => _getCurrentLocation(showSnackbarErrors: true),
                                       ),
                                 border: OutlineInputBorder(
@@ -579,10 +597,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                   borderSide: BorderSide(color: Colors.teal[300]!),
                                 ),
                                 filled: true,
-                                fillColor: Colors.white.withOpacity(0.8),
+                                fillColor: Colors.grey[100], // Slightly different color to indicate it's not editable
+                                contentPadding: EdgeInsets.symmetric(vertical: 16.0, horizontal: 16.0),
                               ),
-                              validator: (value) => value?.trim().isEmpty ?? true
-                                  ? 'Location is required'
+                              // No validator needed since it's not user-editable
+                              validator: (value) => (value?.trim().isEmpty ?? true) && !isLoadingFromService
+                                  ? 'Please update your location using the refresh button'
                                   : null,
                             );
                           }
