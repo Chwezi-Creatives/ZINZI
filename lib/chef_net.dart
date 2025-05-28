@@ -148,6 +148,27 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
 
   // --- Caching Logic (Copied from Source) ---
 
+  // Helper method to parse date strings from cache
+  DateTime? _parseDate(String dateString) {
+    try {
+      // First try parsing as ISO 8601 (default toIso8601String() format)
+      final parsed = DateTime.tryParse(dateString);
+      if (parsed != null) return parsed;
+      
+      // If that fails, try parsing with timezone offset if present
+      if (dateString.endsWith('Z')) {
+        return DateTime.parse(dateString);
+      }
+      
+      // If still failing, try adding timezone offset
+      final dateWithOffset = '${dateString}Z';
+      return DateTime.tryParse(dateWithOffset) ?? DateTime.tryParse(dateString);
+    } catch (e) {
+      print('[ChefNet] Error parsing date: $e');
+      return null;
+    }
+  }
+
   Future<void> _loadChefsFromCacheOrFetch() async {
     if (!context.mounted) return;
 
@@ -160,6 +181,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
     final String? cachedData = prefs.getString(kCacheKeyChefs);
     final String? cachedTimestampString = prefs.getString(kCacheKeyTimestamp);
     print('[ChefNet] Cached timestamp string: $cachedTimestampString');
+    
     if (cachedData != null && cachedTimestampString != null) {
       print('[ChefNet] Cache found, checking validity...');
       DateTime? cachedTimestamp = _parseDate(cachedTimestampString);
@@ -255,37 +277,42 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
 
   // --- Sorting Logic (Copied from Source) ---
   void _sortChefList(List<Map<String, dynamic>> listToSort) {
-  print('[ChefNet] _sortChefList called. List length: ${listToSort.length}');
-    listToSort.sort((a, b) {
-      // Attempt to parse the sort field (e.g., 'created_at')
-      DateTime? dateA = _parseDate(a[kChefSortField]);
-      DateTime? dateB = _parseDate(b[kChefSortField]);
+    if (listToSort.isEmpty) return; // Nothing to sort
+    
+    print('[ChefNet] _sortChefList called. List length: ${listToSort.length}');
+    
+    try {
+      listToSort.sort((a, b) {
+        // Safely get sort field with null check
+        final sortFieldA = a[kChefSortField];
+        final sortFieldB = b[kChefSortField];
+        
+        // If both are null, consider them equal
+        if (sortFieldA == null && sortFieldB == null) return 0;
+        
+        // If one is null, put it at the end
+        if (sortFieldA == null) return 1;
+        if (sortFieldB == null) return -1;
+        
+        // Parse dates
+        final dateA = _parseDate(sortFieldA);
+        final dateB = _parseDate(sortFieldB);
 
-      // Handle null dates (treat them as older)
-      if (dateA == null && dateB == null)
-        return 0; // Keep original order if both invalid
-      if (dateA == null)
-        return 1; // Place nulls (a) after non-nulls (b) -> older
-      if (dateB == null)
-        return -1; // Place non-nulls (a) before nulls (b) -> newer
+        // Handle null dates (treat them as older)
+        if (dateA == null && dateB == null) return 0;
+        if (dateA == null) return 1;    // Place nulls after non-nulls
+        if (dateB == null) return -1;    // Place non-nulls before nulls
 
-      // Compare valid dates in descending order (latest first)
-      return dateB.compareTo(dateA);
-    });
-  }
-
-  // Helper to parse date strings robustly (Copied from Source)
-  DateTime? _parseDate(dynamic dateValue) {
-    if (dateValue == null) return null;
-    if (dateValue is String) {
-      return DateTime.tryParse(dateValue); // Handles ISO 8601 etc.
+        // Compare valid dates in descending order (latest first)
+        return dateB.compareTo(dateA);
+      });
+    } catch (e) {
+      print('[ChefNet] Error sorting chefs: $e');
+      // In case of error, don't sort rather than crashing
     }
-    // Add handling for other potential date formats if needed (e.g., timestamps)
-    // if (dateValue is int) {
-    //   return DateTime.fromMillisecondsSinceEpoch(dateValue);
-    // }
-    return null; // Return null if format is unexpected
   }
+
+  // The _parseDate method is now defined above with more robust parsing logic
 
   // --- Data Fetching (Copied from Source) ---
 
