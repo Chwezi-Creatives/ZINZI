@@ -47,6 +47,43 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     return match != null ? match.group(0)! : 'ugx';
   }
 
+  Widget _buildPaymentMethodChoice(String method, String assetPath, {bool showImage = true}) {
+    final bool isSelected = _selectedPaymentMethod == method;
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _selectedPaymentMethod = method;
+        });
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white, // Always white background
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? Colors.teal.shade700 : Colors.grey.shade300,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            // Only show image if showImage is true
+            if (showImage) Image.asset(assetPath, height: 20, width: 20),
+            SizedBox(width: 8),
+            Text(
+              method,
+              style: GoogleFonts.poppins(
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                color: Colors.black87, // Consistent text color
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -721,33 +758,24 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Payment Method',
+                          'Choose a payment method',
                           style: GoogleFonts.poppins(
                             fontSize: 18,
                             fontWeight: FontWeight.w600,
                             color: Colors.teal[800],
                           ),
                         ),
-                        RadioListTile<String>(
-                          title: Text('Mobile Money (Momo)', style: GoogleFonts.poppins(color: Colors.teal[700])),
-                          value: 'Momo',
-                          groupValue: _selectedPaymentMethod,
-                          onChanged: (value) => setState(() => _selectedPaymentMethod = value!),
-                          activeColor: Colors.teal[700],
-                        ),
-                        RadioListTile<String>(
-                          title: Text('Card', style: GoogleFonts.poppins(color: Colors.teal[700])),
-                          value: 'Card',
-                          groupValue: _selectedPaymentMethod,
-                          onChanged: (value) => setState(() => _selectedPaymentMethod = value!),
-                          activeColor: Colors.teal[700],
-                        ),
-                        RadioListTile<String>(
-                          title: Text('Cash on Delivery', style: GoogleFonts.poppins(color: Colors.teal[700])),
-                          value: 'Cash',
-                          groupValue: _selectedPaymentMethod,
-                          onChanged: (value) => setState(() => _selectedPaymentMethod = value!),
-                          activeColor: Colors.teal[700],
+                        SizedBox(height: 16),
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.start,
+                            children: [
+                              _buildPaymentMethodChoice('Momo', 'assets/images/mtn.png', showImage: true),
+                              SizedBox(width: 12),
+                              _buildPaymentMethodChoice('Airtel', 'assets/images/airtel.png', showImage: true),
+                            ],
+                          ),
                         ),
                       ],
                     ),

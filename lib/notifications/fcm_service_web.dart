@@ -32,6 +32,9 @@ class FCMService {
   /// Initializes FCM for web platform
   static Future<void> initialize() async {
     try {
+      // Add a small delay to ensure Firebase is fully initialized
+      await Future.delayed(const Duration(milliseconds: 300));
+      
       await _initializeWeb();
 
       // Only attempt token registration if user_id and user_type are present
@@ -89,6 +92,9 @@ class FCMService {
   // Web-specific initialization
   static Future<void> _initializeWeb() async {
     try {
+      // Add a small delay to ensure Firebase is fully initialized
+      await Future.delayed(const Duration(milliseconds: 300));
+      
       // Request permission for web notifications
       await FirebaseMessaging.instance.requestPermission(
         alert: true,
@@ -99,6 +105,9 @@ class FCMService {
         provisional: false,
         sound: true,
       );
+      
+      // Add a small delay after permission request
+      await Future.delayed(const Duration(milliseconds: 200));
 
       // Set up foreground message handler
       FirebaseMessaging.onMessage.listen(_handleMessage);

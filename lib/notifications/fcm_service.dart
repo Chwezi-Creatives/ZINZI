@@ -1,3 +1,4 @@
+//cspell:disable
 import 'dart:convert';
 import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -44,9 +45,14 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 }
 
 class FCMService {
-  // Initialize Firebase Messaging instance
-  static final FirebaseMessaging _firebaseMessaging =
-      FirebaseMessaging.instance;
+  // Initialize Firebase Messaging instance with null safety
+  static FirebaseMessaging? _firebaseMessaging;
+  
+  // Getter for Firebase Messaging instance
+  static FirebaseMessaging get firebaseMessaging {
+    _firebaseMessaging ??= FirebaseMessaging.instance;
+    return _firebaseMessaging!;
+  }
 
   // Initialize FlutterLocalNotificationsPlugin (only for mobile)
   static final FlutterLocalNotificationsPlugin? _notifications =
@@ -68,6 +74,9 @@ class FCMService {
   /// Initializes FCM with platform-specific settings
   static Future<void> initialize() async {
     try {
+      // Add a small delay to ensure Firebase is fully initialized
+      await Future.delayed(const Duration(milliseconds: 300));
+      
       // Platform-specific setup
       if (kIsWeb) {
         await _initializeWeb();
@@ -131,8 +140,11 @@ class FCMService {
   // Web-specific initialization
   static Future<void> _initializeWeb() async {
     try {
+      // Add a small delay to ensure Firebase is fully initialized
+      await Future.delayed(const Duration(milliseconds: 200));
+      
       // Request permission for web notifications
-      await FirebaseMessaging.instance.requestPermission(
+      await firebaseMessaging.requestPermission(
         alert: true,
         announcement: false,
         badge: true,
@@ -141,6 +153,9 @@ class FCMService {
         provisional: false,
         sound: true,
       );
+      
+      // Add a small delay after permission request
+      await Future.delayed(const Duration(milliseconds: 200));
 
       // Set up foreground message handler
       FirebaseMessaging.onMessage.listen(_handleMessage);
@@ -481,7 +496,7 @@ class FCMService {
   // Get current FCM token
   static Future<String?> getFCMToken() async {
     try {
-      return await _firebaseMessaging.getToken();
+      return await firebaseMessaging.getToken();
     } catch (e) {
       print('Error getting FCM token: $e');
       return null;
@@ -491,7 +506,7 @@ class FCMService {
   // Subscribe to a specific topic
   static Future<void> subscribeToTopic(String topic) async {
     try {
-      await _firebaseMessaging.subscribeToTopic(topic);
+      await firebaseMessaging.subscribeToTopic(topic);
       print('Subscribed to topic: $topic');
     } catch (e) {
       print('Error subscribing to topic: $e');
@@ -501,7 +516,7 @@ class FCMService {
   // Unsubscribe from a specific topic
   static Future<void> unsubscribeFromTopic(String topic) async {
     try {
-      await _firebaseMessaging.unsubscribeFromTopic(topic);
+      await firebaseMessaging.unsubscribeFromTopic(topic);
       print('Unsubscribed from topic: $topic');
     } catch (e) {
       print('Error unsubscribing from topic: $e');
@@ -547,8 +562,7 @@ class FCMService {
   static Future<void> deactivateTokenWithBackend() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final token =
-          await _firebaseMessaging.getToken(); // Uses static _firebaseMessaging
+      final token = await firebaseMessaging.getToken();
       if (token == null) {
         print('[FCM] No token available for deactivation');
         return;

@@ -4846,7 +4846,7 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin {
     } catch (e) {
       if (!mounted) return;
       setState(() => _loadingOrderIds.remove(orderId));
-      _showErrorSnackbar('Error updating gig status:  ${e.toString()}');
+      _showErrorSnackbar('Error updating gig status: ${e.toString()}');
     }
   }
 

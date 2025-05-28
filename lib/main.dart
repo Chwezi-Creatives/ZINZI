@@ -25,31 +25,44 @@ void main() async {
   // Start performance monitoring
   PerformanceService.startTimer();
 
+  // Ensure Flutter binding is initialized
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize performance service
-  await PerformanceService.initialize();
+  try {
+    // Initialize performance service
+    await PerformanceService.initialize();
 
-  // Load environment variables in parallel with other initializations
-  final envLoad = dotenv.load(fileName: ".env");
+    // Load environment variables
+    await dotenv.load(fileName: ".env");
 
-  // Initialize Firebase and FCM in parallel
-  final firebaseInit = _initializeFirebase();
-  final fcmInit = _initializeFCM();
-  final drawerInit = _initializeDrawer();
+    // Initialize Firebase first
+    await _initializeFirebase();
+    
+    // Add a small delay to ensure Firebase is fully initialized
+    await Future.delayed(const Duration(milliseconds: 500));
+    
+    // Initialize FCM with error handling
+    await _initializeFCM().catchError((error) {
+      print('FCM initialization failed: $error');
+      // Continue app startup even if FCM fails
+    });
 
-  // Wait for all async operations to complete
-  await Future.wait([
-    envLoad,
-    firebaseInit,
-    fcmInit,
-    drawerInit,
-  ]);
+    // Initialize drawer data
+    await _initializeDrawer().catchError((error) {
+      print('Drawer initialization failed: $error');
+      // Continue app startup even if drawer init fails
+    });
 
-  // End performance monitoring
-  PerformanceService.endTimer();
+    // End performance monitoring
+    PerformanceService.endTimer();
 
-  runApp(const MyApp());
+    // Run the app
+    runApp(const MyApp());
+  } catch (e) {
+    print('Error during initialization: $e');
+    // Even if there's an error, we should still try to run the app
+    runApp(const MyApp());
+  }
 }
 
 // Initialize Firebase in the background
@@ -77,24 +90,37 @@ Future<void> _initializeFirebase() async {
   }
 }
 
-// Initialize FCM in the background
+// Initialize FCM in the background with proper error handling
 Future<void> _initializeFCM() async {
   try {
+    // Add a small delay to ensure Firebase is fully initialized
+    await Future.delayed(const Duration(milliseconds: 300));
+    
+    // Initialize FCM service
     await fcm.FCMService.initialize();
+    
     if (kIsWeb) {
       print("FCMService initialized (web)");
     } else {
-      final os = getOperatingSystem();
-      if (isIOS()) {
-        print("FCMService initialized (iOS)");
-      } else if (isAndroid()) {
-        print("FCMService initialized (Android)");
-      } else {
-        print("FCMService initialized (other non-web OS: $os)");
+      try {
+        final os = getOperatingSystem();
+        if (isIOS()) {
+          print("FCMService initialized (iOS)");
+        } else if (isAndroid()) {
+          print("FCMService initialized (Android)");
+        } else {
+          print("FCMService initialized (other non-web OS: $os)");
+        }
+      } catch (e) {
+        print("Error getting OS info: $e");
       }
     }
+    
+    // Add a small delay to ensure FCM is fully initialized
+    await Future.delayed(const Duration(milliseconds: 200));
   } catch (e) {
     print("Error initializing FCM: $e");
+    rethrow; // Re-throw to be caught by the main try-catch
   }
 }
 

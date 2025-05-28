@@ -145,8 +145,6 @@ class _AllMealsScreenState extends State<AllMealsScreen>
   // Separate future for initial fetch state
   Future<void>? _initialFetchFuture; // Changed to Future<void>
 
-  Map<String, dynamic> _userDetails = {};
-  bool _isLoadingUserDetails = true;
   bool _isLoadingMeals = true; // Track meal loading state separately
   String _fetchError = ''; // Store fetch error message
 
@@ -200,10 +198,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
       _fetchMealsAndPreprocess();
 
       _searchController.addListener(_onSearchChanged);
-      _fetchUserDetails();
     })();
-
-    // No longer need to listen to connectivity changes
   }
 
   /// Force refresh meals data, invalidating cache
@@ -315,22 +310,27 @@ class _AllMealsScreenState extends State<AllMealsScreen>
     // Don't fetch if already loading
     if (_isLoadingMeals) return;
     
-    // Check if we have cache that might be stale (older than 1 hour)
-    final bool hasStaleCache = _AllMealsScreenState._mealsCache.isNotEmpty && 
+    // Check if we have valid cache (less than 24 hours old)
+    final bool hasValidCache = _AllMealsScreenState._mealsCache.isNotEmpty && 
                               _AllMealsScreenState._mealsCacheTimestamp != null &&
-                              DateTime.now().difference(_AllMealsScreenState._mealsCacheTimestamp!).inHours >= 24;
+                              DateTime.now().difference(_AllMealsScreenState._mealsCacheTimestamp!).inHours < 24;
     
     // If we have no data at all, we need to show loading
     final bool hasNoData = _allMeals.isEmpty;
     
-    // If we have no data, we need to show loading state
+    // If we have valid cache and data, no need to fetch
+    if (hasValidCache && !hasNoData) {
+      print('[AllMeals] Using valid cache');
+      return;
+    }
+    
+    // If we have no data, show loading state
     if (hasNoData) {
       setState(() {
         _isLoadingMeals = true;
       });
-    } else if (hasStaleCache) {
-      // If we have stale data, show a subtle indicator that refresh is happening
-      // but don't show full loading state to avoid UI jumps
+    } else {
+      // Show refresh indicator for background refresh
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Refreshing meals...'),
@@ -369,8 +369,8 @@ class _AllMealsScreenState extends State<AllMealsScreen>
             _isLoadingMeals = false;
           });
           
-          // Show success message if we had stale data
-          if (hasStaleCache && meals.isNotEmpty) {
+          // Show success message if we refreshed the data
+          if (!hasValidCache && meals.isNotEmpty) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text('Meals updated'),
@@ -401,7 +401,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
               _isLoadingMeals = false;
             });
             
-            if (hasStaleCache) {
+            if (!hasValidCache) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text('Using cached data. Could not refresh.'),
@@ -473,71 +473,6 @@ class _AllMealsScreenState extends State<AllMealsScreen>
     }
   }
 
-  Future<void> _fetchUserDetails() async {
-    // Keep implementation as before, ensure setState is used correctly
-    final prefs = await SharedPreferences.getInstance();
-    
-    // Handle both int and String user_id cases
-    dynamic rawUserId = prefs.get('user_id');
-    int? userId;
-    
-    if (rawUserId is int) {
-      userId = rawUserId;
-    } else if (rawUserId is String) {
-      userId = int.tryParse(rawUserId);
-    }
-    
-    if (userId == null) {
-      setState(() => _isLoadingUserDetails = false);
-      print("No user ID found in SharedPreferences.");
-      return;
-    }
-    final url =
-        '$apiBaseUrl/rr/rusers/$userId'; // Use path parameter if API supports it
-    try {
-      final response = await http.get(Uri.parse(url), headers: {
-        'Content-Type': 'application/json'
-      }).timeout(const Duration(seconds: 10));
-
-      if (mounted) {
-        // Check mounted before setState
-        if (response.statusCode == 200) {
-          final responseData = json.decode(response.body);
-          // Assuming the API for single user returns a map under 'data' or directly a map
-          Map<String, dynamic>? userDetailsMap;
-          if (responseData is Map<String, dynamic>) {
-            if (responseData.containsKey('data') &&
-                responseData['data'] is Map) {
-              userDetailsMap = Map<String, dynamic>.from(responseData['data']);
-            } else if (!responseData.containsKey('message')) {
-              // If it's the user map directly
-              userDetailsMap = Map<String, dynamic>.from(responseData);
-            }
-          }
-
-          if (userDetailsMap != null) {
-            setState(() {
-              _userDetails = userDetailsMap!;
-              _isLoadingUserDetails = false;
-            });
-          } else {
-            print("User details format unexpected or empty: $responseData");
-            setState(() => _isLoadingUserDetails = false);
-          }
-        } else {
-          print(
-              "Error fetching user details: ${response.statusCode} - ${response.reasonPhrase}");
-          setState(() => _isLoadingUserDetails = false);
-        }
-      }
-    } on TimeoutException {
-      print("Timeout fetching user details for ID: $userId");
-      if (mounted) setState(() => _isLoadingUserDetails = false);
-    } catch (error) {
-      print("Error fetching user details for ID $userId: $error");
-      if (mounted) setState(() => _isLoadingUserDetails = false);
-    }
-  }
 
   void _onSearchChanged() {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
