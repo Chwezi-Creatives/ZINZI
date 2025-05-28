@@ -158,18 +158,26 @@ async def lifespan(app: FastAPI):
         app.state.fcm_service = None
         logger.info("Application shutdown: Database connection pool closed.")
 
+# Define allowed origins for CORS
+ALLOWED_ORIGINS = [
+    "http://localhost:5000",
+    "http://localhost:3000",
+    "http://localhost:8080",
+    "http://localhost:55282",
+    "http://127.0.0.1",
+    "http://127.0.0.1:5000",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:8080",
+    "http://192.168.1.2:55282",
+    "https://zinzib.onrender.com",
+    "https://zinzi-web.vercel.app:443",
+    "https://zinzi-web.vercel.app:443",
+    # Add your production domain here when deploying
+]
+
 # Use the lifespan manager
 app = FastAPI(
     title="ZINZI",
-    middleware=[
-        Middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-    ],
     description="Robust ZINZI backend.",
     lifespan=lifespan,
     default_response_class=ORJSONResponse
@@ -205,10 +213,12 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # --- CORS Middleware ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Adjust in production (e.g., ["https://yourfrontend.com"])
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=600  # 10 minutes
 )
 
 # --- Database Dependency ---
@@ -1081,21 +1091,67 @@ class Chefs(BaseRepository):
         else: logger.error(f"Chef creation failed for {email}"); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Chef creation failed.")
 
     async def list_chefs(self, conn: asyncpg.Connection, chef_id=None):
-        # ... (uses conn for _execute_query) ...
-        sql = "SELECT * FROM chefs"; params = []
+        # Explicitly list all columns except sensitive ones
+        columns = [
+            'chefid', 'name', 'email', 'image', 'is_email_verified', 'user_type',
+            'chef_type', 'is_active', 'rating', 'phone_number', 'experience',
+            'serviceradius', 'responsetime', 'minnotice', 'punctuality',
+            'teamsize', 'equipment', 'bio', 'availability', 'languages',
+            'specialties', 'certifications', 'registration_date', 'location',
+            'samplemenu', 'added_by', 'added_by_type', 'last_login',
+            'pricing', 'stock'
+        ]
+        
+        sql = f"SELECT {', '.join(columns)} FROM chefs"
+        params = []
+        
         if chef_id is not None:
-            try: cid = int(chef_id); sql += " WHERE chefid = $1"; params.append(cid)
-            except ValueError: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid chef_id.")
+            try:
+                cid = int(chef_id)
+                sql += " WHERE chefid = $1"
+                params.append(cid)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid chef_id."
+                )
+                
         chefs_list = await self._execute_query(conn, sql, tuple(params), fetch_all=True)
-        if chefs_list is None: return []
+        if chefs_list is None:
+            return []
+            
         processed_chefs = []
         for chef_dict in chefs_list:
-            processed_chef = dict(chef_dict); list_fields = ['equipment','availability','languages','specialties','certifications','samplemenu','stock']
-            for field in list_fields: processed_chef[field] = deserialize_list_from_json_string(processed_chef.get(field))
-            try: pricing_data=json.loads(processed_chef.get('pricing') or '{}'); extracted_price=pricing_data.get('starting_price',0.0); processed_chef['price']=extracted_price if extracted_price is not None else 0.0
-            except json.JSONDecodeError: logger.warning(f"Bad pricing JSON chef {processed_chef.get('chefid')}"); processed_chef['price']=0.0
-            [processed_chef.update({k:v.isoformat()}) for k,v in processed_chef.items() if isinstance(v, (datetime, date))]; processed_chefs.append(processed_chef)
-        if chef_id and not processed_chefs: logger.warning(f"Chef not found ID: {chef_id}"); return []
+            processed_chef = dict(chef_dict)
+            list_fields = [
+                'equipment', 'availability', 'languages', 'specialties',
+                'certifications', 'samplemenu', 'stock'
+            ]
+            
+            # Deserialize JSON strings to Python objects
+            for field in list_fields:
+                processed_chef[field] = deserialize_list_from_json_string(processed_chef.get(field))
+            
+            # Extract price from pricing JSON if available
+            try:
+                pricing_data = json.loads(processed_chef.get('pricing') or '{}')
+                extracted_price = pricing_data.get('starting_price', 0.0)
+                processed_chef['price'] = extracted_price if extracted_price is not None else 0.0
+            except json.JSONDecodeError:
+                logger.warning(f"Bad pricing JSON for chef {processed_chef.get('chefid')}")
+                processed_chef['price'] = 0.0
+            
+            # Convert datetime objects to ISO format strings
+            for k, v in list(processed_chef.items()):
+                if isinstance(v, (datetime, date)):
+                    processed_chef[k] = v.isoformat()
+            
+            processed_chefs.append(processed_chef)
+        
+        if chef_id and not processed_chefs:
+            logger.warning(f"Chef not found ID: {chef_id}")
+            return []
+            
         return processed_chefs
 
     async def update_chef(self, conn: asyncpg.Connection, chef_id: int, updates: dict):
@@ -1222,16 +1278,50 @@ class Producers(BaseRepository):
         else: raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Producer creation failed.")
 
     async def list_producers(self, conn: asyncpg.Connection, producer_id=None):
-        # ... (uses conn for _execute_query) ...
-        sql="SELECT * FROM producers"; params=[]
+        # Explicitly list all columns except sensitive ones
+        columns = [
+            'producer_id', 'name', 'image', 'email', 'is_email_verified', 'user_type',
+            'producer_type', 'is_active', 'rating', 'phone_number', 'registration_date',
+            'location', 'added_by', 'added_by_type', 'last_login', 'reviews', 'stock'
+        ]
+        
+        sql = f"SELECT {', '.join(columns)} FROM producers"
+        params = []
+        
         if producer_id is not None:
-            try: pid=int(producer_id); sql+=" WHERE producer_id = $1"; params.append(pid)
-            except ValueError: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid producer_id.")
+            try:
+                pid = int(producer_id)
+                sql += " WHERE producer_id = $1"
+                params.append(pid)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid producer_id."
+                )
+                
         producers_list = await self._execute_query(conn, sql, tuple(params), fetch_all=True)
-        if producers_list is None: return []
-        processed = [];
-        for row in producers_list: p_prod=dict(row); p_prod['stock']=deserialize_list_from_json_string(p_prod.get('stock')); [p_prod.update({k:v.isoformat()}) for k,v in p_prod.items() if isinstance(v, (datetime, date))]; processed.append(p_prod)
-        if producer_id is not None and not processed: logger.warning(f"Producer not found ID: {producer_id}"); return []
+        if producers_list is None:
+            return []
+            
+        processed = []
+        for row in producers_list:
+            p_prod = dict(row)
+            
+            # Deserialize stock JSON string to Python object
+            if 'stock' in p_prod:
+                p_prod['stock'] = deserialize_list_from_json_string(p_prod['stock'])
+            
+            # Convert datetime objects to ISO format strings
+            for key, value in list(p_prod.items()):
+                if isinstance(value, (datetime, date)):
+                    p_prod[key] = value.isoformat()
+            
+            processed.append(p_prod)
+        
+        if producer_id is not None and not processed:
+            logger.warning(f"Producer not found ID: {producer_id}")
+            return []
+            
         return processed
 
     async def login_producer(self, conn: asyncpg.Connection, identifier: str, password: str):
@@ -1350,18 +1440,56 @@ class Stakeholders(BaseRepository):
         else: raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Stakeholder creation failed.")
 
     async def list_stakeholders(self, conn: asyncpg.Connection):
-        # ... (uses conn for _execute_query) ...
-        sql="SELECT * FROM stakeholders"
+        # Explicitly list all columns except sensitive ones
+        columns = [
+            'stakeholder_id', 'name', 'full_name', 'image', 'email', 'is_email_verified', 
+            'user_type', 'is_active', 'rating', 'phone_number', 'registration_date', 
+            'location', 'added_by', 'added_by_type', 'last_login'
+        ]
+        
+        sql = f"SELECT {', '.join(columns)} FROM stakeholders"
         results = await self._execute_query(conn, sql, fetch_all=True)
-        if results: processed = []; [processed.append({**dict(item), **{k: v.isoformat() for k,v in item.items() if isinstance(v, (datetime,date))}}) for item in results]; return processed
-        return []
+        
+        if not results:
+            return []
+            
+        processed = []
+        for item in results:
+            # Convert row to dict
+            row_dict = dict(item)
+            
+            # Convert datetime objects to ISO format strings
+            for key, value in list(row_dict.items()):
+                if isinstance(value, (datetime, date)):
+                    row_dict[key] = value.isoformat()
+            
+            processed.append(row_dict)
+            
+        return processed
 
     async def get_stakeholder_by_id(self, conn: asyncpg.Connection, stakeholder_id: int):
-        # ... (uses conn for _execute_query) ...
-        sql="SELECT * FROM stakeholders WHERE stakeholder_id = $1"
+        # Explicitly list all columns except sensitive ones
+        columns = [
+            'stakeholder_id', 'name', 'full_name', 'image', 'email', 'is_email_verified', 
+            'user_type', 'is_active', 'rating', 'phone_number', 'registration_date', 
+            'location', 'added_by', 'added_by_type', 'last_login'
+        ]
+        
+        sql = f"SELECT {', '.join(columns)} FROM stakeholders WHERE stakeholder_id = $1"
         result = await self._execute_query(conn, sql, (stakeholder_id,), fetch_one=True)
-        if result: p_result=dict(result); [p_result.update({k: v.isoformat() for k,v in p_result.items() if isinstance(v, (datetime,date))})]; return p_result
-        return None
+        
+        if not result:
+            return None
+            
+        # Convert row to dict
+        result_dict = dict(result)
+        
+        # Convert datetime objects to ISO format strings
+        for key, value in list(result_dict.items()):
+            if isinstance(value, (datetime, date)):
+                result_dict[key] = value.isoformat()
+                
+        return result_dict
 
     async def update_stakeholder(self, conn: asyncpg.Connection, stakeholder_id: int, updates: dict):
         # ... (uses conn for _execute_query) ...
