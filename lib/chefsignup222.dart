@@ -533,11 +533,19 @@ class _ChefSignUpPageBetterNewState extends State<ChefSignUpPageBetterNew> {
       } else {
         String errorMessage = 'Failed to submit data.';
         try {
-          final errorData = json.decode(response.body);
-          errorMessage +=
-              ' Error: ${errorData['message'] ?? response.reasonPhrase}';
+          if (response.statusCode == 409) {
+            errorMessage = 'An account with this email already exists. Please log in or use a different email.';
+          } else {
+            final errorData = json.decode(response.body);
+            errorMessage +=
+                ' Error: ${errorData['message'] ?? response.reasonPhrase}';
+          }
         } catch (_) {
-          errorMessage += ' Status code: ${response.statusCode}';
+          if (response.statusCode == 409) {
+            errorMessage = 'An account with this email already exists. Please log in or use a different email.';
+          } else {
+            errorMessage += ' Status code: ${response.statusCode}';
+          }
         }
         _showSnackBar(errorMessage, isError: true);
       }

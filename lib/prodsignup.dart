@@ -368,12 +368,20 @@ class _ProducerSignUpPageState extends State<ProducerSignUpPage> {
           String errorMessage = 'Sign up failed. Please try again.';
           try {
             final responseData = json.decode(response.body);
-            errorMessage = responseData['message'] ??
-                responseData['error'] ??
-                errorMessage;
+            if (response.statusCode == 409) {
+              errorMessage = 'An account with this email already exists. Please log in or use a different email.';
+            } else {
+              errorMessage = responseData['message'] ??
+                  responseData['error'] ??
+                  errorMessage;
+            }
           } catch (_) {
-            errorMessage =
-                'Sign up failed (Code: ${response.statusCode}). Please try again.';
+            if (response.statusCode == 409) {
+              errorMessage = 'An account with this email already exists. Please log in or use a different email.';
+            } else {
+              errorMessage =
+                  'Sign up failed (Code: ${response.statusCode}). Please try again.';
+            }
           }
           _showErrorSnackBar(errorMessage);
         }

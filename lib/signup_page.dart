@@ -279,27 +279,30 @@ class _UserSignUpPageState extends State<UserSignUpPage>
         );
       } else {
         // Improved error handling for specific backend messages
-        String displayMessage =
-            'Signup failed. Please try again.'; // Default message
+        String displayMessage = 'Signup failed. Please try again.'; // Default message
         try {
-          final errorResponse = json.decode(response.body);
-          final backendMessage = errorResponse['message'] as String?;
+          if (response.statusCode == 409) {
+            displayMessage = 'An account with this email already exists. Please log in or use a different email.';
+          } else {
+            final errorResponse = json.decode(response.body);
+            final backendMessage = errorResponse['message'] as String?;
 
-          if (backendMessage != null) {
-            // Check for the specific "already registered" error
-            if (backendMessage
-                .toLowerCase()
-                .contains('is already registered')) {
-              displayMessage =
-                  'This email address is already registered. Please use a different email or log in.';
-            } else {
-              // Use the backend message if it's not the specific one we handled
-              displayMessage = backendMessage;
+            if (backendMessage != null) {
+              // Check for the specific "already registered" error
+              if (backendMessage.toLowerCase().contains('is already registered')) {
+                displayMessage = 'This email address is already registered. Please use a different email or log in.';
+              } else {
+                // Use the backend message if it's not the specific one we handled
+                displayMessage = backendMessage;
+              }
             }
           }
         } catch (e) {
-          // If parsing the error response fails, stick to the default message
+          // If parsing the error response fails, check status code
           print("Error parsing error response: $e");
+          if (response.statusCode == 409) {
+            displayMessage = 'An account with this email already exists. Please log in or use a different email.';
+          }
         }
 
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(

@@ -307,10 +307,20 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
           String errorMessage = 'Signup failed.';
           try {
             final responseData = json.decode(response.body);
-            errorMessage = responseData['message'] ??
-                responseData['error'] ??
-                'Signup failed (Code: ${response.statusCode})';
-          } catch (_) {}
+            if (response.statusCode == 409) {
+              errorMessage = 'An account with this email already exists. Please log in or use a different email.';
+            } else {
+              errorMessage = responseData['message'] ??
+                  responseData['error'] ??
+                  'Signup failed (Code: ${response.statusCode})';
+            }
+          } catch (_) {
+            if (response.statusCode == 409) {
+              errorMessage = 'An account with this email already exists. Please log in or use a different email.';
+            } else {
+              errorMessage = 'Signup failed (Code: ${response.statusCode}). Please try again.';
+            }
+          }
           _showErrorSnackBar(errorMessage);
         }
       } catch (e) {
