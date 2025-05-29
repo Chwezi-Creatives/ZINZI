@@ -480,11 +480,61 @@ class AuthenticationAndUsers(BaseRepository):
             logger.error(f"Error fetching combined metrics for user {user_id}: {str(e)}", exc_info=True)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An error occurred while fetching metrics")
     # Existing methods...
-    # Methods now accept 'conn' from Depends(get_db)
+    # Methods now accept 'conn' from Depends(get_db)   #currently a private method buill come back later to decide wether to make it a class of its own or a public method,etc
+    async def _handle_email_verification(self, conn: asyncpg.Connection, email: str, user_id: int, user_type: str) -> None:
+        """
+        Handles the email verification process - generates code, stores it, and sends email.
+        
+        Args:
+            conn: Database connection
+            email: User's email address
+            user_id: User's ID
+            user_type: Type of user (user, chef, producer, etc.)
+        """
+        try:
+            # Generate a 6-digit numeric code (fits within VARCHAR(10) and is user-friendly)
+            verification_code = generate_random_code(length=6, use_digits=True, use_uppercase=False)
+            
+            # First, check if there's an existing verification for this user
+            await conn.execute(
+                """
+                DELETE FROM email_verifications 
+                WHERE user_id = $1 AND user_type = $2
+                """,
+                user_id, user_type
+            )
+            
+            # Verify code length before insertion
+            if len(verification_code) > 10:
+                raise ValueError(f"Generated code '{verification_code}' is too long for the database column")
+                
+            # Insert new verification code
+            await conn.execute(
+                """
+                INSERT INTO email_verifications 
+                (user_id, verification_code, user_type, created_at, expires_at) 
+                VALUES ($1, $2, $3, NOW(), NOW() + INTERVAL '3 minutes')
+                """,
+                user_id, verification_code, user_type
+            )
+            
+            logger.info(f"Verification code created for {user_type} ID {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Error in _handle_email_verification: {str(e)}")
+            raise
+        
+        # Send verification email
+        try:
+            self.send_verification_email_gmail(email, verification_code)
+            logger.info(f"Verification email sent to {email} for user type {user_type}")
+        except Exception as e:
+            logger.error(f"Failed to send verification email to {email}: {e}")
+            # Don't fail the signup if email sending fails, just log it
+            # The user can request a new code if needed
+    
     async def signup_user(self, conn: asyncpg.Connection, name: str, email: str, password: str, user_type: str, image: Optional[str] = None) -> Dict[str, Any]:
-        # ... (implementation unchanged, but uses the passed 'conn') ...
         hashed_pw = hash_password(password)
-        verification_code = generate_random_code()
         user_id = None
         try:
             async with conn.transaction(): # Use transaction
@@ -505,11 +555,9 @@ class AuthenticationAndUsers(BaseRepository):
                     user_id = await conn.fetchval(insert_query, name, email, hashed_pw)
                 if not user_id: raise asyncpg.PostgresError("User insertion failed to return user_id.")
 
-                # Insert verification code with user_type
-                insert_verification_query = "INSERT INTO email_verifications (user_id, verification_code, user_type, created_at) VALUES ($1, $2, $3, NOW())"
-                await conn.execute(insert_verification_query, user_id, verification_code, user_type)
-
-            # self.send_verification_email_gmail(email, verification_code) # Sync call
+                # Handle email verification
+                await self._handle_email_verification(conn, email, user_id, user_type)
+                
             logger.info(f"User '{name}' (ID: {user_id}) registered successfully with user type {user_type}.")
             return {"user_id": user_id, "success": True}
         except ValueError as e:
@@ -1087,8 +1135,16 @@ class Chefs(BaseRepository):
         sql = """INSERT INTO chefs (name, image, email, hashed_password, is_email_verified, user_type, chef_type, is_active, rating, phone_number, experience, serviceradius, responsetime, minnotice, punctuality, teamsize, equipment, bio, availability, languages, specialties, certifications, registration_date, location, samplemenu, added_by, added_by_type, last_login, pricing, stock) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW(), $23, $24, $25, $26, NOW(), $27, $28) RETURNING chefid"""
         params = (chef_data_lower['name'], chef_data_lower.get('image'), email, hashed_password, is_email_verified, user_type, chef_data_lower.get('chef_type', 'Individual'), is_active, chef_data_lower.get('rating', 0.0), chef_data_lower.get('phone_number'), chef_data_lower.get('experience'), chef_data_lower.get('serviceradius'), chef_data_lower.get('responsetime'), chef_data_lower.get('minnotice'), chef_data_lower.get('punctuality', 0.0), chef_data_lower.get('teamsize'), equipment_json_str, chef_data_lower.get('bio'), availability_json_str, languages_json_str, specialties_json_str, certifications_json_str, chef_data_lower.get('location'), samplemenu_json_str, added_by, added_by_type, pricing_param, stock_json_str)
         chef_id = await self._execute_query(conn, sql, params, returning_id_column='chefid')
-        if chef_id: logger.info(f"Created chef ID: {chef_id}"); return {"Chef_id": chef_id, "user_type": user_type, "message": "Chef created"}
-        else: logger.error(f"Chef creation failed for {email}"); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Chef creation failed.")
+        if chef_id:
+            # Initialize AuthenticationAndUsers to access email verification
+            auth = AuthenticationAndUsers()
+            # Send verification email
+            await auth._handle_email_verification(conn, email, chef_id, user_type)
+            logger.info(f"Created chef ID: {chef_id}")
+            return {"Chef_id": chef_id, "user_type": user_type, "message": "Chef created"}
+        else: 
+            logger.error(f"Chef creation failed for {email}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Chef creation failed.")
 
     async def list_chefs(self, conn: asyncpg.Connection, chef_id=None):
         # Explicitly list all columns except sensitive ones
@@ -1274,8 +1330,15 @@ class Producers(BaseRepository):
         except: added_by_id=None; rating_f=0.0
         params=(producer_data_lower['name'], producer_data_lower.get('image'), email, hashed_password, is_email_verified, user_type, producer_data_lower.get('producer_type','Individual'), is_active, rating_f, producer_data_lower.get('phone_number'), producer_data_lower.get('location'), added_by_id, added_by_type, producer_data_lower.get('reviews'), stock_json)
         producer_id=await self._execute_query(conn, sql, params, returning_id_column='producer_id')
-        if producer_id: logger.info(f"Created producer ID: {producer_id}"); return {"producer_id": producer_id, "UserType": user_type}
-        else: raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Producer creation failed.")
+        if producer_id: 
+            # Initialize AuthenticationAndUsers to access email verification
+            auth = AuthenticationAndUsers()
+            # Send verification email
+            await auth._handle_email_verification(conn, email, producer_id, user_type)
+            logger.info(f"Created producer ID: {producer_id}")
+            return {"producer_id": producer_id, "UserType": user_type}
+        else: 
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Producer creation failed.")
 
     async def list_producers(self, conn: asyncpg.Connection, producer_id=None):
         # Explicitly list all columns except sensitive ones
@@ -1364,8 +1427,15 @@ class Transporters(BaseRepository):
         sql="INSERT INTO transporters (name, email, hashed_password, phone_number, profile_image_url, vehicle_type, license_plate, is_active, rating, location, registration_date, user_type, reviews) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), $11, $12) RETURNING transporter_id"
         params=(data_lower['name'], email, hashed_password, data_lower.get('phone_number'), data_lower.get('profile_image_url'), data_lower.get('vehicle_type'), data_lower.get('license_plate'), is_active, data_lower.get('rating',0.0), data_lower.get('location'), user_type, data_lower.get('reviews'))
         transporter_id=await self._execute_query(conn, sql, params, returning_id_column='transporter_id')
-        if transporter_id: logger.info(f"Created transporter ID: {transporter_id}"); return {"transporter_id": transporter_id, "UserType": user_type, "message":"Transporter created"}
-        else: raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Transporter creation failed.")
+        if transporter_id: 
+            # Initialize AuthenticationAndUsers to access email verification
+            auth = AuthenticationAndUsers()
+            # Send verification email
+            await auth._handle_email_verification(conn, email, transporter_id, user_type)
+            logger.info(f"Created transporter ID: {transporter_id}")
+            return {"transporter_id": transporter_id, "UserType": user_type, "message":"Transporter created"}
+        else: 
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Transporter creation failed.")
 
     async def list_transporters(self, conn: asyncpg.Connection, transporter_id=None):
         # ... (uses conn for _execute_query) ...
@@ -1436,8 +1506,15 @@ class Stakeholders(BaseRepository):
         except: added_by_id=None; rating_f=0.0
         params=(data_lower['name'], data_lower['full_name'], data_lower.get('image'), email, hashed_password, is_email_verified, user_type, is_active, rating_f, data_lower.get('phone_number'), data_lower.get('location'), added_by_id, added_by_type)
         stakeholder_id=await self._execute_query(conn, sql, params, returning_id_column='stakeholder_id')
-        if stakeholder_id: logger.info(f"Created stakeholder ID: {stakeholder_id}"); return {"stakeholder_id": stakeholder_id, "UserType": user_type}
-        else: raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Stakeholder creation failed.")
+        if stakeholder_id: 
+            # Initialize AuthenticationAndUsers to access email verification
+            auth = AuthenticationAndUsers()
+            # Send verification email
+            await auth._handle_email_verification(conn, email, stakeholder_id, user_type)
+            logger.info(f"Created stakeholder ID: {stakeholder_id}")
+            return {"stakeholder_id": stakeholder_id, "UserType": user_type}
+        else: 
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Stakeholder creation failed.")
 
     async def list_stakeholders(self, conn: asyncpg.Connection):
         # Explicitly list all columns except sensitive ones
