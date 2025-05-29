@@ -351,7 +351,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     return orders;
   }
 
-  // Check for status changes and trigger dialogs if needed
+  // Track status changes without triggering automatic popups
   void _checkForStatusChanges(List<Map<String, dynamic>> freshOrders) {
     final Map<int, String> currentStatuses = {};
     
@@ -364,24 +364,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       }
     }
     
-    // Check for changes and trigger dialogs
-    for (final entry in currentStatuses.entries) {
-      final orderId = entry.key;
-      final newStatus = entry.value;
-      final previousStatus = _previousOrderStatuses[orderId];
-      
-      // If status changed to 'verification needed' and not already showing the dialog
-      if (newStatus == 'verification needed' && 
-          newStatus != previousStatus &&
-          !_isVerificationProcessActive) {
-        // Use postFrameCallback to ensure the dialog is shown after the build is complete
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _handleVerificationRequest(orderId);
-        });
-      }
-    }
-    
-    // Update previous statuses for next comparison
+    // Update previous statuses for reference
     _previousOrderStatuses.clear();
     _previousOrderStatuses.addAll(currentStatuses);
   }

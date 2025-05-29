@@ -18,18 +18,17 @@ import 'package:zinzi2/signup_or_Login.dart';
 import 'package:zinzi2/useranalytics.dart';
 import 'package:zinzi2/social.dart';
 import 'package:zinzi2/chef_net.dart';
-//import 'package:zinzi2/producer_network_testing.dart';
-import 'package:zinzi2/orderhistory.dart'; // Import Order History Screen
+import 'package:zinzi2/orderhistory.dart';
 import 'package:zinzi2/onboard.dart';
 import 'package:zinzi2/nutrition+.dart';
 
-// --- Color Constants (Should be moved to a shared file ideally) ---
+// --- Color Constants ---
 const Color kColorPrimaryDark = Color(0xFF004D40);
 const Color kColorPrimary = Color(0xFF00796B);
 const Color kColorPrimaryLight = Color(0xFF4DB6AC);
 const Color kColorPrimaryLighter = Color(0xFFB2DFDB);
 const Color kColorPrimaryLightest = Color(0xFFE0F2F1);
-const Color kColorBackground = Color(0xFFF8F8F8); // Clean background
+const Color kColorBackground = Color(0xFFF8F8F8);
 const Color kColorSurface = Colors.white;
 const Color kColorTextPrimary = kColorPrimaryDark;
 const Color kColorTextSecondary = Color(0xFF546E7A);
@@ -43,74 +42,150 @@ final apiBaseUrl = dotenv.env['API_BASE_URL'] ??
     dotenv.env['API_BASE_URL-intranet'] ??
     'https://default.url';
 
+class UserDataCache {
+  final String userId;
+  final String userType;
+  final Map<String, dynamic> data;
+  final DateTime lastUpdated;
+
+  UserDataCache({
+    required this.userId,
+    required this.userType,
+    required this.data,
+    required this.lastUpdated,
+  });
+
+  bool get isValid => lastUpdated.add(const Duration(hours: 36)).isAfter(DateTime.now());
+}
+
 class AppDrawer extends StatefulWidget {
   final String? invokedBy;
   const AppDrawer({Key? key, this.invokedBy}) : super(key: key);
 
-  // Static cache for user details
-  static Map<String, dynamic>? _cachedUserDetails;
-  static DateTime? _lastCacheUpdate;
-  static const Duration _cacheDuration = Duration(hours: 36);
-
+  // Static cache for user details with user context
+  static final Map<String, UserDataCache> _userCaches = {};
+  
   // Static method to refresh user details
   static Future<void> refreshUserDetails() async {
     final prefs = await SharedPreferences.getInstance();
-    final userId = prefs.getInt('user_id');
-    if (userId == null) {
-      _cachedUserDetails = null;
-      _lastCacheUpdate = null;
+    final userId = prefs.getString('user_id') ?? '';
+    final userType = (prefs.getString('user_type') ?? 'user').toLowerCase();
+    
+    if (userId.isEmpty) {
+      _userCaches.remove(_getCacheKey(userId, userType));
       return;
     }
+    
+    String endpoint;
+    Map<String, String> fieldMapping;
 
-    final url = '$apiBaseUrl/rr/rusers/userId';
+    switch (userType) {
+      case 'chef':
+        endpoint = '$apiBaseUrl/rr/rchefs/$userId';
+        fieldMapping = {
+          'name': 'name',
+          'email': 'email',
+          'image': 'image',
+        };
+        break;
+      case 'producer':
+        endpoint = '$apiBaseUrl/rr/rproducers/$userId';
+        fieldMapping = {
+          'name': 'name',
+          'email': 'email',
+          'image': 'image',
+        };
+        break;
+      case 'transporter':
+        endpoint = '$apiBaseUrl/rr/transporters/$userId';
+        fieldMapping = {
+          'name': 'name',
+          'email': 'email',
+          'image': 'profile_image_url',
+        };
+        break;
+      case 'user':
+      default:
+        endpoint = '$apiBaseUrl/rr/rusers/$userId';
+        fieldMapping = {
+          'name': 'name',
+          'email': 'email',
+          'image': 'image',
+        };
+    }
+
     try {
-      final response =
-          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+      final response = await http.get(
+        Uri.parse(endpoint),
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 10));
+
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        if (responseData is Map<String, dynamic>) {
-          // Store both the full response and basic profile data
-          _cachedUserDetails = responseData;
-          _lastCacheUpdate = DateTime.now();
+        if (responseData is Map<String, dynamic> && responseData['data'] != null) {
+          final userData = _createCaseInsensitiveMap(responseData['data'] as Map<String, dynamic>);
+          
+          final name = _getCaseInsensitive(userData, fieldMapping['name']!)?.toString() ?? 'User Name';
+          final email = _getCaseInsensitive(userData, fieldMapping['email']!)?.toString() ?? '';
+          final image = _getCaseInsensitive(userData, fieldMapping['image']!)?.toString() ?? '';
 
-          // Also update SharedPreferences with basic profile data
-          await prefs.setString(
-              'user_name', responseData['name'] ?? 'User Name');
-          await prefs.setString('user_email', responseData['email'] ?? '');
-          await prefs.setString(
-              'profile_image_url', responseData['profile_image_url'] ?? '');
+          // Update cache
+          _userCaches[_getCacheKey(userId, userType)] = UserDataCache(
+            userId: userId,
+            userType: userType,
+            data: {
+              'name': name,
+              'email': email,
+              'image': image,
+              'user_type': userType,
+            },
+            lastUpdated: DateTime.now(),
+          );
+
+          // Update SharedPreferences with user-specific keys
+          await prefs.setString('${userType}_${userId}_user_name', name);
+          await prefs.setString('${userType}_${userId}_user_email', email);
+          await prefs.setString('${userType}_${userId}_profile_image_url', image);
         }
       }
     } catch (e) {
-      print("Error refreshing user details: $e");
+      print("Error refreshing $userType details: $e");
     }
   }
 
-  // Static method to clear cache (call this on logout)
-  static void clearCache() async {
-    _cachedUserDetails = null;
-    _lastCacheUpdate = null;
+  // Static method to clear cache for specific user
+  static Future<void> clearUserCache(String userId, String userType) async {
+    _userCaches.remove(_getCacheKey(userId, userType));
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('user_name');
-    await prefs.remove('user_email');
-    await prefs.remove('profile_image_url');
+    
+    // Remove all user-specific preferences
+    final prefix = '${userType}_${userId}_';
+    final keys = prefs.getKeys().where((key) => key.startsWith(prefix)).toList();
+    for (final key in keys) {
+      await prefs.remove(key);
+    }
   }
 
-  // Static method to initialize user data (call this at app start)
-  static Future<void> initializeUserData() async {
-    final prefs = await SharedPreferences.getInstance();
-    // Check if we have basic profile data in SharedPreferences
-    final userName = prefs.getString('user_name');
-    final userEmail = prefs.getString('user_email');
-    final profileImageUrl = prefs.getString('profile_image_url');
+  // Static method to get current user cache
+  static UserDataCache? getCurrentUserCache(String userId, String userType) {
+    return _userCaches[_getCacheKey(userId, userType)];
+  }
 
-    if (userName != null && userEmail != null && profileImageUrl != null) {
-      // We have basic profile data, no need to fetch immediately
-      return;
-    }
+  // Helper to create cache key
+  static String _getCacheKey(String userId, String userType) {
+    return '${userType.toLowerCase()}_${userId.toLowerCase()}';
+  }
 
-    // If we don't have basic profile data, fetch it
-    await refreshUserDetails();
+  // Helper method to create a case-insensitive copy of a map
+  static Map<String, dynamic> _createCaseInsensitiveMap(Map<String, dynamic> original) {
+    return original.map((key, value) => 
+      MapEntry(key.toLowerCase(), value is Map<String, dynamic> ? _createCaseInsensitiveMap(value) : value)
+    );
+  }
+
+  // Helper for case-insensitive map access
+  static dynamic _getCaseInsensitive(Map<String, dynamic> map, String key) {
+    return map[key.toLowerCase()];
   }
 
   @override
@@ -123,7 +198,7 @@ class _AppDrawerState extends State<AppDrawer> {
   String? _profileImageUrl;
   String? _profileImagePath;
   bool _isLoading = true;
-  int? _userId;
+  String? _userId;
   String? _userType;
 
   @override
@@ -136,118 +211,149 @@ class _AppDrawerState extends State<AppDrawer> {
     setState(() => _isLoading = true);
     final prefs = await SharedPreferences.getInstance();
 
-    // First try to get basic profile data from SharedPreferences
-    _userName = prefs.getString('user_name') ?? "User Name";
-    _userEmail = prefs.getString('user_email') ?? "";
-    _profileImageUrl = prefs.getString('profile_image_url');
-    _profileImagePath = prefs.getString('profile_image_path');
-    // Fix: Accept user_id as int or parse from String
-    _userId = prefs.getInt('user_id');
-if (_userId == null) {
-  final userIdStr = prefs.getString('user_id');
-  if (userIdStr != null) {
-    _userId = int.tryParse(userIdStr);
-  }
-}
-    if (_userId == null) {
-      final userIdStr = prefs.getString('user_id');
-      if (userIdStr != null) {
-        _userId = int.tryParse(userIdStr);
-      }
-    }
-    _userType = prefs.getString('user_type');
+    // Get current user context
+    _userId = prefs.getString('user_id');
+    _userType = prefs.getString('user_type')?.toLowerCase();
 
-    // If we have basic profile data, we can show it immediately
-    if (_userName != "User Name" && _profileImageUrl != null) {
+    if (_userId == null || _userType == null) {
       setState(() => _isLoading = false);
+      return;
     }
 
-    // Then try to get full user data from cache or API
-    if (_userId != null) {
-      if (AppDrawer._cachedUserDetails != null) {
-        _updateFromCache();
-      } else {
-        await _fetchUserDetails();
-      }
-    } else {
-      setState(() => _isLoading = false);
+    // Check cache first
+    final userCache = AppDrawer.getCurrentUserCache(_userId!, _userType!);
+    if (userCache != null && userCache.isValid) {
+      _updateFromCache(userCache);
+      return;
     }
+
+    // If no valid cache, fetch from API
+    await _fetchUserDetails();
   }
 
-  void _updateFromCache() {
-    if (AppDrawer._cachedUserDetails == null) return;
-
-    final userData = AppDrawer._cachedUserDetails!;
+  void _updateFromCache(UserDataCache cache) {
     setState(() {
-      _userName = userData['name'] ?? _userName;
-      _userEmail = userData['email'] ?? _userEmail;
-      _profileImageUrl = userData['profile_image_url'] ?? _profileImageUrl;
+      _userName = cache.data['name'] ?? _userName;
+      _userEmail = cache.data['email'] ?? _userEmail;
+      _profileImageUrl = cache.data['image'] ?? _profileImageUrl;
       _isLoading = false;
     });
   }
 
   Future<void> _fetchUserDetails() async {
-    if (_userId == null) {
-      if (mounted) setState(() => _isLoading = false);
+    if (_userId == null || _userType == null) {
+      setState(() => _isLoading = false);
       return;
     }
 
-    final url = '$apiBaseUrl/rr/rusers/$_userId';
+    final prefs = await SharedPreferences.getInstance();
+    String endpoint;
+    Map<String, String> fieldMapping;
+
+    switch (_userType!) {
+      case 'chef':
+        endpoint = '$apiBaseUrl/rr/rchefs/$_userId';
+        fieldMapping = {
+          'name': 'name',
+          'email': 'email',
+          'image': 'image',
+        };
+        break;
+      case 'producer':
+        endpoint = '$apiBaseUrl/rr/rproducers/$_userId';
+        fieldMapping = {
+          'name': 'name',
+          'email': 'email',
+          'image': 'image',
+        };
+        break;
+      case 'transporter':
+        endpoint = '$apiBaseUrl/rr/transporters/$_userId';
+        fieldMapping = {
+          'name': 'name',
+          'email': 'email',
+          'image': 'profile_image_url',
+        };
+        break;
+      case 'user':
+      default:
+        endpoint = '$apiBaseUrl/rr/rusers/$_userId';
+        fieldMapping = {
+          'name': 'name',
+          'email': 'email',
+          'image': 'image',
+        };
+    }
+
     try {
-      final response =
-          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+      final response = await http.get(
+        Uri.parse(endpoint),
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 10));
+
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        if (responseData is Map<String, dynamic>) {
-          // Update cache
-          AppDrawer._cachedUserDetails = responseData;
-          AppDrawer._lastCacheUpdate = DateTime.now();
+        if (responseData is Map<String, dynamic> && responseData['data'] != null) {
+          final userData = AppDrawer._createCaseInsensitiveMap(responseData['data'] as Map<String, dynamic>);
+          
+          final name = AppDrawer._getCaseInsensitive(userData, fieldMapping['name']!)?.toString() ?? _userName;
+          final email = AppDrawer._getCaseInsensitive(userData, fieldMapping['email']!)?.toString() ?? _userEmail;
+          final image = AppDrawer._getCaseInsensitive(userData, fieldMapping['image']!)?.toString() ?? _profileImageUrl ?? '';
 
-          // Update SharedPreferences with basic profile data
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('user_name', responseData['name'] ?? _userName);
-          await prefs.setString(
-              'user_email', responseData['email'] ?? _userEmail);
-          await prefs.setString('profile_image_url',
-              responseData['profile_image_url'] ?? _profileImageUrl ?? '');
+          // Update cache
+          AppDrawer._userCaches[AppDrawer._getCacheKey(_userId!, _userType!)] = UserDataCache(
+            userId: _userId!,
+            userType: _userType!,
+            data: {
+              'name': name,
+              'email': email,
+              'image': image,
+              'user_type': _userType!,
+            },
+            lastUpdated: DateTime.now(),
+          );
+
+          // Update SharedPreferences with user-specific keys
+          await prefs.setString('${_userType}_${_userId}_user_name', name);
+          await prefs.setString('${_userType}_${_userId}_user_email', email);
+          await prefs.setString('${_userType}_${_userId}_profile_image_url', image);
 
           if (mounted) {
             setState(() {
-              _userName = responseData['name'] ?? _userName;
-              _userEmail = responseData['email'] ?? _userEmail;
-              _profileImageUrl =
-                  responseData['profile_image_url'] ?? _profileImageUrl;
+              _userName = name;
+              _userEmail = email;
+              _profileImageUrl = image;
               _isLoading = false;
             });
           }
         }
+      } else {
+        if (mounted) setState(() => _isLoading = false);
       }
     } catch (e) {
-      print("Error fetching user details: $e");
+      print("Error fetching $_userType details: $e");
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _logout() async {
-    final prefs = await SharedPreferences.getInstance();
-    final keys = prefs.getKeys();
-    final patterns = [RegExp(r'_id\b'), RegExp(r'_user_type\b')];
-    for (final key in keys) {
-      if (patterns.any((p) => p.hasMatch(key))) {
-        await prefs.remove(key);
-      }
+    if (_userId != null && _userType != null) {
+      await AppDrawer.clearUserCache(_userId!, _userType!);
     }
+    
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('user_id');
+    await prefs.remove('user_type');
+    
     if (mounted) {
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(
-            builder: (context) => const SignUpOrLoginPage()),
+        MaterialPageRoute(builder: (context) => const SignUpOrLoginPage()),
         (Route<dynamic> route) => false,
       );
     }
   }
 
-  // Helper for list tiles
   Widget _buildDrawerTile(IconData icon, String title, VoidCallback? onTap,
       {Color? color, bool enabled = true}) {
     final Color effectiveColor =
@@ -266,7 +372,6 @@ if (_userId == null) {
   List<Widget> _buildUserTypeSpecificTiles() {
     List<Widget> tiles = [];
 
-    // Common tiles for all user types
     tiles.addAll([
       _buildDrawerTile(Icons.home_outlined, 'Home', () {
         Navigator.pop(context);
@@ -301,13 +406,12 @@ if (_userId == null) {
         'Profile',
         widget.invokedBy == 'chef_dashboard' ||
                 widget.invokedBy == 'producer_dashboard'
-            ? null // disables the tile
+            ? null
             : () async {
                 Navigator.pop(context);
                 final prefs = await SharedPreferences.getInstance();
                 final userType = prefs.getString('user_type');
                 if (userType == 'chef' || userType == 'producer') {
-                  // Do nothing else for chef and producer
                   return;
                 } else {
                   Navigator.push(
@@ -323,17 +427,17 @@ if (_userId == null) {
             widget.invokedBy == 'producer_dashboard'),
       ),
       _buildDrawerTile(
-        Icons.history, // Icon for Order History
-        'Order History', // Title for Order History
+        Icons.history,
+        'Order History',
         widget.invokedBy == 'chef_dashboard' ||
                 widget.invokedBy == 'producer_dashboard'
-            ? null // disables the tile
+            ? null
             : () {
                 Navigator.pop(context);
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => OrderHistoryScreen(), // Navigate to OrderHistoryScreen
+                    builder: (context) => OrderHistoryScreen(),
                     settings: RouteSettings(name: '/order_history'),
                   ),
                 );
@@ -393,7 +497,6 @@ if (_userId == null) {
       }),
     ]);
 
-    // Common tiles for all user types
     tiles.addAll([
       const Divider(height: 1, color: kColorDivider),
       _buildDrawerTile(Icons.help_outline, 'Help', () {
@@ -406,7 +509,6 @@ if (_userId == null) {
           color: Colors.red.shade700),
       _buildDrawerTile(Icons.close, 'Close App', () {
         Navigator.pop(context);
-        // Close the app without clearing data
         SystemNavigator.pop();
       }, color: Colors.red.shade700),
     ]);
@@ -416,7 +518,6 @@ if (_userId == null) {
 
   @override
   Widget build(BuildContext context) {
-    // Determine the image provider based on fetched URL and local path
     ImageProvider<Object> avatarImage;
     if (_profileImageUrl != null && _profileImageUrl!.isNotEmpty) {
       avatarImage = CachedNetworkImageProvider(_profileImageUrl!);
@@ -425,17 +526,15 @@ if (_userId == null) {
       if (file.existsSync()) {
         avatarImage = FileImage(file);
       } else {
-        avatarImage = const AssetImage(
-            'assets/images/proffr.png'); // Default if local file missing
+        avatarImage = const AssetImage('assets/images/proffr.png');
       }
     } else {
-      avatarImage =
-          const AssetImage('assets/images/proffr.png'); // Default asset image
+      avatarImage = const AssetImage('assets/images/proffr.png');
     }
 
     return Drawer(
       child: Container(
-        color: kColorSurface, // Use surface color for drawer background
+        color: kColorSurface,
         child: Column(
           children: [
             UserAccountsDrawerHeader(
@@ -465,7 +564,6 @@ if (_userId == null) {
                 backgroundImage: avatarImage,
                 onBackgroundImageError: (_, __) {
                   print("Error loading profile picture in drawer.");
-                  // Optionally handle error, maybe show initials?
                 },
                 child: _isLoading &&
                         _profileImageUrl == null &&
@@ -481,7 +579,7 @@ if (_userId == null) {
               ),
               decoration: const BoxDecoration(
                 color: kColorPrimaryDark,
-              ), // Dark teal header
+              ),
               margin: EdgeInsets.zero,
             ),
             Expanded(

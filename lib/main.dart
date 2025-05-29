@@ -127,8 +127,8 @@ Future<void> _initializeFCM() async {
 // Initialize drawer data in the background
 Future<void> _initializeDrawer() async {
   try {
-    await AppDrawer.initializeUserData();
-    print("Drawer data initialized");
+    // The drawer will initialize its own data when it's created
+    print("Drawer will initialize data when created");
   } catch (e) {
     print("Error initializing drawer data: $e");
   }
