@@ -10,13 +10,13 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:zinzi2/allmeals.dart';
 import 'package:zinzi2/blogview.dart';
+import 'package:zinzi2/wellness_communities_screen.dart';
 import 'package:zinzi2/cart.dart' as cart;
 import 'package:zinzi2/profile.dart';
 import 'package:zinzi2/chef_dash8888.dart';
 import 'package:zinzi2/produ_dash22.dart';
 import 'package:zinzi2/signup_or_Login.dart';
 import 'package:zinzi2/useranalytics.dart';
-import 'package:zinzi2/social.dart';
 import 'package:zinzi2/chef_net.dart';
 import 'package:zinzi2/orderhistory.dart';
 import 'package:zinzi2/onboard.dart';
@@ -480,8 +480,8 @@ class _AppDrawerState extends State<AppDrawer> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => SocialMediaScreen(),
-            settings: RouteSettings(name: '/social'),
+            builder: (context) => const WellnessCommunitiesScreen(),
+            settings: const RouteSettings(name: '/wellness_communities'),
           ),
         );
       }),
@@ -492,6 +492,7 @@ class _AppDrawerState extends State<AppDrawer> {
           MaterialPageRoute(
             builder: (context) =>
                 const BlogScreen(url: 'https://artchwezi.blogspot.com/'),
+            settings: const RouteSettings(name: '/blog'),
           ),
         );
       }),

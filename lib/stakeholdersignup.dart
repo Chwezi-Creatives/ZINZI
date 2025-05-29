@@ -299,6 +299,8 @@ class _StakeholderSignUpPageState extends State<StakeholderSignUpPage> {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString(
               'stakeholder_user_id', stakeholderId.toString());
+          await prefs.setString(
+              'user_id', stakeholderId.toString());
           print(
               "Stakeholder ID saved: $stakeholderId"); // Optional: for debugging
           _showSnackbar("Sign up successful!", success: true);

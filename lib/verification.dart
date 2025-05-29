@@ -35,34 +35,87 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
   }
 
   Future<void> _loadUserData() async {
-    final prefs = await SharedPreferences.getInstance();
-    // Try to get user_id as string first, fall back to int for backward compatibility
-    final loadedUserId =
-        prefs.getString('user_id') ?? prefs.getInt('user_id')?.toString();
-    final loadedUserType = prefs.getString('user_type');
-    final loadedTransporterId = prefs.getString('transporter_id') ??
-        prefs.getString('user_id'); // Load transporter ID
+    print('🔍 Loading user data from SharedPreferences...');
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Get user_id as string
+      final userIdString = prefs.getString('user_id');
+      print('🔍 user_id from prefs: $userIdString');
+      
+      // Get other user data
+      final userType = prefs.getString('user_type');
+      final transporterId = prefs.getString('transporter_id');
 
-    setState(() {
-      _userId = loadedUserId; // Set the loaded user ID
-      _userType = loadedUserType; // Set the loaded user type
-      _transporterId = loadedTransporterId; // Set the loaded transporter ID
-      _isUserDataLoaded = true; // Mark that user data has been loaded
-    });
+      print('📥 Loaded user data:');
+      print('   - User ID: $userIdString');
+      print('   - User Type: $userType');
+      print('   - Transporter ID: $transporterId');
+
+      // Validate user ID
+      if (userIdString == null || userIdString.isEmpty) {
+        print('❌ user_id is null or empty in SharedPreferences');
+      } else {
+        // Try to parse to int to validate it's a valid number
+        try {
+          final userIdInt = int.parse(userIdString);
+          print('✅ Valid user ID (parsed as int): $userIdInt');
+        } catch (e) {
+          print('⚠️ user_id is not a valid integer: $userIdString');
+        }
+      }
+
+      setState(() {
+        _userId = userIdString; // Store as string in the state
+        _userType = userType;
+        _transporterId = transporterId ?? userIdString;
+        _isUserDataLoaded = true; // Always mark as loaded to prevent infinite loading
+      });
+      
+      print('✅ User data loading completed');
+    } catch (e, stackTrace) {
+      print('❌ Error loading user data:');
+      print('   - Error: $e');
+      print('   - Stack trace: $stackTrace');
+      setState(() {
+        _isUserDataLoaded = true; // Still mark as loaded to avoid infinite loading
+      });
+    }
   }
 
   Future<void> _verifyEmail() async {
+    print('🔐 Starting email verification...');
+    print('   - _isUserDataLoaded: $_isUserDataLoaded');
+    print('   - _userId: $_userId');
+    print('   - _userType: $_userType');
+    print('   - Code entered: ${_codeController.text.trim()}');
+    
+    // Check form validation
+    final isFormValid = _formKey.currentState?.validate() ?? false;
+    print('   - Form validation: $isFormValid');
+    
     // Ensure user data and form state are valid before proceeding
-    if (!_isUserDataLoaded ||
-        _userId == null ||
-        _userType == null ||
-        !_formKey.currentState!.validate()) {
+    if (!_isUserDataLoaded || _userId == null || _userType == null || !isFormValid) {
+      print('❌ Validation failed:');
+      if (!_isUserDataLoaded) print('      - User data not loaded');
+      if (_userId == null) print('      - User ID is null');
+      if (_userType == null) print('      - User type is null');
+      if (!isFormValid) print('      - Form validation failed');
+      
+      // Reload user data in case it failed to load previously
+      if (!_isUserDataLoaded || _userId == null || _userType == null) {
+        print('🔄 Attempting to reload user data...');
+        await _loadUserData();
+      }
+      
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text(
             'Please make sure you have entered the code and user data is available.'),
       ));
       return;
     }
+    
+    print('✅ All validations passed, proceeding with verification...');
 
     setState(() {
       _isLoading = true; // Set loading state
@@ -70,24 +123,33 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
 
     try {
       // Convert user ID to int for the API
-      final userIdInt = int.tryParse(
-          _userId!); // Use non-null assertion as _userId is checked above
+      final userIdInt = int.tryParse(_userId!);
 
       if (userIdInt == null) {
-        throw Exception('Invalid user ID format');
+        print('❌ Invalid user ID format: "$_userId"');
+        throw Exception('Invalid user ID format. Expected a number but got: $_userId');
       }
 
+      final requestBody = {
+        'user_id': userIdInt,
+        'verification_code': _codeController.text.trim(),
+        'user_type': _userType,
+      };
+      
+      print('📤 Sending verification request to: $apibaseurl/rr/verify_user');
+      print('   - Request body: $requestBody');
+      
       final response = await http.post(
         Uri.parse('$apibaseurl/rr/verify_user'),
         headers: {
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({
-          'user_id': userIdInt,
-          'verification_code': _codeController.text.trim(),
-          'user_type': _userType, // Include user_type
-        }),
+        body: jsonEncode(requestBody),
       );
+      
+      print('📥 Received response:');
+      print('   - Status code: ${response.statusCode}');
+      print('   - Body: ${response.body}');
 
       if (response.statusCode == 200) {
         // Navigate based on user type
@@ -135,9 +197,14 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
           content: Text(responseData['message'] ?? 'Verification failed'),
         ));
       }
-    } catch (error) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('An error occurred. Please try again later.'),
+    } catch (error, stackTrace) {
+      print('❌ Error during verification:');
+      print('   - Error: $error');
+      print('   - Stack trace: $stackTrace');
+      
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Error: ${error.toString()}'),
+        duration: const Duration(seconds: 5),
       ));
     } finally {
       setState(() {
@@ -248,7 +315,7 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
                   ),
                   const SizedBox(height: 20),
                   const Text(
-                    "Didn't receive a code? Check your email or request a new one.",
+                    "Didn't receive a code? Check your email it could take a few seconds to arrive.",
                     style: TextStyle(fontSize: 14, color: Colors.black54),
                     textAlign: TextAlign.center,
                   ),

@@ -284,6 +284,7 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
           if (transporterId != null) {
             final prefs = await SharedPreferences.getInstance();
             await prefs.setString('transporter_id', transporterId.toString());
+            await prefs.setString('user_id', transporterId.toString());
             await prefs.setString('user_type',
                 'transporter'); // Changed to lowercase for consistency
             await prefs.setBool('is_logged_in', true);

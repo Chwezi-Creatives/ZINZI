@@ -516,6 +516,8 @@ class _ChefSignUpPageBetterNewState extends State<ChefSignUpPageBetterNew> {
         if (chefID != null && userType != null) {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString('chef_user_id', chefID.toString());
+          await prefs.setString('user_id', chefID.toString());
+          await prefs.setString('user_type', userType);
           await prefs.setString('chef_user_type', userType);
           await prefs.setBool('is_logged_in', true);
           // Register FCM token with user info (async, do not await)
