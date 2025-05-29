@@ -472,6 +472,19 @@ class Product {
       source: source != null ? source() : this.source,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'produce_id': produceId,
+      'produce_name': produceName,
+      if (calories != null) 'calories': calories,
+      if (carbohydrates != null) 'carbohydrates': carbohydrates,
+      if (fats != null) 'fats': fats,
+      if (proteins != null) 'proteins': proteins,
+      if (unitGrams != null) 'unit_grams': unitGrams,
+      if (source != null) 'source': source,
+    };
+  }
 }
 
 // Rider/Transporter Model (Unified)
@@ -886,23 +899,68 @@ class ProducerApiService {
     }
   }
 
+  // Cache constants
+  static const String _produceCacheKey = 'producer_produce_cache';
+  static const String _produceCacheTimestampKey = 'producer_produce_cache_timestamp';
+  static const int _cacheExpiryDays = 3; // Cache expiry in days
+
   // --- Produce and Stock Methods ---
-  static Future<List<Product>> fetchProducerProduce() async {
-    // GET /rr/produce - fetches MASTER list of all produce items
+  static Future<List<Product>> fetchProducerProduce({bool forceRefresh = false}) async {
+    // Check cache first if not forcing refresh
+    if (!forceRefresh) {
+      final cachedProduce = await UserCache.getData(_produceCacheKey);
+      final cachedTimestamp = await UserCache.getData(_produceCacheTimestampKey);
+      
+      if (cachedProduce is List && cachedTimestamp is String) {
+        final cacheTime = DateTime.tryParse(cachedTimestamp);
+        if (cacheTime != null && 
+            DateTime.now().difference(cacheTime).inDays < _cacheExpiryDays) {
+          try {
+            final List<Product> products = (cachedProduce as List)
+                .map((item) => Product.fromJson(item as Map<String, dynamic>))
+                .toList();
+            print("[ProducerDash] Using cached produce list (${products.length} items)");
+            return products;
+          } catch (e) {
+            print("[ProducerDash] Error parsing cached produce: $e");
+            // Continue to fetch fresh data if cache parsing fails
+          }
+        }
+      }
+    }
+    
+    // If we get here, either cache is invalid or we're forcing a refresh
     final Uri uri = Uri.parse('$_apibaseurl/rr/produce');
-    print("[ProducerDash] Fetching master produce list: $uri");
+    print("[ProducerDash] Fetching fresh master produce list: $uri");
     try {
-      // Assuming produce list might need auth
-      final response = await http.get(uri,
-          headers: await _getReadHeaders(requiresAuth: true));
+      final response = await http.get(
+        uri,
+        headers: await _getReadHeaders(requiresAuth: true),
+      );
+      
       if (response.statusCode == 200) {
         final dynamic handledData = _handleApiResponse(response.body);
         if (handledData is List) {
           final List<Product> produce = handledData
               .map<Product>((prodJson) => Product.fromJson(prodJson))
               .toList();
-          print(
-              "[ProducerDash] Fetched ${produce.length} produce items from master list.");
+          
+          print("[ProducerDash] Fetched ${produce.length} produce items from API");
+          
+          // Cache the results
+          try {
+            final produceJson = produce.map((p) => p.toJson()).toList();
+            await UserCache.saveData(_produceCacheKey, produceJson);
+            await UserCache.saveData(
+              _produceCacheTimestampKey, 
+              DateTime.now().toIso8601String()
+            );
+            print("[ProducerDash] Cached ${produce.length} produce items");
+          } catch (e) {
+            print("[ProducerDash] Error caching produce: $e");
+            // Don't fail the request if caching fails
+          }
+          
           return produce;
         } else {
           print(
@@ -1148,85 +1206,37 @@ class ProducerDash22 extends StatefulWidget {
 
   /// Preload producer dashboard cache for splash screen (no UI, no context needed)
   static Future<void> preloadCacheForSplash() async {
-    // --- Profile Cache ---
-    const String profileKey = 'producer_profile';
-    const String profileTsKey = 'producer_profile_cache_timestamp';
-    const String ordersKey = 'producer_orders';
-    const String ordersTsKey = 'producer_orders_cache_timestamp';
-    const String produceKey = 'producer_produce';
-    const String produceTsKey = 'producer_produce_cache_timestamp';
-    final now = DateTime.now();
-
-    // --- Profile ---
-    final cachedProfile = await UserCache.getData(profileKey);
-    final cachedProfileTs = await UserCache.getData(profileTsKey);
-    bool profileCacheValid = false;
-    if (cachedProfile != null && cachedProfileTs != null) {
-      final cacheTime =
-          DateTime.tryParse(cachedProfileTs as String); // Ensure cast
-      if (cacheTime != null && now.difference(cacheTime).inMinutes < 15) {
-        profileCacheValid = true;
-      }
-    }
-    if (!profileCacheValid) {
+    print('[Splash][ProducerDash] Starting cache preload...');
+    final stopwatch = Stopwatch()..start();
+    
+    try {
+      // Fetch profile - this will use its own caching
       try {
-        final profile = await ProducerApiService.fetchProducerProfile();
-        await UserCache.saveData(profileKey, profile.toJson());
-        await UserCache.saveData(profileTsKey, now.toIso8601String());
+        await ProducerApiService.fetchProducerProfile();
+        print('[Splash][ProducerDash] Profile cache preloaded');
       } catch (e) {
-        print('[Splash][ProducerDash] profile preload error: $e');
+        print('[Splash][ProducerDash] Profile preload error: $e');
       }
-    } else {
-      print(
-          '[Splash][ProducerDash] profile preload skipped: Cache still valid.');
-    }
-
-    // --- Orders ---
-    final cachedOrders = await UserCache.getData(ordersKey);
-    final cachedOrdersTs = await UserCache.getData(ordersTsKey);
-    bool ordersCacheValid = false;
-    if (cachedOrders is List && cachedOrdersTs is String) {
-      final cacheTime = DateTime.tryParse(cachedOrdersTs);
-      if (cacheTime != null && now.difference(cacheTime).inMinutes < 15) {
-        ordersCacheValid = true;
-      }
-    }
-    if (!ordersCacheValid) {
+      
+      // Fetch orders - this will use its own caching
       try {
-        final orders = await ProducerApiService.fetchProducerOrders();
-        final ordersJson = orders.map((o) => _serializeOrder(o)).toList();
-        await UserCache.saveData(ordersKey, ordersJson);
-        await UserCache.saveData(ordersTsKey, now.toIso8601String());
+        await ProducerApiService.fetchProducerOrders();
+        print('[Splash][ProducerDash] Orders cache preloaded');
       } catch (e) {
-        print('[Splash][ProducerDash] orders preload error: $e');
+        print('[Splash][ProducerDash] Orders preload error: $e');
       }
-    } else {
-      print(
-          '[Splash][ProducerDash] orders preload skipped: Cache still valid.');
-    }
-
-    // --- Produce ---
-    final cachedProduce = await UserCache.getData(produceKey);
-    final cachedProduceTs = await UserCache.getData(produceTsKey);
-    bool produceCacheValid = false;
-    if (cachedProduce is List && cachedProduceTs is String) {
-      final cacheTime = DateTime.tryParse(cachedProduceTs);
-      if (cacheTime != null && now.difference(cacheTime).inMinutes < 15) {
-        produceCacheValid = true;
-      }
-    }
-    if (!produceCacheValid) {
+      
+      // Fetch produce - this will use the new 3-day caching
       try {
-        final produce = await ProducerApiService.fetchProducerProduce();
-        final produceJson = produce.map((p) => _serializeProduct(p)).toList();
-        await UserCache.saveData(produceKey, produceJson);
-        await UserCache.saveData(produceTsKey, now.toIso8601String());
+        await ProducerApiService.fetchProducerProduce();
+        print('[Splash][ProducerDash] Produce cache preloaded');
       } catch (e) {
-        print('[Splash][ProducerDash] produce preload error: $e');
+        print('[Splash][ProducerDash] Produce preload error: $e');
       }
-    } else {
-      print(
-          '[Splash][ProducerDash] produce preload skipped: Cache still valid.');
+      
+      print('[Splash][ProducerDash] Cache preload completed in ${stopwatch.elapsedMilliseconds}ms');
+    } catch (e) {
+      print('[Splash][ProducerDash] Error during cache preload: $e');
     }
   }
 
