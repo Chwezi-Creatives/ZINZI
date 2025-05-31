@@ -118,7 +118,7 @@ class AppDrawer extends StatefulWidget {
       final response = await http.get(
         Uri.parse(endpoint),
         headers: {'Content-Type': 'application/json'},
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 20));
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
@@ -289,7 +289,7 @@ class _AppDrawerState extends State<AppDrawer> {
       final response = await http.get(
         Uri.parse(endpoint),
         headers: {'Content-Type': 'application/json'},
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 20));
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
