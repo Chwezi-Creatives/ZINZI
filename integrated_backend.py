@@ -2000,16 +2000,27 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
             if not isinstance(e, HTTPException):
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error validating product: {str(e)}")
             raise
-    async def create_order(self, conn: asyncpg.Connection, user_id: int, order_type: str,
-                           items: Optional[List[Dict]] = None,
-                           order_status: str = "pending", payment_status: str = "pending", payment_mode: str = "cash",
-                           delivery_address: Optional[str] = None, notes: Optional[str] = None,
-                           total_price: Optional[float] = None, amount_paid: float = 0.0,
-                           product_id: Optional[Union[str, int]] = None,
-                           chef_id: Optional[int] = None, producer_id: Optional[int] = None,
-                           quantity: Optional[int] = None,
-                           transporter_id: Optional[int] = None, transaction_id: Optional[str] = None
-                           ) -> Dict[str, Any]:
+    async def create_order(
+        self,
+        conn: asyncpg.Connection,
+        user_id: int,
+        order_type: str,
+        user_type: str,
+        items: Optional[List[Dict]] = None,
+        order_status: str = "pending",
+        payment_status: str = "pending",
+        payment_mode: str = "cash",
+        delivery_address: Optional[str] = None,
+        notes: Optional[str] = None,
+        total_price: Optional[float] = None,
+        amount_paid: float = 0.0,
+        product_id: Optional[Union[str, int]] = None,
+        chef_id: Optional[int] = None,
+        producer_id: Optional[int] = None,
+        quantity: Optional[int] = None,
+        transporter_id: Optional[int] = None,
+        transaction_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Create a new order and send notification to the user.
         """
@@ -2109,72 +2120,88 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
 
             sql = """
                 INSERT INTO orders (
-                    user_id, order_type, product_id, chef_id, producer_id, transporter_id,
+                    user_id, user_type, order_type, product_id, chef_id, producer_id, transporter_id,
                     order_date, delivery_address, order_status, total_price, notes,
                     payment_status, payment_mode, amount_paid, transaction_id, quantity,
                     gig_details, complementary_meals
                 )
-                VALUES ($1,$2,$3,$4,$5,$6, NOW(), $7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+                VALUES ($1,$2,$3,$4,$5,$6,$7, NOW(), $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
                 RETURNING order_id
             """
             params: Tuple[Any, ...] = (
-                user_id_i, order_type_l, prod_id_s, chef_id_i, producer_id_i, transporter_id_i,
+                user_id_i, user_type, order_type_l, prod_id_s, chef_id_i, producer_id_i, transporter_id_i,
                 delivery_address_s, order_status_l, price_f, notes_s, payment_status_l,
                 payment_mode_l, paid_f, transaction_id, qty_i, gig_details_json,
                 complementary_meals_serialized_json
             )
             order_id = await self._execute_query(conn, sql, params, returning_id_column='order_id')
 
-            if order_id:
-                logger.info(f"Order created successfully for user {user_id_i} with order_id {order_id}")
-                
-                # Send notification to user
+            if not order_id:
+                logger.error(f"Order creation attempt failed for user {user_id_i} (no ID returned).")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Order creation failed unexpectedly (no ID returned)."
+                )
+
+            logger.info(f"Order created successfully for user {user_id_i} (type: {user_type}) with order_id {order_id}")
+            logger.debug(f"Order details - user_id: {user_id_i}, user_type: {user_type}, order_type: {order_type_l}")
+            
+            # Send notification to user
+            await self._send_order_notification(
+                conn=conn,
+                user_id=str(user_id_i),
+                user_type='user',
+                order_id=str(order_id),
+                new_status=order_status_l,
+                notification_type='order_created',
+                order_type=order_type
+            )
+            
+            # Send notification to chef if exists
+            if chef_id_i is not None:
                 await self._send_order_notification(
                     conn=conn,
-                    user_id=str(user_id_i),
-                    user_type='user',
+                    user_id=str(chef_id_i),
+                    user_type='chef',
                     order_id=str(order_id),
                     new_status=order_status_l,
                     notification_type='order_created',
                     order_type=order_type
                 )
                 
-                # Send notification to chef if exists
-                if chef_id_i is not None:
-                    await self._send_order_notification(
-                        conn=conn,
-                        user_id=str(chef_id_i),
-                        user_type='chef',
-                        order_id=str(order_id),
-                        new_status=order_status_l,
-                        notification_type='order_created',
-                        order_type=order_type
-                    )
-                    
-                # Send notification to producer if exists
-                if producer_id_i is not None:
-                    await self._send_order_notification(
-                        conn=conn,
-                        user_id=str(producer_id_i),
-                        user_type='producer',
-                        order_id=str(order_id),
-                        new_status=order_status_l,
-                        notification_type='order_created',
-                        order_type=order_type
-                    )
-                
-                return {"message": "Order created", "order_id": order_id, "chef_id": derived_chef_id, "producer_id": derived_producer_id, "success": True}
-            else:
-                logger.error(f"Order creation attempt failed for user {user_id_i} (no ID returned).")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order creation failed unexpectedly (no ID returned).")
+            # Send notification to producer if exists
+            if producer_id_i is not None:
+                await self._send_order_notification(
+                    conn=conn,
+                    user_id=str(producer_id_i),
+                    user_type='producer',
+                    order_id=str(order_id),
+                    new_status=order_status_l,
+                    notification_type='order_created',
+                    order_type=order_type
+                )
+            
+            return {
+                "message": "Order created",
+                "order_id": order_id,
+                "chef_id": derived_chef_id,
+                "producer_id": derived_producer_id,
+                "success": True
+            }
 
         except Exception as e: # Catch-all for other exceptions like DB connection issues
-            logger.error(f"Error creating order for user {user_id}: {str(e)}", exc_info=True)
+            logger.error(f"Error creating order for user {user_id} (type: {user_type}): {str(e)}", exc_info=True)
             if not isinstance(e, HTTPException): # Avoid re-wrapping HTTPExceptions
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred: {str(e)}")
+                error_detail = f"An unexpected error occurred while processing your order"
+                logger.error(f"Order creation failed - User ID: {user_id}, User Type: {user_type}, Error: {str(e)}")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_detail)
             raise
 
-    async def read_orders(self, conn: asyncpg.Connection, order_id=None, chef_id=None, producer_id=None, user_id=None, transporter_id=None) -> List[Dict[str, Any]]:
+    async def read_orders(self, conn: asyncpg.Connection, order_id=None, chef_id=None, producer_id=None, user_id=None, transporter_id=None, user_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        if user_id is not None and user_type is None:
+            error_msg = "User type is required when filtering by user_id"
+            logger.error(f"Validation error in read_orders: {error_msg}. User ID: {user_id}")
+            raise ValueError(error_msg)
         logger.info(f"Reading orders with criteria: order_id={order_id}, chef_id={chef_id}, producer_id={producer_id}, user_id={user_id}, transporter_id={transporter_id}")
         sql = """
             WITH MealDetails AS ( SELECT m.meal_id::text, m.meal_name, COALESCE(STRING_AGG(DISTINCT p.produce_name, ', ' ORDER BY p.produce_name), '') AS ingredients FROM meals m LEFT JOIN meal_ingredients mi ON m.meal_id = mi.meal_id LEFT JOIN produce p ON mi.produce_id = p.produce_id GROUP BY m.meal_id, m.meal_name ),
@@ -2224,6 +2251,17 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
                 sql += f" AND o.user_id = ${param_index}"
                 params_list.append(_safe_int(user_id, "user_id"))
                 param_index += 1
+                
+                # user_type is required when user_id is provided
+                if not user_type:
+                    error_msg = "User type cannot be empty when filtering by user_id"
+                    logger.error(f"Validation error in read_orders: {error_msg}. User ID: {user_id}")
+                    raise ValueError(error_msg)
+                
+                sql += f" AND o.user_type = ${param_index}"
+                params_list.append(str(user_type).lower())
+                param_index += 1
+                logger.debug(f"Filtering orders by user_id: {user_id}, user_type: {user_type}")
             if transporter_id is not None:
                 sql += f" AND o.transporter_id = ${param_index}"
                 params_list.append(_safe_int(transporter_id, "transporter_id"))
@@ -3998,12 +4036,26 @@ async def create_order_endpoint(order_data: dict = Body(...), conn: asyncpg.Conn
     # ... (implementation unchanged, uses conn from dependency) ...
     logger.debug(f"Received order payload: {order_data}")
     try:
-        user_id=order_data['user_id']; order_type=order_data['order_type']; product_id=order_data.get('product_id')
-        delivery_address=order_data.get('delivery_address'); order_status=order_data.get('order_status','pending'); total_price=order_data.get('total_price',0.0)
-        notes=order_data.get('notes'); payment_status=order_data.get('payment_status','pending'); payment_mode=order_data.get('payment_mode','cash')
-        amount_paid=order_data.get('amount_paid',0.0); transaction_id=order_data.get('transaction_id'); quantity=order_data.get('quantity',1)
-        transporter_id=order_data.get('transporter_id'); items=order_data.get('items')
-        chef_id=order_data.get('chef_id'); producer_id=order_data.get('producer_id')
+        # Extract required fields
+        user_id = order_data['user_id']
+        order_type = order_data['order_type']
+        user_type = order_data['user_type']  # Now required
+        
+        # Extract optional fields with defaults
+        product_id = order_data.get('product_id')
+        delivery_address = order_data.get('delivery_address')
+        order_status = order_data.get('order_status', 'pending')
+        total_price = order_data.get('total_price', 0.0)
+        notes = order_data.get('notes')
+        payment_status = order_data.get('payment_status', 'pending')
+        payment_mode = order_data.get('payment_mode', 'cash')
+        amount_paid = order_data.get('amount_paid', 0.0)
+        transaction_id = order_data.get('transaction_id')
+        quantity = order_data.get('quantity', 1)
+        transporter_id = order_data.get('transporter_id')
+        items = order_data.get('items')
+        chef_id = order_data.get('chef_id')
+        producer_id = order_data.get('producer_id')
         if isinstance(items, list) and len(items) > 0:
              first=items[0]; chef_id=first.get('chef_id',chef_id); producer_id=first.get('producer_id',producer_id); product_id=first.get('product_id',product_id); quantity=first.get('quantity',quantity)
         is_gig = str(order_type).lower().strip() == 'gig'
@@ -4011,7 +4063,27 @@ async def create_order_endpoint(order_data: dict = Body(...), conn: asyncpg.Conn
             if chef_id is None and producer_id is None: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='chef_id or producer_id required.')
             if chef_id is not None and producer_id is not None: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Cannot set both chef_id and producer_id.')
         async with conn.transaction():
-            result = await orders_crud.create_order(conn=conn, user_id=user_id, order_type=order_type, product_id=product_id, chef_id=chef_id, producer_id=producer_id, delivery_address=delivery_address, order_status=order_status, total_price=total_price, notes=notes, payment_status=payment_status, payment_mode=payment_mode, amount_paid=amount_paid, transaction_id=transaction_id, quantity=quantity, transporter_id=transporter_id, items=items)
+            # user_type is now required and will be validated by create_order
+            result = await orders_crud.create_order(
+                conn=conn, 
+                user_id=user_id, 
+                order_type=order_type, 
+                product_id=product_id, 
+                chef_id=chef_id, 
+                producer_id=producer_id, 
+                delivery_address=delivery_address, 
+                order_status=order_status, 
+                total_price=total_price, 
+                notes=notes, 
+                payment_status=payment_status, 
+                payment_mode=payment_mode, 
+                amount_paid=amount_paid, 
+                transaction_id=transaction_id, 
+                quantity=quantity, 
+                transporter_id=transporter_id, 
+                items=items, 
+                user_type=user_type  # This is now required
+            )
             # Notification should be triggered only after successful commit
             
             # Trigger notification for chef or producer
@@ -4094,8 +4166,31 @@ async def get_completion_code_endpoint(order_id: int = Path(..., gt=0), user_id:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected server error occurred.") from e
 
 @app.get('/rr/orders')
-async def get_orders_endpoint(order_id: Optional[int]=Query(None), chef_id: Optional[int]=Query(None), producer_id: Optional[int]=Query(None), user_id: Optional[int]=Query(None), transporter_id: Optional[int]=Query(None), conn: asyncpg.Connection=Depends(get_db)):
-    data = await orders_crud.read_orders(conn=conn, order_id=order_id, chef_id=chef_id, producer_id=producer_id, user_id=user_id, transporter_id=transporter_id) # Pass conn
+async def get_orders_endpoint(
+    order_id: Optional[int] = Query(None),
+    chef_id: Optional[int] = Query(None),
+    producer_id: Optional[int] = Query(None),
+    user_id: Optional[int] = Query(None),
+    transporter_id: Optional[int] = Query(None),
+    user_type: Optional[str] = Query(None),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    # Require user_type when user_id is provided
+    if user_id is not None and user_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="user_type is required when user_id is provided"
+        )
+        
+    data = await orders_crud.read_orders(
+        conn=conn,
+        order_id=order_id,
+        chef_id=chef_id,
+        producer_id=producer_id,
+        user_id=user_id,
+        transporter_id=transporter_id,
+        user_type=user_type
+    )
     return {'message': 'Orders retrieved.', 'data': data}
 
 @app.patch('/rr/orders/{order_id}/status')
