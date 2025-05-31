@@ -7,6 +7,8 @@ import 'dart:convert';
 import 'nutrition+.dart'; // Ensure this file contains your NutritionItem model definition
 import 'cart.dart' as cart;
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:zinzi2/utils/overlay_utils.dart';
 import 'producer_selector_bottom_sheet.dart';
 
 const Color primaryColor = Color(0xFF0B5345); // Dark teal
@@ -154,6 +156,11 @@ class _Nutri_DetailPageState extends State<Nutri_DetailPage>
   }
 
   Future<void> _showProducerSelector() async {
+    // Get current user info
+    final prefs = await SharedPreferences.getInstance();
+    final currentUserId = prefs.getString('user_id');
+    final currentUserType = prefs.getString('user_type')?.toLowerCase();
+
     // If we're already loading or cache check is in progress, show loading indicator
     if (_isLoadingProducers) {
       // Show loading dialog if still fetching data
@@ -239,16 +246,32 @@ class _Nutri_DetailPageState extends State<Nutri_DetailPage>
         }
         return ProducerSelectorBottomSheet(
           producers: _cachedProducers!,
-          onSelected: (producer) {
-            setState(() {
-              selectedProducer = producer;
-            });
-            Navigator.pop(context);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                  content:
-                      Text('Producer selected: ${producer['name'] ?? ''}')),
-            );
+          onSelected: (producer) async {
+            // Check if current user is a producer trying to order from themselves
+            if (currentUserType == 'producer' && 
+                (producer['producer_id']?.toString() == currentUserId || 
+                 producer['id']?.toString() == currentUserId)) {
+              debugPrint('Producer cannot order from themselves');
+              if (mounted) {
+                OverlayUtils.showErrorOverlay(
+                  context: context,
+                  message: 'You cannot order from yourself',
+                );
+              }
+              return;
+            }
+            
+            if (mounted) {
+              setState(() {
+                selectedProducer = producer;
+              });
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Producer selected: ${producer['name'] ?? ''}'),
+                ),
+              );
+            }
           },
         );
       },

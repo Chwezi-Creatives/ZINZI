@@ -1516,6 +1516,10 @@ class _ProfilePageState extends State<ProfilePage>
     return Scaffold(
       backgroundColor: kColorBackground,
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
         title: Text('Profile', style: GoogleFonts.poppins()),
         backgroundColor: kColorPrimaryDark,
         foregroundColor: kColorTextOnPrimary,

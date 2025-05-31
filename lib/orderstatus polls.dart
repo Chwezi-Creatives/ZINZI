@@ -4,16 +4,13 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:intl/intl.dart';
-import 'package:zinzi2/app_drawer_unified.dart'; // Assuming this import is correct
+import 'package:zinzi2/app_drawer_unified.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
-import 'package:audioplayers/audioplayers.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'notifications/notification_provider.dart';
 
 // Add this to your main.dart or a separate routes.dart file
@@ -293,7 +290,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen>
     // Cancel any existing timer just in case
     _pollingTimer?.cancel();
 
-    _pollingTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
       _log(
           'Polling timer tick. mounted: $mounted, _isVerificationProcessActive: $_isVerificationProcessActive, _isRefreshing: $_isRefreshing');
 
@@ -688,10 +685,12 @@ class _OrderStatusScreenState extends State<OrderStatusScreen>
 
     try {
       _log('Fetching data for order IDs: ${widget.orderIdList}');
+      final prefs = await SharedPreferences.getInstance();
+      final userType = prefs.getString('user_type') ?? 'customer';
       final fetchFutures = widget.orderIdList.map((orderId) async {
         try {
           final uri = Uri.parse(
-              '$_apiBaseUrl/rr/orders?user_id=${widget.userId}&order_id=$orderId');
+              '$_apiBaseUrl/rr/orders?user_id=${widget.userId}&order_id=$orderId&user_type=$userType');
           _log('Fetching details for Order #$orderId from: $uri');
           final response =
               await http.get(uri).timeout(const Duration(seconds: 25));

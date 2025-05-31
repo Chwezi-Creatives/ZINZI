@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:zinzi2/allmeals.dart'; // Assuming this screen exists
+import 'package:zinzi2/utils/overlay_utils.dart'; // Add this import
 import 'package:zinzi2/app_drawer_unified.dart'
     as drawer; // Import unified AppDrawer with prefix
 // **** IMPORT THE UPDATED CART ****
@@ -14,6 +15,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'dart:async';
 import 'package:google_fonts/google_fonts.dart'; // For consistent font
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:zinzi2/user_cache.dart'; // Import UserCache
 import 'package:zinzi2/cache_config.dart'; // Import CacheConfig
@@ -826,7 +828,24 @@ class _MealDetailScreenState extends State<MealDetailScreen>
   }
 
   // --- UPDATED: _chooseChef ---
-  void _chooseChef(Map<String, dynamic> chef) {
+  void _chooseChef(Map<String, dynamic> chef) async {
+    // Check if current user is a chef trying to order from themselves
+    final prefs = await SharedPreferences.getInstance();
+    final currentUserId = prefs.getString('user_id');
+    final currentUserType = prefs.getString('user_type')?.toLowerCase();
+    
+    if (currentUserType == 'chef' && 
+        chef['chefid']?.toString() == currentUserId) {
+      debugPrint('Chef cannot order from themselves');
+      if (mounted) {
+        OverlayUtils.showErrorOverlay(
+          context: context,
+          message: 'You cannot order from yourself',
+        );
+      }
+      return;
+    }
+
     final mealTitle = widget.meal['Meal_name'] ?? 'Unknown Meal';
     final mainMealPrice = _parsePrice(widget.meal['Price']);
 
@@ -851,7 +870,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
       double complementaryTotalPrice = currentlySelectedComplementaries.fold(0, (sum, item) => sum + (item['price'] as double? ?? 0.0));
       double singleItemPriceWithComplementaries = mainMealPrice + complementaryTotalPrice;
 
-       // Get quantity (use current cart quantity if exists, else use screen's default)
+      // Get quantity (use current cart quantity if exists, else use screen's default)
        int quantity = ShoppingCart.getItemQuantity(mealTitle);
        if (quantity == 0) quantity = _quantityPerDay > 0 ? _quantityPerDay : 1; // If not in cart, use local setting
 
@@ -878,7 +897,25 @@ class _MealDetailScreenState extends State<MealDetailScreen>
   }
 
   // --- UPDATED: _chooseProducer ---
-  void _chooseProducer(Map<String, dynamic> producer) {
+  void _chooseProducer(Map<String, dynamic> producer) async {
+    // Check if current user is a producer trying to order from themselves
+    final prefs = await SharedPreferences.getInstance();
+    final currentUserId = prefs.getString('user_id');
+    final currentUserType = prefs.getString('user_type')?.toLowerCase();
+    
+    if (currentUserType == 'producer' && 
+        (producer['producer_id']?.toString() == currentUserId || 
+         producer['id']?.toString() == currentUserId)) {
+      debugPrint('Producer cannot order from themselves');
+      if (mounted) {
+        OverlayUtils.showErrorOverlay(
+          context: context,
+          message: 'You cannot order from yourself',
+        );
+      }
+      return;
+    }
+
     final mealTitle = widget.meal['Meal_name'] ?? 'Unknown Meal';
     final mainMealPrice = _parsePrice(widget.meal['Price']);
 

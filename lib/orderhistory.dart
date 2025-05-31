@@ -134,7 +134,9 @@ class OrderHistoryScreen extends StatefulWidget {
           }
         }
         if (userId != null && userId.isNotEmpty) {
-          final uri = Uri.parse('$apiBaseUrl/rr/orders?user_id=$userId');
+          final prefs = await SharedPreferences.getInstance();
+          final userType = prefs.getString('user_type') ?? 'customer';
+          final uri = Uri.parse('$apiBaseUrl/rr/orders?user_id=$userId&user_type=$userType');
           final response = await http.get(uri).timeout(const Duration(seconds: 25));
           if (response.statusCode == 200) {
             final data = json.decode(response.body);
@@ -168,9 +170,10 @@ class OrderHistoryScreen extends StatefulWidget {
   State<OrderHistoryScreen> createState() => _OrderHistoryScreenState();
 }
 
-class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
+class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTickerProviderStateMixin {
   Future<List<Map<String, dynamic>>>? _orderHistoryFuture;
   List<Map<String, dynamic>> _orders = [];
+  List<Map<String, dynamic>> _filteredOrders = [];
   static const String _cacheKey = 'order_history_cache';
   static const String _cacheTsKey = 'order_history_cache_ts';
   final Map<int, bool> _isExpandedMap = {};
@@ -178,6 +181,59 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   bool _isRefreshing = false;
   // Track previous order statuses to detect changes
   final Map<int, String> _previousOrderStatuses = {};
+  
+  // Status filter state
+  String? _selectedStatus;
+  
+  // Available status options for filtering in a logical order
+  // Ordered by typical order lifecycle, with most important/most used statuses first
+  final List<Map<String, dynamic>> _statusOptions = [
+    {'status': 'all', 'label': 'All'},
+    {'status': 'pending', 'label': 'Pending'},
+    {'status': 'accepted', 'label': 'Accepted'},
+    {'status': 'processing', 'label': 'Processing'},
+    {'status': 'shipped', 'label': 'Shipped'},
+    {'status': 'delivered', 'label': 'Delivered'},
+    {'status': 'completed', 'label': 'Completed'},
+    {'status': 'verification needed', 'label': 'Needs Verification'},
+    // Less common statuses
+    {'status': 'cancelled', 'label': 'Cancelled'},
+    {'status': 'failed', 'label': 'Failed'},
+  ];
+  
+  // Apply current filters to orders
+  void _applyFilters() {
+    if (_orders.isEmpty) {
+      _filteredOrders = [];
+      return;
+    }
+    
+    setState(() {
+      if (_selectedStatus == null || _selectedStatus == 'all') {
+        _filteredOrders = List.from(_orders);
+      } else {
+        _filteredOrders = _orders.where((order) {
+          final status = order['order_status']?.toString().toLowerCase() ?? 'unknown';
+          // Also check for 'assigned' status when looking for 'accepted' as they might be used interchangeably
+          if (_selectedStatus == 'accepted' && status == 'assigned') {
+            return true;
+          }
+          return status == _selectedStatus;
+        }).toList();
+      }
+    });
+  }
+  
+  // Set the active status filter
+  void _setStatusFilter(String? status) {
+    setState(() {
+      _selectedStatus = status == _selectedStatus ? null : status;
+      if (_selectedStatus == null) {
+        _selectedStatus = 'all'; // Default to 'All' if deselected
+      }
+      _applyFilters();
+    });
+  }
 
   // --- State Variables ---
   // Flag to pause polling when verification dialog is active
@@ -186,23 +242,57 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   int? _loadingVerificationOrderId;
 
   late NotificationProvider _notificationProvider;
+  
+  // Animation controller for refresh icon
+  late AnimationController _refreshController;
+  late Animation<double> _refreshAnimation;
 
   @override
   void initState() {
     super.initState();
     print('[DEBUG] initState called for OrderHistoryScreen');
     print('[OrderHistory] Polling page initialized.'); // DEBUG: Polling page start
+    
+    // Initialize refresh animation controller
+    _refreshController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    );
+    
+    // Only start repeating when actually refreshing
+    if (_isRefreshing) {
+      _refreshController.repeat();
+    }
+    
+    _refreshAnimation = Tween(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _refreshController,
+        curve: Curves.linear,
+      ),
+    );
+    
     _orderHistoryFuture = _loadInitialHistory();
     _startPolling();
     // Listen for notification refreshes
     _notificationProvider = Provider.of<NotificationProvider>(context, listen: false);
     _notificationProvider.addListener(_handleNotificationRefresh);
+    
+    // Initialize filtered orders once data is loaded
+    _orderHistoryFuture?.then((orders) {
+      if (mounted) {
+        setState(() {
+          _orders = orders;
+          _applyFilters();
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
     _pollingTimer?.cancel();
     _notificationProvider.removeListener(_handleNotificationRefresh);
+    _refreshController.dispose();
     super.dispose();
   }
 
@@ -225,8 +315,8 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   void _startPolling() {
     // Cancel existing timer if any
     _pollingTimer?.cancel();
-    print('[OrderHistory] Polling started (interval: 15s).'); // DEBUG: Polling started
-    _pollingTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
+    print('[OrderHistory] Polling started (interval: 5s).'); // DEBUG: Polling started
+    _pollingTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
       // --- MODIFIED: Only poll if verification process is NOT active ---
       if (!_isVerificationProcessActive && mounted) {
         print("Polling for order updates...");
@@ -246,6 +336,14 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       print('[DEBUG] Early return: _isRefreshing is true, skipping poll.');
       return; // Prevent concurrent refreshes
     }
+    
+    // Start refresh animation
+    if (!_refreshController.isAnimating) {
+      _refreshController.repeat();
+    } else {
+      _refreshController.forward();
+    }
+    
     setState(() {
       _isRefreshing = true;
     });
@@ -262,17 +360,24 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         }
       }
       print('[DEBUG] Before await _fetchAndUpdateOrderHistory');
-      final freshOrders = await _fetchAndUpdateOrderHistory(userId!);
+      final freshOrders = await _fetchAndUpdateOrderHistory(userId);
       print('[DEBUG] After await _fetchAndUpdateOrderHistory');
       if (mounted) {
         _checkForStatusChanges(freshOrders);
         setState(() {
           _orders = freshOrders;
+          _applyFilters();
         });
       }
     } catch (e) {
       print("[DEBUG] Error during silent history refresh: $e");
     } finally {
+      // Stop refresh animation
+      if (_refreshController.isAnimating) {
+        _refreshController.stop();
+        _refreshController.value = 0.0; // Reset to initial state
+      }
+      
       if (mounted) {
         setState(() {
           _isRefreshing = false;
@@ -321,7 +426,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       if (cacheValid) {
         print('[OrderHistory] Loaded from cache.');
         // Start background fetch but return cached data immediately
-        _fetchAndUpdateOrderHistory(userId!);
+        _fetchAndUpdateOrderHistory(userId);
         if (mounted) setState(() { _orders = List<Map<String, dynamic>>.from(cachedOrders); });
         return List<Map<String, dynamic>>.from(cachedOrders);
       } else {
@@ -373,7 +478,9 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       String userId) async {
     print('[DEBUG] Entering _fetchOrderHistoryDetails for userId=$userId');
     List<Map<String, dynamic>> orders = [];
-    final uri = Uri.parse('$apiBaseUrl/rr/orders?user_id=$userId');
+    final prefs = await SharedPreferences.getInstance();
+    final userType = prefs.getString('user_type') ?? 'customer';
+    final uri = Uri.parse('$apiBaseUrl/rr/orders?user_id=$userId&user_type=$userType');
     print("Fetching order history from: $uri");
 
     try {
@@ -629,7 +736,15 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     // Ensure verification state is reset on manual refresh
     if (mounted) {
       setState(() {
-        _orderHistoryFuture = _loadInitialHistory(); // Re-run the full load
+        _orderHistoryFuture = _loadInitialHistory().then((orders) {
+          if (mounted) {
+            setState(() {
+              _orders = orders;
+              _applyFilters();
+            });
+          }
+          return orders;
+        });
       });
     }
     // Wait for the refresh to complete (optional, for indicator)
@@ -669,6 +784,31 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
           backgroundColor: kColorPrimary,
           foregroundColor: kColorSurface,
           elevation: 2.0,
+          actions: [
+            // Refresh button with rotation animation
+            AnimatedBuilder(
+              animation: _refreshAnimation,
+              builder: (context, child) {
+                return IconButton(
+                  icon: Transform.rotate(
+                    angle: _refreshAnimation.value * 2 * 3.14159, // 360 degrees in radians
+                    child: Icon(
+                      Icons.refresh,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                  onPressed: _isRefreshing
+                      ? null // Disable button while refreshing
+                      : () {
+                          print('Manual refresh triggered from app bar');
+                          _refreshHistorySilently();
+                        },
+                );
+              },
+            ),
+            const SizedBox(width: 8),
+          ],
           systemOverlayStyle: SystemUiOverlayStyle.light.copyWith(
             statusBarColor: Colors.transparent,
             statusBarIconBrightness: Brightness.light,
@@ -704,24 +844,94 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
 
   // --- UI Building Widgets ---
 
+  // Build the filter chips for order statuses
+  Widget _buildStatusFilterChips() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: _statusOptions.map((statusData) {
+          final status = statusData['status'] as String;
+          final label = statusData['label'] as String;
+          final isSelected = _selectedStatus == status || 
+                           (status == 'all' && (_selectedStatus == null || _selectedStatus == 'all'));
+          
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 4.0),
+            child: ChoiceChip(
+              label: Text(
+                label,
+                style: TextStyle(
+                  color: isSelected ? Colors.white : kColorTextPrimary,
+                  fontSize: 12,
+                ),
+              ),
+              selected: isSelected,
+              backgroundColor: Colors.grey[200],
+              selectedColor: status == 'all' ? kColorPrimary : _getStatusColor(status),
+              labelStyle: TextStyle(
+                color: isSelected ? Colors.white : kColorTextPrimary,
+              ),
+              onSelected: (_) => _setStatusFilter(status),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              side: BorderSide(
+                color: isSelected ? 
+                  (status == 'all' ? kColorPrimary : _getStatusColor(status)) : 
+                  Colors.grey[300]!,
+                width: 1,
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   Widget _buildOrderList() {
     if (_orders.isEmpty) {
       return _buildEmptyState(context);
     }
-    return RefreshIndicator(
-      onRefresh: _refreshHistory,
-      color: kColorPrimary,
-      child: ListView.builder(
-        padding: const EdgeInsets.symmetric(
-            horizontal: _horizontalPadding / 2, vertical: _verticalPadding),
-        itemCount: _orders.length,
-        itemBuilder: (context, index) {
-          final order = _orders[index];
-          final orderId = order['order_id'] as int;
-          final isExpanded = _isExpandedMap[orderId] ?? false;
-          return _buildOrderCard(context, order, orderId, isExpanded);
-        },
-      ),
+    
+    return Column(
+      children: [
+        // Status filter chips
+        _buildStatusFilterChips(),
+        
+        // Order list with pull-to-refresh
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _refreshHistory,
+            color: kColorPrimary,
+            child: _filteredOrders.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Text(
+                        'No orders match the selected filters',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: kColorTextSecondary,
+                        ),
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: _horizontalPadding / 2,
+                      vertical: _verticalPadding / 2,
+                    ),
+                    itemCount: _filteredOrders.length,
+                    itemBuilder: (context, index) {
+                      final order = _filteredOrders[index];
+                      final orderId = order['order_id'] as int;
+                      final isExpanded = _isExpandedMap[orderId] ?? false;
+                      return _buildOrderCard(context, order, orderId, isExpanded);
+                    },
+                  ),
+          ),
+        ),
+      ],
     );
   }
 

@@ -8,19 +8,19 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:zinzi2/allmeals.dart';
 import 'package:zinzi2/blogview.dart';
 import 'package:zinzi2/wellness_communities_screen.dart';
 import 'package:zinzi2/cart.dart' as cart;
 import 'package:zinzi2/profile.dart';
 import 'package:zinzi2/chef_dash8888.dart';
 import 'package:zinzi2/produ_dash22.dart';
+import 'package:zinzi2/chef_profile.dart' show ChefProfileApp;
+import 'package:zinzi2/producer_profile.dart' show ProducerProfileApp;
+import 'package:zinzi2/profile.dart' show ProfilePage;
 import 'package:zinzi2/signup_or_Login.dart';
 import 'package:zinzi2/useranalytics.dart';
-import 'package:zinzi2/chef_net.dart';
 import 'package:zinzi2/orderhistory.dart';
 import 'package:zinzi2/onboard.dart';
-import 'package:zinzi2/nutrition+.dart';
 
 // --- Color Constants ---
 const Color kColorPrimaryDark = Color(0xFF004D40);
@@ -336,21 +336,89 @@ class _AppDrawerState extends State<AppDrawer> {
     }
   }
 
-  Future<void> _logout() async {
-    if (_userId != null && _userType != null) {
-      await AppDrawer.clearUserCache(_userId!, _userType!);
+  void _navigateToProfile() async {
+    if (_userType == null) return;
+    
+    Navigator.pop(context); // Close the drawer
+    
+    // Navigate based on user type
+    switch (_userType!.toLowerCase()) {
+      case 'chef':
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ChefProfileApp(),
+              settings: RouteSettings(name: '/chef_profile'),
+            ),
+          );
+        }
+        break;
+      case 'producer':
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ProducerProfileApp(),
+              settings: RouteSettings(name: '/producer_profile'),
+            ),
+          );
+        }
+        break;
+      case 'user':
+      default:
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ProfilePage(),
+              settings: RouteSettings(name: '/profile'),
+            ),
+          );
+        }
+        break;
     }
-    
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('user_id');
-    await prefs.remove('user_type');
-    
-    if (mounted) {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (context) => const SignUpOrLoginPage()),
-        (Route<dynamic> route) => false,
-      );
+  }
+
+  Future<void> _logout() async {
+    try {
+      // Clear user cache if user info is available
+      if (_userId != null && _userType != null) {
+        await AppDrawer.clearUserCache(_userId!, _userType!);
+      }
+      
+      // Clear all user-related data from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('user_id');
+      await prefs.remove('user_type');
+      
+      // Clear any other user-specific preferences if needed
+      await prefs.remove('fcm_token');
+      await prefs.remove('first_login');
+      
+      // Clear the cart when logging out
+      cart.ShoppingCart.clearCart();
+      
+      if (mounted) {
+        // Navigate to login screen and remove all previous routes
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => const SignUpOrLoginPage()),
+          (Route<dynamic> route) => false,
+        );
+      }
+      
+      print('User logged out successfully');
+    } catch (e) {
+      print('Error during logout: $e');
+      // Even if there's an error, we should still try to navigate to login
+      if (mounted) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => const SignUpOrLoginPage()),
+          (Route<dynamic> route) => false,
+        );
+      }
     }
   }
 
@@ -381,16 +449,6 @@ class _AppDrawerState extends State<AppDrawer> {
           (Route<dynamic> route) => false,
         );
       }),
-      _buildDrawerTile(Icons.restaurant_menu_outlined, 'Meals', () {
-        Navigator.pop(context);
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const AllMealsScreen(),
-            settings: RouteSettings(name: '/meals'),
-          ),
-        );
-      }),
       _buildDrawerTile(Icons.shopping_cart_outlined, 'Shopping Cart', () {
         Navigator.pop(context);
         Navigator.push(
@@ -401,31 +459,6 @@ class _AppDrawerState extends State<AppDrawer> {
           ),
         );
       }),
-      _buildDrawerTile(
-        Icons.person_outline,
-        'Profile',
-        widget.invokedBy == 'chef_dashboard' ||
-                widget.invokedBy == 'producer_dashboard'
-            ? null
-            : () async {
-                Navigator.pop(context);
-                final prefs = await SharedPreferences.getInstance();
-                final userType = prefs.getString('user_type');
-                if (userType == 'chef' || userType == 'producer') {
-                  return;
-                } else {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => ProfilePage(),
-                      settings: RouteSettings(name: '/profile'),
-                    ),
-                  );
-                }
-              },
-        enabled: !(widget.invokedBy == 'chef_dashboard' ||
-            widget.invokedBy == 'producer_dashboard'),
-      ),
       _buildDrawerTile(
         Icons.history,
         'Order History',
@@ -452,26 +485,6 @@ class _AppDrawerState extends State<AppDrawer> {
           MaterialPageRoute(
             builder: (context) => UserAnalyticsDashboard(),
             settings: RouteSettings(name: '/analytics'),
-          ),
-        );
-      }),
-      _buildDrawerTile(Icons.people_outline, 'Hire a Chef', () {
-        Navigator.pop(context);
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const ChooseChefNetwork(),
-            settings: RouteSettings(name: '/chef_network'),
-          ),
-        );
-      }),
-      _buildDrawerTile(Icons.eco_outlined, 'Nutrition+', () {
-        Navigator.pop(context);
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => NutritionPage(),
-            settings: RouteSettings(name: '/nutrition'),
           ),
         );
       }),
@@ -559,24 +572,27 @@ class _AppDrawerState extends State<AppDrawer> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-              currentAccountPicture: CircleAvatar(
-                radius: 35,
-                backgroundColor: kColorSurface.withOpacity(0.8),
-                backgroundImage: avatarImage,
-                onBackgroundImageError: (_, __) {
-                  print("Error loading profile picture in drawer.");
-                },
-                child: _isLoading &&
-                        _profileImageUrl == null &&
-                        _profileImagePath == null
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2.0,
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(kColorPrimary)))
-                    : null,
+              currentAccountPicture: GestureDetector(
+                onTap: _navigateToProfile,
+                child: CircleAvatar(
+                  radius: 35,
+                  backgroundColor: kColorSurface.withOpacity(0.8),
+                  backgroundImage: avatarImage,
+                  onBackgroundImageError: (_, __) {
+                    print("Error loading profile picture in drawer.");
+                  },
+                  child: _isLoading &&
+                          _profileImageUrl == null &&
+                          _profileImagePath == null
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2.0,
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(kColorPrimary)))
+                      : null,
+                ),
               ),
               decoration: const BoxDecoration(
                 color: kColorPrimaryDark,

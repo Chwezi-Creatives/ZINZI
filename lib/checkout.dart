@@ -240,9 +240,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     setState(() => _isLoading = true);
 
     String? userId;
+    String? userType;
     try {
       final prefs = await SharedPreferences.getInstance();
       userId = prefs.getString('user_id');
+      userType = prefs.getString('user_type');
 
       if (userId == null || userId.isEmpty) {
         _showSnackBar('User is not logged in.');
@@ -313,6 +315,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       Map<String, dynamic> orderPayload = {
         'order_type': orderType,
         'user_id': userId.toString(),
+        'user_type': userType ?? 'customer', // Default to 'customer' if userType is null
         'items': [itemPayload],
         'delivery_address': deliveryLocation, // Full location string with coordinates and address
         'delivery_coordinates': LocationService.instance.currentPosition != null
