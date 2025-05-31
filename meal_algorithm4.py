@@ -815,7 +815,7 @@ class MealRecommendation4:
                 "diabetes management", "hypertension management",
                 "reduce inflammation", "reduce inflamation",  # Common typo
                 "detox", "cleanse", "detox and cleanse",
-                "satiety", "improve satiety", "prevent overeating",
+                #"satiety", "improve satiety", "prevent overeating", thisline is currently disabled as it caused issus, will reanalbe it later after refactoring
                 "improve metabolic health", "metabolic health",
                 "improved skin", "skin improvement",
                 
@@ -931,7 +931,10 @@ class MealRecommendation4:
                     return 1
                     
             if 'satiety' in meal_goal:
-                # Valid for both weight loss (portion control) and muscle gain (higher intake)
+                # Exclude satiety meals for weight loss goals
+                if 'loss' in user_goal or 'lose' in user_goal:
+                    return 0
+                # For other goals (muscle gain, maintenance), allow satiety meals
                 return 1
                 
             # No matches found in this mapping

@@ -88,7 +88,7 @@ async def get_disbursement_access_token(session: httpx.AsyncClient):
         logger.error(f"An unexpected error occurred during disbursement token retrieval: {e}")
     return None
 
-async def perform_disbursement(session: httpx.AsyncClient, recipient_msisdn: str, amount: str, currency: str): 
+async def perform_disbursement(session: httpx.AsyncClient, recipient_msisdn: str, amount: str, currency: str):  # Changed default currency to eur
     token = await get_disbursement_access_token(session)
     if not token:
         logger.error("Cannot perform disbursement without an access token.")
@@ -191,7 +191,7 @@ async def check_disbursement_status(session: httpx.AsyncClient, transaction_id: 
 
 async def main():
     async with httpx.AsyncClient() as session:
-        currency = os.getenv('CURRENCY_MOMO')
+        currency = os.getenv('MOMO_SANDBOX_CURRENCY')  # Changed default to direct from env
         logger.info(f"Attempting to disburse {TEST_AMOUNT} {currency} to {TEST_RECIPIENT_MSISDN}")
         transaction_id = await perform_disbursement(session, TEST_RECIPIENT_MSISDN, TEST_AMOUNT, currency)
 

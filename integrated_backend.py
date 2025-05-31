@@ -213,7 +213,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # --- CORS Middleware ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["*"], #ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -2935,150 +2935,8 @@ def handle_stripe_payment_cancellation() -> Dict[str, Any]:
     logger.info("Stripe payment likely cancelled."); return {"status": "cancelled", "message": "Payment not completed."}
 
 # --- MoMo Global Variables and Functions ---
-MOMO_API_KEY = os.getenv("MOMO_API_KEY")
-MOMO_SUBSCRIPTION_KEY = os.getenv("MOMO_SUBSCRIPTION_KEY")
-MOMO_API_USER_ID = os.getenv("MOMO_API_USER_ID")
-MOMO_BASE_URL = os.getenv("MOMO_BASE_URL", "https://sandbox.momodeveloper.mtn.com").rstrip('/')
-MOMO_TARGET_ENV = os.getenv("MOMO_TARGET_ENV", "sandbox")
-MOMO_CALLBACK_URL = os.getenv("MOMO_CALLBACK_URL", 'chwezicreatives.com')
-momo_headers: Dict[str, str] = {}; momo_access_token: str = ""; momo_token_expires_at: int = 0
 
-def get_momo_api_user_key(user_id: str, subscription_key: str) -> Optional[str]:
-    """Generates MoMo API Key (usually done via portal)."""
-    # ... (implementation unchanged) ...
-    if not user_id or not subscription_key: logger.error("MoMo UserID/SubKey needed for API key gen."); return None
-    url=f"{MOMO_BASE_URL}/v1_0/apiuser/{user_id}/apikey"; headers={"Ocp-Apim-Subscription-Key": subscription_key}; logger.info(f"Req MoMo API Key for user {user_id}...")
-    try:
-        response=requests.post(url, headers=headers, timeout=10); response.raise_for_status()
-        key_info=response.json(); api_key=key_info.get("apiKey")
-        if api_key: logger.info(f"Generated MoMo API Key for user {user_id}."); return api_key
-        else: logger.error(f"MoMo API Key gen fail {user_id}. Resp: {response.text}"); return None
-    except requests.exceptions.RequestException as e: logger.error(f"MoMo API Key gen network/API err {user_id}: {e}", exc_info=True); return None
-    except json.JSONDecodeError: logger.error(f"MoMo API Key gen JSON decode err {user_id}. Resp: {response.text}"); return None
-    except Exception as e: logger.error(f"Unexpected MoMo API Key gen err {user_id}: {e}", exc_info=True); return None
-
-def get_momo_access_token() -> bool:
-    """Obtains MoMo access token."""
-    # ... (implementation unchanged) ...
-    global momo_access_token, momo_token_expires_at, momo_headers
-    if not MOMO_API_USER_ID or not MOMO_SUBSCRIPTION_KEY: logger.critical("MoMo UserID/SubKey not configured."); return False
-    api_key = MOMO_API_KEY;
-    if not api_key: logger.critical("MoMo API Key not configured."); return False
-    url = f"{MOMO_BASE_URL}/collection/token/"; auth_str=f"{MOMO_API_USER_ID}:{api_key}"; auth_b64=base64.b64encode(auth_str.encode()).decode()
-    headers = {"Authorization":f"Basic {auth_b64}", "Ocp-Apim-Subscription-Key":MOMO_SUBSCRIPTION_KEY}
-    try:
-        logger.info("Requesting new MoMo Token..."); response=requests.post(url, headers=headers, timeout=15); response.raise_for_status()
-        token_info=response.json(); new_token=token_info.get("access_token"); expires_in=token_info.get("expires_in",3500)
-        if not new_token: logger.error(f"MoMo token missing: {token_info}"); return False
-        momo_access_token=new_token; momo_token_expires_at=int(time.time())+expires_in-60
-        momo_headers={"Authorization":f"Bearer {momo_access_token}", "X-Reference-Id":str(uuid.uuid4()), "X-Target-Environment":MOMO_TARGET_ENV, "Ocp-Apim-Subscription-Key":MOMO_SUBSCRIPTION_KEY, "Content-Type":"application/json"}
-        logger.info("Obtained MoMo Token."); return True
-    except requests.exceptions.RequestException as e: logger.error(f"MoMo token network/API err: {e}", exc_info=True); return False
-    except json.JSONDecodeError: logger.error(f"MoMo token JSON decode err. Resp: {response.text}"); return False
-    except Exception as e: logger.error(f"Unexpected MoMo token err: {e}", exc_info=True); return False
-
-def ensure_momo_token() -> bool:
-    """Checks MoMo token validity, refreshes if needed."""
-    # ... (implementation unchanged) ...
-    if time.time() >= momo_token_expires_at or not momo_access_token: logger.info("MoMo token expired/missing, refreshing..."); return get_momo_access_token()
-    return True
-
-
-def request_momo_payment(amount: float, currency: str, external_id: str, payer_number: str, payer_message: str, payee_note: str) -> Dict[str, Any]:
-    """Requests MoMo payment."""
-    if not ensure_momo_token():
-        return {"status": "failure", "error": "MoMo auth failed."}
-
-    url = f"{MOMO_BASE_URL}/collection/v1_0/requesttopay"
-    tx_uuid = str(uuid.uuid4())
-    current_headers = {**momo_headers, "X-Reference-Id": tx_uuid}
-
-    try:
-        payload = {
-            "amount": str(float(amount)),
-            "currency": currency.lower(),
-            "externalId": str(external_id),
-            "payer": {"partyIdType": "MSISDN", "partyId": str(payer_number)},
-            "payerMessage": str(payer_message),
-            "payeeNote": str(payee_note),
-        }
-    except (ValueError, TypeError) as e:
-        logger.error(f"Invalid MoMo payload data: {e}")
-        return {"status": "failure", "error": "Invalid data format."}
-
-    try:
-        logger.info(f"Req MoMo Payment: ExtID={external_id}, TxRef={tx_uuid}, Amt={amount}, Payer={payer_number}")
-        response = requests.post(url, json=payload, headers=current_headers, timeout=30)
-
-        if response.status_code == 202:
-            logger.info(f"MoMo Req Accepted. TxRef={tx_uuid}. Await confirm {payer_number}.")
-            return {"status": "pending", "transaction_ref": tx_uuid, "message": "Awaiting confirmation."}
-        else:
-            err_details = response.text
-            try:
-                err_details = response.json()
-            except:
-                pass
-            logger.error(f"MoMo Req Failed. Status: {response.status_code}, TxRef: {tx_uuid}, Err: {err_details}")
-            return {"status": "failure", "error": err_details}
-
-    except requests.exceptions.Timeout:
-        logger.error(f"MoMo Req Timeout. TxRef: {tx_uuid}.")
-        return {"status": "failure", "error": "Request timed out."}
-    except requests.exceptions.RequestException as e:
-        logger.error(f"MoMo Req Network/API Err. TxRef: {tx_uuid}. Err: {e}", exc_info=True)
-        return {"status": "failure", "error": f"Network/API Error: {e}"}
-    except Exception as e:
-        logger.error(f"Unexpected MoMo Req Err. TxRef: {tx_uuid}. Err: {e}", exc_info=True)
-        return {"status": "failure", "error": "Unexpected error."}
-    
-
-
-def check_momo_payment_status(transaction_ref: str) -> Dict[str, Any]:
-    """Checks MoMo payment status."""
-    if not ensure_momo_token():
-        return {"status": "failure", "error": "MoMo auth failed."}
-    if not transaction_ref:
-        return {"status": "failure", "error": "Tx ref required."}
-
-    url = f"{MOMO_BASE_URL}/collection/v1_0/requesttopay/{transaction_ref}"
-    current_headers = momo_headers
-
-    try:
-        logger.info(f"Checking MoMo Status TxRef: {transaction_ref}")
-        response = requests.get(url, headers=current_headers, timeout=15)
-        response.raise_for_status()
-
-        status_data = response.json()
-        current_status = status_data.get('status', 'UNKNOWN').upper()
-        logger.info(f"MoMo Status OK TxRef: {transaction_ref}. Status: {current_status}")
-        return {"status": "success", "payment_status": status_data}
-
-    except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 404:
-            logger.warning(f"MoMo tx ref '{transaction_ref}' not found (404).")
-            return {"status": "not_found", "error": "Tx ref not found."}
-        else:
-            err_details = e.response.text
-            try:
-                err_details = e.response.json()
-            except:
-                pass
-            logger.error(f"MoMo Status HTTP Err. TxRef: {transaction_ref}, Status: {e.response.status_code}, Err: {err_details}")
-            return {"status": "failure", "error": err_details}
-
-    except requests.exceptions.Timeout:
-        logger.error(f"MoMo Status Timeout. TxRef: {transaction_ref}.")
-        return {"status": "failure", "error": "Status check timeout."}
-    except requests.exceptions.RequestException as e:
-        logger.error(f"MoMo Status Network Err. TxRef: {transaction_ref}. Err: {e}", exc_info=True)
-        return {"status": "failure", "error": f"Network/API Error: {e}"}
-    except json.JSONDecodeError:
-        logger.error(f"MoMo Status JSON decode err. TxRef: {transaction_ref}. Resp: {response.text}")
-        return {"status": "failure", "error": "Invalid response."}
-    except Exception as e:
-        logger.error(f"MoMo Status Unexpected Err. TxRef: {transaction_ref}. Err: {e}", exc_info=True)
-        return {"status": "failure", "error": "Unexpected error."}
+#end of momo 
 
 # --- Backend Class Instantiations ---
 # These instances are created once and used by endpoints via Depends(get_db)
