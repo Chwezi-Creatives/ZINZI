@@ -9,12 +9,16 @@ import 'notifications/fcm_service.dart';
 class ProducerLoginPageModular extends StatelessWidget {
   const ProducerLoginPageModular({Key? key}) : super(key: key);
 
-  Future<void> saveUserDetails(String producerId, String userType) async {
+  Future<void> saveUserDetails(String producerId, String userType, {String? phone}) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setString('producer_id', producerId); // Already a string
     await prefs.setString('user_type', userType); // Save user_type
     await prefs.setString('user_id', producerId); // Standard key for splash
     await prefs.setBool('is_logged_in', true);
+    if (phone != null) {
+      await prefs.setString('user_phone', phone);
+      print('Phone number saved: $phone');
+    }
     print('Producer ID saved: $producerId');
     print('User Type saved: $userType');
     // Register FCM token with user info (async, do not await)
@@ -36,15 +40,20 @@ class ProducerLoginPageModular extends StatelessWidget {
         // Extract data from the loginData map
         final String userId = loginData['userId'];
         final String userType = loginData['userType'];
-        // Save user ID and user type to shared preferences
+        final String? phone = loginData['phone']; // Extract phone number if available
+        
+        // Save user ID, user type, and phone number to shared preferences
         SharedPreferences.getInstance().then((prefs) {
           prefs.setString('user_type', 'producer');
           prefs.setString('user_id', userId);
-          saveUserDetails(userId, userType);
+          if (phone != null) {
+            prefs.setString('user_phone', phone);
+          }
+          saveUserDetails(userId, userType, phone: phone);
           // Navigate to the Producer Dashboard after saving user details
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (context) => ProducerDash22()), // Ensure this class is defined and imported
+            MaterialPageRoute(builder: (context) => ProducerDash22()),
           );
         });
        //   } else {

@@ -8,7 +8,7 @@ import 'dart:io'; // Keep for Platform checks if needed elsewhere, otherwise rem
 // If not, you might need to replace `LandingPage()` with a relevant widget or remove the back navigation.
 import 'onboard.dart'; // Make sure this import points to your actual landing page file
 
-// Main App Widget
+// Main App Widgethi 
 class NutritionChatApp extends StatefulWidget {
   const NutritionChatApp({Key? key}) : super(key: key);
 
@@ -150,7 +150,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // Add initial greeting message
     _messages.add(const ChatMessage(
       text:
-          'Hi! I\'m your Nutrition Chat Agent, Sensei. How can I assist you today?',
+          'Hi, i am Sensei your Wellness Coach, ask me anything !',
       isUser: false,
     ));
     // Removed TTS/STT initialization calls

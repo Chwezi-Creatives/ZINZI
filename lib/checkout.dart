@@ -30,7 +30,8 @@ class CheckoutScreen extends StatefulWidget {
 class _CheckoutScreenState extends State<CheckoutScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _phoneController = TextEditingController();
+  final _phoneController = TextEditingController(); // Optional general phone number
+  final _paymentPhoneNumberController = TextEditingController(); // Phone number for payment
   final _addressController = TextEditingController(); // Source of truth for location text
   final _notesController = TextEditingController();
   String _selectedPaymentMethod = 'Momo';
@@ -53,6 +54,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       onTap: () {
         setState(() {
           _selectedPaymentMethod = method;
+          _paymentPhoneNumberController.clear(); // Clear the phone number when payment method changes
         });
       },
       child: Container(
@@ -118,7 +120,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       }
       debugPrint('[Checkout] Initialized location from LocationService position: $initialDisplay. Triggering geocoding.');
       // Trigger geocoding if only position is available and address is not
-      locationService.getAddressFromPosition(pos); 
+      locationService.getAddressFromPosition(pos);
     } else {
       debugPrint('[Checkout] No pre-fetched location found. Calling _getCurrentLocation to fetch fresh.');
       _getCurrentLocation(showSnackbarErrors: false); // Fetch fresh, suppress snackbar for initial auto-fetch
@@ -137,7 +139,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       final pos = locationService.currentPosition!;
       displayLocation = "${pos.latitude}, ${pos.longitude}";
     }
-    
+
     if (_addressController.text != displayLocation) {
        setState(() {
         _addressController.text = displayLocation;
@@ -172,6 +174,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     LocationService.instance.errorNotifier.removeListener(_handleLocationErrorFromService);
     _nameController.dispose();
     _phoneController.dispose();
+    _paymentPhoneNumberController.dispose(); // Dispose the new controller
     _addressController.dispose();
     _notesController.dispose();
     super.dispose();
@@ -192,20 +195,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Future<void> _getCurrentLocation({bool showSnackbarErrors = true}) async {
     if (!mounted) return;
     debugPrint('[Checkout] _getCurrentLocation called. Forcing geocode and address update. showSnackbarErrors: $showSnackbarErrors');
-    
-    // The LocationService will handle its own loading state and error reporting.
-    // The listeners (_updateLocationFromService, _handleLocationErrorFromService, _updateLoadingStateFromService)
-    // will react to changes in the service.
-    // The showSnackbarErrors flag is a bit tricky here because the error handling is via a listener.
-    // If we want to suppress snackbars for a specific call, the listener itself would need to be aware of this context,
-    // or be temporarily detached, which adds complexity.
-    // For now, _handleLocationErrorFromService will show any error set in the service.
+
     await LocationService.instance.fetchAndSetCurrentLocation(forceGeocode: true, updateAddressRegardless: true);
-    
-    // If !showSnackbarErrors and an error occurred, the listener would still show it.
-    // This design means errors from the service are always reported via the listener.
-    // If specific suppression is needed for the initial call, _handleLocationErrorFromService
-    // would need a way to know it's an "initial, silent" fetch.
   }
 
   void _showSnackBar(String message,
@@ -224,14 +215,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Future<void> _submitOrder() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // Ensure we have the latest location data
     if (LocationService.instance.currentPosition == null) {
       await _getCurrentLocation(showSnackbarErrors: true);
+       // Re-check after attempting to get location if it was missing
+      if (LocationService.instance.currentPosition == null) {
+         _showSnackBar('Please acquire your delivery location before placing the order.');
+        return;
+      }
     }
 
-    // Use the full location string from the service, or fall back to the text field
     final String deliveryLocation = LocationService.instance.fullLocationString ?? _addressController.text;
-    
+
     if (deliveryLocation.trim().isEmpty) {
       _showSnackBar('Please acquire your delivery location before placing the order.');
       return;
@@ -257,6 +251,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       if (mounted) setState(() => _isLoading = false);
       return;
     }
+
+    final String paymentPhoneNumber = _paymentPhoneNumberController.text.trim(); // Get payment phone number
 
     List<String> orderIds = [];
     double totalProcessedPrice = 0.0;
@@ -299,8 +295,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         itemPayload = {
           'order_type': orderType,
           'type': orderType,
-          // Ensure the specific product ID (e.g., meal_id, ingredient_id) is included
-          // And also include a generic 'product_id' for potential backend consistency
           productIdEntry.key: productIdEntry.value?.toString(),
           'product_id': productIdEntry.value?.toString(),
           'quantity': (item['quantity'] as num?)?.toInt(),
@@ -311,13 +305,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         };
       }
 
-      // Include both the full location string and the coordinates in the payload
       Map<String, dynamic> orderPayload = {
         'order_type': orderType,
         'user_id': userId.toString(),
-        'user_type': userType ?? 'customer', // Default to 'customer' if userType is null
+        'user_type': userType ?? 'customer',
+        'payment_phone_number': paymentPhoneNumber, // Added payment phone number here
         'items': [itemPayload],
-        'delivery_address': deliveryLocation, // Full location string with coordinates and address
+        'delivery_address': deliveryLocation,
         'delivery_coordinates': LocationService.instance.currentPosition != null
             ? {
                 'latitude': LocationService.instance.currentPosition!.latitude,
@@ -326,7 +320,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             : null,
         'notes': _notesController.text,
         'payment_mode': _selectedPaymentMethod.toLowerCase(),
-        'total_price': (item['price'] as num?)?.toDouble() ?? 0.0, // Price for this specific item's order
+        'total_price': (item['price'] as num?)?.toDouble() ?? 0.0,
         'chef_id': item['selectedchef']?['chefid']?.toString(),
         'producer_id': item['selectedproducer']?['producer_id']?.toString(),
       };
@@ -347,18 +341,18 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           orderIds.add(orderId.toString());
           totalProcessedPrice += (item['price'] as num?)?.toDouble() ?? 0.0;
           print('Successfully submitted order $orderId for item: ${item['title'] ?? 'Gig'}');
-          ShoppingCart.removeItems([item]); // Assuming item structure is compatible
+          ShoppingCart.removeItems([item]);
         } else {
           allOrdersSuccessful = false;
           print('Failed to place order for item: ${item['title'] ?? 'Gig'}. Response: ${response.statusCode}, Body: ${response.body}');
           _showSnackBar('Failed to place order for ${item['title'] ?? 'Gig'}. Error: ${response.reasonPhrase}');
-          break; // Stop processing further items if one fails
+          break;
         }
       } catch (e) {
         allOrdersSuccessful = false;
         print('Exception while placing order for item: ${item['title'] ?? 'Gig'}. Error: $e');
         _showSnackBar('Error placing order for ${item['title'] ?? 'Gig'}. Please try again.');
-        break; // Stop processing further items if an exception occurs
+        break;
       }
     }
 
@@ -368,7 +362,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
     if (allOrdersSuccessful && orderIds.isNotEmpty) {
       _showSnackBar('All orders placed successfully!', duration: Duration(seconds: 2));
-      await Future.delayed(Duration(seconds: 2)); // Give time for snackbar
+      await Future.delayed(Duration(seconds: 2));
       if(mounted) {
         Navigator.pushReplacement(
           context,
@@ -383,10 +377,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       }
     } else if (orderIds.isNotEmpty && !allOrdersSuccessful) {
        _showSnackBar('Some orders were placed, but others failed. Check order history.', duration: Duration(seconds: 5));
-       // Optionally navigate to order history or provide a way to see partial success
     } else if (!allOrdersSuccessful) {
-      // No orders were successful
-      // Snackbars for specific errors would have been shown already
+      // Errors already shown
     }
   }
 
@@ -444,7 +436,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           final item = widget.items[i];
                           final bestServedWith = (item['bestservedwith'] as List?)?.cast<Map<String, dynamic>>() ?? [];
                           final chef = item['selectedchef'] as Map<String, dynamic>?;
-                          // final chefHasPrice = chef != null && chef['price'] != null && chef['price'] is num;
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -496,16 +487,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Expanded( // Added Expanded for long titles
+                                    Expanded(
                                       child: Text(
                                         '${item['title']} x${item['quantity']}',
                                         style: GoogleFonts.poppins(
                                           color: Colors.teal[700],
                                         ),
-                                        overflow: TextOverflow.ellipsis, // Handle overflow
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
-                                    SizedBox(width: 8), // Spacing
+                                    SizedBox(width: 8),
                                     Text(
                                       'ugx ${((item['price'] ?? 0.0) * (item['quantity'] ?? 0)).toStringAsFixed(2)}',
                                       style: GoogleFonts.poppins(
@@ -522,7 +513,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                     ],
                                   ),
                                 if (bestServedWith.isNotEmpty)
-                                  Padding( // Added padding for complements
+                                  Padding(
                                     padding: const EdgeInsets.only(top: 4.0, left: 8.0),
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -530,7 +521,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                         Text('Complements:', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.teal[700])),
                                         ...bestServedWith.map((comp) {
                                           final compName = comp['name']?.toString() ?? comp['title']?.toString() ?? '';
-                                          final compPrice = (comp['price'] is num) ? (comp['price'] as num).toDouble() : 0.0; // Default to 0 if not num
+                                          final compPrice = (comp['price'] is num) ? (comp['price'] as num).toDouble() : 0.0;
                                           return Padding(
                                             padding: const EdgeInsets.only(left: 8.0, top: 2.0),
                                             child: Row(
@@ -602,9 +593,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           valueListenable: LocationService.instance.isLoadingNotifier,
                           builder: (context, isLoadingFromService, child) {
                             return TextFormField(
-                              controller: _addressController, // Use the main controller
-                              readOnly: true, // Make the field read-only
-                              enableInteractiveSelection: false, // Disable text selection
+                              controller: _addressController,
+                              readOnly: true,
+                              enableInteractiveSelection: false,
                               decoration: InputDecoration(
                                 labelText: 'Location',
                                 hintText: 'Tap the refresh button to update location',
@@ -637,10 +628,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                   borderSide: BorderSide(color: Colors.teal[300]!),
                                 ),
                                 filled: true,
-                                fillColor: Colors.grey[100], // Slightly different color to indicate it's not editable
+                                fillColor: Colors.grey[100],
                                 contentPadding: EdgeInsets.symmetric(vertical: 16.0, horizontal: 16.0),
                               ),
-                              // No validator needed since it's not user-editable
                               validator: (value) => (value?.trim().isEmpty ?? true) && !isLoadingFromService
                                   ? 'Please update your location using the refresh button'
                                   : null,
@@ -780,6 +770,42 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                             ],
                           ),
                         ),
+                        SizedBox(height: 16), // Space before the phone number field
+                        TextFormField(
+                          controller: _paymentPhoneNumberController,
+                          decoration: InputDecoration(
+                            labelText: 'Payment Phone Number',
+                            hintText: 'Enter number for selected payment method',
+                            prefixIcon: Icon(Icons.phone_android_outlined, color: Colors.teal[600]),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8.0),
+                              borderSide: BorderSide(color: Colors.teal[200]!),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8.0),
+                              borderSide: BorderSide(color: Colors.teal[600]!, width: 2),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8.0),
+                              borderSide: BorderSide(color: Colors.teal[300]!),
+                            ),
+                            filled: true,
+                            fillColor: Colors.white, // Slightly different or consistent fill
+                          ),
+                          keyboardType: TextInputType.phone,
+                          style: GoogleFonts.poppins(),
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return 'Please enter the phone number for payment';
+                            }
+                            // Basic Ugandan phone number validation (e.g., 07xxxxxxxx or +2567xxxxxxxx)
+                            // Adjust regex as per specific requirements
+                            if (!RegExp(r'^(0|\+?256)?[7]\d{8}$').hasMatch(value.trim())) {
+                                return 'Enter a valid Ugandan phone number (e.g., 07xx..., +2567xx...)';
+                            }
+                            return null;
+                          },
+                        ),
                       ],
                     ),
                   ),
@@ -802,7 +828,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           ),
                         ),
                 ),
-                SizedBox(height: 20), // Added some bottom padding
+                SizedBox(height: 20),
               ],
             ),
           ),

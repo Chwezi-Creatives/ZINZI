@@ -285,13 +285,17 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
             final prefs = await SharedPreferences.getInstance();
             await prefs.setString('transporter_id', transporterId.toString());
             await prefs.setString('user_id', transporterId.toString());
-            await prefs.setString('user_type',
-                'transporter'); // Changed to lowercase for consistency
+            await prefs.setString('user_type', 'transporter');
             await prefs.setBool('is_logged_in', true);
+            
+            // Save phone number if available in the response
+            final String? phoneNumber = responseData['phone'] as String?;
+            if (phoneNumber != null && phoneNumber.isNotEmpty) {
+              await prefs.setString('user_phone', phoneNumber);
+            }
 
-            await Future.delayed(
-                const Duration(milliseconds: 100)); // Small delay
-// Register FCM token with user info (async, do not await)
+            await Future.delayed(const Duration(milliseconds: 100));
+            // Register FCM token with user info (async, do not await)
             FCMService.registerTokenWithUserInfo();
           }
           if (!mounted) return; // Check mount status again after delay

@@ -255,17 +255,18 @@ class _UserSignUpPageState extends State<UserSignUpPage>
       if (response.statusCode == 201) {
         final responseData = json.decode(response.body);
         final int userId = responseData['user_id'];
+        final String? phoneNumber = responseData['phone'] as String?;
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setInt('user_id', userId);
-        await prefs.setString(
-            'user_type', 'User'); // Set user type in SharedPreferences
-        await prefs.setString(
-            'user_email',
-            _emailController.text
-                .trim()); // Set user email in SharedPreferences
-        await prefs.setBool(
-            'is_logged_in', true); // Set logged in status in SharedPreferences
+        await prefs.setString('user_type', 'User');
+        await prefs.setString('user_email', _emailController.text.trim());
+        await prefs.setBool('is_logged_in', true);
+        
+        // Save phone number if available in the response
+        if (phoneNumber != null && phoneNumber.isNotEmpty) {
+          await prefs.setString('user_phone', phoneNumber);
+        }
 
         // Register FCM token with user info (async, do not await)
         FCMService.registerTokenWithUserInfo();

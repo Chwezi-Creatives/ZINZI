@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:async';
+import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 Future<void> main() async {
@@ -88,13 +90,17 @@ class _TestCollectionsScreenState extends State<TestCollectionsScreen> {
   final _formKey = GlobalKey<FormState>();
   final _amountController = TextEditingController(text: '1000');
   final _phoneController = TextEditingController();
+  final _transactionIdController = TextEditingController();
   bool _isLoading = false;
+  bool _isCheckingStatus = false;
   String _response = '';
+  String? _lastTransactionId;
 
   @override
   void dispose() {
     _amountController.dispose();
     _phoneController.dispose();
+    _transactionIdController.dispose();
     super.dispose();
   }
 
@@ -119,6 +125,77 @@ class _TestCollectionsScreenState extends State<TestCollectionsScreen> {
     
     // Return as is if we can't determine the format
     return digits;
+  }
+
+  Future<void> _checkPaymentStatus() async {
+    final transactionId = _transactionIdController.text.trim();
+    if (transactionId.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a transaction ID or external ID')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isCheckingStatus = true;
+      _response = 'Checking payment status...\nTransaction ID: $transactionId\n\n';
+    });
+
+    try {
+      final baseUrl = dotenv.get('API_BASE_URL');
+      final url = Uri.parse('$baseUrl/api/v1/momo/payment-status/$transactionId');
+      
+      debugPrint('Sending GET request to: $url');
+      
+      final response = await http.get(
+        url,
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 30));
+
+      debugPrint('Response status: ${response.statusCode}');
+      debugPrint('Response body: ${response.body}');
+
+      final responseData = jsonDecode(response.body);
+      
+      setState(() {
+        _response = 'Status Check Response (${response.statusCode}):\n\n' 
+            '${jsonEncode(responseData, toEncodable: (e) => e.toString())}';
+      });
+
+      if (response.statusCode == 200) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Status check completed')),
+        );
+      } else {
+        if (!mounted) return;
+        final errorMessage = responseData is Map 
+            ? responseData['detail'] ?? responseData['message'] ?? 'Unknown error'
+            : 'HTTP ${response.statusCode} - ${response.reasonPhrase}';
+            
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $errorMessage')),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _response = 'Error checking payment status: $e';
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCheckingStatus = false;
+        });
+      }
+    }
   }
 
   Future<void> _requestPayment() async {
@@ -153,9 +230,14 @@ class _TestCollectionsScreenState extends State<TestCollectionsScreen> {
       );
 
       final responseData = jsonDecode(response.body);
+      final transactionId = responseData['transaction_id']?.toString() ?? responseData['external_id']?.toString();
       
       setState(() {
         _response = 'Response: ${response.statusCode}\n\n${jsonEncode(responseData, toEncodable: (e) => e.toString())}';
+        if (transactionId != null) {
+          _lastTransactionId = transactionId;
+          _transactionIdController.text = transactionId;
+        }
       });
 
       if (response.statusCode == 200) {
@@ -264,6 +346,52 @@ class _TestCollectionsScreenState extends State<TestCollectionsScreen> {
                     : const Text('Request Payment'),
               ),
               const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 16),
+              const Text(
+                'Check Payment Status',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _transactionIdController,
+                readOnly: true,
+                decoration: InputDecoration(
+                  labelText: 'Transaction ID',
+                  hintText: 'Will be filled automatically after payment',
+                  border: const OutlineInputBorder(),
+                  filled: true,
+                  fillColor: Colors.grey[100],
+                  suffixIcon: _lastTransactionId != null
+                      ? IconButton(
+                          icon: const Icon(Icons.content_copy, size: 20),
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: _lastTransactionId!));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Transaction ID copied to clipboard')),
+                            );
+                          },
+                        )
+                      : null,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: _isCheckingStatus || _lastTransactionId == null ? null : _checkPaymentStatus,
+                icon: _isCheckingStatus 
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh, size: 20),
+                label: const Text('Check Status'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  backgroundColor: Colors.green[700],
+                ),
+              ),
+              const SizedBox(height: 24),
               if (_response.isNotEmpty)
                 Card(
                   child: Padding(
@@ -293,13 +421,17 @@ class _TestDisbursementsScreenState extends State<TestDisbursementsScreen> {
   final _formKey = GlobalKey<FormState>();
   final _amountController = TextEditingController(text: '1000');
   final _payeeIdController = TextEditingController();
+  final _referenceIdController = TextEditingController();
   bool _isLoading = false;
+  bool _isCheckingStatus = false;
   String _response = '';
+  String? _lastReferenceId;
 
   @override
   void dispose() {
     _amountController.dispose();
     _payeeIdController.dispose();
+    _referenceIdController.dispose();
     super.dispose();
   }
 
@@ -324,6 +456,78 @@ class _TestDisbursementsScreenState extends State<TestDisbursementsScreen> {
     
     // Return as is if we can't determine the format
     return digits;
+  }
+
+  Future<void> _checkDisbursementStatus() async {
+    final referenceId = _referenceIdController.text.trim();
+    if (referenceId.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a reference ID or external ID')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isCheckingStatus = true;
+      _response = 'Checking disbursement status...\nReference ID: $referenceId\n\n';
+    });
+
+    try {
+      final baseUrl = dotenv.get('API_BASE_URL');
+      final url = Uri.parse('$baseUrl/api/v1/momo/disbursement-status/$referenceId');
+      
+      debugPrint('Sending GET request to: $url');
+      
+      final response = await http.get(
+        url,
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 30));
+
+      debugPrint('Response status: ${response.statusCode}');
+      debugPrint('Response body: ${response.body}');
+
+      final responseData = jsonDecode(response.body);
+      
+      setState(() {
+        _response = 'Status Check Response (${response.statusCode}):\n\n' 
+            '${jsonEncode(responseData, toEncodable: (e) => e.toString())}';
+      });
+
+      if (response.statusCode == 200) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Status check completed')),
+        );
+      } else {
+        // Show error message
+        if (!mounted) return;
+        final errorMessage = responseData is Map 
+            ? responseData['detail'] ?? responseData['message'] ?? 'Unknown error'
+            : 'HTTP ${response.statusCode} - ${response.reasonPhrase}';
+            
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $errorMessage')),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _response = 'Error checking disbursement status: $e';
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCheckingStatus = false;
+        });
+      }
+    }
   }
 
   Future<void> _disburseFunds() async {
@@ -358,9 +562,14 @@ class _TestDisbursementsScreenState extends State<TestDisbursementsScreen> {
       );
 
       final responseData = jsonDecode(response.body);
+      final referenceId = responseData['reference_id']?.toString() ?? responseData['external_id']?.toString();
       
       setState(() {
         _response = 'Response: ${response.statusCode}\n\n${jsonEncode(responseData, toEncodable: (e) => e.toString())}';
+        if (referenceId != null) {
+          _lastReferenceId = referenceId;
+          _referenceIdController.text = referenceId;
+        }
       });
 
       if (response.statusCode == 200) {
@@ -467,6 +676,52 @@ class _TestDisbursementsScreenState extends State<TestDisbursementsScreen> {
                         ),
                       )
                     : const Text('Disburse Funds'),
+              ),
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 16),
+              const Text(
+                'Check Disbursement Status',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _referenceIdController,
+                readOnly: true,
+                decoration: InputDecoration(
+                  labelText: 'Reference ID',
+                  hintText: 'Will be filled automatically after disbursement',
+                  border: const OutlineInputBorder(),
+                  filled: true,
+                  fillColor: Colors.grey[100],
+                  suffixIcon: _lastReferenceId != null
+                      ? IconButton(
+                          icon: const Icon(Icons.content_copy, size: 20),
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: _lastReferenceId!));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Reference ID copied to clipboard')),
+                            );
+                          },
+                        )
+                      : null,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: _isCheckingStatus || _lastReferenceId == null ? null : _checkDisbursementStatus,
+                icon: _isCheckingStatus 
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh, size: 20),
+                label: const Text('Check Status'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  backgroundColor: Colors.green[700],
+                ),
               ),
               const SizedBox(height: 24),
               if (_response.isNotEmpty)

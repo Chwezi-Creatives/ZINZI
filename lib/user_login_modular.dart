@@ -9,11 +9,14 @@ import 'notifications/fcm_service.dart';
 class UserLoginPageModular extends StatelessWidget {
   const UserLoginPageModular({Key? key}) : super(key: key);
 
-  Future<void> saveUserDetails(String userId, String userType) async {
+  Future<void> saveUserDetails(String userId, String userType, {String? phone}) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setString('user_id', userId); // Store as string
     await prefs.setString('user_type', userType);
     await prefs.setBool('is_logged_in', true);
+    if (phone != null) {
+      await prefs.setString('user_phone', phone);
+    }
     // Register FCM token with user info (async, do not await)
     FCMService.registerTokenWithUserInfo();
   }
@@ -34,14 +37,16 @@ class UserLoginPageModular extends StatelessWidget {
         final String userId = loginData['userId'];
         final String userType = loginData['userType'];
         final bool verified = loginData['verified'] ?? false; // Default to false if null
+        final String? phone = loginData['phone']; // Extract phone number if available
 
-            // Save user ID and user type to shared preferences
-            saveUserDetails(userId, userType); // userId is already a string
-            // Navigate to the User Dashboard after saving user details
-            Navigator.pushReplacement(
-              context,
-              _createSlideTransitionRoute(context),
-            );
+        // Save user details including phone number to shared preferences
+        saveUserDetails(userId, userType, phone: phone);
+        
+        // Navigate to the User Dashboard after saving user details
+        Navigator.pushReplacement(
+          context,
+          _createSlideTransitionRoute(context),
+        );
        //   } else {
        //     print('Data does not contain required keys: "user_id" or "user_type".');
        //   }

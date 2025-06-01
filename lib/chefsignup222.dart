@@ -512,6 +512,7 @@ class _ChefSignUpPageBetterNewState extends State<ChefSignUpPageBetterNew> {
         final responseData = json.decode(response.body);
         final int? chefID = responseData['ChefID'];
         final String? userType = responseData['UserType'];
+        final String? phoneNumber = responseData['phone'] as String?;
 
         if (chefID != null && userType != null) {
           final prefs = await SharedPreferences.getInstance();
@@ -520,10 +521,15 @@ class _ChefSignUpPageBetterNewState extends State<ChefSignUpPageBetterNew> {
           await prefs.setString('user_type', userType);
           await prefs.setString('chef_user_type', userType);
           await prefs.setBool('is_logged_in', true);
+          
+          // Save phone number if available in the response
+          if (phoneNumber != null && phoneNumber.isNotEmpty) {
+            await prefs.setString('user_phone', phoneNumber);
+          }
+          
           // Register FCM token with user info (async, do not await)
-          FCMService
-              .registerTokenWithUserInfo(); // Register FCM token with user info (async, do not await)
-          print('Saved ChefID: $chefID, UserType: $userType');
+          FCMService.registerTokenWithUserInfo();
+          print('Saved ChefID: $chefID, UserType: $userType, Phone: $phoneNumber');
         }
 
         _showSnackBar('Chef registration successful!', isError: false);

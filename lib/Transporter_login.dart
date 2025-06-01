@@ -77,6 +77,7 @@ class _TransporterLoginPageState extends State<TransporterLoginPage> {
              final bool verified = data['verified'] as bool? ?? false;
              final String email = data['email'] as String? ?? '';
              final String transporterName = data['transporter_name'] as String? ?? '';
+             final String? phone = data['phone'] as String?; // Extract phone number if available
 
              // Save to SharedPreferences
              SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -84,7 +85,11 @@ class _TransporterLoginPageState extends State<TransporterLoginPage> {
              await prefs.setString('transporter_email', email);
              await prefs.setString('transporter_name', transporterName);
              await prefs.setString('user_type', userType);
-await prefs.setString('user_id', transporterId); // Standard key for splash
+             await prefs.setString('user_id', transporterId); // Standard key for splash
+             if (phone != null) {
+               await prefs.setString('user_phone', phone);
+               print('Phone number saved: $phone');
+             }
              await prefs.setBool('is_logged_in', true);
              // Register FCM token with user info (async, do not await)
              FCMService.registerTokenWithUserInfo();

@@ -349,12 +349,17 @@ class _ProducerSignUpPageState extends State<ProducerSignUpPage> {
 
           // Store user info/token if returned by backend
           SharedPreferences prefs = await SharedPreferences.getInstance();
-          await prefs.setString(
-              'producer_id', responseData['producer_id'].toString()); // Example
-          await prefs.setString(
-              'user_id', responseData['producer_id'].toString());
+          await prefs.setString('producer_id', responseData['producer_id'].toString());
+          await prefs.setString('user_id', responseData['producer_id'].toString());
           await prefs.setString('user_type', 'producer');
           await prefs.setBool('is_logged_in', true);
+          
+          // Save phone number if available in the response
+          final String? phoneNumber = responseData['phone'] as String?;
+          if (phoneNumber != null && phoneNumber.isNotEmpty) {
+            await prefs.setString('user_phone', phoneNumber);
+          }
+          
           // Register FCM token with user info (async, do not await)
           FCMService.registerTokenWithUserInfo();
 

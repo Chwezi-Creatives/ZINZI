@@ -94,6 +94,7 @@ class _LoginPageModularState extends State<LoginPageModular>
           final String userId = data[widget.idKey].toString(); // Extract user ID and convert to String
           final String userType = widget.expectedUserType; // Use expected user type
           final bool verified = data['verified'] as bool? ?? false; // Extract verified status, default to false if null
+          final String? phone = data['phone'] as String?; // Extract phone number if available
 
           // Pass extracted data to the success callback
           if (mounted) {
@@ -101,6 +102,7 @@ class _LoginPageModularState extends State<LoginPageModular>
               'userId': userId,
               'userType': userType,
               'verified': verified,
+              'phone': phone, // Include phone number in the response
             });
           }
         } else {
