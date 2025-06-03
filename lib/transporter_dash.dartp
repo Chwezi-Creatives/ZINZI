@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:zinzi2/app_drawer_unified.dart';
 import 'package:flutter/services.dart'; // For SystemUiOverlayStyle & input formatters
 import 'package:intl/intl.dart';
+import 'dart:async';
 import 'dart:convert'; // For jsonDecode, jsonEncode
 import 'package:http/http.dart' as http; // Import the http package
 import 'package:shared_preferences/shared_preferences.dart'; // Import SharedPreferences
@@ -2256,6 +2257,8 @@ class _TransporterOrdersTabState extends State<TransporterOrdersTab>
   String _error = '';
   bool _isUpdatingStatus = false; // State for disabling buttons during update
   bool _didLoadOrders = false; // Ensure orders are loaded only once
+  Timer? _pollingTimer;
+  static const Duration _pollingInterval = Duration(seconds: 30); // Poll every 30 seconds
 
   @override
   bool get wantKeepAlive => true;
@@ -2271,18 +2274,41 @@ class _TransporterOrdersTabState extends State<TransporterOrdersTab>
     super.didChangeDependencies();
     if (!_didLoadOrders) {
       _didLoadOrders = true;
-      _loadOrders();
+      _startPolling();
     }
   }
 
-  // --- Load Orders Data via API ---
-  Future<void> _loadOrders() async {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).removeCurrentSnackBar();
-    setState(() {
-      _isLoading = true;
-      _error = '';
+  @override
+  void dispose() {
+    _stopPolling();
+    super.dispose();
+  }
+
+  void _startPolling() {
+    // Initial load
+    _loadOrders();
+    // Start periodic polling
+    _pollingTimer = Timer.periodic(_pollingInterval, (timer) {
+      _loadOrders(silent: true);
     });
+  }
+
+  void _stopPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = null;
+  }
+
+  // --- Load Orders Data via API ---
+  Future<void> _loadOrders({bool silent = false}) async {
+    if (!mounted) return;
+    
+    if (!silent) {
+      ScaffoldMessenger.of(context).removeCurrentSnackBar();
+      setState(() {
+        _isLoading = true;
+        _error = '';
+      });
+    }
 
     try {
       // Pass ID to fetch orders
@@ -2291,12 +2317,15 @@ class _TransporterOrdersTabState extends State<TransporterOrdersTab>
           await TransporterApiService.fetchAssignedOrders(widget.transporterId);
       if (mounted) {
         setState(() {
-          _assignedOrders = orders;
-          _assignedOrders.sort((a, b) {
-            int sc = _getTransporterStatusPriority(a.orderStatus)
-                .compareTo(_getTransporterStatusPriority(b.orderStatus));
-            return sc != 0 ? sc : b.orderDate.compareTo(a.orderDate);
-          });
+          // Only update if there are actual changes to prevent unnecessary rebuilds
+          if (!_areOrderListsEqual(_assignedOrders, orders)) {
+            _assignedOrders = orders;
+            _assignedOrders.sort((a, b) {
+              int sc = _getTransporterStatusPriority(a.orderStatus)
+                  .compareTo(_getTransporterStatusPriority(b.orderStatus));
+              return sc != 0 ? sc : b.orderDate.compareTo(a.orderDate);
+            });
+          }
           _isLoading = false;
         });
       }
@@ -2307,7 +2336,9 @@ class _TransporterOrdersTabState extends State<TransporterOrdersTab>
           _isLoading = false;
           _error = 'Failed to load orders: $e';
         });
-        _showErrorSnackbar(_error);
+        if (!silent) {
+          _showErrorSnackbar(_error);
+        }
       }
     }
   }
@@ -2815,5 +2846,27 @@ class _TransporterOrdersTabState extends State<TransporterOrdersTab>
       default:
         return 6;
     }
+  }
+
+  // --- Helper Methods ---
+  
+  /// Compares two order lists to check if they have the same orders with the same statuses
+  bool _areOrderListsEqual(List<Order> list1, List<Order> list2) {
+    if (list1.length != list2.length) return false;
+    
+    // Create a map of orderId to orderStatus for quick lookup
+    final orderStatusMap = <int, String>{};
+    for (final order in list2) {
+      orderStatusMap[order.orderId] = order.orderStatus;
+    }
+    
+    // Check if all orders in list1 have matching status in list2
+    for (final order in list1) {
+      if (orderStatusMap[order.orderId] != order.orderStatus) {
+        return false;
+      }
+    }
+    
+    return true;
   }
 } // End of _TransporterOrdersTabState

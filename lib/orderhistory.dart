@@ -70,24 +70,48 @@ String _formatCurrency(dynamic amount) {
   }
 }
 
+// Get color for payment status (separate from order status)
+Color _getPaymentStatusColor(String? status) {
+  if (status == null) return kColorInfo;
+  
+  status = status.toString().toLowerCase().trim();
+  
+  // Handle payment status colors
+  if (status == 'paid' || status == 'completed') {
+    return Colors.green; // Green for successful payments
+  } else if (status == 'pending' || status == 'processing_payment') {
+    return kColorWarning; // Warning color for pending payments
+  } else if (status == 'failed' || status == 'cancelled' || status == 'declined') {
+    return kColorCancelled; // Red for failed/cancelled payments
+  }
+  
+  return kColorInfo; // Default color for unknown statuses
+}
+
+// Get color for order status
 Color _getStatusColor(String? status) {
-  status = status?.toLowerCase().trim();
+  if (status == null) return kColorInfo;
+  
+  status = status.toLowerCase().trim();
+  
+  // Handle order status colors
   switch (status) {
     case 'delivered':
     case 'completed':
       return kColorSuccess;
     case 'processing':
     case 'shipped':
-    case 'pending':
+    case 'preparing':
       return kColorWarning;
+    case 'verification needed':
+      return Colors.blueGrey;
     case 'cancelled':
     case 'failed':
       return kColorCancelled;
-    // Added specific color for verification needed
-    case 'verification needed':
-      return Colors.blueGrey; // Or use kColorInfo or a custom color
+    case 'pending':
+      return kColorWarning;
     default:
-      return kColorInfo; // Default for unknown or null statuses
+      return kColorInfo;
   }
 }
 
@@ -137,7 +161,7 @@ class OrderHistoryScreen extends StatefulWidget {
           final prefs = await SharedPreferences.getInstance();
           final userType = prefs.getString('user_type') ?? 'customer';
           final uri = Uri.parse('$apiBaseUrl/rr/orders?user_id=$userId&user_type=$userType');
-          final response = await http.get(uri).timeout(const Duration(seconds: 25));
+          final response = await http.get(uri).timeout(const Duration(seconds: 35));
           if (response.statusCode == 200) {
             final data = json.decode(response.body);
             if (data is Map<String, dynamic> && data['data'] is List) {
@@ -484,7 +508,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
     print("Fetching order history from: $uri");
 
     try {
-      final response = await http.get(uri).timeout(const Duration(seconds: 25));
+      final response = await http.get(uri).timeout(const Duration(seconds: 35));
       print('[OrderHistory] Poll result: Status ${response.statusCode}, Body: ${response.body}'); // DEBUG: Show API result
 
       if (response.statusCode == 200) {
@@ -586,7 +610,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
     try {
       final response = await http
           .get(uri)
-          .timeout(const Duration(seconds: 15)); // Slightly longer timeout
+          .timeout(const Duration(seconds: 35)); // Slightly longer timeout
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -1167,16 +1191,16 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
           ),
           _buildDetailRow(
             context,
-            icon: Icons.payment_outlined,
+            icon: Icons.shopping_basket_outlined,
             label: 'Payment Mode',
-            value: _getStatusDisplay(order['payment_mode']), // Use formatter
+            value: _getStatusDisplay(order['payment_mode']),
           ),
           _buildDetailRow(
             context,
             icon: Icons.credit_card_outlined,
             label: 'Payment Status',
             value: _getStatusDisplay(order['payment_status']),
-            valueColor: _getStatusColor(order['payment_status']),
+            valueColor: _getPaymentStatusColor(order['payment_status']),
           ),
           // Display Order Items (if available)
           if (itemsList.isNotEmpty) ...[

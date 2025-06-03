@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/foundation.dart'; // For kDebugMode
 // import 'package:geolocator/geolocator.dart'; // Geolocator is now used by LocationService
 import 'package:google_fonts/google_fonts.dart';
 import 'orderstatus polls.dart' as order_status;
@@ -86,6 +87,44 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     );
   }
 
+  Future<void> _loadUserPhoneNumber() async {
+    if (!kDebugMode) return; // Only run debug code in debug mode
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      if (!prefs.containsKey('user_phone')) {
+        debugPrint('🔍 [Checkout] user_phone key not found in SharedPreferences');
+        return;
+      }
+      
+      final userPhone = prefs.getString('user_phone');
+      if (userPhone == null) {
+        debugPrint('🔍 [Checkout] user_phone is null in SharedPreferences');
+        return;
+      }
+      
+      if (userPhone.isEmpty) {
+        debugPrint('🔍 [Checkout] user_phone is empty in SharedPreferences');
+        return;
+      }
+      
+      if (!mounted) {
+        debugPrint('🔍 [Checkout] Widget not mounted, not setting phone number');
+        return;
+      }
+      
+      debugPrint('🔍 [Checkout] Setting payment phone number from SharedPreferences: $userPhone');
+      setState(() {
+        _paymentPhoneNumberController.text = userPhone;
+      });
+      
+    } catch (e) {
+      debugPrint('⚠️ [Checkout] Error loading user phone number: $e');
+      // Silently fail in production, but log in debug mode
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -93,6 +132,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     _scaleFactor = 1.0;
     _startAnimation();
     _initializeLocation(); // New method to handle location initialization
+    _loadUserPhoneNumber(); // Load saved phone number if available
 
     // Listen to location updates from the service
     LocationService.instance.currentAddressNotifier.addListener(_updateLocationFromService);
@@ -397,13 +437,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         child: Container(
           height: MediaQuery.of(context).size.height,
           decoration: BoxDecoration(
-            image: DecorationImage(
-              image: AssetImage('assets/images/soft.jpg'),
-              fit: BoxFit.cover,
-              colorFilter: ColorFilter.mode(
-                Colors.white.withOpacity(0.95),
-                BlendMode.dstATop,
-              ),
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.teal.shade50,
+                Colors.teal.shade50,
+              ],
             ),
           ),
           padding: EdgeInsets.all(16),

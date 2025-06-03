@@ -858,7 +858,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen>
       backgroundColor: kColorBackground,
       drawer: const AppDrawer(),
       appBar: AppBar(
-        title: Text('ORDER TRACKING',
+        title: Text('ORDER STATUS',
             style: GoogleFonts.poppins(
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
@@ -1252,12 +1252,22 @@ class _OrderStatusScreenState extends State<OrderStatusScreen>
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
                           color: kColorTextPrimary)),
-                  Icon(
-                      _isOrderInfoExpanded
-                          ? Icons.expand_less
-                          : Icons.expand_more,
-                      color: kColorTextPrimary,
-                      size: 28),
+                  Row(
+                    children: [
+                      Text('Tap for details',
+                          style: GoogleFonts.poppins(
+                              fontSize: 12,
+                              color: kColorTextSecondary,
+                              fontStyle: FontStyle.italic)),
+                      const SizedBox(width: 8),
+                      Icon(
+                          _isOrderInfoExpanded
+                              ? Icons.expand_less
+                              : Icons.expand_more,
+                          color: kColorTextPrimary,
+                          size: 28),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -1274,6 +1284,15 @@ class _OrderStatusScreenState extends State<OrderStatusScreen>
                 _buildInfoRow('Quantity', quantity),
                 _buildInfoRow('Total Price', '$totalPrice UGX'),
                 _buildInfoRow('Order Status', orderStatus),
+                _buildInfoRow('Payment Status', paymentStatus,
+                  textStyle: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w500,
+                    color: paymentStatus.toLowerCase() != 'pending' 
+                        ? Colors.green 
+                        : kColorTextPrimary,
+                    fontSize: 13,
+                  )
+                ),
                 if (needsVerification) ...[
                   const SizedBox(height: 16),
                   Center(
@@ -1326,7 +1345,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen>
                   const Divider(color: kColorDivider, height: 16, thickness: 1),
                   _buildInfoRow('Contact', contactInfo),
                   _buildInfoRow('Delivery To', cleanAddress),
-                  _buildInfoRow('Payment Status', paymentStatus),
+                  // Payment status moved above to be right after order status
                   if (notes != null && notes.isNotEmpty)
                     _buildInfoRow('Notes', notes),
                   if (ingredients != null &&
@@ -1340,17 +1359,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen>
                 ? CrossFadeState.showSecond
                 : CrossFadeState.showFirst,
           ),
-          if (!_isOrderInfoExpanded)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12.0, top: 0),
-              child: Center(
-                child: Text('Tap here for more details',
-                    style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        color: kColorTextSecondary,
-                        fontStyle: FontStyle.italic)),
-              ),
-            ),
+
         ],
       ),
     );
@@ -1433,21 +1442,21 @@ class _OrderStatusScreenState extends State<OrderStatusScreen>
     );
   }
 
-  Widget _buildInfoRow(String label, String value) {
+  Widget _buildInfoRow(String label, String value, {TextStyle? textStyle}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-              width: 105,
+              width: 120,
               child: Text(label,
                   style: GoogleFonts.poppins(
                       fontSize: 13, color: kColorTextSecondary))),
-          const SizedBox(width: 20),
+          const SizedBox(width: 30),
           Expanded(
               child: Text(value.isEmpty ? 'N/A' : value,
-                  style: GoogleFonts.poppins(
+                  style: textStyle ?? GoogleFonts.poppins(
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
                       color: kColorTextPrimary))),

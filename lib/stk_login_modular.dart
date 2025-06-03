@@ -7,13 +7,19 @@ import 'notifications/fcm_service.dart';
 class StakeholderLoginPageModular extends StatelessWidget {
   const StakeholderLoginPageModular({Key? key}) : super(key: key);
 
-  Future<void> saveUserDetails(String userId, String userType) async {
+  Future<void> saveUserDetails(String userId, String userType, {String? phone}) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setString('stakeholder_user_id', userId);
     await prefs.setString('stakeholder_user_type', userType);
     await prefs.setString('user_id', userId); // Standard key for splash
     await prefs.setString('user_type', userType); // Standard key for splash
     await prefs.setBool('is_logged_in', true);
+    
+    // Save phone number if provided
+    if (phone != null && phone.isNotEmpty) {
+      await prefs.setString('user_phone', phone);
+    }
+    
     // Register FCM token with user info (async, do not await)
     FCMService.registerTokenWithUserInfo();
   }
@@ -35,6 +41,7 @@ class StakeholderLoginPageModular extends StatelessWidget {
         final String userId = loginData['userId'];
         final String userType = loginData['userType'];
         final bool verified = loginData['verified'] ?? false; // Default to false if null
+        final String? phone = loginData['phone']; // Extract phone number if available
 
           // Confirm that the expected fields are present
        //   if (data is Map<String, dynamic> &&
@@ -43,8 +50,8 @@ class StakeholderLoginPageModular extends StatelessWidget {
        //     String userId = data['stakeholder_id'].toString();
        //     String userType = data['user_type'];
 
-            // Save user ID and user type to shared preferences
-            saveUserDetails(userId, userType);
+            // Save user ID, user type, and phone number to shared preferences
+            saveUserDetails(userId, userType, phone: phone);
 
             // Navigate to the Stakeholder Dashboard after saving user details
             Navigator.pushReplacement(

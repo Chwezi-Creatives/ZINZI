@@ -395,6 +395,7 @@ class _AppDrawerState extends State<AppDrawer> {
       // Clear any other user-specific preferences if needed
       await prefs.remove('fcm_token');
       await prefs.remove('first_login');
+      await prefs.remove('user_phone');  // Clear user phone number
       
       // Clear the cart when logging out
       cart.ShoppingCart.clearCart();

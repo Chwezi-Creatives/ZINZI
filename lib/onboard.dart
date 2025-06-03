@@ -20,13 +20,14 @@ class LandingPage extends StatelessWidget {
       ),
       body: Container(
         decoration: BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage('assets/images/soft.jpg'),
-            fit: BoxFit.cover,
-            colorFilter: ColorFilter.mode(
-              Colors.white.withOpacity(0.8),
-              BlendMode.dstATop,
-            ),
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.teal[50]!,
+              //Colors.teal[20]!,
+              Colors.teal[50]!,
+            ],
           ),
         ),
         child: Padding(
@@ -93,6 +94,10 @@ class LandingPage extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.teal[50],
           borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Colors.teal[400]!,
+            width: 1.0,
+          ),
           boxShadow: [
             BoxShadow(
               color: Colors.teal.withOpacity(0.2),
@@ -144,6 +149,10 @@ class LandingPage extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.teal[50],
           borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Colors.teal[400]!,
+            width: 1.0,
+          ),
           boxShadow: [
             BoxShadow(
               color: Colors.teal.withOpacity(0.2),

@@ -138,44 +138,50 @@ class _UserSignUpPageState extends State<UserSignUpPage>
   }
 
   Future<void> pickImage() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(source: ImageSource.gallery);
 
-    if (pickedFile != null) {
-      setState(() {
-        _profileImage = File(pickedFile.path);
-      });
-      setState(() {
-        _isUploadingProfileImage = true; // Start loading indicator
-      });
-      try {
-        String imageUrl = await uploadImageToImgur(_profileImage!);
-        _imageUrlController.text = imageUrl; // Set the actual Imgur URL
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Profile image uploaded successfully!'),
-            backgroundColor: primaryTeal,
-          ));
+      if (pickedFile != null) {
+        setState(() {
+          _profileImage = File(pickedFile.path);
+          _isUploadingProfileImage = true;
+        });
+
+        try {
+          String imageUrl = await uploadImageToImgur(_profileImage!);
+          _imageUrlController.text = imageUrl; // Set the actual Imgur URL
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Profile image uploaded successfully!'),
+              backgroundColor: primaryTeal,
+            ));
+          }
+        } catch (e) {
+          print("Image upload error: $e");
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Image upload failed. You can try again or continue without an image.'),
+              backgroundColor: errorColor,
+            ));
+          }
+          // Don't clear the selected image, let user retry
+          _imageUrlController.clear();
+        } finally {
+          if (mounted) {
+            setState(() {
+              _isUploadingProfileImage = false;
+            });
+          }
         }
-      } catch (e) {
-        print("Image upload error: $e");
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Image upload failed: $e'),
-            backgroundColor: errorColor,
-          ));
-          // Optionally clear the selected image if upload fails
-          setState(() {
-            _profileImage = null;
-          });
-        }
-        _imageUrlController.clear(); // Clear controller on error
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isUploadingProfileImage = false; // Stop loading indicator
-          });
-        }
+      }
+    } catch (e) {
+      print("Image picker error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Failed to pick image. Please try again.'),
+          backgroundColor: errorColor,
+        ));
       }
     }
   }
@@ -215,39 +221,45 @@ class _UserSignUpPageState extends State<UserSignUpPage>
   Future<void> _signUp() async {
     if (!_formKey.currentState!.validate()) return;
 
+    // Show confirmation dialog if no image was uploaded
+    if (_imageUrlController.text.trim().isEmpty) {
+      final bool? proceed = await showDialog<bool>(
+        context: context,
+        builder: (BuildContext context) => AlertDialog(
+          title: const Text('No Profile Image'),
+          content: const Text(
+              'You can add a profile image later from your profile settings. Would you like to continue without a profile image?'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Go Back'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      );
+
+      if (proceed != true) {
+        return; // User chose to go back
+      }
+    }
+
     setState(() {
       _isLoading = true;
     });
-
-    // Ensure an image URL is present (either uploaded or default)
-    String finalImageUrl = _imageUrlController.text.trim();
-    if (finalImageUrl.isEmpty) {
-      // Check if a profile image was selected but failed to upload
-      if (_profileImage != null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              'Profile image upload failed previously. Please try selecting again or proceed without one.'),
-          backgroundColor: errorColor,
-        ));
-        setState(() => _isLoading = false);
-        return; // Stop signup if upload failed and wasn't resolved
-      } else {
-        // Use default placeholder only if no image was ever selected
-        finalImageUrl =
-            "https://via.placeholder.com/150/00796B/FFFFFF?text=User";
-        print("Using default placeholder image.");
-      }
-    }
 
     try {
       final response = await http.post(
         Uri.parse('$apibaseurl/rr/signup_user'),
         headers: {'Content-Type': 'application/json'},
-        body: json.encode({
+        body: jsonEncode({
           'name': _nameController.text.trim(),
           'email': _emailController.text.trim(),
           'password': _passwordController.text.trim(),
-          'image': finalImageUrl, // Use final image URL
+          if (_imageUrlController.text.trim().isNotEmpty) 'image': _imageUrlController.text.trim(),
           'user_type': 'User', // Set the user type explicitly
         }),
       );

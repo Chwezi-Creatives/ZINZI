@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
+import 'dart:async'; // Added import for TimeoutException
 import 'dart:convert';
 import 'dart:io'; // Required for File and image picking
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // For environment variables
@@ -238,18 +239,14 @@ class TransporterProfile {
 }
 
 class Order {
-  // ...existing fields...
-  // Add this getter for customer phone number (adjust field name if needed)
-  String? get userPhone {
-    // Try to find a field that holds the customer phone number
-    // If not present, return null or a placeholder
-    if (this.toJson().containsKey('customer_phone')) {
-      return getStringSafe(this.toJson()['customer_phone']);
-    }
-    if (this.toJson().containsKey('user_phone')) {
-      return getStringSafe(this.toJson()['user_phone']);
-    }
-    return null;
+  // Add user_phone field
+  final String? userPhone;
+  
+  // Helper method to safely get string from dynamic value
+  static String? _getStringSafe(dynamic value) {
+    if (value == null) return null;
+    if (value is String) return value;
+    return value.toString();
   }
 
   final int orderId;
@@ -284,7 +281,8 @@ class Order {
   static const STATUS_ASSIGNED = 'assigned'; // Match the example data
   static const STATUS_ACCEPTED = 'Accepted'; // Explicit accept by Rider
   static const STATUS_PICKED_UP = 'Picked Up'; // By Rider
-  static const STATUS_ON_THE_WAY = 'On The Way'; // Common alias for delivering
+  static const STATUS_ON_THE_WAY = 'On The Way'; // Common alias for delivering - will be removed from timeline display logic
+  static const STATUS_VERIFICATION_NEEDED = 'verification needed'; // Potential status string
   static const STATUS_DELIVERING = 'Delivering'; // Sometimes used
   static const STATUS_DELIVERED = 'Delivered'; // Rider confirms drop-off
   static const STATUS_COMPLETED =
@@ -379,7 +377,7 @@ class Order {
 
   Order({
     required this.orderId,
-    this.userId,
+    required this.userId,
     required this.orderType,
     this.productId,
     this.chefId,
@@ -387,7 +385,7 @@ class Order {
     this.transporterId,
     required this.orderDate,
     required this.deliveryAddress,
-    this.pickupLocation, // <<< NEW: Add pickupLocation to constructor
+    this.pickupLocation,
     required this.orderStatus,
     required this.totalPrice,
     this.notes,
@@ -404,6 +402,7 @@ class Order {
     this.transporterName,
     this.gigDetails,
     this.productName,
+    this.userPhone, // Add userPhone to constructor
   });
 
   factory Order.fromJson(Map<String, dynamic> json) {
@@ -422,6 +421,9 @@ class Order {
 
     // Helper to safely get a string value
     String? getStringSafe(dynamic value) => value?.toString();
+
+    // Parse user_phone from JSON
+    final userPhone = _getStringSafe(json['user_phone']);
 
     return Order(
       orderId: parseIntSafe(json['order_id']), // Use safe parser
@@ -455,6 +457,7 @@ class Order {
       transporterName: getStringSafe(json['transporter_name']),
       gigDetails: getStringSafe(json['gig_details']),
       productName: getStringSafe(json['product_name']), // Use safe getter
+      userPhone: userPhone, // Add user_phone from JSON
     );
   }
 
@@ -485,6 +488,7 @@ class Order {
         'transporter_name': transporterName,
         'gig_details': gigDetails,
         'product_name': productName,
+        'user_phone': userPhone, // Include user_phone
       };
 
   // copyWith method adapted from old code
@@ -498,7 +502,7 @@ class Order {
     ValueGetter<int?>? transporterId,
     DateTime? orderDate,
     String? deliveryAddress,
-    String? pickupLocation, // <<< ADD copyWith support
+    String? pickupLocation,
     String? orderStatus, // Main field to update
     double? totalPrice,
     ValueGetter<String?>? notes,
@@ -515,6 +519,7 @@ class Order {
     ValueGetter<String?>? transporterName,
     ValueGetter<String?>? gigDetails,
     ValueGetter<String?>? productName,
+    ValueGetter<String?>? userPhone,
   }) {
     return Order(
       orderId: orderId ?? this.orderId,
@@ -547,6 +552,7 @@ class Order {
           transporterName != null ? transporterName() : this.transporterName,
       gigDetails: gigDetails != null ? gigDetails() : this.gigDetails,
       productName: productName != null ? productName() : this.productName,
+      userPhone: userPhone != null ? userPhone() : this.userPhone,
     );
   }
 }
@@ -555,41 +561,47 @@ class Payment {
   final int id;
   final int transporterId;
   final int orderId;
-  final String orderType;
   final double amount;
-  final String
-      disbursementTransactionStatus; // e.g., Pending, In Progress, Successful
-  final String orderTransactionStatus; // e.g., Confirmed, Shipped, Delivered
+  final String transactionId;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final String? status; // Added status field
+  final String? orderType; // Made nullable and added as a field
+  
+  // Computed properties for backward compatibility
+  String get effectiveOrderType => orderType ?? 'delivery';
+  String get disbursementTransactionStatus => status ?? 'Successful';
+  String get orderTransactionStatus => 'Completed'; // Assuming completed since it's a disbursement
 
   Payment({
     required this.id,
     required this.transporterId,
     required this.orderId,
-    required this.orderType,
     required this.amount,
-    required this.disbursementTransactionStatus,
-    required this.orderTransactionStatus,
+    required this.transactionId,
     required this.createdAt,
     required this.updatedAt,
+    this.status,
+    this.orderType,
   });
 
-  factory Payment.fromJson(Map<String, dynamic> json) {
+  // Named constructor for API compatibility
+  factory Payment.fromApiJson(Map<String, dynamic> json) {
     return Payment(
-      id: parseIntSafe(json['id']),
-      transporterId: parseIntSafe(json['transporter_id']),
-      orderId: parseIntSafe(json['order_id']),
-      orderType: getStringSafe(json['order_type']) ?? 'unknown',
-      amount: parseDoubleSafe(json['amount']),
-      disbursementTransactionStatus:
-          getStringSafe(json['disbursement_transaction_status']) ?? 'Unknown',
-      orderTransactionStatus:
-          getStringSafe(json['order_transaction_status']) ?? 'Unknown',
-      createdAt: parseRequiredDateSafe(json['created_at']),
-      updatedAt: parseRequiredDateSafe(json['updated_at']),
+      id: parseIntSafe(json['id'] ?? json['disbursement_id'] ?? '0'),
+      transporterId: parseIntSafe(json['transporter_id'] ?? '0'),
+      orderId: parseIntSafe(json['order_id'] ?? '0'),
+      amount: parseDoubleSafe(json['amount'] ?? '0'),
+      transactionId: getStringSafe(json['transaction_id']) ?? 'N/A',
+      status: getStringSafe(json['status']),
+      orderType: getStringSafe(json['order_type']),
+      createdAt: parseDateSafe(json['created_at']) ?? DateTime.now(),
+      updatedAt: parseDateSafe(json['updated_at']) ?? DateTime.now(),
     );
   }
+  
+  // Original fromJson for backward compatibility
+  factory Payment.fromJson(Map<String, dynamic> json) => Payment.fromApiJson(json);
 }
 
 // ================================================
@@ -932,61 +944,6 @@ class TransporterApiService {
     }
   }
 
-  // Fetch available orders (not assigned yet)
-  static Future<List<Order>> fetchAvailableOrders() async {
-    // Extract transporter_id from SharedPreferences (try transporter_id, fallback to user_id)
-    final prefs = await SharedPreferences.getInstance();
-    dynamic transporterId = prefs.get('transporter_id');
-    if (transporterId == null) {
-      transporterId = prefs.get('user_id');
-    }
-    if (transporterId == null) {
-      throw Exception('Transporter ID not found in SharedPreferences.');
-    }
-    // Handle int or String
-    String transporterIdStr;
-    if (transporterId is int) {
-      transporterIdStr = transporterId.toString();
-    } else if (transporterId is String) {
-      transporterIdStr = transporterId;
-    } else {
-      throw Exception(
-          'Transporter ID is of unexpected type: ${transporterId.runtimeType}');
-    }
-    final Uri uri =
-        Uri.parse('$apibaseurl/rr/orders?transporter_id=$transporterIdStr');
-    print(
-        "Fetching available orders for transporter $transporterIdStr from: $uri");
-    try {
-      final response =
-          await http.get(uri, headers: _getWriteHeaders(requiresAuth: true));
-      if (response.statusCode == 200) {
-        final dynamic rawData = json.decode(response.body);
-        final dynamic ordersList = _handleStaticApiResponse(rawData,
-            endpointContext: 'fetchAvailableOrders');
-        if (ordersList is List) {
-          return ordersList
-              .whereType<Map<String, dynamic>>()
-              .map((item) => Order.fromJson(item))
-              .toList();
-        } else {
-          print(
-              "Available orders API response format unexpected: Expected List, got ${ordersList?.runtimeType}");
-          return [];
-        }
-      } else {
-        print(
-            "Error fetching available orders: ${response.statusCode} ${response.body}");
-        throw Exception(
-            'Failed to load available orders (Code: ${response.statusCode}) - ${response.reasonPhrase}');
-      }
-    } catch (e) {
-      print("Exception fetching available orders: $e");
-      // Don't cast the exception directly if it's not an Exception type
-      throw Exception('Failed to load available orders: ${e.toString()}');
-    }
-  }
-
   // Accept an available order
   static Future<bool> acceptOrder(int orderId, String transporterId) async {
     final Uri uri = Uri.parse(
@@ -999,32 +956,52 @@ class TransporterApiService {
         throw Exception('Invalid transporter ID format');
       }
 
+      print("Sending PATCH request to update order status to 'picked up'...");
       final response = await http.patch(
         uri,
         headers: _getWriteHeaders(requiresAuth: true),
         body: jsonEncode({
           'transporter_id': transporterIdInt, // Send transporter ID as int
-          'order_status':
-              Order.STATUS_ASSIGNED // Use the 'assigned' status from your model
+          'order_status': Order.STATUS_PICKED_UP // Update status to 'picked up' when order is accepted
         }),
-      );
-      if (response.statusCode == 200 || response.statusCode == 204) {
-        print("Order $orderId accepted successfully.");
-        return true;
+      ).timeout(const Duration(seconds: 30)); // Add timeout for the request
+
+      print("Response status: ${response.statusCode}");
+      print("Response body: ${response.body}");
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        // Success - check if response contains updated status
+        try {
+          final responseBody = json.decode(response.body);
+          if (responseBody is Map && responseBody.containsKey('order_status')) {
+            final updatedStatus = responseBody['order_status']?.toString().toLowerCase();
+            print("Order $orderId status updated successfully. New status: $updatedStatus");
+          } else {
+            // No status in response, but still successful
+            print("Order $orderId update successful. No status returned in response.");
+          }
+          return true;
+        } catch (e) {
+          // If we can't parse the response but got a success status code, still consider it a success
+          print("Order $orderId update successful. Could not parse response: $e");
+          return true;
+        }
       } else {
         print("Error accepting order: ${response.statusCode} ${response.body}");
         String errorMessage = 'Failed to accept order.';
         try {
           final errorBody = json.decode(response.body);
-          errorMessage =
-              errorBody['message'] ?? errorBody['error'] ?? errorMessage;
+          errorMessage = errorBody['message'] ?? errorBody['error'] ?? errorMessage;
         } catch (_) {}
         throw Exception(
             'Failed to accept order (Code: ${response.statusCode}) - $errorMessage');
       }
+    } on TimeoutException catch (e) {
+      print("Timeout while waiting for order status update: $e");
+      throw Exception('Request timed out while updating order status');
     } catch (e) {
       print("Exception accepting order: $e");
-      throw Exception('Failed to accept order: ${e.toString()}');
+      rethrow; // Re-throw to preserve the original stack trace
     }
   }
 
@@ -1098,23 +1075,12 @@ class TransporterDashNew extends StatefulWidget {
     }
     if (!ordersCacheValid) {
       try {
-        // Fetch transporter orders and available orders
-        final results = await Future.wait([
-          TransporterApiService.fetchAllTransporterOrders(transporterId),
-          TransporterApiService.fetchAvailableOrders(),
-        ]);
-
-        final transporterOrders = results[0] as List<Order>;
-        final availableOrders = results[1] as List<Order>;
-
-        // Combine and serialize
-        final List<Order> combinedOrders = [
-          ...transporterOrders,
-          ...availableOrders,
-        ];
-
+        // Only fetch transporter orders
+        final transporterOrders = await TransporterApiService.fetchAllTransporterOrders(transporterId);
+        
+        // Serialize the orders
         final List<Map<String, dynamic>> serializedOrders =
-            combinedOrders.map((order) => order.toJson()).toList();
+            transporterOrders.map((order) => order.toJson()).toList();
 
         await UserCache.saveData(ordersKey, serializedOrders);
         await UserCache.saveData(ordersTsKey, now.toIso8601String());
@@ -1224,6 +1190,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     _vehicleYearController.dispose();
     _licensePlateController.dispose();
     _vehicleColorController.dispose();
+    _searchController.dispose(); // Dispose search controller
     super.dispose();
   }
 
@@ -1501,34 +1468,23 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
 
     // 2. Always fetch fresh data in background
     try {
-      // Fetch orders and payments concurrently
-      final results = await Future.wait([
-        TransporterApiService.fetchAllTransporterOrders(widget.transporterId),
-        TransporterApiService.fetchTransporterPayments(widget.transporterId),
-        TransporterApiService.fetchAvailableOrders(),
-      ], eagerError: true);
+      // Fetch orders and payments
+      final ordersResult = await TransporterApiService.fetchAllTransporterOrders(widget.transporterId);
+      final paymentsResult = await TransporterApiService.fetchTransporterPayments(widget.transporterId);
 
       if (mounted) {
-        final ordersResult = results[0] as List<dynamic>;
-        final paymentsResult = results[1] as List<dynamic>;
-        final availableOrdersResult = results[2] as List<dynamic>;
-
-        // Combine assigned orders with available orders
-        final List<Order> combinedOrders = [
-          ...ordersResult.cast<Order>(),
-          ...availableOrdersResult.cast<Order>(),
-        ];
+        // Convert to list of Orders
+        final List<Order> allOrders = ordersResult.cast<Order>().toList();
 
         setStateIfMounted(() {
-          _allOrders = combinedOrders;
-          _payments = paymentsResult
-              .cast<Payment>(); // Assuming paymentsResult is List<Payment>
+          _allOrders = allOrders;
+          _payments = paymentsResult.cast<Payment>();
           _isLoading = false; // Done loading general data
           _errorMessage = null;
         });
 
         // Save orders to cache for next time
-        await _saveOrdersCacheToPrefs(combinedOrders);
+        await _saveOrdersCacheToPrefs(allOrders);
       }
     } catch (e, stackTrace) {
       print(
@@ -1689,7 +1645,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                       : null,
               child: (_transporterProfile?.profileImageUrl == null ||
                           _transporterProfile!.profileImageUrl!.isEmpty) &&
-                      _transporterProfile?.name.isNotEmpty == true
+                      _transporterProfile?.name.isNotEmpty == true // Added null check for name
                   ? Text(
                       _transporterProfile!.name[0].toUpperCase(),
                       style: TextStyle(
@@ -2123,36 +2079,29 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   }
 
   double _calculateTodaysEarnings() {
-    // Same as provided
     DateTime now = DateTime.now();
     DateTime todayStart = DateTime(now.year, now.month, now.day);
     DateTime todayEnd = todayStart.add(Duration(days: 1));
 
-    double total = 0;
     // Sum successful payments from today
-    total += _payments
+    double total = _payments
         .where((p) =>
             p.createdAt.isAfter(todayStart) &&
             p.createdAt.isBefore(todayEnd) &&
-            (p.disbursementTransactionStatus.toLowerCase() == 'successful' ||
-                p.disbursementTransactionStatus.toLowerCase() ==
-                    'completed')) // Include 'completed' if used
+            p.disbursementTransactionStatus == 'Successful') // Using computed property
         .fold(0.0, (sum, p) => sum + p.amount);
 
     // Add earnings from orders completed today IF no corresponding payment exists
-    // (This logic might need refinement based on how earnings/payments relate)
     for (var order in _getCompletedOrders()) {
-      // Use orderDate or a specific completion date if available
       if (order.orderDate.isAfter(todayStart) &&
           order.orderDate.isBefore(todayEnd)) {
         bool paymentExistsToday = _payments.any((p) =>
             p.orderId == order.orderId &&
             p.createdAt.isAfter(todayStart) &&
             p.createdAt.isBefore(todayEnd) &&
-            (p.disbursementTransactionStatus.toLowerCase() == 'successful' ||
-                p.disbursementTransactionStatus.toLowerCase() == 'completed'));
+            p.disbursementTransactionStatus == 'Successful');
         if (!paymentExistsToday) {
-          total += order.earnings; // Use calculated earnings
+          total += order.earnings ?? 0; // Use calculated earnings with null safety
         }
       }
     }
@@ -2457,22 +2406,34 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   }
 
   String _getStatusText(String apiStatus) {
-    // Match more carefully based on provided data and constants
-    String statusLower = apiStatus.toLowerCase();
-    if (statusLower == Order.STATUS_PENDING.toLowerCase()) return 'Pending';
-    if (statusLower == Order.STATUS_ASSIGNED.toLowerCase()) return 'Assigned';
-    if (statusLower == Order.STATUS_ACCEPTED.toLowerCase()) return 'Accepted';
-    if (statusLower == Order.STATUS_PICKED_UP.toLowerCase()) return 'Picked Up';
-    if (statusLower == Order.STATUS_ON_THE_WAY.toLowerCase() ||
-        statusLower == Order.STATUS_DELIVERING.toLowerCase())
-      return 'On The Way';
-    if (statusLower == Order.STATUS_DELIVERED.toLowerCase()) return 'Delivered';
-    if (statusLower == Order.STATUS_COMPLETED.toLowerCase()) return 'Completed';
-    if (statusLower == Order.STATUS_CANCELLED.toLowerCase()) return 'Cancelled';
-    // Capitalize first letter as a fallback
-    return apiStatus.isNotEmpty
-        ? apiStatus[0].toUpperCase() + apiStatus.substring(1)
-        : 'Unknown';
+    // Handle empty status
+    if (apiStatus.isEmpty) return 'Unknown';
+    
+    // Normalize the input status by converting to lowercase and replacing underscores/hyphens with spaces
+    String normalizeStatus(String status) {
+      return status.toLowerCase().replaceAll(RegExp(r'[_-]'), ' ').trim();
+    }
+    
+    final normalizedStatus = normalizeStatus(apiStatus);
+    final normalizedTargets = {
+      normalizeStatus(Order.STATUS_PENDING): 'Pending',
+      normalizeStatus(Order.STATUS_ASSIGNED): 'Assigned',
+      normalizeStatus(Order.STATUS_ACCEPTED): 'Accepted',
+      normalizeStatus(Order.STATUS_PICKED_UP): 'Picked Up',
+      'verification needed': 'Verification Needed', // Added mapping
+      normalizeStatus(Order.STATUS_DELIVERED): 'Delivered',
+      normalizeStatus(Order.STATUS_COMPLETED): 'Completed',
+      normalizeStatus(Order.STATUS_CANCELLED): 'Cancelled',
+    };
+    
+    // Try to find a matching status in our normalized map
+    final matchedStatus = normalizedTargets[normalizedStatus];
+    if (matchedStatus != null) {
+      return matchedStatus;
+    }
+    
+    // For any other status, capitalize first letter
+    return apiStatus[0].toUpperCase() + apiStatus.substring(1);
   }
 
   Widget _buildScheduledDeliveriesCard(List<Order> scheduledOrders) {
@@ -2591,9 +2552,21 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           // Search Bar
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
           child: TextField(
+            controller: _searchController,
             decoration: InputDecoration(
-              hintText: 'Search deliveries...',
+              hintText: 'Search by order ID, name, address...',
               prefixIcon: Icon(Icons.search, color: _grey),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: Icon(Icons.clear, color: _grey, size: 20),
+                      onPressed: () {
+                        setState(() {
+                          _searchController.clear();
+                          _searchQuery = '';
+                        });
+                      },
+                    )
+                  : null,
               filled: true,
               fillColor: _lightGrey,
               contentPadding: EdgeInsets.symmetric(vertical: 0, horizontal: 16),
@@ -2605,8 +2578,9 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                   borderSide: BorderSide(color: _primaryTeal, width: 1)),
             ),
             onChanged: (value) {
-              /* Implement search filtering */ print('Searching for: $value');
-              // TODO: Implement search filtering based on order ID, address, etc.
+              setState(() {
+                _searchQuery = value.trim().toLowerCase();
+              });
             },
           ),
         ),
@@ -2695,36 +2669,83 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     );
   }
 
-  // Filtering logic (Adapting statuses from Order constants)
+  // Helper method to normalize status strings for comparison
+  String _normalizeStatus(String status) {
+    // First normalize the string (lowercase, remove underscores, trim)
+    final normalized = status.toLowerCase().replaceAll(RegExp(r'[_-]'), ' ').trim();
+    
+    // Treat 'complete', 'completed', and 'delivered' as the same status
+    if (normalized == 'complete' || normalized == 'delivered') {
+      return 'completed';
+    }
+    
+    return normalized;
+  }
+
+  // Search query controller and variable
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  // Filter orders based on search query
+  bool _matchesSearchQuery(Order order) {
+    if (_searchQuery.isEmpty) return true;
+    
+    final query = _searchQuery.toLowerCase();
+    
+    // Search in order ID
+    if (order.orderId.toString().contains(query)) return true;
+    
+    // Search in product/meal name
+    if ((order.productName?.toLowerCase() ?? '').contains(query) ||
+        (order.mealName?.toLowerCase() ?? '').contains(query)) {
+      return true;
+    }
+    
+    // Search in delivery address
+    if ((order.deliveryAddress.toLowerCase()).contains(query)) { // deliveryAddress is not nullable
+      return true;
+    }
+    
+    // Search in customer phone
+    if (order.userPhone?.contains(query) ?? false) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  // Filtering logic for different tabs
   List<Order> _getActiveOrders() {
-    const activeStatuses = {
-      Order.STATUS_ASSIGNED,
-      Order.STATUS_ACCEPTED,
-      Order.STATUS_PICKED_UP,
-      Order.STATUS_ON_THE_WAY,
-      Order.STATUS_DELIVERING
-    };
+    // Show orders that are either picked up or need verification
     return _allOrders
-        .where((o) => activeStatuses.contains(o.orderStatus.toLowerCase()))
+        .where((o) {
+          final status = _normalizeStatus(o.orderStatus);
+          final isActive = status == _normalizeStatus(Order.STATUS_PICKED_UP) || 
+                         status == _normalizeStatus(Order.STATUS_VERIFICATION_NEEDED) || // Added actual constant
+                         status == _normalizeStatus('verification needed'); // Keep string for robustness
+          return isActive && _matchesSearchQuery(o);
+        })
         .toList()
       ..sort((a, b) => b.orderDate.compareTo(a.orderDate)); // Newest first
   }
 
   List<Order> _getAvailableOrders() {
-    const availableStatuses = {
-      Order.STATUS_PENDING,
-      'available' // Add 'available' if used by API
-    };
+    // Show 'assigned' or 'pending' orders in the Available tab
     return _allOrders
-        .where((o) => availableStatuses.contains(o.orderStatus.toLowerCase()))
+        .where((o) {
+          final status = _normalizeStatus(o.orderStatus);
+          final isAvailable = status == _normalizeStatus(Order.STATUS_ASSIGNED) ||
+                           status == _normalizeStatus(Order.STATUS_PENDING);
+          return isAvailable && _matchesSearchQuery(o);
+        })
         .toList()
       ..sort((a, b) => b.orderDate.compareTo(a.orderDate)); // Newest first
   }
 
   List<Order> _getCompletedOrders() {
-    // Only include orders with status 'completed' (case-insensitive)
+    // All these statuses will be normalized to 'completed' by _normalizeStatus
     return _allOrders
-        .where((o) => o.orderStatus.toLowerCase() == 'completed')
+        .where((o) => (_normalizeStatus(o.orderStatus) == 'completed' || _normalizeStatus(o.orderStatus) == _normalizeStatus(Order.STATUS_CANCELLED)) && _matchesSearchQuery(o))
         .toList()
       ..sort((a, b) => b.orderDate.compareTo(a.orderDate)); // Most recent first
   }
@@ -2749,8 +2770,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving';
 
     // Check if the URL can be launched
-    if (await canLaunch(url)) {
-      await launch(url);
+    if (await canLaunchUrl(Uri.parse(url))) { // Updated to canLaunchUrl
+      await launchUrl(Uri.parse(url)); // Updated to launchUrl
     } else {
       // Show an error message if Google Maps cannot be launched
       _showErrorSnackBar('Could not launch Google Maps');
@@ -2813,8 +2834,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     } else {
       // Active Orders
       statusColor = _primaryTeal;
-      statusText =
-          'Active: ${_getStatusText(status)}'; // More specific active status
+      // statusText = 'Active: ${_getStatusText(status)}'; // More specific active status. Use _getStatusText directly.
+      statusText = _getStatusText(status); 
       actionButton = SizedBox(
           width: double.infinity,
           child: ElevatedButton(
@@ -3096,7 +3117,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                   backgroundColor: _lightTeal,
                   backgroundImage: _profileImageFile != null
                       ? FileImage(_profileImageFile!) as ImageProvider
-                      : (_transporterProfile?.profileImageUrl != null
+                      : (_transporterProfile?.profileImageUrl != null && _transporterProfile!.profileImageUrl!.isNotEmpty
                           ? CachedNetworkImageProvider(_transporterProfile!
                               .profileImageUrl!) // Use CachedNetworkImage
                           : null),
@@ -3107,7 +3128,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                     // Optionally display placeholder icon here if needed
                   },
                   child: (_profileImageFile == null &&
-                          _transporterProfile?.profileImageUrl == null)
+                          (_transporterProfile?.profileImageUrl == null || _transporterProfile!.profileImageUrl!.isEmpty ))
                       ? Icon(Icons.person, size: 60, color: _primaryTeal)
                       : null,
                 ),
@@ -3374,8 +3395,10 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           'image': uploadedImageUrl,
       };
       // Clean data (remove unchanged fields - optional but good practice)
-      updateData.removeWhere(
-          (key, value) => value == _transporterProfile?.toJson()[key]);
+      if (_transporterProfile != null) { // Added null check
+        updateData.removeWhere(
+            (key, value) => value == _transporterProfile!.toJson()[key]);
+      }
       updateData.removeWhere(
           (key, value) => value == null || (value is String && value.isEmpty));
 
@@ -3775,23 +3798,24 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       false; // Track if navigation was started for this order
   // State vars same as provided
 
-  // Method to get user-friendly status text (copied from main state)
-  String _getStatusText(String apiStatus) {
-    String statusLower = apiStatus.toLowerCase();
+  // Method to get user-friendly status text
+  String _getDetailedStatusText(String apiStatus) {
+    String statusLower = apiStatus.toLowerCase().replaceAll('_', ' ').trim();
     if (statusLower == Order.STATUS_PENDING.toLowerCase()) return 'Pending';
     if (statusLower == Order.STATUS_ASSIGNED.toLowerCase()) return 'Assigned';
     if (statusLower == Order.STATUS_ACCEPTED.toLowerCase()) return 'Accepted';
     if (statusLower == Order.STATUS_PICKED_UP.toLowerCase()) return 'Picked Up';
-    if (statusLower == Order.STATUS_ON_THE_WAY.toLowerCase() ||
-        statusLower == Order.STATUS_DELIVERING.toLowerCase())
-      return 'On The Way';
+    if (statusLower == Order.STATUS_VERIFICATION_NEEDED.toLowerCase() || statusLower == "verification needed") return 'Verification Needed';
+    if (statusLower == Order.STATUS_ON_THE_WAY.toLowerCase() || statusLower == Order.STATUS_DELIVERING.toLowerCase()) return 'On The Way'; // Kept for completeness, but not in timeline
     if (statusLower == Order.STATUS_DELIVERED.toLowerCase()) return 'Delivered';
     if (statusLower == Order.STATUS_COMPLETED.toLowerCase()) return 'Completed';
     if (statusLower == Order.STATUS_CANCELLED.toLowerCase()) return 'Cancelled';
+    
     return apiStatus.isNotEmpty
         ? apiStatus[0].toUpperCase() + apiStatus.substring(1)
         : 'Unknown';
   }
+
 
   late Order _currentOrder;
   final TextEditingController _verificationCodeController =
@@ -3805,10 +3829,28 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   void initState() {
     super.initState();
     _currentOrder = widget.order;
-    // Show verification immediately if status is on_the_way and needs verification
-    _isVerificationVisible = _currentOrder.orderStatus.toLowerCase() ==
-            Order.STATUS_ON_THE_WAY.toLowerCase() &&
-        _needsVerification();
+    // Show verification immediately if status is 'picked up' and verification is conceptually next,
+    // or if status is 'verification needed'.
+    // The _isVerificationVisible flag controls the visibility of the code input card.
+    // This should be true if the current status implies verification is the active step.
+    String normalizedCurrentStatus = _currentOrder.orderStatus.toLowerCase().replaceAll('_', ' ').trim();
+    _isVerificationVisible = (normalizedCurrentStatus == Order.STATUS_PICKED_UP.toLowerCase() && _nextStepIsVerification()) ||
+                             normalizedCurrentStatus == Order.STATUS_VERIFICATION_NEEDED.toLowerCase();
+  }
+  
+  @override
+  void didUpdateWidget(OrderDetailsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Update local state when the widget is updated with new order data
+    if (widget.order.orderId != oldWidget.order.orderId || 
+        widget.order.orderStatus != oldWidget.order.orderStatus) {
+      setState(() {
+        _currentOrder = widget.order;
+        String normalizedCurrentStatus = _currentOrder.orderStatus.toLowerCase().replaceAll('_', ' ').trim();
+         _isVerificationVisible = (normalizedCurrentStatus == Order.STATUS_PICKED_UP.toLowerCase() && _nextStepIsVerification()) ||
+                             normalizedCurrentStatus == Order.STATUS_VERIFICATION_NEEDED.toLowerCase();
+      });
+    }
   }
 
   @override
@@ -3872,8 +3914,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     final url =
         'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving';
 
-    if (await canLaunch(url)) {
-      await launch(url);
+    if (await canLaunchUrl(Uri.parse(url))) { // Updated to canLaunchUrl
+      await launchUrl(Uri.parse(url)); // Updated to launchUrl
     } else {
       _showErrorSnackBar('Could not launch Google Maps');
     }
@@ -3881,77 +3923,88 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   // *** END: Method Added for Navigation ***
 
   // --- Status Logic (Adapting old constants) ---
-  String? _getNextStatus() {
-    String currentStatusLower = _currentOrder.orderStatus.toLowerCase();
-    switch (currentStatusLower) {
-      case Order.STATUS_ASSIGNED: // Match lowercase constant
-      case Order.STATUS_ACCEPTED:
-        return Order.STATUS_PICKED_UP;
-      case Order.STATUS_PICKED_UP:
-        return Order.STATUS_ON_THE_WAY; // Or STATUS_DELIVERING
-      case Order.STATUS_ON_THE_WAY:
-      case Order.STATUS_DELIVERING:
-        return _needsVerification()
-            ? null
-            : Order.STATUS_DELIVERED; // Null if verification needed
-      default:
-        return null; // No action from delivered, pending, cancelled etc.
-    }
+  String _normalizeStatus(String status) {
+    return status.toLowerCase().replaceAll('_', ' ').trim();
   }
 
-  bool _needsVerification() {
-    // Add real logic if possible, default to true based on UI video
-    // Let's make it false for now unless specifically needed
-    return false; // Assume verification not needed by default
+  String? _getNextStatus() {
+    String currentStatusNormalized = _normalizeStatus(_currentOrder.orderStatus);
+    
+    if (currentStatusNormalized == _normalizeStatus(Order.STATUS_ASSIGNED) ||
+        currentStatusNormalized == _normalizeStatus(Order.STATUS_ACCEPTED)) {
+      return Order.STATUS_PICKED_UP;
+    }
+    if (currentStatusNormalized == _normalizeStatus(Order.STATUS_PICKED_UP)) {
+      // If picked up, next is verification needed (conceptually, or actual status update)
+      return Order.STATUS_VERIFICATION_NEEDED; 
+    }
+    if (currentStatusNormalized == _normalizeStatus(Order.STATUS_VERIFICATION_NEEDED)) {
+      return Order.STATUS_DELIVERED;
+    }
+    if (currentStatusNormalized == _normalizeStatus(Order.STATUS_DELIVERED)) {
+      return Order.STATUS_COMPLETED;
+    }
+    return null; // No action from completed, cancelled etc.
   }
+
+
+  // This method determines if verification is the *immediate next conceptual step*
+  // given the current state, for UI hints (like button text).
+  bool _nextStepIsVerification() {
+      // Simplified: If current status is picked up, verification is next.
+      // Add more complex logic here if some order types don't need verification.
+      return _normalizeStatus(_currentOrder.orderStatus) == _normalizeStatus(Order.STATUS_PICKED_UP);
+  }
+
 
   String _getCompleteButtonText() {
-    String currentStatusLower = _currentOrder.orderStatus.toLowerCase();
-    switch (currentStatusLower) {
-      case Order.STATUS_ASSIGNED:
-      case Order.STATUS_ACCEPTED:
-        return 'Mark as Picked Up';
-      case Order.STATUS_PICKED_UP:
-        return 'Mark as On The Way';
-      case Order.STATUS_ON_THE_WAY:
-      case Order.STATUS_DELIVERING:
-        return _needsVerification() ? 'Verify & Complete' : 'Mark as Delivered';
-      default:
-        return 'Update Status'; // Generic fallback
+    String currentStatusNormalized = _normalizeStatus(_currentOrder.orderStatus);
+
+    if (currentStatusNormalized == _normalizeStatus(Order.STATUS_ASSIGNED) ||
+        currentStatusNormalized == _normalizeStatus(Order.STATUS_ACCEPTED)) {
+      return 'Mark as Picked Up';
     }
+    if (currentStatusNormalized == _normalizeStatus(Order.STATUS_PICKED_UP)) {
+      return 'Proceed to Verification'; // Next step is verification
+    }
+    if (currentStatusNormalized == _normalizeStatus(Order.STATUS_VERIFICATION_NEEDED)) {
+      return 'Mark as Delivered'; // After verification, mark delivered
+    }
+    if (currentStatusNormalized == _normalizeStatus(Order.STATUS_DELIVERED)) {
+      return 'Mark as Completed';
+    }
+    return 'Update Status'; // Generic fallback
   }
 
   bool _canCompleteDelivery() {
-    String currentStatusLower = _currentOrder.orderStatus.toLowerCase();
-    // Can complete if there's a next status OR if it's the verification step
-    return _getNextStatus() != null ||
-        (currentStatusLower == Order.STATUS_ON_THE_WAY.toLowerCase() &&
-            _needsVerification());
+    // Can take action if there's a next status or if current status is verification needed (implying 'Verify' button)
+    return _getNextStatus() != null || _normalizeStatus(_currentOrder.orderStatus) == _normalizeStatus(Order.STATUS_VERIFICATION_NEEDED);
   }
+
 
   // --- Actions ---
   Future<void> _handleStatusUpdate() async {
-    String? nextStatus = _getNextStatus();
-    if (nextStatus == null) {
-      // This case implies we are at 'on_the_way' and need verification
-      if (_currentOrder.orderStatus.toLowerCase() ==
-              Order.STATUS_ON_THE_WAY.toLowerCase() &&
-          _needsVerification()) {
-        setState(() => _isVerificationVisible = true); // Show verification card
-        _showSnackBar("Please enter verification code.", isError: false);
-      } else {
-        print(
-            "No further status update available for ${_currentOrder.orderStatus}");
-        // Optionally show a snackbar if no action is available
-        _showSnackBar(
-            "Order is already ${_getStatusText(_currentOrder.orderStatus)}.",
-            isError: false);
-      }
+    String currentStatusNormalized = _normalizeStatus(_currentOrder.orderStatus);
+    
+    if (currentStatusNormalized == _normalizeStatus(Order.STATUS_PICKED_UP)) {
+      // If current is Picked Up, the action is to show/focus on verification
+      setState(() {
+        _isVerificationVisible = true;
+      });
+      _performStatusUpdate(Order.STATUS_VERIFICATION_NEEDED); // Update status to 'verification needed'
+      // _showSnackBar("Please enter verification code.", isError: false); // Or rely on verification card becoming visible
       return;
     }
 
+    String? nextStatus = _getNextStatus();
+    if (nextStatus == null) {
+      print("No further status update available for ${_currentOrder.orderStatus}");
+      _showSnackBar("Order is already ${_getDetailedStatusText(_currentOrder.orderStatus)}.", isError: false);
+      return;
+    }
     _performStatusUpdate(nextStatus);
   }
+
 
   Future<void> _handleVerifyCode() async {
     String code = _verificationCodeController.text.trim();
@@ -3973,43 +4026,124 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
       final apiBaseUrl =
           dotenv.env['API_BASE_URL-intranet'] ?? 'https://api.example.com';
+      
+      // API expects 'completed' status when verifying with code
       final response = await http
           .patch(
             Uri.parse('$apiBaseUrl/rr/orders/${_currentOrder.orderId}/status'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({
-              'transporter_id': userId,
+              'transporter_id': userId, // Ensure this is the correct key for your API
               'completion_code': code,
-              'order_status': 'completed'
+              'order_status': Order.STATUS_COMPLETED // API might expect 'completed' upon successful verification
             }),
           )
           .timeout(Duration(seconds: 15));
 
-      if (response.statusCode != 200) {
-        throw Exception('API Error: ${response.statusCode}');
-      }
+      _dismissLoadingSnackbar(); // Dismiss loading after API call
 
-      final responseData = jsonDecode(response.body);
-      if (responseData['success'] != true) {
-        throw Exception(responseData['message'] ?? 'Verification failed');
-      }
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        // Assuming success means the status is now 'completed' or 'delivered' via backend logic
+        // For UI, we'll transition to 'delivered' if verification was the step, then to 'completed'
+        
+        // Fetch the latest order details to get the true new status from backend
+        final updatedOrderFromServer = await _fetchLatestOrderDetails(_currentOrder.orderId);
 
-      await _performStatusUpdate('completed', isVerification: true);
-      _verificationCodeController.clear();
+        if (mounted) {
+          setState(() {
+             if (updatedOrderFromServer != null) {
+              _currentOrder = updatedOrderFromServer;
+            } else {
+              // Fallback: if verification was successful, assume next logical step is delivered or completed
+              _currentOrder = _currentOrder.copyWith(orderStatus: Order.STATUS_DELIVERED);
+            }
+            _isVerificationVisible = false; // Hide verification card
+          });
+           _showSuccessSnackBar('Verification successful! Order marked as delivered/completed.');
+          _verificationCodeController.clear();
+          await widget.onStatusUpdate(); // Refresh parent
+        }
 
-      // Update order list if exists
-      if (_allOrders.any((o) => o.orderId == _currentOrder.orderId)) {
-        setState(() {
-          _currentOrder = _currentOrder.copyWith(orderStatus: 'completed');
-        });
+      } else {
+        // If verification fails, fetch the latest order status to update UI correctly
+        final updatedOrder = await _fetchLatestOrderDetails(_currentOrder.orderId);
+        if (updatedOrder != null && mounted) {
+          setState(() {
+            _currentOrder = updatedOrder;
+            // Re-evaluate if verification card should be visible based on potentially unchanged status
+            String normalizedCurrentStatus = _currentOrder.orderStatus.toLowerCase().replaceAll('_', ' ').trim();
+            _isVerificationVisible = (normalizedCurrentStatus == Order.STATUS_PICKED_UP.toLowerCase() && _nextStepIsVerification()) ||
+                                      normalizedCurrentStatus == Order.STATUS_VERIFICATION_NEEDED.toLowerCase();
+          });
+        }
+        
+        try {
+          final errorData = jsonDecode(response.body);
+          throw Exception(errorData['message'] ?? 'Verification failed. API Code: ${response.statusCode}');
+        } catch (_) {
+          throw Exception('API Error: ${response.statusCode}. ${response.body}');
+        }
       }
     } catch (e) {
       _dismissLoadingSnackbar();
       print("Verification failed: $e");
-      if (mounted)
+      if (mounted) {
         _showErrorSnackBar(
             'Verification failed: ${e.toString().replaceAll('Exception: ', '')}');
-      setState(() => _isUpdatingStatus = false);
+      }
+    } finally {
+       if (mounted) setState(() => _isUpdatingStatus = false);
+    }
+  }
+
+  // Fetches the latest order details from the server
+  Future<Order?> _fetchLatestOrderDetails(int orderId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final apiBaseUrl =
+          dotenv.env['API_BASE_URL-intranet'] ?? 'https://api.example.com';
+      
+      print('Fetching latest order details for order $orderId...');
+      final response = await http.get(
+        Uri.parse('$apiBaseUrl/rr/orders/$orderId'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json', // Added Accept header
+          'Cache-Control': 'no-cache, no-store, must-revalidate', // Aggressive caching prevention
+          'Pragma': 'no-cache', 
+          'Expires': '0',
+        },
+      ).timeout(Duration(seconds: 10));
+
+      print('Order details response: ${response.statusCode}');
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        // Adjust based on your API response structure for a single order
+        // Assuming the order data is directly in the response or under a 'data' key
+        Map<String, dynamic>? orderData;
+        if (data is Map<String, dynamic> && data.containsKey('data') && data['data'] is Map<String, dynamic>) {
+            orderData = data['data'] as Map<String, dynamic>;
+        } else if (data is Map<String, dynamic> && data.containsKey('order_id')) { // If the root is the order object
+            orderData = data;
+        }
+        
+        if (orderData != null) {
+          final updatedOrder = Order.fromJson(orderData);
+          print('Fetched updated order status: ${updatedOrder.orderStatus}');
+          return updatedOrder;
+        } else {
+           print('Invalid response format for single order: ${response.body}');
+        }
+
+      } else {
+        print('Failed to fetch order details: ${response.statusCode} ${response.body}');
+      }
+      return null;
+    } catch (e) {
+      print('Error fetching order details: $e');
+      return null;
     }
   }
 
@@ -4019,7 +4153,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     if (!isVerification) {
       // Show loading snackbar only for non-verification updates
       _showLoadingSnackbar(
-          "Updating status to ${_getStatusText(newStatus)}...");
+          "Updating status to ${_getDetailedStatusText(newStatus)}...");
     }
     setState(() => _isUpdatingStatus = true);
 
@@ -4029,19 +4163,32 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       _dismissLoadingSnackbar();
 
       if (success && mounted) {
+        // First, fetch the latest order details from the server
+        final updatedOrder = await _fetchLatestOrderDetails(_currentOrder.orderId);
+        
+        // Show success message
         _showSuccessSnackBar(isVerification
             ? 'Delivery verified and completed!'
-            : 'Order status updated to ${_getStatusText(newStatus)}!');
-        // Update local state and refresh the previous screen
+            : 'Order status updated to ${_getDetailedStatusText(newStatus)}!');
+            
+        // Update local state with the latest order data
         setState(() {
-          // Create a new Order object with the updated status
-          _currentOrder = _currentOrder.copyWith(orderStatus: newStatus);
-          _isVerificationVisible =
-              false; // Hide verification card after success
+          if (updatedOrder != null) {
+            // Use the fully updated order from the server
+            _currentOrder = updatedOrder;
+          } else {
+            // Fallback to local update if fetch fails
+            _currentOrder = _currentOrder.copyWith(orderStatus: newStatus);
+          }
+          // Re-evaluate verification card visibility based on the new status
+          String normalizedCurrentStatus = _currentOrder.orderStatus.toLowerCase().replaceAll('_', ' ').trim();
+          _isVerificationVisible = (normalizedCurrentStatus == Order.STATUS_PICKED_UP.toLowerCase() && _nextStepIsVerification()) ||
+                                   normalizedCurrentStatus == Order.STATUS_VERIFICATION_NEEDED.toLowerCase();
         });
-        await widget.onStatusUpdate(); // Call the callback to refresh list
-        // Optionally pop screen if it's the final step?
-        // if (newStatus.toLowerCase() == Order.STATUS_DELIVERED.toLowerCase()) Navigator.pop(context);
+        
+        // Refresh the order list in the parent widget
+        await widget.onStatusUpdate();
+        
       } else if (mounted) {
         throw Exception(
             "Update status API failed silently or component unmounted.");
@@ -4061,23 +4208,22 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     String status = _currentOrder.orderStatus;
-    String statusLower = status.toLowerCase();
+    String statusNormalized = _normalizeStatus(status);
     Color statusColor;
-    String statusText = _getStatusText(status); // User-friendly
+    String statusTextDisplay = _getDetailedStatusText(status); // User-friendly
 
-    switch (statusLower) {
-      case Order.STATUS_DELIVERED:
-      case Order.STATUS_COMPLETED:
-        statusColor = _green;
-        break;
-      case Order.STATUS_CANCELLED:
-        statusColor = _red;
-        break;
-      default:
-        statusColor = _primaryTeal;
-        statusText = '$statusText'; // Show specific active status
-        break;
+    if (statusNormalized == _normalizeStatus(Order.STATUS_DELIVERED) ||
+        statusNormalized == _normalizeStatus(Order.STATUS_COMPLETED)) {
+      statusColor = _green;
+    } else if (statusNormalized == _normalizeStatus(Order.STATUS_CANCELLED)) {
+      statusColor = _red;
+    } else if (statusNormalized == _normalizeStatus(Order.STATUS_VERIFICATION_NEEDED)) {
+      statusColor = Colors.orange.shade700; // Distinct color for verification needed
     }
+    else {
+      statusColor = _primaryTeal;
+    }
+
 
     return Scaffold(
       backgroundColor: _white,
@@ -4096,7 +4242,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               decoration: BoxDecoration(
                   color: statusColor.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(20)),
-              child: Text(statusText,
+              child: Text(statusTextDisplay,
                   style: TextStyle(
                       color: statusColor,
                       fontWeight: FontWeight.bold,
@@ -4113,18 +4259,17 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           _buildMapPlaceholder(), SizedBox(height: 16),
           _buildOrderDetailsCard(), SizedBox(height: 16),
           _buildStatusTimelineCard(),
-          SizedBox(height: 16), // Renamed for clarity
+          SizedBox(height: 16), 
           // Show verification card conditionally
-          if (_isVerificationVisible) ...[
+          if (_isVerificationVisible && statusNormalized != _normalizeStatus(Order.STATUS_DELIVERED) && statusNormalized != _normalizeStatus(Order.STATUS_COMPLETED) ) ...[
             _buildDeliveryVerificationCard(),
             SizedBox(height: 16),
           ],
           // Show main action button if applicable
-          // Show "I have arrived" button only if navigation was triggered and order is not delivered/completed/cancelled
           if (_navigationTriggered &&
-              statusLower != Order.STATUS_DELIVERED &&
-              statusLower != Order.STATUS_COMPLETED &&
-              statusLower != Order.STATUS_CANCELLED) ...[
+              statusNormalized != _normalizeStatus(Order.STATUS_DELIVERED) &&
+              statusNormalized != _normalizeStatus(Order.STATUS_COMPLETED) &&
+              statusNormalized != _normalizeStatus(Order.STATUS_CANCELLED)) ...[
             Padding(
               padding: const EdgeInsets.only(top: 8.0),
               child: SizedBox(
@@ -4167,7 +4312,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                   },
                                   body: jsonEncode({
                                     idKey: idToSend,
-                                    'order_status': 'completed',
+                                    'order_status': 'completed', // Or 'verification_needed_arrived'
                                   }),
                                 )
                                 .timeout(const Duration(seconds: 15));
@@ -4178,93 +4323,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                       context, _currentOrder);
                               if (verified) {
                                 // After verification, update status to completed
-                                try {
-                                  final prefs =
-                                      await SharedPreferences.getInstance();
-                                  final userType = prefs.getString('user_type');
-                                  final userId = prefs.getString('user_id');
-                                  final chefId =
-                                      prefs.getString('chef_user_id');
-                                  String? idToSend;
-                                  String idKey;
-                                  if (userType != null &&
-                                      userType.toLowerCase() == 'transporter') {
-                                    idToSend = userId;
-                                    idKey = 'transporter_id';
-                                  } else {
-                                    idToSend = chefId;
-                                    idKey = 'chef_id';
-                                  }
-                                  if (idToSend == null)
-                                    throw Exception(
-                                        'User ID not found. Please log in again.');
-                                  final apiBaseUrl =
-                                      dotenv.env['API_BASE_URL-intranet'] ??
-                                          'https://api.example.com';
-                                  final uri = Uri.parse(
-                                      '${apiBaseUrl}/rr/orders/${_currentOrder.orderId}/status');
-                                  final response = await http
-                                      .patch(
-                                        uri,
-                                        headers: {
-                                          'Content-Type': 'application/json',
-                                          'Accept': 'application/json',
-                                        },
-                                        body: jsonEncode({
-                                          idKey: idToSend,
-                                          'order_status': 'completed',
-                                        }),
-                                      )
-                                      .timeout(const Duration(seconds: 15));
-                                  if (response.statusCode == 200) {
-                                    // TODO: Optionally refresh order from backend after marking as completed
-                                    /*
-                              try {
-                                final orderUri = Uri.parse('${apiBaseUrl}/rr/orders/${_currentOrder.orderId}');
-                                final orderResp = await http.get(orderUri, headers: {
-                                  'Content-Type': 'application/json',
-                                  'Accept': 'application/json',
-                                }).timeout(const Duration(seconds: 15));
-                                if (orderResp.statusCode == 200) {
-                                  final orderJson = jsonDecode(orderResp.body);
-                                  setState(() {
-                                    _currentOrder = Order.fromJson(orderJson);
-                                  });
-                                  _showSuccessSnackBar('Order marked as completed!');
-                                } else {
-                                  setState(() {
-                                    _currentOrder = _currentOrder.copyWith(orderStatus: 'completed');
-                                  });
-                                  _showSuccessSnackBar('Order marked as completed (local update, failed to refresh from backend)!');
-                                }
-                              } catch (e) {
-                                setState(() {
-                                  _currentOrder = _currentOrder.copyWith(orderStatus: 'completed');
-                                });
-                                _showSuccessSnackBar('Order marked as completed (local update, failed to refresh from backend)!');
-                              }
-                              */
-                                    setState(() {
-                                      _currentOrder = _currentOrder.copyWith(
-                                          orderStatus: 'completed');
-                                      // Also update in _allOrders if present so it appears in completed tab
-                                      final idx = _allOrders.indexWhere((o) =>
-                                          o.orderId == _currentOrder.orderId);
-                                      if (idx != -1) {
-                                        _allOrders[idx] = _currentOrder;
-                                      }
-                                    });
-                                    _showSuccessSnackBar(
-                                        'Order marked as completed!');
-                                  } else {
-                                    final detail = jsonDecode(response.body);
-                                    _showErrorSnackBar(
-                                        'Failed to mark as completed: ${detail['detail'] ?? response.statusCode}');
-                                  }
-                                } catch (e) {
-                                  _showErrorSnackBar(
-                                      'Failed to mark as completed: $e');
-                                }
+                                 await _performStatusUpdate(Order.STATUS_COMPLETED, isVerification: true);
                               } else {
                                 _showErrorSnackBar(
                                     'Verification failed or cancelled.');
@@ -4272,7 +4331,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                             } else {
                               final detail = jsonDecode(response.body);
                               _showErrorSnackBar(
-                                  'Failed to trigger code: ${detail['detail'] ?? response.statusCode}');
+                                  'Failed to trigger code: ${detail['message'] ?? detail['detail'] ?? response.statusCode}');
                             }
                           } catch (e) {
                             _showErrorSnackBar('Failed to trigger code: $e');
@@ -4300,7 +4359,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   onPressed: () async {
                     final customerPhone =
                         _currentOrder.userPhone ?? "(256) 7YY-YYY-YYY";
-                    if (customerPhone.isNotEmpty) {
+                    if (customerPhone.isNotEmpty && customerPhone != "null") {
                       final Uri telUri =
                           Uri(scheme: 'tel', path: customerPhone);
                       if (await canLaunchUrl(telUri)) {
@@ -4321,9 +4380,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             ),
           ],
           if (_canCompleteDelivery() &&
-              statusLower != Order.STATUS_DELIVERED &&
-              statusLower != Order.STATUS_COMPLETED &&
-              statusLower != Order.STATUS_CANCELLED)
+              statusNormalized != _normalizeStatus(Order.STATUS_DELIVERED) &&
+              statusNormalized != _normalizeStatus(Order.STATUS_COMPLETED) &&
+              statusNormalized != _normalizeStatus(Order.STATUS_CANCELLED))
             Padding(
               padding: const EdgeInsets.only(
                   top: 8.0), // Add some space above button
@@ -4332,9 +4391,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                 child: ElevatedButton(
                   onPressed: _isUpdatingStatus
                       ? null
-                      : (_isVerificationVisible
-                          ? _handleVerifyCode
-                          : _handleStatusUpdate), // Direct to correct handler
+                      : (statusNormalized == _normalizeStatus(Order.STATUS_VERIFICATION_NEEDED) || (_isVerificationVisible && statusNormalized == _normalizeStatus(Order.STATUS_PICKED_UP))
+                          ? _handleVerifyCode  // If verification card is visible and status is picked_up OR status is verification_needed
+                          : _handleStatusUpdate),
                   child: _isUpdatingStatus
                       ? SizedBox(
                           height: 20,
@@ -4396,7 +4455,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   // *** MODIFIED: Added Navigation Button ***
   Widget _buildOrderDetailsCard() {
     String restaurantPhone = "(256) 7XX-XXX-XXX"; // Placeholder Uganda format
-    String customerPhone = "(256) 7YY-YYY-YYY"; // Placeholder Uganda format
+    // Get customer phone number or show 'Not available' if not found
+    final customerPhone = _currentOrder.userPhone;
+    final hasValidPhone = customerPhone != null && customerPhone.isNotEmpty && customerPhone != 'null';
+    final displayPhone = hasValidPhone ? customerPhone : 'Phone number not available';
     return Card(
         elevation: 1,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -4426,7 +4488,16 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   isTitle: false), // Changed to non-title
               _buildDetailRow(null, _currentOrder.simplifiedDeliveryAddress,
                   isAddress: true),
-              _buildDetailRow(Icons.phone_outlined, customerPhone),
+              hasValidPhone
+                  ? _buildDetailRow(
+                      Icons.phone_outlined, 
+                      customerPhone!, // Known to be non-null here
+                      isPhone: true,
+                    )
+                  : _buildDetailRow(
+                      Icons.phone_disabled_outlined,
+                      displayPhone,
+                    ),
               Divider(height: 24, color: _lightTeal),
               Text('Order Items:',
                   style:
@@ -4492,8 +4563,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   // *** END MODIFIED _buildOrderDetailsCard ***
 
   Widget _buildDetailRow(IconData? icon, String text,
-      {bool isTitle = false, bool isAddress = false}) {
-    /* ... Same as provided ... */
+      {bool isTitle = false, bool isAddress = false, bool isPhone = false}) {
     return Padding(
         padding: EdgeInsets.only(
             bottom: isAddress ? 8 : 4.0,
@@ -4504,16 +4574,39 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             SizedBox(width: 12)
           ],
           Expanded(
-              child: Text(text,
-                  style: TextStyle(
+            child: isPhone
+                ? GestureDetector(
+                    onTap: () async {
+                      final Uri telUri = Uri(scheme: 'tel', path: text);
+                      if (await canLaunchUrl(telUri)) {
+                        await launchUrl(telUri);
+                      } else {
+                        _showErrorSnackBar('Could not launch phone dialer');
+                      }
+                    },
+                    child: Text(
+                      text,
+                      style: TextStyle(
+                        fontSize: isTitle ? 15 : 14,
+                        fontWeight: isTitle ? FontWeight.w600 : FontWeight.normal,
+                        color: _primaryTeal, // Make phone numbers stand out
+                        decoration: TextDecoration.underline,
+                        height: 1.3,
+                      ),
+                    ),
+                  )
+                : Text(
+                    text,
+                    style: TextStyle(
                       fontSize: isTitle ? 15 : 14,
                       fontWeight: isTitle ? FontWeight.w600 : FontWeight.normal,
                       color: isTitle
                           ? _darkTeal
-                          : (isAddress
-                              ? _darkTeal
-                              : _grey), // Address uses dark teal
-                      height: 1.3)))
+                          : (isAddress ? _darkTeal : _grey),
+                      height: 1.3,
+                    ),
+                  ),
+          )
         ]));
   }
 
@@ -4543,80 +4636,129 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                 TextStyle(fontSize: 12, color: color, fontWeight: fontWeight)));
   }
 
-  // Renamed from _buildStatusCard for clarity
+  // MODIFIED Status Timeline Card
   Widget _buildStatusTimelineCard() {
-    // Same structure as _buildStatusCard, just uses timeline items
-    bool isAcceptedMet = _isStatusMet([
-      Order.STATUS_ACCEPTED.toLowerCase(),
-      Order.STATUS_ASSIGNED
-          .toLowerCase(), // Treat assigned as accepted for timeline
-      Order.STATUS_PICKED_UP.toLowerCase(),
-      Order.STATUS_ON_THE_WAY.toLowerCase(),
-      Order.STATUS_DELIVERED.toLowerCase(),
-      Order.STATUS_COMPLETED.toLowerCase()
-    ]);
-    bool isPickedUpMet = _isStatusMet([
-      Order.STATUS_PICKED_UP.toLowerCase(),
-      Order.STATUS_ON_THE_WAY.toLowerCase(),
-      Order.STATUS_DELIVERED.toLowerCase(),
-      Order.STATUS_COMPLETED.toLowerCase()
-    ]);
-    bool isOnTheWayMet = _isStatusMet([
-      Order.STATUS_ON_THE_WAY.toLowerCase(),
-      Order.STATUS_DELIVERED.toLowerCase(),
-      Order.STATUS_COMPLETED.toLowerCase()
-    ]);
-    bool isDeliveredMet = _isStatusMet([
-      Order.STATUS_DELIVERED.toLowerCase(),
-      Order.STATUS_COMPLETED.toLowerCase()
-    ]);
+    const String verificationNeededStatusNormalized = "verification needed";
+
+    String currentNormalizedStatus = _normalizeStatus(_currentOrder.orderStatus);
+
+    // Determine if each step in the timeline is met or passed
+    bool isAcceptedMet = [
+      _normalizeStatus(Order.STATUS_ACCEPTED),
+      _normalizeStatus(Order.STATUS_ASSIGNED),
+      _normalizeStatus(Order.STATUS_PICKED_UP),
+      verificationNeededStatusNormalized,
+      _normalizeStatus(Order.STATUS_DELIVERED),
+      _normalizeStatus(Order.STATUS_COMPLETED)
+    ].contains(currentNormalizedStatus);
+
+    bool isPickedUpMet = [
+      _normalizeStatus(Order.STATUS_PICKED_UP),
+      verificationNeededStatusNormalized,
+      _normalizeStatus(Order.STATUS_DELIVERED),
+      _normalizeStatus(Order.STATUS_COMPLETED)
+    ].contains(currentNormalizedStatus);
+
+    bool isVerificationStepMet = [
+      verificationNeededStatusNormalized,
+      _normalizeStatus(Order.STATUS_DELIVERED),
+      _normalizeStatus(Order.STATUS_COMPLETED)
+    ].contains(currentNormalizedStatus);
+    
+    bool isDeliveredMet = [
+      _normalizeStatus(Order.STATUS_DELIVERED),
+      _normalizeStatus(Order.STATUS_COMPLETED)
+    ].contains(currentNormalizedStatus);
+
+    // Subtitles for each step
+    String acceptedSubtitle = isAcceptedMet ? "You accepted this order" : "Pending acceptance";
+    String pickedUpSubtitle = isPickedUpMet ? "You picked up the order" : "Pending pickup";
+    
+    String verificationSubtitle;
+    if (isVerificationStepMet) {
+      verificationSubtitle = "Verification successful";
+    } else if (currentNormalizedStatus == _normalizeStatus(Order.STATUS_PICKED_UP)) {
+      verificationSubtitle = "Awaiting verification code";
+    } else {
+      verificationSubtitle = "Pending verification";
+    }
+
+    String deliveredSubtitle;
+    if (isDeliveredMet) {
+      deliveredSubtitle = "Order successfully delivered";
+    } else if (currentNormalizedStatus == verificationNeededStatusNormalized) {
+      deliveredSubtitle = "Ready for delivery"; // After verification
+    } else {
+      deliveredSubtitle = "Pending delivery completion";
+    }
 
     return Card(
-        elevation: 1,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Padding(
-            padding: EdgeInsets.all(16.0),
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Status Timeline',
-                  style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: _darkTeal)),
-              SizedBox(height: 16),
-              _buildStatusItem(
-                  'Order Accepted/Assigned', // Combined text
-                  'You accepted this order',
-                  isAcceptedMet),
-              _buildStatusItem(
-                  'Order Picked Up', 'You picked up the order', isPickedUpMet),
-              _buildStatusItem(
-                  'On The Way', 'You are delivering the order', isOnTheWayMet),
-              _buildStatusItem(
-                  'Delivered', _getDeliveredSubtitle(), isDeliveredMet,
-                  isLast: true,
-                  needsVerification: _needsVerification() && !isDeliveredMet),
-              // Action button moved outside this card in the main body build method
-            ])));
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Status Timeline',
+                style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: _darkTeal)),
+            SizedBox(height: 16),
+            _buildStatusItem(
+              'Order Accepted/Assigned',
+              acceptedSubtitle,
+              isAcceptedMet,
+            ),
+            _buildStatusItem(
+              'Order Picked Up', 
+              pickedUpSubtitle, 
+              isPickedUpMet,
+            ),
+            _buildStatusItem(
+              'Verification Needed',
+              verificationSubtitle,
+              isVerificationStepMet,
+              // 'needsVerification' (orange clock icon) is shown if this step is PENDING 
+              // AND current status is 'picked_up' (meaning verification is the next logical action).
+              needsVerification: currentNormalizedStatus == _normalizeStatus(Order.STATUS_PICKED_UP) && !isVerificationStepMet,
+            ),
+            _buildStatusItem(
+              'Delivered', 
+              deliveredSubtitle,
+              isDeliveredMet,
+              isLast: true,
+              // 'needsVerification' (orange clock icon) for Delivered step is if current status IS 'verification_needed'
+              // (meaning delivery is the next logical action after code verification).
+              needsVerification: currentNormalizedStatus == verificationNeededStatusNormalized && !isDeliveredMet,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildStatusItem(String title, String subtitle, bool isCompleted,
       {bool isLast = false, bool needsVerification = false}) {
-    // Same as provided
-    IconData iconData = isCompleted
-        ? Icons.check_circle
-        : (needsVerification
-            ? Icons.access_time // Icon for verification needed
-            : Icons.radio_button_unchecked); // Icon for pending step
-    Color iconColor = isCompleted
-        ? _green
-        : (needsVerification
-            ? Colors.orange.shade700
-            : _grey); // Different color for verification step
+    // Same as provided, but logic for icon/color is self-contained here.
+    IconData iconData;
+    Color iconColor;
+
+    if (isCompleted) {
+      iconData = Icons.check_circle;
+      iconColor = _green;
+    } else if (needsVerification) { // This step is pending AND needs verification action
+      iconData = Icons.access_time;
+      iconColor = Colors.orange.shade700;
+    } else { // This step is pending and does not currently require verification action
+      iconData = Icons.radio_button_unchecked;
+      iconColor = _grey;
+    }
+    
     Color textColor = isCompleted ? _darkTeal : _grey;
-    Color subtitleColor = isCompleted
-        ? _grey
-        : (needsVerification ? Colors.orange.shade700 : _grey);
+    Color subtitleColor = isCompleted ? _grey : (needsVerification ? Colors.orange.shade700 : _grey);
+
 
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Column(children: [
@@ -4625,7 +4767,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           Container(
               width: 1,
               height: 30,
-              color: isCompleted ? _green : Colors.grey.shade300,
+              color: isCompleted ? _green : Colors.grey.shade300, // Line color reflects completion of current step
               margin: EdgeInsets.symmetric(vertical: 4))
       ]),
       SizedBox(width: 12),
@@ -4643,27 +4785,11 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                     Text(subtitle,
                         style: TextStyle(
                             fontSize: 13,
-                            color: subtitleColor)) // Use subtitleColor
+                            color: subtitleColor)) 
                   ]))),
     ]);
   }
 
-  bool _isStatusMet(List<String> targetStatuses) {
-    // Helper to check if current status is one of the targets (case-insensitive)
-    return targetStatuses.contains(_currentOrder.orderStatus.toLowerCase());
-  }
-
-  String _getDeliveredSubtitle() {
-    String currentStatusLower = _currentOrder.orderStatus.toLowerCase();
-    if (_isStatusMet([
-      Order.STATUS_DELIVERED.toLowerCase(),
-      Order.STATUS_COMPLETED.toLowerCase()
-    ])) return 'Order successfully delivered';
-    if (_needsVerification() &&
-        currentStatusLower == Order.STATUS_ON_THE_WAY.toLowerCase())
-      return 'Verify delivery with code';
-    return 'Pending delivery completion';
-  }
 
   // Builds the verification input card
   Widget _buildDeliveryVerificationCard() {
@@ -4681,7 +4807,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                       fontWeight: FontWeight.bold,
                       color: _darkTeal)),
               SizedBox(height: 8),
-              Text('Ask the customer for their 6-digit verification code.',
+              Text('After delivering the order, Ask the customer for their 6-digit verification code.',
                   style: TextStyle(color: _grey, fontSize: 14)),
               SizedBox(height: 16),
               TextField(
@@ -4763,13 +4889,9 @@ class EarningsHistoryScreen extends StatelessWidget {
               itemBuilder: (context, index) {
                 DateTime date = sortedDates[index];
                 List<Payment> dailyPayments = groupedPayments[date]!;
-                // Calculate daily total ONLY for successful/completed payments
+                // Calculate daily total for successful payments using the computed property
                 double dailyTotal = dailyPayments
-                    .where((p) =>
-                        p.disbursementTransactionStatus.toLowerCase() ==
-                            'successful' ||
-                        p.disbursementTransactionStatus.toLowerCase() ==
-                            'completed')
+                    .where((p) => p.disbursementTransactionStatus == 'Successful')
                     .fold(0.0, (sum, p) => sum + p.amount);
                 String formattedDate =
                     DateFormat('EEEE, MMM d, yyyy').format(date);
@@ -4794,7 +4916,7 @@ class EarningsHistoryScreen extends StatelessWidget {
                                               fontWeight: FontWeight.bold,
                                               color: _darkTeal)),
                                       Text(
-                                          'ugx ${dailyTotal.toStringAsFixed(0)}', // Format UGX
+                                          'ugx ${dailyTotal.toStringAsFixed(0)}',
                                           style: TextStyle(
                                               fontSize: 16,
                                               fontWeight: FontWeight.bold,
@@ -4802,8 +4924,7 @@ class EarningsHistoryScreen extends StatelessWidget {
                                     ]),
                                 Divider(height: 20, color: _lightTeal),
                                 ...dailyPayments
-                                    .map(
-                                        (payment) => _buildPaymentItem(payment))
+                                    .map((payment) => _buildPaymentItem(payment))
                                     .toList(),
                               ]))),
                 );
@@ -4812,16 +4933,22 @@ class EarningsHistoryScreen extends StatelessWidget {
   }
 
   Widget _buildPaymentItem(Payment payment) {
-    /* ... Same as provided ... */
     Color statusColor;
     IconData statusIcon;
-    String statusText = payment.disbursementTransactionStatus; // Default
-    switch (payment.disbursementTransactionStatus.toLowerCase()) {
+    String statusText = payment.disbursementTransactionStatus;
+    
+    // Handle null or empty status
+    if (statusText.isEmpty) {
+      statusText = 'Pending';
+    }
+    
+    // Determine status color and icon
+    switch (statusText.toLowerCase()) {
       case 'successful':
-      case 'completed': // Treat completed same as successful visually
+      case 'completed':
         statusColor = _green;
         statusIcon = Icons.check_circle;
-        statusText = 'Successful'; // Normalize text
+        statusText = 'Successful';
         break;
       case 'pending':
         statusColor = _grey;
@@ -4829,11 +4956,14 @@ class EarningsHistoryScreen extends StatelessWidget {
         statusText = 'Pending';
         break;
       case 'in progress':
+      case 'processing':
         statusColor = Colors.orange;
         statusIcon = Icons.sync;
         statusText = 'In Progress';
         break;
       case 'failed':
+      case 'rejected':
+      case 'declined':
         statusColor = _red;
         statusIcon = Icons.error;
         statusText = 'Failed';
@@ -4841,10 +4971,7 @@ class EarningsHistoryScreen extends StatelessWidget {
       default:
         statusColor = _grey;
         statusIcon = Icons.help_outline;
-        // Capitalize if unknown but not empty
-        statusText = statusText.isNotEmpty
-            ? statusText[0].toUpperCase() + statusText.substring(1)
-            : 'Unknown';
+        statusText = statusText[0].toUpperCase() + statusText.substring(1).toLowerCase();
     }
     return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -4855,10 +4982,12 @@ class EarningsHistoryScreen extends StatelessWidget {
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                Text('Order #${payment.orderId} (${payment.orderType})',
+                Text('Order #${payment.orderId}',
                     style: TextStyle(fontWeight: FontWeight.w600)),
-                Text('Status: ${payment.orderTransactionStatus}',
-                    style: TextStyle(color: _grey, fontSize: 12)),
+                Text(
+                  'Status: ${payment.disbursementTransactionStatus}',
+                  style: TextStyle(color: _grey, fontSize: 12),
+                ),
               ])),
           SizedBox(width: 8),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [

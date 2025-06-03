@@ -75,12 +75,19 @@ class _LoginPageState extends State<LoginPage>
 
         if (data.containsKey('user_id')) {
           int userId = data['user_id'];
+          final String? phoneNumber = data['phone'] as String?;
 
           final prefs = await SharedPreferences.getInstance();
           await prefs.setInt('user_id', userId);
           await prefs.setString('user_type', data['user_type'] ?? '');
           await prefs.setString('user_email', data['email'] ?? '');
           await prefs.setBool('is_logged_in', true);
+          
+          // Save phone number if available in the response
+          if (phoneNumber != null && phoneNumber.isNotEmpty) {
+            await prefs.setString('user_phone', phoneNumber);
+          }
+          
           // Register FCM token with user info (async, do not await)
           FCMService.registerTokenWithUserInfo();
 

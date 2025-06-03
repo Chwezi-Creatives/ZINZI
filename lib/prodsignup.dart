@@ -295,25 +295,64 @@ class _ProducerSignUpPageState extends State<ProducerSignUpPage> {
         _showSnackBar('Please select a producer type.', isError: true);
         return;
       }
-      // Check if location was acquired
+      
+      // Make location optional
+      bool continueWithoutLocation = false;
       if (_locationCoordinates.isEmpty) {
-        _showSnackBar('Please acquire your location using the button.',
-            isError: true);
-        return;
+        final shouldContinue = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Location Not Set'),
+            content: const Text('You can continue without setting a location and update it later from your profile settings. Would you like to continue?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Go Back'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Continue'),
+              ),
+            ],
+          ),
+        ) ?? false;
+        
+        if (!shouldContinue) {
+          return;
+        }
+        continueWithoutLocation = true;
       }
-      // Check if image was uploaded (optional based on requirements)
-      if (_profileImageFile != null &&
-          _uploadedImageUrl == null &&
-          !_isUploadingImage) {
-        _showSnackBar(
-            'Profile image is still uploading or failed. Please wait or try again.',
-            isError: true);
-        return; // Or retry upload here: await _uploadToImgur(); if(!_uploadedImageUrl...) return;
-      }
-      if (_isUploadingImage) {
-        _showSnackBar('Profile image is uploading. Please wait.',
-            isError: true);
-        return;
+      
+      // Make profile image optional
+      bool continueWithoutImage = false;
+      if (_profileImageFile != null && _uploadedImageUrl == null) {
+        if (_isUploadingImage) {
+          _showSnackBar('Profile image is still uploading. Please wait.', isError: true);
+          return;
+        }
+        
+        final shouldContinue = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('No Profile Image'),
+            content: const Text('You can continue without a profile image and add one later from your profile settings. Would you like to continue?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Go Back'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Continue'),
+              ),
+            ],
+          ),
+        ) ?? false;
+        
+        if (!shouldContinue) {
+          return;
+        }
+        continueWithoutImage = true;
       }
 
       setState(() => _isLoading = true);
@@ -328,15 +367,17 @@ class _ProducerSignUpPageState extends State<ProducerSignUpPage> {
           body: json.encode({
             'name': _nameController.text.trim(),
             // Combine human-readable address and coordinates, fallback to just coordinates
-            'location': _humanReadableAddress.isNotEmpty &&
-                    _humanReadableAddress != 'Could not fetch address'
-                ? "$_humanReadableAddress ($_locationCoordinates)"
-                : _locationCoordinates,
+            'location': _locationCoordinates.isEmpty
+                ? ''
+                : _humanReadableAddress.isNotEmpty &&
+                        _humanReadableAddress != 'Could not fetch address'
+                    ? "$_humanReadableAddress ($_locationCoordinates)"
+                    : _locationCoordinates,
             'phone_number': _phoneNumberController.text.trim(),
             'email': _emailController.text.trim().toLowerCase(),
             'password': _passwordController.text,
             'producer_type': _selectedProducerType,
-            'image': _uploadedImageUrl,
+            'image': continueWithoutImage ? '' : _uploadedImageUrl,
           }),
         );
 
@@ -373,21 +414,20 @@ class _ProducerSignUpPageState extends State<ProducerSignUpPage> {
         } else {
           // --- FAILURE ---
           String errorMessage = 'Sign up failed. Please try again.';
-          try {
-            final responseData = json.decode(response.body);
-            if (response.statusCode == 409) {
-              errorMessage = 'An account with this email already exists. Please log in or use a different email.';
-            } else {
+          
+          // Handle 409 Conflict specifically
+          if (response.statusCode == 409) {
+            errorMessage = 'An account with this email already exists. Please log in or use a different email.';
+          } 
+          // Try to parse error message from response for other error codes
+          else {
+            try {
+              final responseData = json.decode(response.body);
               errorMessage = responseData['message'] ??
-                  responseData['error'] ??
-                  errorMessage;
-            }
-          } catch (_) {
-            if (response.statusCode == 409) {
-              errorMessage = 'An account with this email already exists. Please log in or use a different email.';
-            } else {
-              errorMessage =
-                  'Sign up failed (Code: ${response.statusCode}). Please try again.';
+                           responseData['error'] ??
+                           'Sign up failed (Code: ${response.statusCode}). Please try again.';
+            } catch (_) {
+              errorMessage = 'Sign up failed (Code: ${response.statusCode}). Please try again.';
             }
           }
           _showErrorSnackBar(errorMessage);

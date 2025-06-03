@@ -457,14 +457,14 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
           ),
           body: Container(
             decoration: BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage(
-                    'assets/images/soft.jpg'), // Ensure this asset exists
-                fit: BoxFit.cover,
-                colorFilter: ColorFilter.mode(
-                  Colors.white.withOpacity(0.95),
-                  BlendMode.dstATop,
-                ),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.teal.shade50,
+                  Colors.teal.shade50,
+                  Colors.white,
+                ],
               ),
             ),
             child: Column(

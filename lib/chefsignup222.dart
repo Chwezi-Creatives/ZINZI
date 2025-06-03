@@ -402,17 +402,58 @@ class _ChefSignUpPageBetterNewState extends State<ChefSignUpPageBetterNew> {
       _showSnackBar('Passwords do not match.', isError: true, isWarning: true);
       return;
     }
+    
+    // Make profile image optional
+    bool continueWithoutImage = false;
     if (imageUrlController.text.isEmpty) {
-      _showSnackBar('Please upload a profile image.',
-          isError: true, isWarning: true);
-      return;
+      final shouldContinue = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('No Profile Image'),
+          content: const Text('You can continue without a profile image and add one later from your profile settings. Would you like to continue?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Go Back'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      ) ?? false;
+      
+      if (!shouldContinue) {
+        return;
+      }
+      continueWithoutImage = true;
     }
+    
+    // Make location optional
     if (locationController.text.isEmpty ||
         locationController.text.startsWith('Failed to get location')) {
-      _showSnackBar('Please acquire your location.',
-          isError: true, isWarning: true);
-      _formKey.currentState!.validate();
-      return;
+      final shouldContinue = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Location Not Set'),
+          content: const Text('You can continue without setting a location and update it later from your profile settings. Would you like to continue?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Go Back'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      ) ?? false;
+      
+      if (!shouldContinue) {
+        return;
+      }
     }
     if (_sampleImageUrls
         .where((url) => url != null && url.isNotEmpty)
@@ -476,9 +517,12 @@ class _ChefSignUpPageBetterNewState extends State<ChefSignUpPageBetterNew> {
       'name': nameController.text.trim(),
       'email': emailController.text.trim(),
       'password': passwordController.text.trim(),
-      'image': imageUrlController.text.trim(),
+      'image': continueWithoutImage ? '' : imageUrlController.text.trim(),
       'phone_number': phoneNumberController.text.trim(),
-      'location': locationController.text.trim(),
+      'location': (locationController.text.isEmpty || 
+                  locationController.text.startsWith('Failed to get location')) 
+                  ? '' 
+                  : locationController.text.trim(),
       'chef_type': selectedChefType,
       'experience': int.tryParse(experienceController.text.trim()) ?? 0,
       'responsetime': selectedResponseTime,

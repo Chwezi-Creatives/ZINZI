@@ -785,8 +785,13 @@ class _NutritionPageState extends State<NutritionPage>
       drawer: AppDrawer(),
       // drawer: AppDrawerUnified(), // Uncomment if you have this drawer
       appBar: AppBar(
-         // Uncomment if you have this drawer
-        title: const Text('Nutrition+'),
+        backgroundColor: primaryTeal,
+        foregroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text(
+          'Nutrition+',
+          style: TextStyle(color: Colors.white),
+        ),
         actions: [
           AnimatedBuilder(
             animation: _refreshIconController,
@@ -839,6 +844,11 @@ class _NutritionPageState extends State<NutritionPage>
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true, // Good for many tabs
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white.withOpacity(0.7),
+          indicatorColor: Colors.white,
+          indicatorWeight: 2.0,
+          labelStyle: const TextStyle(fontWeight: FontWeight.bold),
           tabs: const [
             Tab(text: 'Spices'),
             Tab(text: 'Herbs'),

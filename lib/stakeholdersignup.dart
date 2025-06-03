@@ -13,6 +13,7 @@ import 'dart:io';
 // Placeholder for verification page if the above is wrong:
 import 'package:flutter/cupertino.dart'; // Using Cupertino for placeholder
 import 'package:shared_preferences/shared_preferences.dart';
+import 'notifications/fcm_service.dart';
 
 // --- Placeholder Verification Page ---
 class EmailVerificationPage extends StatelessWidget {
@@ -242,10 +243,58 @@ class _StakeholderSignUpPageState extends State<StakeholderSignUpPage> {
       return;
     }
 
-    // Optional: Check if image was selected/uploaded
+    // Make profile image optional
+    bool continueWithoutImage = false;
     if (_profileImage == null || _imageUrlController.text.isEmpty) {
-      _showSnackbar('Please select a profile image.');
-      return;
+      final shouldContinue = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('No Profile Image'),
+          content: const Text('You can continue without a profile image and add one later from your profile settings. Would you like to continue?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Go Back'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      ) ?? false;
+      
+      if (!shouldContinue) {
+        return;
+      }
+      continueWithoutImage = true;
+    }
+    
+    // Make location optional
+    bool continueWithoutLocation = false;
+    if (locationCoordinates.isEmpty) {
+      final shouldContinue = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Location Not Set'),
+          content: const Text('You can continue without setting a location and update it later from your profile settings. Would you like to continue?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Go Back'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      ) ?? false;
+      
+      if (!shouldContinue) {
+        return;
+      }
+      continueWithoutLocation = true;
     }
 
     setState(() {
@@ -253,15 +302,13 @@ class _StakeholderSignUpPageState extends State<StakeholderSignUpPage> {
     });
 
     try {
-      // Simulate image upload if not done earlier
-      if (_imageUrlController.text.startsWith("https://placeholder.com")) {
-        // Only upload if it's still the placeholder and image exists
-        if (_profileImage != null) {
+      // Only upload image if one was selected and we're not continuing without it
+      if (!continueWithoutImage && _profileImage != null) {
+        if (_imageUrlController.text.startsWith("https://placeholder.com")) {
           _imageUrlController.text = await uploadImageToServer(_profileImage!);
-        } else {
-          throw Exception(
-              "Profile image missing for upload."); // Should have been caught earlier
         }
+      } else if (continueWithoutImage) {
+        _imageUrlController.text = ''; // Ensure empty string if no image
       }
 
       final response = await http
@@ -277,9 +324,9 @@ class _StakeholderSignUpPageState extends State<StakeholderSignUpPage> {
                   .toLowerCase(), // Send lowercase email
               'Password': _passwordController.text.trim(),
               // Sending both human-readable and coordinates might be useful
-              'Location_Address': humanReadableAddress,
+              'Location_Address': locationCoordinates.isEmpty ? '' : humanReadableAddress,
               'Location_Coordinates': locationCoordinates,
-              'Image': _imageUrlController.text.trim(), // URL from upload
+              'Image': _imageUrlController.text.trim().isNotEmpty ? _imageUrlController.text.trim() : '', // URL from upload or empty
               'Phone_Number': _phoneNumberController.text.trim(),
               'Is_Active': true, // Default to active
               'Rating': 0, // Default rating
@@ -294,6 +341,7 @@ class _StakeholderSignUpPageState extends State<StakeholderSignUpPage> {
         final responseData = json.decode(response.body);
         final stakeholderId =
             responseData['stakeholder_id']; // Adjust key if needed
+        final String? phoneNumber = responseData['phone'] as String?;
 
         if (stakeholderId != null) {
           final prefs = await SharedPreferences.getInstance();
@@ -301,10 +349,20 @@ class _StakeholderSignUpPageState extends State<StakeholderSignUpPage> {
               'stakeholder_user_id', stakeholderId.toString());
           await prefs.setString(
               'user_id', stakeholderId.toString());
-          print(
-              "Stakeholder ID saved: $stakeholderId"); // Optional: for debugging
+          await prefs.setString('user_type', 'stakeholder');
+          await prefs.setBool('is_logged_in', true);
+          
+          // Save phone number if available in the response
+          if (phoneNumber != null && phoneNumber.isNotEmpty) {
+            await prefs.setString('user_phone', phoneNumber);
+          }
+          
+          // Register FCM token with user info (async, do not await)
+          FCMService.registerTokenWithUserInfo();
+          
+          print("Stakeholder ID saved: $stakeholderId"); // Optional: for debugging
           _showSnackbar("Sign up successful!", success: true);
-          // Navigate to dashboard page
+          // Navigate to verification page
           Navigator.pushReplacement(
               // Use pushReplacement if you don't want user coming back here
               context,

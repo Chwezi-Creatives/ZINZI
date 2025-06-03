@@ -162,8 +162,13 @@ class Order {
   static const String STATUS_PENDING = 'Pending';
   static const String STATUS_ACCEPTED = 'Accepted';
   static const String STATUS_PREPARING = 'Preparing';
+  static const String STATUS_READY_FOR_PICKUP = 'Ready for Pickup';
+  static const String STATUS_PICKED_UP = 'Picked Up';
+  static const String STATUS_ON_THE_WAY = 'On The Way';
   static const String STATUS_DISPATCHED = 'Dispatched';
+  static const String STATUS_DELIVERING = 'Delivering';
   static const String STATUS_DELIVERED = 'Delivered';
+  static const String STATUS_COMPLETED = 'Completed';
   static const String STATUS_CANCELLED = 'Cancelled';
 
   Order({

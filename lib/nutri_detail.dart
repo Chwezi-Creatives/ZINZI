@@ -557,88 +557,92 @@ class _Nutri_DetailPageState extends State<Nutri_DetailPage>
   }
 
   Widget _buildSelectedProducerCard() {
-    if (selectedProducer != null) {
-      return Container(
+    return GestureDetector(
+      onTap: _showProducerSelector,
+      child: Container(
+        width: double.infinity, // Ensure full width
         margin: EdgeInsets.only(top: 8),
         decoration: BoxDecoration(
-          color: Colors.green.withOpacity(0.1),
+          color: selectedProducer != null 
+              ? Colors.green.withOpacity(0.1) 
+              : Colors.grey.withOpacity(0.1),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.green.withOpacity(0.3)),
+          border: Border.all(
+            color: selectedProducer != null 
+                ? Colors.green.withOpacity(0.3) 
+                : Colors.grey.withOpacity(0.3)
+          ),
         ),
-        child: ListTile(
-          leading: CircleAvatar(
-            backgroundColor: Colors.green.shade50,
-            child: Icon(Icons.person, color: Colors.green),
-          ),
-          title: Text(
-            selectedProducer!['name'] ?? 'Producer Name',
-            style: TextStyle(fontWeight: FontWeight.w600),
-          ),
-          subtitle: Row(
-            children: [
-              Icon(Icons.location_on, size: 14, color: Colors.grey),
-              SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  selectedProducer!['location'] ?? 'Unknown Location',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+        child: selectedProducer != null 
+          ? ListTile(
+              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              leading: CircleAvatar(
+                backgroundColor: Colors.green.shade50,
+                child: Icon(Icons.person, color: Colors.green),
+              ),
+              title: Text(
+                selectedProducer!['name'] ?? 'Producer Name',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Row(
+                children: [
+                  Icon(Icons.location_on, size: 14, color: Colors.grey),
+                  SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      selectedProducer!['location'] ?? 'Unknown Location',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              trailing: Text(
+                'Change',
+                style: TextStyle(
+                  color: accentColor,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-            ],
-          ),
-          trailing: TextButton(
-            onPressed: _showProducerSelector,
-            child: Text(
-              'Change',
-              style: TextStyle(
-                color: accentColor,
-                fontWeight: FontWeight.bold,
+            )
+          : Container(
+              width: double.infinity, // Ensure full width
+              padding: EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(Icons.person_add, size: 40, color: Colors.grey),
+                  SizedBox(height: 12),
+                  Text(
+                    'No Producer Selected',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: accentColor,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      'Select Producer',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
-        ),
-      );
-    } else {
-      return Container(
-        margin: EdgeInsets.only(top: 8),
-        width: double.infinity,
-        padding: EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-        decoration: BoxDecoration(
-          color: Colors.grey.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.withOpacity(0.3)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Icon(Icons.person_add, size: 40, color: Colors.grey),
-            SizedBox(height: 12),
-            Text(
-              'No Producer Selected',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey.shade700,
-              ),
-            ),
-            SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _showProducerSelector,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: accentColor,
-                foregroundColor: Colors.white,
-                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child: Text('Select Producer'),
-            ),
-          ],
-        ),
-      );
-    }
+      ),
+    );
   }
 
   Widget _buildProceedToCartButton() {
@@ -678,7 +682,7 @@ class _Nutri_DetailPageState extends State<Nutri_DetailPage>
               }
             : null,
         style: ElevatedButton.styleFrom(
-          backgroundColor: primaryColor,
+          backgroundColor: primaryColor, foregroundColor: Colors.white,
           disabledBackgroundColor: Colors.grey.shade400,
           padding: EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(

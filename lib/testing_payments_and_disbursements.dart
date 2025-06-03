@@ -18,9 +18,58 @@ class PaymentTesterApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'MoMo Payment Tester',
+      debugShowCheckedModeBanner: false, // Remove debug banner
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.teal,
+          primary: Colors.teal,
+          secondary: Colors.tealAccent,
+          surface: Colors.white,
+          background: Colors.white,
+        ),
         useMaterial3: true,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.teal,
+          foregroundColor: Colors.white,
+          elevation: 2,
+          centerTitle: true,
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.teal,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            elevation: 2,
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Colors.teal),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Colors.teal),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Colors.teal, width: 2),
+          ),
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        ),
+        cardTheme: CardTheme(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          color: Colors.white,
+        ),
       ),
       home: const HomeScreen(),
     );
@@ -144,7 +193,7 @@ class _TestCollectionsScreenState extends State<TestCollectionsScreen> {
 
     try {
       final baseUrl = dotenv.get('API_BASE_URL');
-      final url = Uri.parse('$baseUrl/api/v1/momo/payment-status/$transactionId');
+      final url = Uri.parse('$baseUrl/rr/momo/payment-status/$transactionId');
       
       debugPrint('Sending GET request to: $url');
       
@@ -208,7 +257,7 @@ class _TestCollectionsScreenState extends State<TestCollectionsScreen> {
 
     try {
       final baseUrl = dotenv.get('API_BASE_URL');
-      final endpoint = '/api/v1/momo/request-payment';
+      final endpoint = '/rr/momo/request-payment';
       final url = Uri.parse('$baseUrl$endpoint');
       final formattedPhone = _formatPhoneNumber(_phoneController.text);
       
@@ -475,7 +524,7 @@ class _TestDisbursementsScreenState extends State<TestDisbursementsScreen> {
 
     try {
       final baseUrl = dotenv.get('API_BASE_URL');
-      final url = Uri.parse('$baseUrl/api/v1/momo/disbursement-status/$referenceId');
+      final url = Uri.parse('$baseUrl/rr/momo/disbursement-status/$referenceId');
       
       debugPrint('Sending GET request to: $url');
       
@@ -540,7 +589,7 @@ class _TestDisbursementsScreenState extends State<TestDisbursementsScreen> {
 
     try {
       final baseUrl = dotenv.get('API_BASE_URL');
-      final endpoint = '/api/v1/momo/disburse';
+      final endpoint = '/rr/momo/disburse';
       final url = Uri.parse('$baseUrl$endpoint');
       final formattedPayeeId = _formatPhoneNumber(_payeeIdController.text);
       

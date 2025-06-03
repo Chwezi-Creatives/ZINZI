@@ -239,9 +239,62 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
         _showSnackBar('Please select vehicle type.', isError: true);
         return;
       }
+      
+      // Make profile image optional
+      bool continueWithoutImage = false;
       if (_isUploadingImage) {
-        _showSnackBar('Image is uploading. Please wait.', isError: true);
+        _showSnackBar('Image is still uploading. Please wait.', isError: true);
         return;
+      } else if (_profileImageFile != null && _uploadedImageUrl == null) {
+        final shouldContinue = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('No Profile Image'),
+            content: const Text('You can continue without a profile image and add one later from your profile settings. Would you like to continue?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Go Back'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Continue'),
+              ),
+            ],
+          ),
+        ) ?? false;
+        
+        if (!shouldContinue) {
+          return;
+        }
+        continueWithoutImage = true;
+      }
+      
+      // Make location optional
+      bool continueWithoutLocation = false;
+      if (_locationCoordinates.isEmpty) {
+        final shouldContinue = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Location Not Set'),
+            content: const Text('You can continue without setting a location and update it later from your profile settings. Would you like to continue?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Go Back'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Continue'),
+              ),
+            ],
+          ),
+        ) ?? false;
+        
+        if (!shouldContinue) {
+          return;
+        }
+        continueWithoutLocation = true;
       }
 
       setState(() => _isLoading = true);
@@ -255,7 +308,7 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
         'license_plate': _licensePlateController.text.trim().isEmpty
             ? null
             : _licensePlateController.text.trim(),
-        'profile_image_url': _uploadedImageUrl,
+        'profile_image_url': continueWithoutImage ? null : _uploadedImageUrl,
         'location_coordinates':
             _locationCoordinates.isNotEmpty ? _locationCoordinates : null,
         'address':

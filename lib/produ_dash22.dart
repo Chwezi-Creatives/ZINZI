@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
-// import 'dart:io'; // No longer needed here as File operations are in producer_profile.dart
+import 'dart:io' show SocketException, TimeoutException; // Added SocketException and TimeoutException
 
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:zinzi2/transooter_dash_before_mapbox.dart' show EarningsHistoryScreen, Payment;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // For FilteringTextInputFormatter & SystemUiOverlayStyle
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -16,7 +16,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi2/app_drawer_unified.dart' as drawer;
 import 'package:zinzi2/notifications/notification_provider.dart';
 import 'package:zinzi2/user_cache.dart'; 
-import 'package:zinzi2/signup_or_Login.dart';
 import 'package:zinzi2/utils/route_observer.dart';
 
 
@@ -263,6 +262,284 @@ class Product {
   }
 }
 
+// Producer Payment Model
+class ProducerPayment {
+  final int id;
+  final int producerId;
+  final int orderId;
+  final double amount;
+  final String transactionId;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  
+  // Status is always successful for producer payments
+  String get status => 'Successful';
+  
+  // For UI compatibility
+  String get disbursementTransactionStatus => status;
+  String get orderTransactionStatus => 'Completed';
+  String get orderType => 'producer_payment';
+  
+  ProducerPayment({
+    required this.id,
+    required this.producerId,
+    required this.orderId,
+    required this.amount,
+    required this.transactionId,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  
+  factory ProducerPayment.fromJson(Map<String, dynamic> json) {
+    return ProducerPayment(
+      id: _parseInt(json['id']),
+      producerId: _parseInt(json['producer_id']),
+      orderId: _parseInt(json['order_id']),
+      amount: _parseDouble(json['amount']?.toString() ?? '0'),
+      transactionId: _getStringSafe(json['transaction_id']) ?? 'N/A',
+      createdAt: parseDateSafe(json['created_at']) ?? DateTime.now(),
+      updatedAt: parseDateSafe(json['updated_at']) ?? DateTime.now(),
+    );
+  }
+  
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'producer_id': producerId,
+    'order_id': orderId,
+    'amount': amount,
+    'transaction_id': transactionId,
+    'created_at': createdAt.toIso8601String(),
+    'updated_at': updatedAt.toIso8601String(),
+  };
+}
+
+// Custom Earnings History Screen for Producer Payments
+class ProducerEarningsHistoryScreen extends StatelessWidget {
+  final List<ProducerPayment> payments;
+  
+  const ProducerEarningsHistoryScreen({
+    Key? key,
+    required this.payments,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    // Group payments by date
+    final Map<DateTime, List<ProducerPayment>> groupedPayments = {};
+    for (final payment in payments) {
+      final dateKey = DateTime(
+        payment.createdAt.year,
+        payment.createdAt.month,
+        payment.createdAt.day,
+      );
+      groupedPayments.putIfAbsent(dateKey, () => []).add(payment);
+    }
+
+    // Sort dates in descending order (newest first)
+    final sortedDates = groupedPayments.keys.toList()
+      ..sort((a, b) => b.compareTo(a));
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: sortedDates.map<Widget>((date) {
+          final dailyPayments = groupedPayments[date]!;
+          
+          // Calculate daily total for successful payments
+          final dailyTotal = dailyPayments
+              .where((p) => p.status?.toLowerCase() == 'completed')
+              .fold(0.0, (sum, p) => sum + p.amount);
+
+          return Card(
+            elevation: 0,
+            margin: const EdgeInsets.only(bottom: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: primaryTeal.withOpacity(0.3), width: 1),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Date and total row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        DateFormat('EEEE, MMM d, yyyy').format(date),
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        'UGX ${dailyTotal.toStringAsFixed(0)}',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Divider(height: 1),
+                  const SizedBox(height: 12),
+                  
+                  // List of payments for this date
+                  ...dailyPayments.map((payment) => _buildPaymentItem(payment)),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildPaymentItem(ProducerPayment payment) {
+    // Determine status color and icon
+    final status = payment.status?.toLowerCase() ?? 'pending';
+    final statusColor = _getStatusColor(status);
+    final statusIcon = _getStatusIcon(status);
+    final statusText = _getStatusText(status);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: primaryTeal.withOpacity(0.1), width: 1),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Row(
+          children: [
+            // Payment icon
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.teal.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(
+                Icons.payment,
+                color: Colors.teal,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 12),
+            
+            // Payment details
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Order #${payment.orderId}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w500,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Icon(statusIcon, size: 14, color: statusColor),
+                      const SizedBox(width: 4),
+                      Text(
+                        statusText,
+                        style: TextStyle(
+                          color: statusColor,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            
+            // Amount and time
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  'UGX ${payment.amount.toStringAsFixed(0)}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  DateFormat('h:mm a').format(payment.createdAt),
+                  style: const TextStyle(
+                    color: Colors.grey,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    ));
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'completed':
+      case 'success':
+      case 'successful':
+        return Colors.green;
+      case 'pending':
+        return Colors.orange;
+      case 'failed':
+      case 'rejected':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  IconData _getStatusIcon(String status) {
+    switch (status) {
+      case 'completed':
+      case 'success':
+        return Icons.check_circle;
+      case 'pending':
+        return Icons.pending;
+      case 'failed':
+      case 'rejected':
+        return Icons.error;
+      default:
+        return Icons.help_outline;
+    }
+  }
+
+  String _getStatusText(String status) {
+    return status[0].toUpperCase() + status.substring(1);
+  }
+}
+
+// Payment Model is imported from transooter_dash_before_mapbox.dart for backward compatibility
+
+// Helper function to parse dates safely
+DateTime? parseDateSafe(dynamic value) {
+  if (value == null) return null;
+  try {
+    return DateTime.tryParse(value.toString())?.toLocal();
+  } catch (_) {
+    try {
+      return DateFormat("E, dd MMM yyyy HH:mm:ss 'GMT'", 'en_US')
+          .parseUtc(value.toString())
+          .toLocal();
+    } catch (e) {
+      return null;
+    }
+  }
+}
+
 // Rider/Transporter Model (Unified)
 class Rider {
   final int id;
@@ -422,6 +699,73 @@ class ProducerApiService {
   static const String _produceCacheKey = 'producer_produce_cache';
   static const String _produceCacheTimestampKey = 'producer_produce_cache_timestamp';
   static const int _cacheExpiryDays = 3; 
+
+  // Fetch producer payments/disbursements
+  static Future<List<ProducerPayment>> fetchProducerPayments(int producerId) async {
+    try {
+      // Use the base URL as is (should be HTTPS from .env)
+      final baseUrl = _apibaseurl.endsWith('/') 
+          ? _apibaseurl.substring(0, _apibaseurl.length - 1) 
+          : _apibaseurl;
+      final url = '$baseUrl/rr/disbursements/producer?producer_id=$producerId';
+      print('[ProducerDash] Fetching payments from: $url');
+      
+      final headers = await _getReadHeaders(requiresAuth: false);
+      final response = await http.get(
+        Uri.parse(url),
+        headers: headers,
+      ).timeout(const Duration(seconds: 30));
+      
+      print('[ProducerDash] Response status: ${response.statusCode}');
+      
+      // Check for HTML response (usually means an error page)
+      final contentType = response.headers['content-type']?.toLowerCase() ?? '';
+      if (contentType.contains('text/html')) {
+        throw Exception('Server returned an error page. Please try again later.');
+      }
+      
+      if (response.statusCode == 200) {
+        try {
+          // Parse the response as JSON
+          final dynamic data = jsonDecode(response.body);
+          
+          // Handle both array response and single object
+          final List<dynamic> paymentsJson = data is List ? data : [data];
+          
+          print('[ProducerDash] Found ${paymentsJson.length} payments');
+          
+          // Convert each JSON object to ProducerPayment
+          final payments = <ProducerPayment>[];
+          for (final json in paymentsJson) {
+            try {
+              if (json is Map<String, dynamic>) {
+                payments.add(ProducerPayment.fromJson(json));
+              }
+            } catch (e) {
+              print('[ProducerDash] Error parsing payment: $e');
+              continue;
+            }
+          }
+          
+          return payments;
+        } catch (e) {
+          print('[ProducerDash] Error processing payments: $e');
+          throw Exception('Failed to process payment data');
+        }
+      } else {
+        throw Exception('Failed to load payments. Status: ${response.statusCode}');
+      }
+    } on SocketException catch (e) {
+      print('[ProducerDash] Network error: $e');
+      throw Exception('No internet connection');
+    } on TimeoutException {
+      print('[ProducerDash] Request timed out');
+      throw Exception('Request timed out. Please try again.');
+    } catch (e) {
+      print('[ProducerDash] Unexpected error: $e');
+      throw Exception('An error occurred. Please try again.');
+    }
+  }
 
   static Future<List<Product>> fetchProducerProduce({bool forceRefresh = false}) async {
     if (!forceRefresh) {
@@ -618,7 +962,7 @@ class ProducerDash22 extends StatefulWidget {
   State<ProducerDash22> createState() => _ProducerDash22State();
 }
 
-class _ProducerDash22State extends State<ProducerDash22> with WidgetsBindingObserver, RouteAware {
+class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProviderStateMixin, WidgetsBindingObserver, RouteAware {
   int _currentIndex = 0; // Default to Orders tab (index 0 after profile removal)
   // Profile related state variables removed
   List<Order> _orders = [];
@@ -656,6 +1000,80 @@ class _ProducerDash22State extends State<ProducerDash22> with WidgetsBindingObse
 
   // Temp variable to store producer ID for stock updates, as _profile is removed.
   int? _currentProducerId;
+  
+  // State for earnings tab
+  List<ProducerPayment> _payments = [];
+  bool _isLoadingPayments = false;
+  bool _hasPaymentError = false;
+  // _error variable is already declared above
+  
+  // Fetch payments for the producer
+  Future<void> _fetchPayments() async {
+    if (_isLoadingPayments) {
+      print('[ProducerDash] Fetch already in progress, skipping');
+      return;
+    }
+    
+    print('[ProducerDash] Starting to fetch payments');
+    
+    if (!mounted) {
+      print('[ProducerDash] Widget not mounted, aborting');
+      return;
+    }
+    
+    setState(() {
+      _isLoadingPayments = true;
+      _hasPaymentError = false;
+      _error = '';
+    });
+    
+    try {
+      print('[ProducerDash] Getting producer ID');
+      final producerId = await ProducerApiService._getProducerIdInt();
+      if (producerId == null) {
+        print('[ProducerDash] No producer ID found');
+        if (!mounted) return;
+        setState(() {
+          _hasPaymentError = true;
+          _error = 'Producer ID not found. Please log in again.';
+        });
+        return;
+      }
+      
+      print('[ProducerDash] Fetching payments for producer ID: $producerId');
+      final payments = await ProducerApiService.fetchProducerPayments(producerId);
+      
+      print('[ProducerDash] Received ${payments.length} payments');
+      
+      if (!mounted) {
+        print('[ProducerDash] Widget disposed during fetch, ignoring results');
+        return;
+      }
+      
+      setState(() {
+        _payments = payments;
+        _hasPaymentError = false;
+        _error = '';
+      });
+      
+      print('[ProducerDash] Payments updated in state');
+      
+    } catch (e, stack) {
+      print('[ProducerDash] Error fetching payments: $e\n$stack');
+      if (!mounted) return;
+      setState(() {
+        _hasPaymentError = true;
+        _error = 'Failed to load payment history: ${e.toString()}. Please try again later.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingPayments = false;
+        });
+      }
+      print('[ProducerDash] Finished fetch payments operation');
+    }
+  }
 
 
   @override
@@ -736,9 +1154,19 @@ class _ProducerDash22State extends State<ProducerDash22> with WidgetsBindingObse
 
   void _onTabChanged(int newIndex) {
     setState(() => _currentIndex = newIndex);
-    if (newIndex == 0 && _isRouteActive) { // Orders tab is now index 0
+    
+    if (!_isRouteActive) return;
+    
+    // Handle tab-specific logic
+    if (newIndex == 0) { // Orders tab
       _startPolling();
-    } else {
+    } else if (newIndex == 1) { // Earnings tab
+      _pollingTimer?.cancel();
+      _pollingTimer = null;
+      if (_payments.isEmpty && !_isLoadingPayments && !_hasPaymentError) {
+        _fetchPayments();
+      }
+    } else { // Other tabs (Produce)
       _pollingTimer?.cancel();
       _pollingTimer = null;
     }
@@ -747,7 +1175,7 @@ class _ProducerDash22State extends State<ProducerDash22> with WidgetsBindingObse
   void _startPolling() {
     if (_currentIndex != 0 || !_isRouteActive) return; // Orders tab is now index 0
     _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 6), (timer) {
       if (mounted && _currentIndex == 0 && _isRouteActive && !_isRefreshing && _editingProduceId == null) {
         print("[ProducerDash] Polling for new orders...");
         _fetchOrdersAndProduce(forceRefresh: false);
@@ -1370,10 +1798,18 @@ class _ProducerDash22State extends State<ProducerDash22> with WidgetsBindingObse
         title: Text(_getAppBarTitle(), style: const TextStyle(color: textOnTeal, fontWeight: FontWeight.w600, fontSize: 18)),
         centerTitle: false,
         actions: [
-          IconButton(
-            icon: _isRefreshing ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: whiteColor, strokeWidth: 2)) : const Icon(Icons.refresh),
-            tooltip: 'Refresh Data', onPressed: _isRefreshing ? null : () => _fetchAllData(forceRefresh: true),
-          ),
+          if (_currentIndex == 1) // Earnings tab
+            IconButton(
+              icon: _isLoadingPayments ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: whiteColor, strokeWidth: 2)) : const Icon(Icons.refresh),
+              tooltip: 'Refresh Earnings',
+              onPressed: _isLoadingPayments ? null : _fetchPayments,
+            )
+          else // Other tabs
+            IconButton(
+              icon: _isRefreshing ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: whiteColor, strokeWidth: 2)) : const Icon(Icons.refresh),
+              tooltip: 'Refresh Data',
+              onPressed: _isRefreshing ? null : () => _fetchAllData(forceRefresh: true),
+            ),
         ],
       ),
       body: _buildBodyContent(),
@@ -1391,9 +1827,9 @@ class _ProducerDash22State extends State<ProducerDash22> with WidgetsBindingObse
         selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11),
         unselectedLabelStyle: const TextStyle(fontSize: 10), type: BottomNavigationBarType.fixed, elevation: 8.0,
         items: [
-          // Profile tab item removed
           _buildBottomNavItem(Icons.receipt_long_outlined, Icons.receipt_long, 'Orders', 0),
-          _buildBottomNavItem(Icons.inventory_2_outlined, Icons.inventory_2, 'Stock', 1),
+          _buildBottomNavItem(Icons.attach_money, Icons.attach_money_outlined, 'Earnings', 1),
+          _buildBottomNavItem(Icons.inventory_2_outlined, Icons.inventory_2, 'Stock', 2),
         ],
       ),
       floatingActionButton: _buildFloatingActionButton(),
@@ -1419,7 +1855,8 @@ class _ProducerDash22State extends State<ProducerDash22> with WidgetsBindingObse
     switch (_currentIndex) {
       // Case 0 for Profile removed
       case 0: return 'Manage Orders'; // Was index 1
-      case 1: // Was index 2
+      case 1: return 'Earnings';
+      case 2: // Was index 2
         return _editingProduceId != null
             ? (_editingProduceId!.startsWith("TEMP_") ? 'Add Produce Item' : 'Edit Produce Item')
             : 'Manage Stock & Produce';
@@ -1433,7 +1870,8 @@ class _ProducerDash22State extends State<ProducerDash22> with WidgetsBindingObse
     switch (_currentIndex) {
       // Case 0 for Profile FAB removed
       case 0: return null; // Orders Tab (was index 1)
-      case 1: // Produce/Stock Tab (was index 2)
+      case 1: return null; // Earnings Tab
+      case 2: // Produce/Stock Tab (was index 2)
         if (_selectedProduceIds.isNotEmpty) {
           return FloatingActionButton.extended(
             onPressed: _updateProducerStock, tooltip: 'Update Stock Levels',
@@ -1464,10 +1902,254 @@ class _ProducerDash22State extends State<ProducerDash22> with WidgetsBindingObse
     return IndexedStack(
       index: _currentIndex,
       children: [
-        // _buildProfileTab() removed
         _buildOrdersTab(),
+        _buildEarningsTab(),
         _buildProduceTab(),
       ],
+    );
+  }
+
+  Widget _buildEarningsTab() {
+    // Fetch payments when the tab is first built
+    if (_payments.isEmpty && !_isLoadingPayments && !_hasPaymentError) {
+      print('[EarningsTab] Triggering initial payments fetch');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        print('[EarningsTab] Post-frame callback: fetching payments');
+        _fetchPayments();
+      });
+    } else {
+      print('[EarningsTab] Not fetching payments - ' 
+          'isLoading: $_isLoadingPayments, '
+          'hasError: $_hasPaymentError, '
+          'paymentCount: ${_payments.length}');
+    }
+
+    // Prepare today's data
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final todayPayments = _payments.where((p) {
+      final paymentDate = DateTime(p.createdAt.year, p.createdAt.month, p.createdAt.day);
+      return paymentDate.isAtSameMomentAs(today);
+    }).toList();
+    
+    final todayTotal = todayPayments.fold(0.0, (sum, p) => sum + p.amount);
+    final totalEarnings = _payments.fold(0.0, (sum, p) => sum + p.amount);
+
+    Widget content;
+    
+    if (_isLoadingPayments && _payments.isEmpty) {
+      print('[EarningsTab] Showing loading indicator');
+      content = const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: primaryTeal),
+            SizedBox(height: 16),
+            Text('Loading your earnings...', 
+                 style: TextStyle(color: textOnWhite)),
+          ],
+        ),
+      );
+    } else if (_hasPaymentError) {
+      print('[EarningsTab] Showing error view: $_error');
+      content = Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _buildErrorView(),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: _fetchPayments,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Retry'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: primaryTeal,
+              foregroundColor: textOnTeal,
+            ),
+          ),
+        ],
+      );
+    } else if (_payments.isEmpty) {
+      print('[EarningsTab] Showing empty state');
+      content = _buildEmptyState(
+        'No Earnings Yet',
+        'Your earnings will appear here when you receive payments.',
+        icon: Icons.attach_money,
+      );
+    } else {
+      print('[EarningsTab] Showing ${_payments.length} payments');
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Today's Earnings Card
+          Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: primaryTeal.withOpacity(0.2), width: 1),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Today\'s Summary',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: textOnWhite,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      _buildStatCard(
+                        'Today\'s Earnings',
+                        'UGX ${todayTotal.toStringAsFixed(0)}',
+                        Icons.attach_money,
+                        primaryTeal,
+                      ),
+                      const SizedBox(width: 12),
+                      _buildStatCard(
+                        'Orders',
+                        '${todayPayments.length}',
+                        Icons.receipt,
+                        Colors.orange,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildStatCard(
+                          'Total Earnings',
+                          'UGX ${totalEarnings.toStringAsFixed(0)}',
+                          Icons.account_balance_wallet,
+                          Colors.green,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // All Earnings History
+          Text(
+            'Payment History',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: textOnWhite,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ProducerEarningsHistoryScreen(payments: _payments),
+        ],
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return RefreshIndicator(
+          onRefresh: _fetchPayments,
+          color: primaryTeal,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(16.0),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: constraints.maxHeight,
+              ),
+              child: content,
+            ),
+          ),
+        );
+      },
+    );
+  }
+  
+  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withOpacity(0.2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 16, color: color),
+                const SizedBox(width: 4),
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: textOnWhite.withOpacity(0.8),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildEmptyState(String title, String message, {IconData? icon}) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 64, color: Colors.grey[400]),
+              const SizedBox(height: 16),
+            ],
+            Text(
+              title,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textOnWhite),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('Refresh'),
+              onPressed: () => _fetchPayments(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primaryTeal,
+                foregroundColor: textOnTeal,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1529,8 +2211,11 @@ class _ProducerDash22State extends State<ProducerDash22> with WidgetsBindingObse
     final statusColor = _getStatusColor(order.orderStatus);
     final statusIcon = _getStatusIcon(order.orderStatus);
     return Card(
-      margin: EdgeInsets.zero, elevation: 1.5, color: whiteColor.withOpacity(0.9),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0), side: BorderSide(color: statusColor.withOpacity(0.4), width: 1)),
+      margin: EdgeInsets.zero, elevation: 0, color: whiteColor.withOpacity(0.9),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10.0),
+        side: BorderSide(color: primaryTeal.withOpacity(0.3), width: 1),
+      ),
       child: ExpansionTile(
         key: PageStorageKey<int>(order.orderId), tilePadding: const EdgeInsets.fromLTRB(12.0, 8.0, 12.0, 8.0),
         childrenPadding: EdgeInsets.zero, expandedAlignment: Alignment.topLeft, expandedCrossAxisAlignment: CrossAxisAlignment.start,
@@ -1571,8 +2256,8 @@ class _ProducerDash22State extends State<ProducerDash22> with WidgetsBindingObse
   }
 
   Widget _buildOrderActions(Order order) {
-    print('[OrderActions] Order ${order.orderId} status: "${order.orderStatus}"');
-    List<Widget> buttons = []; String status = order.orderStatus;
+    List<Widget> buttons = [];
+    String status = order.orderStatus;
     bool canCancel = ![Order.STATUS_DELIVERED.toLowerCase(), Order.STATUS_COMPLETED.toLowerCase(), Order.STATUS_CANCELLED.toLowerCase(), Order.STATUS_OUT_FOR_DELIVERY.toLowerCase(), Order.STATUS_DISPATCHED.toLowerCase()].contains(status.toLowerCase());
     if (canCancel) buttons.add(_actionButton('Cancel', () => _showRejectConfirmation(order), isDestructive: true));
 
@@ -1750,19 +2435,6 @@ class _ProducerDash22State extends State<ProducerDash22> with WidgetsBindingObse
     return FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d' + dp));
   }
 
-  Widget _buildEmptyState(String title, String subtitle, {required IconData icon}) {
-    return Center(child: Padding(padding: const EdgeInsets.symmetric(vertical: 40.0, horizontal: 20.0), child: Column(
-      mainAxisAlignment: MainAxisAlignment.center, mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 64, color: subtleText.withOpacity(0.5)), const SizedBox(height: 16),
-        Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: textOnWhite), textAlign: TextAlign.center),
-        const SizedBox(height: 8),
-        Text(subtitle, style: const TextStyle(fontSize: 14, color: subtleText), textAlign: TextAlign.center),
-        const SizedBox(height: 20),
-        ElevatedButton.icon(icon: const Icon(Icons.refresh, size: 18), label: const Text('Refresh'), style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[300], foregroundColor: Colors.grey[700], elevation: 0), onPressed: () => _fetchAllData(forceRefresh: true)),
-      ],
-    )));
-  }
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
