@@ -15,19 +15,23 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # --- Configuration ---
-DISBURSEMENT_PRIMARY_KEY = os.getenv("DISBURSEMENT_PRIMARY_KEY")
-DISBURSEMENT_USER_ID = os.getenv("DISBURSEMENT_USER_ID") # This is your X-Reference-Id
-DISBURSEMENT_API_KEY = os.getenv("DISBURSEMENT_API_KEY")
+# Load environment variables
+MOMO_SANDBOX_URL = os.getenv("MOMO_SANDBOX_URL", "https://sandbox.momodeveloper.mtn.com")
+
+# Disbursements API Configuration
+DISBURSEMENT_USER_ID = os.getenv("MOMO_DISBURSEMENTS_USER_ID")  # X-Reference-Id for disbursements
+DISBURSEMENT_API_KEY = os.getenv("MOMO_DISBURSEMENTS_API_KEY")
+DISBURSEMENT_PRIMARY_KEY = os.getenv("MOMO_DISBURSEMENTS_SUBSCRIPTION_KEY")  # Subscription key for disbursements
 
 # Test Disbursement Details
-TEST_RECIPIENT_MSISDN = os.getenv("TEST_RECIPIENT_MSISDN", "256772123456") # Default for testing
-TEST_AMOUNT = os.getenv("TEST_AMOUNT", "100") # Default for testing, as string
+TEST_RECIPIENT_MSISDN = os.getenv("TEST_RECIPIENT_MSISDN", "256772123456")  # Default for testing
+TEST_AMOUNT = os.getenv("TEST_AMOUNT", "100")  # Default for testing, as string
+CURRENCY = os.getenv("MOMO_SANDBOX_CURRENCY", "EUR")  # Default to EUR for sandbox
 
-# MoMo API Endpoints (Sandbox)
-BASE_URL = "https://sandbox.momodeveloper.mtn.com"
-DISBURSEMENT_TOKEN_URL = f"{BASE_URL}/disbursement/token/"
-DISBURSEMENT_TRANSFER_URL = f"{BASE_URL}/disbursement/v1_0/transfer"  # Fixed: changed from 'deposit' to 'transfer'
-DISBURSEMENT_REQUEST_TO_PAY_STATUS_URL_TEMPLATE = f"{BASE_URL}/disbursement/v1_0/transfer/{{transaction_id}}"  # Fixed: updated for transfer
+# MoMo API Endpoints
+DISBURSEMENT_TOKEN_URL = f"{MOMO_SANDBOX_URL}/disbursement/token/"
+DISBURSEMENT_TRANSFER_URL = f"{MOMO_SANDBOX_URL}/disbursement/v1_0/transfer"
+DISBURSEMENT_REQUEST_TO_PAY_STATUS_URL_TEMPLATE = f"{MOMO_SANDBOX_URL}/disbursement/v1_0/transfer/{{transaction_id}}"
 
 # Global variable to store access token and its expiry
 disbursement_access_token = None

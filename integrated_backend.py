@@ -27,7 +27,8 @@ import requests # Keep sync for now
 
 # --- FastAPI Imports ---
 from services.fcm_service import FirebaseMessagingService
-from fastapi import FastAPI, Request, Depends, HTTPException, status, Body, Query, Path
+from fastapi import FastAPI, Request, Depends, HTTPException, status, Body, Query, Path, BackgroundTasks
+from typing import Dict, Any, Optional, List, Union, Tuple
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware import Middleware
@@ -36,10 +37,17 @@ from contextlib import asynccontextmanager # For lifespan manager
 from fastapi.responses import ORJSONResponse, FileResponse # Use ORJSON, Import FileResponse
 import json
 import asyncio
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 
 # Import notification service
 from services.notification_service import NotificationService
+
+# Import MoMo service
+from services.momo_service import MomoService
+from services.disbursement_service import disbursement_service
+
+# Initialize MoMo service
+momo_service = MomoService()
 
 # Import meal recommendation algorithm
 from meal_algorithm4 import MealRecommendation4
@@ -513,7 +521,7 @@ class AuthenticationAndUsers(BaseRepository):
                 """
                 INSERT INTO email_verifications 
                 (user_id, verification_code, user_type, created_at, expires_at) 
-                VALUES ($1, $2, $3, NOW(), NOW() + INTERVAL '3 minutes')
+                VALUES ($1, $2, $3, NOW(), NOW() + INTERVAL '10 minutes')
                 """,
                 user_id, verification_code, user_type
             )
@@ -543,23 +551,8 @@ class AuthenticationAndUsers(BaseRepository):
                 existing_user = await conn.fetchval(email_user_type_query, email, user_type)
                 if existing_user: raise ValueError(f"Email '{email}' is already registered for user type '{user_type}'.")
 
-                # Check for existing name (assuming name is unique across all user types)
-                name_query = "SELECT user_id FROM users WHERE lower(name) = lower($1)"
-                existing_name = await conn.fetchval(name_query, name)
-                if existing_name: raise ValueError(f"Name '{name}' is already taken.")
-                if image is not None:
-                    insert_query = "INSERT INTO users (name, email, hashed_password, registration_date, is_email_verified, image) VALUES ($1, $2, $3, NOW(), FALSE, $4) RETURNING user_id"
-                    user_id = await conn.fetchval(insert_query, name, email, hashed_pw, image)
-                else:
-                    insert_query = "INSERT INTO users (name, email, hashed_password, registration_date, is_email_verified) VALUES ($1, $2, $3, NOW(), FALSE) RETURNING user_id"
-                    user_id = await conn.fetchval(insert_query, name, email, hashed_pw)
-                if not user_id: raise asyncpg.PostgresError("User insertion failed to return user_id.")
-
-                # Handle email verification
-                await self._handle_email_verification(conn, email, user_id, user_type)
-                
             logger.info(f"User '{name}' (ID: {user_id}) registered successfully with user type {user_type}.")
-            return {"user_id": user_id, "success": True}
+            return {"user_id": user_id, "phone": phone_number, "success": True}
         except ValueError as e:
             logger.warning(f"Signup validation failed for {email}: {e}")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
@@ -598,36 +591,162 @@ class AuthenticationAndUsers(BaseRepository):
             logger.error(f"Unexpected error during email verification for user {user_id}: {e}", exc_info=True)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='An unexpected server error occurred during verification.') from e
 
-    # send_verification_email_gmail remains synchronous
     def send_verification_email_gmail(self, to_email: str, verification_code: str):
-        # ... (implementation unchanged) ...
-        SCOPES = ['https://www.googleapis.com/auth/gmail.send']
-        creds = None; token_file = 'token.json'; client_secret_file = 'client_secret.json'
-        if not os.path.exists(client_secret_file): logger.error(f"Gmail client secret file not found: {client_secret_file}"); raise FileNotFoundError(f"Required file '{client_secret_file}' not found.")
-        if os.path.exists(token_file):
-             try: creds = Credentials.from_authorized_user_file(token_file, SCOPES)
-             except Exception as e: logger.warning(f"Error loading credentials from {token_file}: {e}. Will attempt re-auth."); creds = None
-        needs_reauth = False
-        if creds:
-            try:
-                if creds.expiry and creds.expiry < (datetime.utcnow().replace(tzinfo=None) + timedelta(minutes=5)):
-                    if creds.refresh_token: logger.info("Refreshing Gmail API access token..."); creds.refresh(Request()); logger.info("Gmail token refreshed.")
-                    else: logger.warning("Gmail token expired, no refresh token."); needs_reauth = True; creds = None
-                elif not creds.valid: logger.warning("Gmail token invalid."); needs_reauth = True; creds = None
-            except RefreshError as e: logger.error(f"Error refreshing Gmail token: {e}"); needs_reauth = True; creds = None
-            except Exception as e: logger.error(f"Error checking Gmail token: {e}"); creds = None; needs_reauth = True
-        if not creds or needs_reauth:
-            try:
-                logger.info("Starting Gmail auth flow..."); flow = InstalledAppFlow.from_client_secrets_file(client_secret_file, SCOPES); creds = flow.run_local_server(port=8080); logger.info("Gmail auth successful.")
-                with open(token_file, 'w') as token: token.write(creds.to_json()); logger.debug(f"Gmail credentials saved to {token_file}")
-            except Exception as e: logger.error(f"Gmail authentication flow failed: {e}"); raise ConnectionError("Failed Google auth flow.") from e
+        """
+        Send verification email using Gmail SMTP with App Password authentication.
+        
+        Args:
+            to_email: Recipient email address
+            verification_code: The verification code to send
+            
+        Raises:
+            Exception: If email sending fails
+        """
+        import smtplib
+        import ssl
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        import os
+        from dotenv import load_dotenv
+        
+        # Load environment variables
+        load_dotenv()
+        
+        # Configuration - Update these in your .env file
+        SMTP_SERVER = 'smtp.gmail.com'
+        SMTP_PORT = 587  # For starttls
+        SENDER_EMAIL = 'chwezionline@gmail.com'  # Your Gmail address
+        APP_PASSWORD = os.getenv('GMAIL_APP_PASSWORD')  # Your 16-character app password
+        
+        if not APP_PASSWORD:
+            error_msg = "GMAIL_APP_PASSWORD not found in environment variables"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
         try:
-            service = build('gmail', 'v1', credentials=creds)
-            subject = "Your ZINZI Verification Code"; body = f"Your verification code is: {verification_code}\nPlease enter this code in the ZINZI app."; message = MIMEText(body); message['to'] = to_email; message['from'] = 'me'; message['subject'] = subject
-            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode(); send_message_body = {'raw': raw_message}
-            sent_message = service.users().messages().send(userId="me", body=send_message_body).execute()
-            logger.info(f"Verification email sent to {to_email}. Message ID: {sent_message.get('id')}")
-        except Exception as e: logger.error(f"Failed to send Gmail verification email to {to_email}: {e}", exc_info=True); raise ConnectionError(f"Failed Gmail send: {e}") from e
+            logger.info(f"Attempting to send verification email to {to_email}")
+            
+            # Email styling and template
+            subject = "🔐 Your ZINZI Verification Code"
+            body = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {{
+                        font-family: 'Arial', sans-serif;
+                        line-height: 1.6;
+                        color: #333333;
+                        max-width: 600px;
+                        margin: 0 auto;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        border: 1px solid #e0e0e0;
+                        border-radius: 8px;
+                        overflow: hidden;
+                    }}
+                    .header {{
+                        background-color: #4CAF50;  /* ZINZI green */
+                        padding: 20px;
+                        text-align: center;
+                    }}
+                    .header img {{
+                        max-width: 150px;
+                        height: auto;
+                    }}
+                    .content {{
+                        padding: 30px;
+                        background-color: #ffffff;
+                    }}
+                    .verification-code {{
+                        background-color: #f8f9fa;
+                        border: 2px dashed #4CAF50;
+                        color: #4CAF50;
+                        font-size: 28px;
+                        font-weight: bold;
+                        letter-spacing: 5px;
+                        padding: 15px 25px;
+                        margin: 25px 0;
+                        text-align: center;
+                        border-radius: 4px;
+                        display: inline-block;
+                    }}
+                    .button {{
+                        display: inline-block;
+                        padding: 12px 25px;
+                        background-color: #4CAF50;
+                        color: white !important;
+                        text-decoration: none;
+                        border-radius: 4px;
+                        font-weight: bold;
+                        margin: 15px 0;
+                    }}
+                    .footer {{
+                        text-align: center;
+                        padding: 20px;
+                        font-size: 12px;
+                        color: #999999;
+                        background-color: #f8f9fa;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1 style="color: white; margin: 0;">ZINZI</h1>
+                        <p style="color: white; margin: 5px 0 0 0;">Healthy Food, Happy Life</p>
+                    </div>
+                    
+                    <div class="content">
+                        <h2>Welcome to ZINZI! 🌱</h2>
+                        <p>Thank you for joining our community of health-conscious individuals. To complete your registration, please verify your email address using the code below:</p>
+                        
+                        <div class="verification-code">
+                            {verification_code}
+                        </div>
+                        
+                        <p>This code will expire in 30 minutes for security reasons.</p>
+                        
+                        <p>If you didn't request this, please ignore this email or contact our support team if you have any concerns.</p>
+                        
+                        <p>Best regards,<br>The ZINZI Team</p>
+                    </div>
+                    
+                    <div class="footer">
+                        <p>© {datetime.now().year} ZINZI. All rights reserved.</p>
+                        <p>Kampala, Uganda | <a href="https://zinzi.ug" style="color: #4CAF50; text-decoration: none;">zinzi.ug</a></p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            
+            # Create message container
+            message = MIMEMultipart('alternative')
+            message['From'] = SENDER_EMAIL
+            message['To'] = to_email
+            message['Subject'] = subject
+            
+            # Attach HTML version
+            message.attach(MIMEText(body, 'html'))
+            
+            # Create secure connection with server and send email
+            context = ssl.create_default_context()
+            
+            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+                server.ehlo()  # Can be omitted
+                server.starttls(context=context)
+                server.ehlo()  # Can be omitted
+                server.login(SENDER_EMAIL, APP_PASSWORD)
+                server.send_message(message)
+            
+            logger.info(f"Verification email sent to {to_email}")
+            
+        except Exception as e:
+            error_msg = f"Failed to send verification email to {to_email}: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise ConnectionError(error_msg) from e
 
     async def create_user(self, conn: asyncpg.Connection, user_data: Dict[str, Any]) -> Dict[str, Any]:
         # ... (implementation unchanged, calls signup_user with conn) ...
@@ -663,7 +782,7 @@ class AuthenticationAndUsers(BaseRepository):
 
     async def login_user(self, conn: asyncpg.Connection, identifier: str, password: str) -> Dict[str, Any]:
         # ... (implementation uses _execute_query with conn) ...
-        sql = "SELECT user_id, hashed_password, user_type, is_email_verified FROM users WHERE lower(name) = lower($1) OR lower(email) = lower($2)"
+        sql = "SELECT user_id, hashed_password, user_type, is_email_verified, phone_number FROM users WHERE lower(name) = lower($1) OR lower(email) = lower($2)"
         params = (identifier.lower(), identifier.lower())
         try:
             result = await self._execute_query(conn, sql, params, fetch_one=True)
@@ -680,7 +799,7 @@ class AuthenticationAndUsers(BaseRepository):
                 update_sql = "UPDATE users SET last_login = NOW() WHERE user_id = $1"
                 try: await self._execute_query(conn, update_sql, (user_id,)) # Use _execute_query
                 except Exception as update_err: logger.error(f"Failed to update last_login for user {user_id}: {update_err}")
-                return {'message': 'Login successful', 'data': {'user_id': user_id, 'user_type': user_type, 'verified': is_verified}}
+                return {'message': 'Login successful', 'data': {'user_id': user_id, 'user_type': user_type, 'verified': is_verified, 'phone': result.get('phone_number')}}
             else:
                 logger.warning(f"Login failed: Invalid password for identifier '{identifier}'.")
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
@@ -1243,7 +1362,7 @@ class Chefs(BaseRepository):
 
     async def login_chef(self, conn: asyncpg.Connection, identifier: str, password: str):
         # ... (uses conn for _execute_query) ...
-        sql = "SELECT chefid, hashed_password, user_type, is_email_verified FROM chefs WHERE lower(name) = lower($1) OR lower(email) = lower($2)"
+        sql = "SELECT chefid, hashed_password, user_type, is_email_verified, phone_number FROM chefs WHERE lower(name) = lower($1) OR lower(email) = lower($2)"
         params = (identifier.lower(), identifier.lower())
         result = await self._execute_query(conn, sql, params, fetch_one=True)
         if not result: logger.warning(f"Chef login fail: '{identifier}'"); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
@@ -1256,7 +1375,7 @@ class Chefs(BaseRepository):
             # update_sql = "UPDATE chefs SET last_login = NOW() WHERE chefid = $1"
             # try: await self._execute_query(conn, update_sql, (chef_id,))
             # except Exception as update_err: logger.error(f"Failed last_login update chef {chef_id}: {update_err}")
-            return {'message': 'Login successful', 'data': {'chef_id': chef_id, 'user_type': user_type, 'verified': is_verified}}
+            return {'message': 'Login successful', 'data': {'chef_id': chef_id, 'user_type': user_type, 'verified': is_verified, 'phone': result.get('phone_number')}}
         else: logger.warning(f"Chef login fail pwd: '{identifier}'."); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
 
     async def delete_chef(self, conn: asyncpg.Connection, chef_id: int):
@@ -1389,7 +1508,7 @@ class Producers(BaseRepository):
 
     async def login_producer(self, conn: asyncpg.Connection, identifier: str, password: str):
         # ... (uses conn for _execute_query) ...
-        sql = "SELECT producer_id, hashed_password, user_type, is_email_verified FROM producers WHERE lower(name) = lower($1) OR lower(email) = lower($2)"
+        sql = "SELECT producer_id, hashed_password, user_type, is_email_verified, phone_number FROM producers WHERE lower(name) = lower($1) OR lower(email) = lower($2)"
         params = (identifier.lower(), identifier.lower())
         result = await self._execute_query(conn, sql, params, fetch_one=True)
         if not result: logger.warning(f"Producer login fail: '{identifier}'"); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
@@ -1399,7 +1518,7 @@ class Producers(BaseRepository):
         if bcrypt.checkpw(password.encode(), stored_hash_bytes):
              logger.info(f"Producer login success '{identifier}', ID: {producer_id}")
              # Optional: update last_login
-             return {'message':'Login successful', 'data':{'producer_id':producer_id, 'user_type':user_type, 'verified':is_verified}}
+             return {'message':'Login successful', 'data':{'producer_id':producer_id, 'user_type':user_type, 'verified':is_verified, 'phone': result.get('phone_number')}}
         else: logger.warning(f"Producer login fail pwd: '{identifier}'."); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
 
     async def delete_producer(self, conn: asyncpg.Connection, producer_id: int):
@@ -1466,7 +1585,7 @@ class Transporters(BaseRepository):
 
     async def login_transporter(self, conn: asyncpg.Connection, identifier: str, password: str):
         # ... (uses conn for _execute_query) ...
-        sql="SELECT transporter_id, hashed_password, user_type, is_email_verified FROM transporters WHERE lower(name)=lower($1) OR lower(email)=lower($2)"
+        sql="SELECT transporter_id, hashed_password, user_type, is_email_verified, phone_number FROM transporters WHERE lower(name)=lower($1) OR lower(email)=lower($2)"
         params=(identifier.lower(), identifier.lower())
         result = await self._execute_query(conn, sql, params, fetch_one=True)
         if not result: logger.warning(f"Transporter login fail: '{identifier}'"); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
@@ -1476,7 +1595,7 @@ class Transporters(BaseRepository):
         if bcrypt.checkpw(password.encode(), stored_hash_bytes):
             logger.info(f"Transporter login success '{identifier}', ID: {transporter_id}")
             # Optional: update last_login
-            return {'message':'Login successful', 'data':{'transporter_id':transporter_id, 'user_type':user_type, 'verified':is_verified}}
+            return {'message':'Login successful', 'data':{'transporter_id':transporter_id, 'user_type':user_type, 'verified':is_verified, 'phone': result.get('phone_number')}}
         else: logger.warning(f"Transporter login fail pwd: '{identifier}'."); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
 
     async def delete_transporter(self, conn: asyncpg.Connection, transporter_id: int):
@@ -1922,7 +2041,7 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
         'delivered', 'shipped', 'preparing', 'confirmed', 'completed', 'pending',
         'accepted', 'dispatched', 'picked up', 'delivering', 'verification needed' # Added 'verification needed'
     }
-    ALLOWED_PAYMENT_STATUSES = {'failed', 'refunded', 'paid', 'pending', 'completed'}
+    ALLOWED_PAYMENT_STATUSES = {'failed', 'refunded', 'paid', 'pending', 'completed', 'processing_payment'}
     ALLOWED_PAYMENT_MODES = {
         'cash', 'momo', 'mobile money', 'Airtel Card', 'paypal', 'stripe',
         'debit card', 'credit card'
@@ -2460,28 +2579,61 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
                 logger.error(f"Database error updating order {original_order_id} status: {str(e)}", exc_info=True)
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update order status: {str(e)}")
             
-            # Calorie Logging Logic
-            if current_order_type == 'meal':
-                if status_actually_changed:
-                    completion_statuses_for_calories = ['completed', 'delivered', 'complete']
-                    was_completed_before = original_status in completion_statuses_for_calories
-                    is_completed_now = status_to_update in completion_statuses_for_calories
-                    
+            # Process post-status-update actions
+            if status_actually_changed:
+                # Check if order is being marked as completed/delivered
+                completion_statuses = ['completed', 'delivered', 'complete']
+                was_completed_before = original_status in completion_statuses
+                is_completed_now = status_to_update in completion_statuses
+                
+                # Trigger calorie logging for meal orders
+                if current_order_type == 'meal':
                     if is_completed_now and not was_completed_before:
                         logger.info(f"[INTERNAL] Order {original_order_id} (type: {current_order_type}) transitioned from '{original_status}' to '{status_to_update}' - triggering calorie logging.")
-                        # THE KEY CHANGE: No 'conn' is passed here.
-                        # _log_calories_with_error_handling will acquire its own connection.
                         asyncio.create_task(self._log_calories_with_error_handling(original_order_id))
-                    # ... (else debug logging for no calorie logging needed ... IDENTICAL)
                     else:
                         logger.debug(f"[INTERNAL] Order {original_order_id} (type: {current_order_type}): No calorie logging needed. Transition: '{original_status}' -> '{status_to_update}'. Was completed: {was_completed_before}, Is now completed: {is_completed_now}. Status actually changed: {status_actually_changed}")
-
-                # ... (else debug logging for status not changed ... IDENTICAL)
                 else:
-                    logger.debug(f"[INTERNAL] Order {original_order_id} (type: {current_order_type}): Status did not actually change in DB. Skipping calorie logging trigger.")
-            # ... (else debug logging for not a meal order ... IDENTICAL)
+                    logger.debug(f"[INTERNAL] Order {original_order_id} is type '{current_order_type}', not 'meal'. Skipping calorie logging.")
+                
+                # Trigger disbursements for completed orders
+                if is_completed_now and not was_completed_before:
+                    logger.info(f"[DISBURSEMENT] Order {original_order_id} marked as completed - queueing disbursement task")
+                    
+                    # Define the background task outside the create_task call for better error handling
+                    async def _process_disbursement_async():
+                        task_id = f"disburse_order_{original_order_id}_{int(time.time())}"
+                        try:
+                            logger.info(f"[DISBURSEMENT][{task_id}] Starting disbursement process")
+                            async with db_pool.acquire() as conn:
+                                try:
+                                    await disbursement_service.process_order_disbursements(conn, original_order_id)
+                                    logger.info(f"[DISBURSEMENT][{task_id}] Successfully processed disbursements for order {original_order_id}")
+                                except Exception as proc_err:
+                                    logger.error(f"[DISBURSEMENT][{task_id}] Error in disbursement processing: {str(proc_err)}", exc_info=True)
+                                    # Consider adding retry logic here if needed
+                        except Exception as task_err:
+                            logger.error(f"[DISBURSEMENT][{task_id}] Failed to acquire connection or process disbursement: {str(task_err)}", exc_info=True)
+                    
+                    # Start the background task with error handling
+                    try:
+                        task = asyncio.create_task(_process_disbursement_async())
+                        # Add a callback to log if the task fails
+                        def log_task_result(t):
+                            try:
+                                t.result()  # This will raise any unhandled exceptions
+                            except asyncio.CancelledError:
+                                logger.warning(f"[DISBURSEMENT] Disbursement task for order {original_order_id} was cancelled")
+                            except Exception as e:
+                                logger.error(f"[DISBURSEMENT] Unhandled exception in disbursement task for order {original_order_id}: {str(e)}", exc_info=True)
+                        
+                        task.add_done_callback(log_task_result)
+                        logger.info(f"[DISBURSEMENT] Successfully queued disbursement task for order {original_order_id}")
+                    except Exception as e:
+                        logger.error(f"[DISBURSEMENT] Failed to create disbursement task for order {original_order_id}: {str(e)}", exc_info=True)
+                        # Don't re-raise to avoid failing the main request
             else:
-                 logger.debug(f"[INTERNAL] Order {original_order_id} is type '{current_order_type}', not 'meal'. Skipping calorie logging.")
+                logger.debug(f"[INTERNAL] Order {original_order_id} (type: {current_order_type}): Status did not actually change in DB. Skipping post-update actions.")
             
             # ... (return statement IDENTICAL) ...
             return {
@@ -2519,36 +2671,25 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
         Wrapper for log_meal_calories to be used with asyncio.create_task.
         Acquires its own database connection from the global 'db_pool'.
         """
-        # Access the global db_pool directly.
-        # Ensure 'db_pool' is in the scope where this method is defined,
-        # or import it if it's in another module.
-        # For example, if your Orders class is in 'orders_repo.py' and db_pool is in 'main.py':
-        # At the top of 'orders_repo.py', you might have: from main import db_pool
-
-        global db_pool # If db_pool is defined in the same file and is global.
-                       # If imported, this 'global' keyword is not needed here.
-
-        if db_pool is None:
-            logger.error(f"[INTERNAL TASK] Global 'db_pool' is None for order {order_id}. Cannot log calories. Ensure the pool is initialized and accessible.")
-            return
-
-        new_conn = None
         try:
-            logger.info(f"[INTERNAL TASK] Attempting to log calories for order {order_id} via _log_calories_with_error_handling using connection from global db_pool.")
-            async with db_pool.acquire() as new_conn: # Acquire connection from the global pool
-                async with new_conn.transaction():
-                    # self.log_meal_calories is called with the NEWLY ACQUIRED connection
-                    success = await self.log_meal_calories(new_conn, order_id)
-            
-            if success:
-                logger.info(f"[INTERNAL TASK] Calorie logging task successfully processed for order {order_id}.")
-            else:
-                logger.warning(f"[INTERNAL TASK] Calorie logging task processed but indicated failure for order {order_id}.")
-        
-        except asyncpg.PostgresError as db_err:
-            logger.error(f"[INTERNAL TASK] Database error during calorie logging for order {order_id}: {str(db_err)}", exc_info=True)
+            if db_pool is None:
+                logger.error(f"[INTERNAL TASK] Global 'db_pool' is None for order {order_id}. Cannot log calories. Ensure the pool is initialized and accessible.")
+                return
+
+            logger.info(f"[INTERNAL TASK] Attempting to log calories for order {order_id}")
+            try:
+                async with db_pool.acquire() as conn:
+                    async with conn.transaction():
+                        success = await self.log_meal_calories(conn, order_id)
+                        if success:
+                            logger.info(f"[INTERNAL TASK] Successfully logged calories for order {order_id}")
+                        else:
+                            logger.warning(f"[INTERNAL TASK] Calorie logging completed with failure for order {order_id}")
+            except Exception as inner_e:
+                logger.error(f"[INTERNAL TASK] Error in calorie logging transaction for order {order_id}: {str(inner_e)}", exc_info=True)
         except Exception as e:
-            logger.error(f"[INTERNAL TASK] Unhandled error during calorie logging for order {order_id}: {str(e)}", exc_info=True)
+            logger.error(f"[INTERNAL TASK] Unhandled error in _log_calories_with_error_handling for order {order_id}: {str(e)}", exc_info=True)
+        # Don't re-raise to avoid crashing the background task
 
     # NO CHANGES to update_order_status or log_meal_calories methods from the last version.
     # They were:
@@ -2854,6 +2995,273 @@ class GetAllMeals(BaseRepository):
         except Exception as e: logger.error(f"Error fetch all meals: {e}", exc_info=True); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected server error.")
 
 
+# --- MoMo Payment Endpoints ---
+@app.post("/rr/momo/request-payment", response_class=ORJSONResponse)
+async def request_momo_payment(
+    amount: float = Body(..., gt=0, description="Amount to be paid"),
+    currency: str = Body(None, regex=r'^[A-Z]{3}$', description="Currency code (e.g., 'UGX', 'USD'). Defaults to MOMO_CURRENCY from .env or 'UGX'"),
+    payer_number: str = Body(..., description="Payer's phone number (MSISDN) with country code"),
+    payer_message: str = Body(None, description="Message to be shown to the payer. Defaults to 'Payment of {amount} {currency} to ZINZI'"),
+    payee_note: str = Body(None, description="Note about the payment for the payee. Defaults to 'Thank you for your payment'"),
+    external_id: str = Body(None, description="External reference ID (will be generated if not provided)"),
+    db: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Request a payment from a user via MoMo.
+    
+    This endpoint initiates a payment request to the specified phone number.
+    The user will receive a prompt to approve the payment on their device.
+    """
+    try:
+        # Generate a unique external ID if not provided
+        if not external_id:
+            external_id = f"ZINZI_PAY_{int(time.time())}"
+            
+        # Request payment
+        result = await momo_service.request_payment(
+            amount=amount,
+            currency=currency,
+            external_id=external_id,
+            payer_number=payer_number,
+            payer_message=payer_message,
+            payee_note=payee_note
+        )
+        
+        # Log the payment request in the database
+        try:
+            # Use the transaction_id from the result, or fallback to the external_id
+            transaction_id = result.get("transaction_id") or external_id
+            await db.execute(
+                """
+                INSERT INTO payment_transactions 
+                (transaction_id, external_id, amount, currency, status, payment_method, payment_details)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                transaction_id,
+                external_id,
+                amount,
+                currency or "UGX",  # Default to UGX if currency is None
+                "PENDING",
+                "momo",
+                json.dumps({
+                    "payer_number": payer_number,
+                    "payer_message": payer_message,
+                    "payee_note": payee_note,
+                    "momo_response": result
+                })
+            )
+            logger.info(f"Successfully logged payment to database. Transaction ID: {transaction_id}, External ID: {external_id}")
+        except Exception as e:
+            logger.error(f"Failed to log MoMo payment to database: {str(e)}")
+            logger.error(f"Result data: {result}")
+        
+        return {
+            "success": True,
+            "transaction_id": result.get("financialTransactionId"),
+            "external_id": external_id,
+            "status": result.get("status"),
+            "message": "Payment request initiated successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error in MoMo payment request: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to process payment request: {str(e)}"
+        )
+
+@app.get("/rr/momo/payment-status/{reference_id}", response_class=ORJSONResponse)
+async def get_momo_payment_status(
+    reference_id: str = Path(..., description="MoMo transaction ID or external ID"),
+    db: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Check the status of a MoMo payment.
+    
+    This endpoint checks the current status of a previously initiated payment.
+    Can be queried using either the transaction_id or external_id.
+    """
+    try:
+        # Check if we have the transaction in our database using either transaction_id or external_id
+        transaction = await db.fetchrow(
+            """
+            SELECT * FROM payment_transactions 
+            WHERE transaction_id = $1 OR external_id = $1
+            """,
+            reference_id
+        )
+        
+        if not transaction:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Transaction with ID {reference_id} not found"
+            )
+            
+        transaction_id = transaction["transaction_id"]
+            
+        # Call MoMo API to get the current status
+        momo_service = MomoService()
+        status_info = await momo_service.check_payment_status(transaction_id)
+        
+        # Update our database with the latest status
+        await db.execute(
+            """
+            UPDATE payment_transactions 
+            SET status = $1, updated_at = NOW()
+            WHERE transaction_id = $2
+            """,
+            status_info.get("status"),
+            transaction_id
+        )
+        
+        return {
+            "success": True,
+            "transaction_id": transaction_id,
+            "external_id": transaction.get("external_id"),
+            "status": status_info.get("status"),
+            "details": status_info
+        }
+    except HTTPException as he:
+        # Re-raise HTTP exceptions as-is
+        raise he
+    except Exception as e:
+        logger.error(f"Error checking MoMo payment status: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to check payment status: {str(e)}"
+        )
+
+@app.post("/rr/momo/disburse", response_class=ORJSONResponse)
+async def disburse_funds(
+    amount: float = Body(..., gt=0, description="Amount to disburse"),
+    currency: str = Body(None, regex=r'^[A-Z]{3}$', description="Currency code (e.g., 'UGX'). Defaults to MOMO_CURRENCY from .env or 'UGX'"),
+    payee_id: str = Body(..., description="Recipient's ID (phone number or account number)"),
+    payee_id_type: str = Body("MSISDN", description="Type of payee ID (default: MSISDN for phone number)"),
+    payer_message: str = Body(None, description="Message to the recipient. Defaults to 'Payment of {amount} {currency} from ZINZI'"),
+    payee_note: str = Body(None, description="Note about the payment. Defaults to 'Payment for services'"),
+    external_id: str = Body(None, description="External reference ID (will be generated if not provided)"),
+    db: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Disburse funds to a recipient via MoMo.
+    
+    This endpoint initiates a disbursement to the specified recipient.
+    """
+    try:
+        # Generate a unique external ID if not provided
+        if not external_id:
+            external_id = f"ZINZI_DISB_{int(time.time())}"
+            
+        # Perform disbursement
+        result = await momo_service.disburse_funds(
+            amount=amount,
+            currency=currency,
+            external_id=external_id,
+            payee_id=payee_id,
+            payee_id_type=payee_id_type,
+            payer_message=payer_message,
+            payee_note=payee_note
+        )
+        
+        # Log the disbursement in the database
+        try:
+            # Use transaction_id from the result, fallback to external_id if not available
+            transaction_id = result.get("transaction_id") or external_id
+            
+            await db.execute(
+                """
+                INSERT INTO disbursement_transactions 
+                (transaction_id, external_id, amount, currency, status, recipient_id, recipient_type, details)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                """,
+                transaction_id,
+                external_id,
+                amount,
+                currency or "UGX",  # Default to UGX if currency is None
+                result.get("status", "PENDING"),
+                payee_id,
+                payee_id_type,
+                json.dumps({
+                    "payer_message": payer_message,
+                    "payee_note": payee_note,
+                    "momo_response": result
+                })
+            )
+            logger.info(f"Successfully logged disbursement to database with transaction_id: {transaction_id}")
+        except Exception as e:
+            logger.error(f"Failed to log MoMo disbursement to database: {str(e)}", exc_info=True)
+            # Continue even if database logging fails, as the disbursement was successful
+        
+        return {
+            "success": True,
+            "transaction_id": result.get("transaction_id"),
+            "external_id": external_id,
+            "status": result.get("status"),
+            "message": "Disbursement initiated successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error in MoMo disbursement: {str(e)}", exc_info=True)
+        error_detail = str(e)
+        if "Failed to get disbursement token" in error_detail:
+            error_detail = "Failed to authenticate with MoMo API. Please check your MoMo API credentials."
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_detail
+        )
+
+@app.get("/rr/momo/disbursement-status/{reference_id}", response_class=ORJSONResponse)
+async def get_disbursement_status(
+    reference_id: str = Path(..., description="Disbursement reference ID"),
+    db: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Check the status of a MoMo disbursement.
+    
+    This endpoint checks the current status of a previously initiated disbursement.
+    """
+    try:
+        # Check if we have the disbursement in our database
+        disbursement = await db.fetchrow(
+            "SELECT * FROM disbursement_transactions WHERE transaction_id = $1 OR external_id = $1",
+            reference_id
+        )
+        
+        if not disbursement:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Disbursement not found"
+            )
+        
+        # Get the latest status from MoMo
+        status_info = await momo_service.check_disbursement_status(
+            disbursement["transaction_id"]
+        )
+        
+        # Update the disbursement status in our database
+        await db.execute(
+            """
+            UPDATE disbursement_transactions 
+            SET status = $1, updated_at = NOW()
+            WHERE id = $2
+            RETURNING *
+            """,
+            status_info.get("status"),
+            disbursement["id"]
+        )
+        
+        return {
+            "success": True,
+            "transaction_id": disbursement["transaction_id"],
+            "external_id": disbursement["external_id"],
+            "status": status_info.get("status"),
+            "details": status_info
+        }
+    except Exception as e:
+        logger.error(f"Error checking MoMo disbursement status: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to check disbursement status: {str(e)}"
+        )
+
 # --- Payment Gateway Functions (Remain Synchronous) ---
 # ... (configure_paypal, create_payment_paypal, execute_payment_paypal, etc. unchanged) ...
 # ... (configure_stripe, create_stripe_payment, execute_stripe_payment, etc. unchanged) ...
@@ -2932,7 +3340,8 @@ def execute_stripe_payment(payment_intent_id: str, payment_method_id: Optional[s
 
 def handle_stripe_payment_cancellation() -> Dict[str, Any]:
     """Handles Stripe cancellation."""
-    logger.info("Stripe payment likely cancelled."); return {"status": "cancelled", "message": "Payment not completed."}
+    logger.info("Stripe payment likely cancelled.")
+    return {"status": "cancelled", "message": "Payment not completed."}
 
 # --- MoMo Global Variables and Functions ---
 
@@ -3891,24 +4300,102 @@ async def delete_supplement_endpoint(supplement_id: int, conn: asyncpg.Connectio
 # --- Order Endpoints ---
 @app.post('/rr/Aorders', status_code=status.HTTP_201_CREATED)
 async def create_order_endpoint(order_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
-    # ... (implementation unchanged, uses conn from dependency) ...
     logger.debug(f"Received order payload: {order_data}")
     try:
         # Extract required fields
         user_id = order_data['user_id']
         order_type = order_data['order_type']
-        user_type = order_data['user_type']  # Now required
+        user_type = order_data['user_type']  # Required field
         
-        # Extract optional fields with defaults
+        # Extract payment details if payment mode is momo
+        payment_mode = order_data.get('payment_mode', 'cash').lower()
+        
+        # Initialize payment variables with default values
+        transaction_id = None
+        payment_status = 'pending'
+        amount_paid = 0.0
+        total_price = float(order_data.get('total_price', 0.0))
+        
+        # Process MoMo payment if payment mode is 'momo'
+        if payment_mode == 'momo':
+            logger.info(f"[PAYMENT] Starting MoMo payment process for order from user {user_id}")
+            logger.debug(f"[PAYMENT] Payment details - Amount: {total_price}, User: {user_id}")
+            
+            # Extract payment details
+            payer_number = order_data.get('payment_phone_number')
+            
+            if not payer_number:
+                logger.error("[PAYMENT] Missing payment phone number for MoMo payment")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Payment phone number is required for MoMo payments"
+                )
+            
+            if total_price <= 0:
+                logger.error(f"[PAYMENT] Invalid payment amount: {total_price}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid payment amount. Amount must be greater than 0"
+                )
+            
+            # Generate a unique external ID for the transaction with extra random digits and underscores
+            timestamp = int(time.time())
+            random_suffix = str(random.randint(1000, 9999))  # 4-digit random number
+            external_id = f"ZINZI_{timestamp}_{random_suffix}_{user_id}"
+            logger.debug(f"[PAYMENT] Generated external ID: {external_id}")
+            
+            try:
+                # Let MomoService handle all the payment logic
+                payment_result = await momo_service.request_payment(
+                    amount=total_price,
+                    payer_number=payer_number
+                )
+                
+                # Extract transaction details from the result
+                # Use the external_id as the transaction_id for the order to ensure consistency
+                transaction_id = external_id  # Use the same external_id we generated for MoMo
+                payment_status = 'processing_payment'  # Set status to indicate payment is being processed
+                amount_paid = 0.0
+                
+                logger.info(f"[PAYMENT] MoMo payment initiated successfully. Transaction ID: {transaction_id}")
+                logger.info("[PAYMENT] Payment processing completed successfully")
+                
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"[PAYMENT] Error processing MoMo payment: {str(e)}", exc_info=True)
+                logger.info("[PAYMENT] Payment processing failed")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Error processing payment: {str(e)}"
+                )
+        else:
+            # For non-MoMo payments, use provided or default values
+            transaction_id = order_data.get('transaction_id')
+            payment_status = order_data.get('payment_status', 'pending')
+            amount_paid = order_data.get('amount_paid', 0.0)
+            
+            # For cash on delivery, set status to pending
+            if payment_mode == 'cash':
+                payment_status = 'pending'
+                amount_paid = 0.0
+        
+        # Update order data with payment details
+        order_data.update({
+            'transaction_id': transaction_id,
+            'payment_status': payment_status,
+            'amount_paid': amount_paid,
+            'total_price': total_price,
+            'payment_mode': payment_mode
+        })
+        
+        logger.info(f"[ORDER] Creating order with payment status: {payment_status}")
+        
+        # Extract other order fields
         product_id = order_data.get('product_id')
         delivery_address = order_data.get('delivery_address')
         order_status = order_data.get('order_status', 'pending')
-        total_price = order_data.get('total_price', 0.0)
         notes = order_data.get('notes')
-        payment_status = order_data.get('payment_status', 'pending')
-        payment_mode = order_data.get('payment_mode', 'cash')
-        amount_paid = order_data.get('amount_paid', 0.0)
-        transaction_id = order_data.get('transaction_id')
         quantity = order_data.get('quantity', 1)
         transporter_id = order_data.get('transporter_id')
         items = order_data.get('items')
@@ -4327,38 +4814,191 @@ async def cancel_stripe_payment_route():
     try: return handle_stripe_payment_cancellation() # Sync call
     except Exception as e: logger.error(f"Stripe cancel err: {e}", exc_info=True); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Cancel handle error.")
 
-@app.post('/rr/request_momo_payment')
-async def request_momo_payment_route(momo_data: dict = Body(...)):
-    try:
-        amount=momo_data['amount']; payer_number=momo_data['payer_number']; currency=momo_data.get('currency','UGX'); ext_id=momo_data.get('external_id', str(uuid.uuid4())); payer_msg=momo_data.get('payer_message','Payment'); payee_note=momo_data.get('payee_note','Payment Request')
-        amount_f=float(amount)
-        result = request_momo_payment(amount_f, currency, ext_id, payer_number, payer_msg, payee_note) # Sync call
-        if result.get("status") == "pending": return JSONResponse(content=result, status_code=status.HTTP_202_ACCEPTED)
-        else: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.get("error", "MoMo request failed"))
-    except (KeyError, ValueError) as ve: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid MoMo input: {ve}")
-    except Exception as e: logger.error(f"MoMo request err: {e}", exc_info=True); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="MoMo request error.")
-
-@app.get('/rr/check_momo_payment_status')
-async def check_momo_payment_status_route(transaction_ref: str = Query(...)):
-    try:
-        result = check_momo_payment_status(transaction_ref) # Sync call
-        if result.get("status") == "success": return result
-        elif result.get("status") == "not_found": raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result.get("error", "Tx ref not found."))
-        else: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.get("error", "MoMo status check failed."))
-    except Exception as e: logger.error(f"MoMo status check err (Ref: {transaction_ref}): {e}", exc_info=True); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="MoMo status check error.")
 
 @app.post('/rr/momo_callback')
 @app.put('/rr/momo_callback')
-async def momo_callback(request: Request):
-    # ... (implementation unchanged) ...
+async def momo_callback(
+    request: Request,
+    db: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Handle MoMo API callbacks for payment and disbursement status updates.
+    This endpoint is called by MoMo servers to notify about transaction status changes.
+    """
     try:
-        notification_data = await request.json()
-        logger.info(f"MoMo Callback Received: {notification_data}")
-        if not notification_data or not isinstance(notification_data, dict): logger.error("Invalid MoMo callback format."); return JSONResponse(content={"error":"Invalid format"}, status_code=status.HTTP_400_BAD_REQUEST)
-        # TODO: Process notification securely
-        return {"message": "Callback acknowledged"}
-    except json.JSONDecodeError: logger.error("MoMo callback JSON decode err."); return JSONResponse(content={"error":"Invalid JSON"}, status_code=status.HTTP_400_BAD_REQUEST)
-    except Exception as e: logger.error(f"MoMo callback process err: {e}", exc_info=True); return JSONResponse(content={"error":"Callback process failed"}, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # Get raw body for signature verification
+        body_bytes = await request.body()
+        payload = json.loads(body_bytes)
+        
+        logger.info(f"Received MoMo callback: {json.dumps(payload, indent=2)}")
+        
+        # Extract required fields from the callback
+        external_id = payload.get('externalId')
+        if not external_id:
+            logger.error("Missing external_id in MoMo callback")
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"status": "error", "message": "Missing external_id in callback"}
+            )
+            
+        transaction_id = payload.get('financialTransactionId') or external_id
+        status_value = payload.get('status', '').upper()
+        amount = payload.get('amount')
+        currency = payload.get('currency', 'UGX')
+        
+        # Log the callback details
+        logger.info(f"Processing MoMo callback for transaction {transaction_id} (external_id: {external_id}): {status_value}")
+        
+        # Check if we already have this transaction
+        existing_tx = await db.fetchrow(
+            "SELECT * FROM payment_transactions WHERE transaction_id = $1 OR external_id = $2",
+            transaction_id, external_id
+        )
+        
+        if existing_tx:
+            # Update existing transaction
+            await db.execute(
+                """
+                UPDATE payment_transactions 
+                SET status = $1, 
+                    updated_at = NOW(),
+                    payment_details = COALESCE(payment_details, '{}'::jsonb) || $2::jsonb
+                WHERE transaction_id = $3 OR external_id = $4
+                """,
+                status_value,
+                json.dumps({"callback": payload, "updated_at": datetime.utcnow().isoformat()}),
+                transaction_id,
+                external_id
+            )
+            logger.info(f"Updated existing transaction {transaction_id} with status {status_value}")
+        else:
+            # Create new transaction record if not found
+            await db.execute(
+                """
+                INSERT INTO payment_transactions 
+                (transaction_id, external_id, amount, currency, status, payment_method, payment_details)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                transaction_id,
+                external_id,
+                amount,
+                currency,
+                status_value,
+                "momo",
+                json.dumps({"callback": payload, "created_at": datetime.utcnow().isoformat()})
+            )
+            logger.info(f"Created new transaction record for {transaction_id}")
+        
+        # Update order status if payment is successful
+        if status_value == "SUCCESSFUL":
+            try:
+                # Check if there's an order with this transaction ID
+                order = await db.fetchrow(
+                    "SELECT order_id, user_id, order_status, total_price FROM orders WHERE transaction_id = $1",
+                    external_id
+                )
+                
+                if order:
+                    order_id = order['order_id']
+                    user_id = order['user_id']
+                    current_status = order['order_status']
+                    total_price = order['total_price']
+                    
+                    # Only update if order is not already completed
+                    if current_status not in ['completed', 'delivered']:
+                        # Update order status to 'processing_payment' or 'paid' based on your workflow
+                        new_status = "processing_payment"
+                        await db.execute(
+                            """
+                            UPDATE orders 
+                            SET payment_status = 'paid', 
+                                order_status = $1,
+                                updated_at = NOW()
+                            WHERE order_id = $2
+                            """,
+                            new_status,
+                            order_id
+                        )
+                        
+                        # Log the status update
+                        await db.execute(
+                            """
+                            INSERT INTO order_status_history 
+                            (order_id, status, notes, created_at)
+                            VALUES ($1, $2, $3, NOW())
+                            """,
+                            order_id,
+                            new_status,
+                            f"Payment confirmed via MoMo. Transaction ID: {transaction_id}"
+                        )
+                        
+                        logger.info(f"Updated order {order_id} status to {new_status} after successful payment")
+                        
+                        # Send notification to user
+                        try:
+                            notification_service = get_notification_service()
+                            await notification_service.send_notifications(
+                                user_ids=[str(user_id)],
+                                notification_type='payment_successful',
+                                metadata={
+                                    'order_id': order_id,
+                                    'amount': float(total_price),
+                                    'transaction_id': transaction_id,
+                                    'status': new_status,
+                                    'timestamp': datetime.utcnow().isoformat()
+                                }
+                            )
+                            logger.info(f"Sent payment success notification for order {order_id}")
+                        except Exception as notif_error:
+                            logger.error(f"Failed to send payment notification: {str(notif_error)}", exc_info=True)
+                        
+            except Exception as order_error:
+                logger.error(f"Error updating order status: {str(order_error)}", exc_info=True)
+        elif status_value == "FAILED":
+            # Handle failed payment
+            try:
+                # Find the order with this transaction ID
+                order = await db.fetchrow(
+                    "SELECT order_id, user_id, total_price FROM orders WHERE transaction_id = $1",
+                    external_id
+                )
+                
+                if order:
+                    # Send failure notification
+                    notification_service = get_notification_service()
+                    await notification_service.send_notifications(
+                        user_ids=[str(order['user_id'])],
+                        notification_type='payment_failed',
+                        metadata={
+                            'order_id': order['order_id'],
+                            'amount': float(order['total_price']),
+                            'transaction_id': transaction_id,
+                            'reason': payload.get('reason', 'Payment processing failed'),
+                            'timestamp': datetime.utcnow().isoformat()
+                        }
+                    )
+                    logger.info(f"Sent payment failed notification for order {order['order_id']}")
+            except Exception as notif_error:
+                logger.error(f"Failed to send payment failure notification: {str(notif_error)}", exc_info=True)
+        
+        # Return success response to MoMo
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"status": "success", "message": "Callback processed successfully"}
+        )
+        
+    except json.JSONDecodeError as je:
+        logger.error(f"Invalid JSON in MoMo callback: {str(je)}")
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"status": "error", "message": "Invalid JSON payload"}
+        )
+    except Exception as e:
+        logger.error(f"Error processing MoMo callback: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"status": "error", "message": "Internal server error"}
+        )
 
 # --- Recommendation Endpoints ---
 

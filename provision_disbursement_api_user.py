@@ -18,7 +18,7 @@ DISBURSEMENT_PRIMARY_KEY = os.getenv("DISBURSEMENT_PRIMARY_KEY")
 # For sandbox testing, you might use a local tunneling service like ngrok,
 # or a placeholder if you're not immediately testing callbacks.
 # IMPORTANT: In a real scenario, this must be a publicly accessible URL.
-CALLBACK_HOST = "https://your-public-callback-url.com" # <--- **UPDATE THIS**
+CALLBACK_HOST = os.getenv("CALLBACK_URL") # <--- **UPDATE THIS**
 
 # MoMo API Endpoints (Sandbox)
 BASE_URL = "https://sandbox.momodeveloper.mtn.com"

@@ -6,12 +6,16 @@ import logging
 import time
 import uuid
 from typing import Dict, Any
+from dotenv import load_dotenv
+load_dotenv()
 
-# Load MoMo environment variables
-X_REFERENCE_ID = os.getenv("X_REFERENCE_ID")  # Unique UUID for reference
-API_KEY = os.getenv("MOMO_API_KEY")            # API Key from MoMo
-SUBSCRIPTION_KEY = os.getenv("MOMO_SUBSCRIPTION_KEY")  # Subscription Key
-momo_base_url = os.getenv("MOMO")              # Base URL for MoMo API
+# Collections API Configuration
+COLLECTIONS_USER_ID = os.getenv("MOMO_COLLECTIONS_USER_ID")  # X-Reference-Id for collections
+COLLECTIONS_API_KEY = os.getenv("MOMO_COLLECTIONS_API_KEY")  # API Key for collections
+COLLECTIONS_SUBSCRIPTION_KEY = os.getenv("MOMO_COLLECTIONS_SUBSCRIPTION_KEY")  # Subscription key for collections
+MOMO_SANDBOX_URL = os.getenv("MOMO_SANDBOX_URL", "https://sandbox.momodeveloper.mtn.com")
+
+# Initialize global variables
 momo_headers = {}
 access_token = ""
 token_expires_at = 0
@@ -21,12 +25,12 @@ logging.basicConfig(level=logging.INFO)
 
 async def get_access_token(session: aiohttp.ClientSession, x_reference_id: str, api_key: str) -> tuple[str, float]:
     """Request a new access token from the MoMo API."""
-    url = f"{momo_base_url}/collection/token/"
+    url = f"{MOMO_SANDBOX_URL}/collection/token/"
     auth_header = base64.b64encode(f"{x_reference_id}:{api_key}".encode()).decode()  # Basic Auth
 
     headers = {
         "Authorization": f"Basic {auth_header}",
-        "Ocp-Apim-Subscription-Key": SUBSCRIPTION_KEY,
+        "Ocp-Apim-Subscription-Key": COLLECTIONS_SUBSCRIPTION_KEY,
     }
 
     logging.info("----- Access Token Request -----")
@@ -53,16 +57,16 @@ async def refresh_access_token(session: aiohttp.ClientSession) -> None:
     global access_token, token_expires_at
 
     if time.time() >= token_expires_at:
-        access_token, token_expires_at = await get_access_token(session, X_REFERENCE_ID, API_KEY)
+        access_token, token_expires_at = await get_access_token(session, COLLECTIONS_USER_ID, COLLECTIONS_API_KEY)
         momo_headers["Authorization"] = f"Bearer {access_token}"
 
 async def configure_momo(session: aiohttp.ClientSession) -> Dict[str, Any]:
     """Configure MoMo API headers."""
     global momo_headers, access_token, token_expires_at
-    access_token, token_expires_at = await get_access_token(session, X_REFERENCE_ID, API_KEY)
+    access_token, token_expires_at = await get_access_token(session, COLLECTIONS_USER_ID, COLLECTIONS_API_KEY)
 
     momo_headers = {
-        "Ocp-Apim-Subscription-Key": SUBSCRIPTION_KEY,
+        "Ocp-Apim-Subscription-Key": COLLECTIONS_SUBSCRIPTION_KEY,
         "Authorization": f"Bearer {access_token}",
     }
 
@@ -115,7 +119,7 @@ async def request_momo_payment(session: aiohttp.ClientSession, amount: float, cu
         logging.info(f"Headers for payment request: {headers}")
 
         # Use the correct URL structure for the request-to-pay endpoint
-        url = f"{momo_base_url}/collection/v1_0/requesttopay"
+        url = f"{MOMO_SANDBOX_URL}/collection/v1_0/requesttopay"
         logging.info(f"Request URL: {url}")
 
         async with session.post(url, json=payload, headers=headers) as response:
@@ -151,7 +155,7 @@ async def check_momo_payment_status(session: aiohttp.ClientSession, transaction_
             "Content-Type": "application/json"
         }
 
-        url = f"{momo_base_url}/collection/v1_0/requesttopay/{transaction_ref}"
+        url = f"{MOMO_SANDBOX_URL}/collection/v1_0/requesttopay/{transaction_ref}"
         logging.info(f"Status check URL: {url}")
         logging.info(f"Status check headers: {headers}")
 
