@@ -1,8 +1,10 @@
+import json
 import logging
 import asyncio
 from typing import Dict, Any, Optional, List, Union
 import asyncpg
 from datetime import datetime
+from contextlib import asynccontextmanager
 from .momo_service import MomoService
 from fastapi import HTTPException, status
 
@@ -23,57 +25,79 @@ class DisbursementService:
         """
         Process disbursements for all parties associated with a completed order.
         
+        This method coordinates the disbursement process for all parties (chef, producer, transporter)
+        involved in an order. It runs each disbursement in its own transaction to ensure isolation.
+        
         Args:
             conn: Database connection
             order_id: ID of the completed order
+            
+        Raises:
+            Exception: If there's an error that should be handled by the caller
         """
-        logger.info(f"Starting disbursement process for order {order_id}")
+        logger.info(f"[DISBURSEMENT][process_order_disbursements] Starting disbursement process for order {order_id}")
         
-        try:
-            # Get order details with associated user phone numbers
-            order_details = await self._get_order_details(conn, order_id)
-            if not order_details:
-                logger.error(f"Order {order_id} not found or missing required details")
-                return
-            
-            # Process disbursements for each party
-            tasks = []
-            
-            # Process chef disbursement if chef exists
-            if order_details.get('chef_id') and order_details.get('chef_phone'):
-                tasks.append(
-                    self._process_single_disbursement(
-                        conn, order_id, 'chef',
-                        order_details['chef_id'], order_details['chef_phone']
+        # Use a transaction for the entire disbursement process
+        async with conn.transaction():
+            try:
+                # Get order details with associated user phone numbers
+                order_details = await self._get_order_details(conn, order_id)
+                if not order_details:
+                    error_msg = f"Order {order_id} not found or missing required details"
+                    logger.error(f"[DISBURSEMENT][process_order_disbursements] {error_msg}")
+                    raise ValueError(error_msg)
+                
+                # Process disbursements for each party
+                tasks = []
+                
+                # Process chef disbursement if chef exists
+                if order_details.get('chef_id') and order_details.get('chef_phone'):
+                    tasks.append(
+                        self._process_single_disbursement(
+                            conn, order_id, 'chef',
+                            order_details['chef_id'], order_details['chef_phone']
+                        )
                     )
-                )
-            
-            # Process producer disbursement if producer exists
-            if order_details.get('producer_id') and order_details.get('producer_phone'):
-                tasks.append(
-                    self._process_single_disbursement(
-                        conn, order_id, 'producer',
-                        order_details['producer_id'], order_details['producer_phone']
+                
+                # Process producer disbursement if producer exists
+                if order_details.get('producer_id') and order_details.get('producer_phone'):
+                    tasks.append(
+                        self._process_single_disbursement(
+                            conn, order_id, 'producer',
+                            order_details['producer_id'], order_details['producer_phone']
+                        )
                     )
-                )
-            
-            # Process transporter disbursement if transporter exists
-            if order_details.get('transporter_id') and order_details.get('transporter_phone'):
-                tasks.append(
-                    self._process_single_disbursement(
-                        conn, order_id, 'transporter',
-                        order_details['transporter_id'], order_details['transporter_phone']
+                
+                # Process transporter disbursement if transporter exists
+                if order_details.get('transporter_id') and order_details.get('transporter_phone'):
+                    tasks.append(
+                        self._process_single_disbursement(
+                            conn, order_id, 'transporter',
+                            order_details['transporter_id'], order_details['transporter_phone']
+                        )
                     )
-                )
-            
-            # Run all disbursements concurrently
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
-            
-            logger.info(f"Completed processing disbursements for order {order_id}")
-            
-        except Exception as e:
-            logger.error(f"Error processing disbursements for order {order_id}: {str(e)}", exc_info=True)
+                
+                # Process disbursements sequentially to avoid database connection conflicts
+                for i, task in enumerate(tasks):
+                    try:
+                        await task
+                    except Exception as e:
+                        user_type = ['chef', 'producer', 'transporter'][i] if i < 3 else 'unknown'
+                        logger.error(
+                            f"[DISBURSEMENT][process_order_disbursements] "
+                            f"Error processing {user_type} disbursement for order {order_id}: {str(e)}",
+                            exc_info=e
+                        )
+                
+                logger.info(f"[DISBURSEMENT][process_order_disbursements] "
+                            f"Successfully processed disbursements for order {order_id}")
+                
+            except Exception as e:
+                logger.error(f"[DISBURSEMENT][process_order_disbursements] "
+                            f"Error processing disbursements for order {order_id}: {str(e)}", 
+                            exc_info=True)
+                # Re-raise to trigger transaction rollback
+                raise
     
     async def _get_order_details(self, conn: asyncpg.Connection, order_id: int) -> Optional[Dict[str, Any]]:
         """
@@ -153,16 +177,16 @@ class DisbursementService:
             logger.warning(f"Skipping {user_type} {user_id} for order {order_id}: No phone number")
             return
             
+        # Generate IDs outside the transaction to ensure they're the same for success/failure cases
+        external_id = f"ZINZI_{order_id}_{user_type.upper()}_{int(datetime.utcnow().timestamp())}"
+        payer_message = f"ZINZI Order {order_id} payment"
+        payee_note = f"Payment for completing order {order_id}"
+        
         try:
             # Log the disbursement attempt
             logger.info(f"Processing {user_type} disbursement for order {order_id}: {user_type}_id={user_id}, phone={phone_number}")
             
             # Call MoMo API to disburse funds
-            external_id = f"ZINZI_{order_id}_{user_type.upper()}_{int(datetime.utcnow().timestamp())}"
-            payer_message = f"ZINZI Order {order_id} payment"
-            payee_note = f"Payment for completing order {order_id}"
-            
-            # Call MoMo API (currency is handled by the MoMo service)
             result = await self.momo_service.disburse_funds(
                 amount=self.disbursement_amount,
                 payee_id=phone_number,
@@ -171,7 +195,7 @@ class DisbursementService:
                 payee_note=payee_note
             )
             
-            # Log the transaction in the database (currency is handled by the MoMo service)
+            # Log the successful transaction
             await self._log_disbursement(
                 conn=conn,
                 order_id=order_id,
@@ -188,9 +212,10 @@ class DisbursementService:
             logger.info(f"Successfully processed {user_type} disbursement for order {order_id}")
             
         except Exception as e:
-            logger.error(f"Error processing {user_type} disbursement for order {order_id}: {str(e)}", exc_info=True)
+            error_msg = str(e)
+            logger.error(f"Error processing {user_type} disbursement for order {order_id}: {error_msg}", exc_info=True)
             
-            # Log the failed transaction
+            # Log the failed transaction in a new transaction to ensure it's recorded
             try:
                 await self._log_disbursement(
                     conn=conn,
@@ -200,12 +225,15 @@ class DisbursementService:
                     amount=self.disbursement_amount,
                     transaction_id=f"FAILED_{int(datetime.utcnow().timestamp())}",
                     status="failed",
-                    reference_id=f"FAILED_{order_id}_{user_type.upper()}_{int(datetime.utcnow().timestamp())}",
+                    reference_id=f"FAILED_{external_id}",
                     phone_number=phone_number,
-                    error_message=str(e)
+                    error_message=error_msg
                 )
             except Exception as log_error:
                 logger.error(f"Failed to log failed disbursement: {str(log_error)}", exc_info=True)
+            
+            # Re-raise the original exception to be handled by the caller
+            raise
     
     async def _log_disbursement(
         self,
@@ -223,6 +251,9 @@ class DisbursementService:
     ) -> None:
         """
         Log a disbursement transaction in the database.
+        
+        This method handles logging to both the specific user-type table and the general
+        disbursement_transactions table within a transaction.
         
         Args:
             conn: Database connection
@@ -253,72 +284,29 @@ class DisbursementService:
                     INSERT INTO {table_name} (
                         {id_column}, order_id, amount, transaction_id, created_at
                     ) VALUES ($1, $2, $3, $4, NOW())
-                    ON CONFLICT (transaction_id) DO NOTHING
                 """
                 
                 # Execute the query with only the essential parameters
-                result = await conn.execute(
+                await conn.execute(
                     query,
                     user_id, 
                     order_id, 
                     amount, 
                     transaction_id
                 )
-                if result == 'INSERT 0 0':
-                    logger.debug(f"Skipped duplicate {user_type} disbursement with transaction_id: {transaction_id}")
-                else:
-                    logger.info(f"Logged {user_type} disbursement for order {order_id} in {table_name}")
+                logger.info(f"Logged {user_type} disbursement for order {order_id} in {table_name}")
             
             # 2. Log to the disbursement_transactions table
             if response_data and 'transaction_id' in response_data:
                 momo_response = response_data.get('momo_response', {}) if isinstance(response_data, dict) else {}
                 
-                # First try with ON CONFLICT, if it fails, try without it
-                try:
-                    disb_query = """
-                        INSERT INTO disbursement_transactions (
-                            transaction_id, reference_id, amount, currency, 
-                            status, payee_id, payee_id_type, 
-                            metadata, created_at, updated_at
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
-                        ON CONFLICT (transaction_id) 
-                        DO UPDATE SET 
-                            status = EXCLUDED.status,
-                            updated_at = NOW(),
-                            metadata = EXCLUDED.metadata
-                    """
-                    await conn.execute(
-                        disb_query,
-                        response_data.get('transaction_id'),
-                        reference_id,
-                        amount,
-                        'UGX',  # Default currency
-                        status.lower(),
-                        phone_number,
-                        'MSISDN',
-                        json.dumps(metadata)
-                    )
-                except asyncpg.exceptions.InvalidColumnReferenceError:
-                    # Fallback to simple insert if ON CONFLICT fails (no unique constraint)
-                    logger.warning("No unique constraint on transaction_id, falling back to simple insert")
-                    disb_query = """
-                        INSERT INTO disbursement_transactions (
-                            transaction_id, reference_id, amount, currency, 
-                            status, payee_id, payee_id_type, 
-                            metadata, created_at, updated_at
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
-                    """
-                    await conn.execute(
-                        disb_query,
-                        response_data.get('transaction_id'),
-                        reference_id,
-                        amount,
-                        'UGX',  # Default currency
-                        status.lower(),
-                        phone_number,
-                        'MSISDN',
-                        json.dumps(metadata)
-                    )
+                disb_query = """
+                    INSERT INTO disbursement_transactions (
+                        transaction_id, external_id, amount, currency, 
+                        status, recipient_id, recipient_type, 
+                        details, created_at, updated_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+                """
                 
                 metadata = {
                     'user_type': user_type,
@@ -329,6 +317,7 @@ class DisbursementService:
                 if error_message:
                     metadata['error'] = error_message
                 
+                # Execute the query without starting a new transaction
                 await conn.execute(
                     disb_query,
                     response_data.get('transaction_id'),
@@ -343,8 +332,10 @@ class DisbursementService:
                 logger.info(f"Logged disbursement transaction {transaction_id} in disbursement_transactions")
             
         except Exception as e:
-            logger.error(f"Error logging disbursement to database: {str(e)}", exc_info=True)
-            raise
+            error_msg = f"Error logging disbursement to database: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            # Don't re-raise the exception to allow the calling method to handle it
+            # This prevents masking the original error with a logging error
 
 # Create a singleton instance of the service
 disbursement_service = DisbursementService()

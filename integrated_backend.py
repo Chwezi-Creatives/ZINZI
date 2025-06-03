@@ -706,7 +706,7 @@ class AuthenticationAndUsers(BaseRepository):
                             {verification_code}
                         </div>
                         
-                        <p>This code will expire in 30 minutes for security reasons.</p>
+                        <p>This code will expire in soon for security reasons.</p>
                         
                         <p>If you didn't request this, please ignore this email or contact our support team if you have any concerns.</p>
                         
@@ -2138,7 +2138,8 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
         producer_id: Optional[int] = None,
         quantity: Optional[int] = None,
         transporter_id: Optional[int] = None,
-        transaction_id: Optional[str] = None
+        transaction_id: Optional[str] = None,
+        user_phone: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Create a new order and send notification to the user.
@@ -2242,16 +2243,16 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
                     user_id, user_type, order_type, product_id, chef_id, producer_id, transporter_id,
                     order_date, delivery_address, order_status, total_price, notes,
                     payment_status, payment_mode, amount_paid, transaction_id, quantity,
-                    gig_details, complementary_meals
+                    gig_details, complementary_meals, user_phone
                 )
-                VALUES ($1,$2,$3,$4,$5,$6,$7, NOW(), $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+                VALUES ($1,$2,$3,$4,$5,$6,$7, NOW(), $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
                 RETURNING order_id
             """
             params: Tuple[Any, ...] = (
                 user_id_i, user_type, order_type_l, prod_id_s, chef_id_i, producer_id_i, transporter_id_i,
                 delivery_address_s, order_status_l, price_f, notes_s, payment_status_l,
                 payment_mode_l, paid_f, transaction_id, qty_i, gig_details_json,
-                complementary_meals_serialized_json
+                complementary_meals_serialized_json, user_phone
             )
             order_id = await self._execute_query(conn, sql, params, returning_id_column='order_id')
 
@@ -2317,18 +2318,31 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
             raise
 
     async def read_orders(self, conn: asyncpg.Connection, order_id=None, chef_id=None, producer_id=None, user_id=None, transporter_id=None, user_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        # Log all incoming parameters for debugging
+        logger.info(f"[read_orders] Received parameters - order_id: {order_id}, chef_id: {chef_id}, producer_id: {producer_id}, "
+                   f"user_id: {user_id}, transporter_id: {transporter_id}, user_type: {user_type}")
+        
+        # Validate user_type when user_id is provided
         if user_id is not None and user_type is None:
             error_msg = "User type is required when filtering by user_id"
             logger.error(f"Validation error in read_orders: {error_msg}. User ID: {user_id}")
             raise ValueError(error_msg)
-        logger.info(f"Reading orders with criteria: order_id={order_id}, chef_id={chef_id}, producer_id={producer_id}, user_id={user_id}, transporter_id={transporter_id}")
+            
+        # If order_id is provided, we can optimize the query by making it the primary filter
+        if order_id is not None:
+            try:
+                order_id_int = int(order_id)  # Ensure order_id is an integer
+                logger.info(f"[read_orders] Order ID provided: {order_id_int}, optimizing query for order lookup")
+            except (ValueError, TypeError) as e:
+                logger.error(f"Invalid order_id format: {order_id}. Error: {str(e)}")
+                raise ValueError(f"Invalid order_id format: {order_id}. Must be a valid integer.")
         sql = """
             WITH MealDetails AS ( SELECT m.meal_id::text, m.meal_name, COALESCE(STRING_AGG(DISTINCT p.produce_name, ', ' ORDER BY p.produce_name), '') AS ingredients FROM meals m LEFT JOIN meal_ingredients mi ON m.meal_id = mi.meal_id LEFT JOIN produce p ON mi.produce_id = p.produce_id GROUP BY m.meal_id, m.meal_name ),
                  SupplementDetails AS ( SELECT supplement_id::text, supplement_name AS product_name FROM supplements ), HerbalDetails AS ( SELECT herbal_id::text, herbal_name AS product_name FROM herbals ), GadgetDetails AS ( SELECT gadget_id::text, gadget_name AS product_name FROM gadgets ), SpiceDetails AS ( SELECT spice_id::text, spice_name AS product_name FROM spices ), ProduceDetails AS ( SELECT produce_id::text, produce_name AS product_name FROM produce )
             SELECT
                 o.order_id, o.user_id, o.order_type, o.product_id, o.chef_id, o.producer_id, o.transporter_id,
                 o.order_date, o.delivery_address, o.order_status, o.total_price, o.notes,
-                o.payment_status, o.payment_mode, o.amount_paid, o.transaction_id, o.quantity,
+                o.payment_status, o.payment_mode, o.amount_paid, o.transaction_id, o.quantity, o.user_phone,
                 o.gig_details, o.complementary_meals,
                 o.updated_at, -- Ensure this column exists in your 'orders' table
                 COALESCE( md.meal_name, supd.product_name, hd.product_name, gd.product_name, sd.product_name, prod.product_name, CASE WHEN o.order_type = 'gig' THEN o.gig_details->>'gig_type' ELSE 'Unknown Product' END ) AS product_name,
@@ -4316,20 +4330,22 @@ async def create_order_endpoint(order_data: dict = Body(...), conn: asyncpg.Conn
         amount_paid = 0.0
         total_price = float(order_data.get('total_price', 0.0))
         
+        # Get and validate phone number (required for all orders)
+        user_phone = order_data.get('payment_phone_number')
+        if not user_phone:
+            logger.error("Phone number is required for order placement")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Phone number is required for order placement"
+            )
+        
         # Process MoMo payment if payment mode is 'momo'
         if payment_mode == 'momo':
             logger.info(f"[PAYMENT] Starting MoMo payment process for order from user {user_id}")
             logger.debug(f"[PAYMENT] Payment details - Amount: {total_price}, User: {user_id}")
             
-            # Extract payment details
-            payer_number = order_data.get('payment_phone_number')
-            
-            if not payer_number:
-                logger.error("[PAYMENT] Missing payment phone number for MoMo payment")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Payment phone number is required for MoMo payments"
-                )
+            # Use the already validated phone number for MoMo payment
+            payer_number = user_phone
             
             if total_price <= 0:
                 logger.error(f"[PAYMENT] Invalid payment amount: {total_price}")
@@ -4354,7 +4370,7 @@ async def create_order_endpoint(order_data: dict = Body(...), conn: asyncpg.Conn
                 # Extract transaction details from the result
                 # Use the external_id as the transaction_id for the order to ensure consistency
                 transaction_id = external_id  # Use the same external_id we generated for MoMo
-                payment_status = 'processing_payment'  # Set status to indicate payment is being processed
+                payment_status = 'paid'  # Set status to indicate payment is being processed
                 amount_paid = 0.0
                 
                 logger.info(f"[PAYMENT] MoMo payment initiated successfully. Transaction ID: {transaction_id}")
@@ -4427,7 +4443,8 @@ async def create_order_endpoint(order_data: dict = Body(...), conn: asyncpg.Conn
                 quantity=quantity, 
                 transporter_id=transporter_id, 
                 items=items, 
-                user_type=user_type  # This is now required
+                user_type=user_type,  # This is now required
+                user_phone=user_phone  # Pass the validated phone number
             )
             # Notification should be triggered only after successful commit
             
@@ -4906,17 +4923,14 @@ async def momo_callback(
                     
                     # Only update if order is not already completed
                     if current_status not in ['completed', 'delivered']:
-                        # Update order status to 'processing_payment' or 'paid' based on your workflow
-                        new_status = "processing_payment"
+                        # Only update payment_status, leave order_status unchanged
                         await db.execute(
                             """
                             UPDATE orders 
-                            SET payment_status = 'paid', 
-                                order_status = $1,
+                            SET payment_status = 'completed',
                                 updated_at = NOW()
-                            WHERE order_id = $2
+                            WHERE order_id = $1
                             """,
-                            new_status,
                             order_id
                         )
                         
