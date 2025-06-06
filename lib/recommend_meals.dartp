@@ -3,12 +3,12 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:zinzi2/meal_detail.dart';
-import 'package:zinzi2/app_drawer_unified.dart';
-import 'package:zinzi2/profile.dart';
-import 'package:zinzi2/useranalytics.dart';
-import 'package:zinzi2/cart.dart';
-import 'package:zinzi2/blogview.dart';
+import 'package:zinzi/meal_detail.dart';
+import 'package:zinzi/app_drawer_unified.dart';
+import 'package:zinzi/profile.dart';
+import 'package:zinzi/useranalytics.dart';
+import 'package:zinzi/cart.dart';
+import 'package:zinzi/blogview.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';

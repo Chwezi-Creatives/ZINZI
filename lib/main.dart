@@ -7,16 +7,16 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
-import 'package:zinzi2/splash.dart';
+import 'package:zinzi/splash.dart';
 import 'notifications/notification_provider.dart';
 // Conditionally import the appropriate FCM service implementation
 import 'notifications/fcm_service.dart'
     if (dart.library.js) 'notifications/fcm_service_web.dart' as fcm;
 import 'notifications/notification_badge.dart';
-import 'package:zinzi2/app_drawer_unified.dart';
-import 'package:zinzi2/platform_info.dart'; // For OS check
-import 'package:zinzi2/services/performance_service.dart';
-import 'package:zinzi2/utils/route_observer.dart';
+import 'package:zinzi/app_drawer_unified.dart';
+import 'package:zinzi/platform_info.dart'; // For OS check
+import 'package:zinzi/services/performance_service.dart';
+import 'package:zinzi/utils/route_observer.dart';
 
 // Create a global route observer
 final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();

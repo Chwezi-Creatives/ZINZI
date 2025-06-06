@@ -3,16 +3,16 @@ import 'package:flutter/services.dart'; // Import for system UI overlay style
 import 'dart:ui'; // For ImageFilter
 
 // Import your page routes (Assuming these paths are correct)
-import 'package:zinzi2/chefsignup222.dart';
-import 'package:zinzi2/Transporter_login.dart';
-import 'package:zinzi2/transporter_signup.dart';
-import 'package:zinzi2/chef_login_modular.dart';
-import 'package:zinzi2/prodsignup.dart';
-import 'package:zinzi2/producer_login_modular.dart';
-import 'package:zinzi2/signup_page.dart';
-import 'package:zinzi2/user_login_modular.dart';
-import 'package:zinzi2/stakeholdersignup.dart' as stakeholder_signup;
-import 'package:zinzi2/stk_login_modular.dart';
+import 'package:zinzi/chefsignup222.dart';
+import 'package:zinzi/Transporter_login.dart';
+import 'package:zinzi/transporter_signup.dart';
+import 'package:zinzi/chef_login_modular.dart';
+import 'package:zinzi/prodsignup.dart';
+import 'package:zinzi/producer_login_modular.dart';
+import 'package:zinzi/signup_page.dart';
+import 'package:zinzi/user_login_modular.dart';
+import 'package:zinzi/stakeholdersignup.dart' as stakeholder_signup;
+import 'package:zinzi/stk_login_modular.dart';
 
 // --- Constants ---
 // Refined Color Palette (kept similar for consistency)

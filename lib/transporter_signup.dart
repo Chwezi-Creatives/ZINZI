@@ -9,9 +9,9 @@ import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shimmer/shimmer.dart';
-// import 'package:zinzi2/Transporter_login.dart';
-// import 'package:zinzi2/transooter_dash_before_mapbox.dart';
-import 'package:zinzi2/verification.dart'; // Import verification page
+// import 'package:zinzi/Transporter_login.dart';
+// import 'package:zinzi/transooter_dash_before_mapbox.dart';
+import 'package:zinzi/verification.dart'; // Import verification page
 import 'notifications/fcm_service.dart';
 
 // --- Hardcoded Colors ---

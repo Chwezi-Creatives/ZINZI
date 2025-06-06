@@ -7,8 +7,8 @@ import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-// import 'package:zinzi2/user_metrics.dart';
-import 'package:zinzi2/verification.dart'; // Import verification page
+// import 'package:zinzi/user_metrics.dart';
+import 'package:zinzi/verification.dart'; // Import verification page
 import 'notifications/fcm_service.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';

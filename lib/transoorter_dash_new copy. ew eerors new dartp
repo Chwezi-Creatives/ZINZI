@@ -21,10 +21,10 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' as mapbox; // Alia
 
 // --- Assumed Imports (Ensure these files exist) ---
 // Make sure these paths are correct for your project structure
-import 'package:zinzi2/Transporter_login.dart'; // For logout navigation
-import 'package:zinzi2/user_cache.dart'; // <<< IMPORT UserCache
-import 'package:zinzi2/cache_config.dart'; // <<< IMPORT CacheConfig
-// import 'package:zinzi2/app_drawer.dart'; // If you reuse the drawer from old code
+import 'package:zinzi/Transporter_login.dart'; // For logout navigation
+import 'package:zinzi/user_cache.dart'; // <<< IMPORT UserCache
+import 'package:zinzi/cache_config.dart'; // <<< IMPORT CacheConfig
+// import 'package:zinzi/app_drawer.dart'; // If you reuse the drawer from old code
 
 // --- Environment Variables ---
 // Ensure loaded in main.dart: await dotenv.load(fileName: ".env");

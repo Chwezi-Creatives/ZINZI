@@ -12,10 +12,10 @@ import 'package:shimmer/shimmer.dart'; // Shimmer effect
 import 'package:geolocator/geolocator.dart'; // For location in profile edit (if needed)
 
 // --- Assumed Imports (Ensure these files exist) ---
-import 'package:zinzi2/Transporter_login.dart'; // For logout navigation
-import 'package:zinzi2/user_cache.dart'; // <<< IMPORT UserCache
-import 'package:zinzi2/cache_config.dart'; // <<< IMPORT CacheConfig
-// import 'package:zinzi2/app_drawer.dart'; // If you reuse the drawer from old code
+import 'package:zinzi/Transporter_login.dart'; // For logout navigation
+import 'package:zinzi/user_cache.dart'; // <<< IMPORT UserCache
+import 'package:zinzi/cache_config.dart'; // <<< IMPORT CacheConfig
+// import 'package:zinzi/app_drawer.dart'; // If you reuse the drawer from old code
 
 // --- Environment Variables ---
 // Ensure loaded in main.dart: await dotenv.load(fileName: ".env");

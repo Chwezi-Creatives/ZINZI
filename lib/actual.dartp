@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:zinzi2/checkout.dart';
-import 'package:zinzi2/cart.dart' as cart;
-import 'package:zinzi2/meal_detail.dart';
-import 'package:zinzi2/mealdetail2.dartp';
-import 'package:zinzi2/mealdetail3.dart';
-import 'package:zinzi2/useranalytics.dart'; // Ensure the necessary imports
+import 'package:zinzi/checkout.dart';
+import 'package:zinzi/cart.dart' as cart;
+import 'package:zinzi/meal_detail.dart';
+import 'package:zinzi/mealdetail2.dartp';
+import 'package:zinzi/mealdetail3.dart';
+import 'package:zinzi/useranalytics.dart'; // Ensure the necessary imports
 import 'dart:math';
-import 'package:zinzi2/blogview.dart';
-import 'package:zinzi2/app_drawer.dart';
+import 'package:zinzi/blogview.dart';
+import 'package:zinzi/app_drawer.dart';
 
 class ActualRecommendedMealsScreen extends StatefulWidget {
   final List<String>

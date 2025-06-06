@@ -1,20 +1,20 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:zinzi2/app_drawer_unified.dart'
-    as drawer; // Import the AppDrawer widget with prefix
-import 'package:zinzi2/notifications/notification_widget.dart'; // Import notification widget
-import 'package:flutter/services.dart'; // For SystemUiOverlayStyle
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'dart:convert'; // For jsonDecode, jsonEncode
-import 'package:http/http.dart' as http; // Import the http package
-import 'package:shared_preferences/shared_preferences.dart'; // Import SharedPreferences
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import flutter_dotenv
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:zinzi/app_drawer_unified.dart' as drawer;
+import 'package:zinzi/notifications/notification_widget.dart';
+import 'package:zinzi/transooter_dash_before_mapbox.dart' show Payment;
 // Removed image_picker, multi_select_flutter, geolocator, dart:io, dart:async (specific to ProfileTab)
 // Removed user_cache, cache_config (specific to ProfileTab caching)
-import 'package:zinzi2/chef_verification_helper.dart'; // Import verification helper
-import 'package:zinzi2/utils/image_utils.dart'; // Import ImageUtils for URL processing
+import 'package:zinzi/chef_verification_helper.dart'; // Import verification helper
+import 'package:zinzi/utils/image_utils.dart'; // Import ImageUtils for URL processing
 
 // --- Consistent Color Palette ---
 const Color primaryTeal = Color(0xFF00796B); // Teal 700
@@ -447,9 +447,15 @@ class ApiService {
   
   static Future<bool> updateOrderStatus(int orderId, String newStatus, {int? chefId, String? completionCode}) async {
     final Uri uri = Uri.parse('$_staticBaseUrl/rr/orders/$orderId/status');
-    print("Updating order $orderId status to $newStatus via general endpoint. Chef: $chefId, Code: $completionCode");
+    debugPrint('[API] Updating order $orderId status to: $newStatus');
     try {
-      final Map<String, dynamic> body = {'order_status': newStatus};
+      final prefs = await SharedPreferences.getInstance();
+      final userPhone = prefs.getString('user_phone');
+      
+      final Map<String, dynamic> body = {
+        'order_status': newStatus,
+        if (userPhone != null) 'restaurant_phone': userPhone,
+      };
       if (chefId != null) body['chef_id'] = chefId;
       if (completionCode != null) body['completion_code'] = completionCode;
 
@@ -487,13 +493,19 @@ class ApiService {
     print("Assigning order $orderId to rider $riderId, setting status to $newStatus");
 
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final userPhone = prefs.getString('user_phone');
+      
+      final Map<String, dynamic> requestBody = {
+        'order_status': newStatus,
+        'transporter_id': riderId,
+        if (userPhone != null) 'restaurant_phone': userPhone,
+      };
+
       final response = await http.patch(
         uri,
         headers: _getWriteHeaders(),
-        body: jsonEncode(<String, dynamic>{
-          'order_status': newStatus,
-          'transporter_id': riderId,
-        }),
+        body: jsonEncode(requestBody),
       ).timeout(const Duration(seconds: 15));
       if (response.statusCode == 200 || response.statusCode == 204) {
         return true;
@@ -911,11 +923,12 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen> with TickerPr
   final GlobalKey<_OrdersTabState> _ordersTabKey = GlobalKey<_OrdersTabState>();
   final GlobalKey<_GigsTabState> _gigsTabKey = GlobalKey<_GigsTabState>();
   final GlobalKey<_ProductsTabState> _productsTabKey = GlobalKey<_ProductsTabState>();
+  final GlobalKey<_EarningsTabState> _earningsTabKey = GlobalKey<_EarningsTabState>();
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this); // Length is now 3
+    _tabController = TabController(length: 4, vsync: this); // Length is now 4
     _refreshIconController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
@@ -1001,6 +1014,13 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen> with TickerPr
               didRefresh = true;
             }
             break;
+          case 3: // EarningsTab
+            final state = _earningsTabKey.currentState;
+            if (state != null && state.mounted) {
+              await state.refreshEarningsTab();
+              didRefresh = true;
+            }
+            break;
         }
       }
       if (!didRefresh) {
@@ -1046,20 +1066,20 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen> with TickerPr
           isScrollable: false,
           controller: _tabController,
           tabs: const [
-            // Tab(icon: Icon(Icons.person_pin_circle_outlined), text: 'Profile'), // REMOVED
             Tab(icon: Icon(Icons.receipt_long_outlined), text: 'Orders'),
             Tab(icon: Icon(Icons.work_outline_rounded), text: 'Gigs'),
             Tab(icon: Icon(Icons.restaurant_menu_outlined), text: 'Menu'),
+            Tab(icon: Icon(Icons.attach_money_outlined), text: 'Earnings'),
           ],
         ),
       ),
       body: TabBarView(
         controller: _tabController,
         children: [
-          // ProfileTab removed
           OrdersTab(key: _ordersTabKey),
           GigsTab(key: _gigsTabKey),
           ProductsTab(key: _productsTabKey),
+          EarningsTab(key: _earningsTabKey),
         ],
       ),
     );
@@ -2830,9 +2850,481 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
 }
 
 class ProductsTab extends StatefulWidget {
-  const ProductsTab({super.key});
+  const ProductsTab({Key? key}) : super(key: key);
+
   @override
-  State<ProductsTab> createState() => _ProductsTabState();
+  _ProductsTabState createState() => _ProductsTabState();
+}
+
+class EarningsTab extends StatefulWidget {
+  const EarningsTab({Key? key}) : super(key: key);
+
+  @override
+  _EarningsTabState createState() => _EarningsTabState();
+}
+
+class ChefEarningsHistoryScreen extends StatelessWidget {
+  final List<Payment> payments;
+  
+  const ChefEarningsHistoryScreen({Key? key, required this.payments}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    Map<DateTime, List<Payment>> groupedPayments = {};
+    for (var payment in payments) {
+      DateTime dateKey = DateTime(payment.createdAt.year,
+          payment.createdAt.month, payment.createdAt.day);
+      groupedPayments.putIfAbsent(dateKey, () => []).add(payment);
+    }
+    List<DateTime> sortedDates = groupedPayments.keys.toList()
+      ..sort((a, b) => b.compareTo(a)); // Sort newest date first
+
+    return ListView.builder(
+      itemCount: sortedDates.length,
+      padding: const EdgeInsets.all(8.0),
+      itemBuilder: (context, index) {
+        DateTime date = sortedDates[index];
+        List<Payment> dailyPayments = groupedPayments[date]!;
+        double dailyTotal = dailyPayments
+            .where((p) => p.disbursementTransactionStatus == 'Successful')
+            .fold(0.0, (sum, p) => sum + p.amount);
+        String formattedDate = DateFormat('EEEE, MMM d, yyyy').format(date);
+        
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      formattedDate,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    Text(
+                      'UGX ${dailyTotal.toStringAsFixed(0)}',
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.green,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1, thickness: 0.5, color: Color(0xFFF0F0F0)),
+              ...dailyPayments.map((payment) => _buildPaymentItem(payment)).toList(),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPaymentItem(Payment payment) {
+    Color statusColor;
+    IconData statusIcon;
+    String statusText = payment.disbursementTransactionStatus;
+    
+    // Handle null or empty status
+    if (statusText.isEmpty) {
+      statusText = 'Pending';
+    }
+    
+    // Determine status color and icon
+    switch (statusText.toLowerCase()) {
+      case 'successful':
+      case 'completed':
+        statusColor = Colors.green;
+        statusIcon = Icons.check_circle;
+        statusText = 'Successful';
+        break;
+      case 'pending':
+        statusColor = Colors.grey;
+        statusIcon = Icons.hourglass_empty;
+        statusText = 'Pending';
+        break;
+      case 'in progress':
+      case 'processing':
+        statusColor = Colors.orange;
+        statusIcon = Icons.sync;
+        statusText = 'In Progress';
+        break;
+      case 'failed':
+      case 'rejected':
+      case 'declined':
+        statusColor = Colors.red;
+        statusIcon = Icons.error;
+        statusText = 'Failed';
+        break;
+      default:
+        statusColor = Colors.grey;
+        statusIcon = Icons.help_outline;
+        statusText = statusText[0].toUpperCase() + statusText.substring(1).toLowerCase();
+    }
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 12.0),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8.0),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6.0),
+            decoration: BoxDecoration(
+              color: Colors.teal.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.receipt_long_outlined, color: Colors.teal, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Order #${payment.orderId}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w500,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Status: ${payment.disbursementTransactionStatus}',
+                  style: const TextStyle(
+                    color: Colors.grey,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                'UGX ${payment.amount.toStringAsFixed(0)}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(statusIcon, size: 12, color: statusColor),
+                    const SizedBox(width: 4),
+                    Text(
+                      statusText,
+                      style: TextStyle(
+                        color: statusColor,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  
+  }
+}
+
+class _EarningsTabState extends State<EarningsTab> with AutomaticKeepAliveClientMixin {
+  bool _isLoading = true;
+  String _error = '';
+  List<Payment> _payments = [];
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchPayments();
+  }
+
+  // Make this method public to allow refresh from parent
+  Future<void> refreshEarningsTab() async {
+    await _fetchPayments();
+  }
+
+  Future<void> _fetchPayments() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      _error = '';
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('user_id');
+      if (userId == null) {
+        throw Exception('User ID not found in SharedPreferences');
+      }
+      final response = await http.get(
+        Uri.parse('${_apibaseurl}/rr/disbursements/chef').replace(
+          queryParameters: {'chef_id': userId},
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data != null && data is List) {
+          setState(() {
+            _payments = data.map((p) => Payment.fromJson(p)).toList();
+          });
+        } else {
+          setState(() {
+            _error = 'Invalid payment data format';
+          });
+        }
+      } else {
+        setState(() {
+          _error = 'Failed to load payments. Status code: ${response.statusCode}';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _error = 'Error: ${e.toString()}';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  double _calculateTotalEarnings() {
+    return _payments
+        .where((p) => p.disbursementTransactionStatus.toLowerCase() == 'successful')
+        .fold(0.0, (sum, p) => sum + p.amount);
+  }
+
+  double _calculateTodaysEarnings() {
+    final now = DateTime.now();
+    return _payments
+        .where((p) =>
+            p.createdAt.year == now.year &&
+            p.createdAt.month == now.month &&
+            p.createdAt.day == now.day &&
+            p.disbursementTransactionStatus.toLowerCase() == 'successful')
+        .fold(0.0, (sum, p) => sum + p.amount);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    
+    if (_isLoading && _payments.isEmpty) {
+      return const Center(child: CircularProgressIndicator(color: primaryTeal));
+    }
+
+    if (_error.isNotEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text('Error: $_error'),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _fetchPayments,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final totalEarnings = _calculateTotalEarnings();
+    final todayEarnings = _calculateTodaysEarnings();
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return RefreshIndicator(
+          onRefresh: _fetchPayments,
+          color: primaryTeal,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16.0),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: constraints.maxHeight - 32,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Summary Cards
+                  Row(
+                    children: [
+                      _buildStatCard(
+                        'Today\'s Earnings',
+                        'UGX ${todayEarnings.toStringAsFixed(0)}',
+                        Icons.attach_money,
+                        primaryTeal,
+                      ),
+                      const SizedBox(width: 12),
+                      _buildStatCard(
+                        'Total Earnings',
+                        'UGX ${totalEarnings.toStringAsFixed(0)}',
+                        Icons.account_balance_wallet,
+                        Colors.green,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  // Main Card for Earnings History
+                  Card(
+                    elevation: 2,
+                    margin: EdgeInsets.zero,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(color: Colors.grey.shade200),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Earnings History Header
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE0F2F1), // Light teal background
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(12),
+                              topRight: Radius.circular(12),
+                            ),
+                            border: Border.all(
+                              color: const Color(0xFFB2DFDB), // Slightly darker teal border
+                              width: 1.0,
+                            ),
+                          ),
+                          child: const Text(
+                            'Earnings History',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ),
+                        const Divider(height: 1, thickness: 0.5, color: Color(0xFFF0F0F0)),
+                        // Earnings Content
+                        ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minHeight: 200,
+                            maxHeight: constraints.maxHeight * 0.7,
+                          ),
+                          child: _payments.isNotEmpty
+                              ? ChefEarningsHistoryScreen(payments: _payments)
+                              : _buildEmptyState(
+                                  'No Payment History',
+                                  'Your earnings will appear here once you start receiving payments.',
+                                  icon: Icons.payment_outlined,
+                                ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Add some bottom padding to ensure content isn't cut off
+                  const SizedBox(height: 24),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withOpacity(0.2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 16, color: color),
+                const SizedBox(width: 4),
+                Text(
+                  title,
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(String title, String message, {IconData? icon}) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 64, color: Colors.grey[400]),
+              const SizedBox(height: 16),
+            ],
+            Text(
+              title,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 extension ProductsTabRefreshExtension on _ProductsTabState {
@@ -2905,7 +3397,6 @@ class _ProductsTabState extends State<ProductsTab> with AutomaticKeepAliveClient
   void _handleEditProduct(MealProduct product) => _showComingSoonSnackbar("Editing meals");
   void _handleDeleteProduct(MealProduct product) => _showComingSoonSnackbar("Deleting meals");
   void _handleToggleSelection(MealProduct product) => _showComingSoonSnackbar("Selecting meals for stock");
-  Future<void> _handleUpdateStock() async => _showComingSoonSnackbar("Updating stock levels");
 
   @override
   Widget build(BuildContext context) {

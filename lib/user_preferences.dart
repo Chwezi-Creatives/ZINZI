@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:zinzi2/profile.dart';
+import 'package:zinzi/profile.dart';
 import 'package:flutter/services.dart'; // Import for SystemChrome
 
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';

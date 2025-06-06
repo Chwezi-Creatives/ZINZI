@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:zinzi2/allmeals.dart';
-import 'package:zinzi2/chef.dart';
-import 'package:zinzi2/chef_net.dart';
-import 'package:zinzi2/producer_network_testing.dart';
+import 'package:zinzi/allmeals.dart';
+import 'package:zinzi/chef.dart';
+import 'package:zinzi/chef_net.dart';
+import 'package:zinzi/producer_network_testing.dart';
 import 'chef_form_netwroked.dart';
-import 'package:zinzi2/nutri+.dart';
-import 'package:zinzi2/sensei_view.dart';
+import 'package:zinzi/nutri+.dart';
+import 'package:zinzi/sensei_view.dart';
 import 'chat.dart';
 
 class LandingPage extends StatelessWidget {

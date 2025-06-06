@@ -8,7 +8,7 @@ import 'nutrition+.dart'; // Ensure this file contains your NutritionItem model 
 import 'cart.dart' as cart;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/utils/overlay_utils.dart';
+import 'package:zinzi/utils/overlay_utils.dart';
 import 'producer_selector_bottom_sheet.dart';
 
 const Color primaryColor = Color(0xFF0B5345); // Dark teal

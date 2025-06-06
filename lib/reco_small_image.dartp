@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:zinzi2/checkout.dart';
-import 'package:zinzi2/cart.dart';
-import 'package:zinzi2/useranalytics.dart';
+import 'package:zinzi/checkout.dart';
+import 'package:zinzi/cart.dart';
+import 'package:zinzi/useranalytics.dart';
 
 class RecommendedMealsScreenSmall extends StatefulWidget {
   @override

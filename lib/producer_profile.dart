@@ -11,8 +11,8 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/cache_config.dart'; // <<< IMPORT CacheConfig
-import 'package:zinzi2/user_cache.dart'; // <<< IMPORT UserCache
+import 'package:zinzi/cache_config.dart'; // <<< IMPORT CacheConfig
+import 'package:zinzi/user_cache.dart'; // <<< IMPORT UserCache
 
 // --- UI Constants ---
 const Color primaryTeal = Color(0xFF00796B);

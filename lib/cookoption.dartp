@@ -1,7 +1,7 @@
 /*import 'package:flutter/material.dart';
-import 'package:zinzi2/chef.dart';
-import 'package:zinzi2/chefdata.dart'; // Ensure this is the correct path to the Chef class // Ensure this is the correct path
-import 'package:zinzi2/customer.dart'; // Ensure this is the correct path
+import 'package:zinzi/chef.dart';
+import 'package:zinzi/chefdata.dart'; // Ensure this is the correct path to the Chef class // Ensure this is the correct path
+import 'package:zinzi/customer.dart'; // Ensure this is the correct path
 
 class CookingChoicePage extends StatelessWidget {
   const CookingChoicePage({Key? key}) : super(key: key);

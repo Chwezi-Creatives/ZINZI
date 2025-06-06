@@ -9,7 +9,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 // Make sure this import is correct
-// import 'package:zinzi2/verification.dart';
+// import 'package:zinzi/verification.dart';
 // Placeholder for verification page if the above is wrong:
 import 'package:flutter/cupertino.dart'; // Using Cupertino for placeholder
 import 'package:shared_preferences/shared_preferences.dart';

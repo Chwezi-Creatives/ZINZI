@@ -8,7 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io'; // For File
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
-import 'package:zinzi2/verification.dart'; // Import verification page
+import 'package:zinzi/verification.dart'; // Import verification page
 import 'notifications/fcm_service.dart'; // Import FCM service
 
 // --- Consistent Color Palette ---

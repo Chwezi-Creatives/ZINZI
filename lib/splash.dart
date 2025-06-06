@@ -1,23 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:zinzi2/onboard.dart';
-import 'package:zinzi2/signup_or_login.dart'; // Assuming this is your login/signup choice page
+import 'package:zinzi/onboard.dart';
+import 'package:zinzi/signup_or_login.dart'; // Assuming this is your login/signup choice page
 import 'package:google_fonts/google_fonts.dart'; // For custom fonts
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/nutri_detail.dart' as nutrition_details;
-import 'package:zinzi2/chef_net.dart';
+import 'package:zinzi/nutri_detail.dart' as nutrition_details;
+import 'package:zinzi/chef_net.dart';
 
-import 'package:zinzi2/chef_dash8888.dart';
-import 'package:zinzi2/produ_dash22.dart';
-import 'package:zinzi2/transooter_dash_before_mapbox.dart';
-import 'package:zinzi2/stakeholderdash222.dart';
-import 'package:zinzi2/allmeals.dart';
-import 'package:zinzi2/meal_detail.dart';
-import 'package:zinzi2/cache_config.dart'; // Import CacheConfig
-import 'package:zinzi2/user_cache.dart'; // Import UserCache
-import 'package:zinzi2/orderhistory.dart'; // Import OrderHistoryScreen for preloading
-import 'package:zinzi2/nutrition+.dart'; // Import NutritionPage for preloading
-import 'package:zinzi2/services/location_service.dart'; // Import LocationService
+import 'package:zinzi/chef_dash8888.dart';
+import 'package:zinzi/produ_dash22.dart';
+import 'package:zinzi/transooter_dash_before_mapbox.dart';
+import 'package:zinzi/stakeholderdash222.dart';
+import 'package:zinzi/allmeals.dart';
+import 'package:zinzi/meal_detail.dart';
+import 'package:zinzi/cache_config.dart'; // Import CacheConfig
+import 'package:zinzi/user_cache.dart'; // Import UserCache
+import 'package:zinzi/orderhistory.dart'; // Import OrderHistoryScreen for preloading
+import 'package:zinzi/nutrition+.dart'; // Import NutritionPage for preloading
+import 'package:zinzi/services/location_service.dart'; // Import LocationService
 
 // --- Hardcoded Color Scheme (Shades of Teal and White/Off-White) ---
 const Color kColorPrimaryDark = Color(0xFF004D40); // Darkest Teal

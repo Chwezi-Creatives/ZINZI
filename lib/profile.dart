@@ -10,20 +10,20 @@ import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
 // import 'notifications/fcm_service.dart'; // Removed duplicate, one below is fine
-import 'package:zinzi2/onlymeals.dart';
-// import 'package:zinzi2/blogview.dart'; // Not used directly here
-// import 'package:zinzi2/cart.dart' as cart; // Not used directly here
-// import 'package:zinzi2/onboard.dart'; // Not used directly here
-import 'package:zinzi2/signup_or_Login.dart';
-// import 'package:zinzi2/splash.dart'; // Replaced with LandingPage for logout
-// import 'package:zinzi2/useranalytics.dart'; // Not used directly here
+import 'package:zinzi/onlymeals.dart';
+// import 'package:zinzi/blogview.dart'; // Not used directly here
+// import 'package:zinzi/cart.dart' as cart; // Not used directly here
+// import 'package:zinzi/onboard.dart'; // Not used directly here
+import 'package:zinzi/signup_or_Login.dart';
+// import 'package:zinzi/splash.dart'; // Replaced with LandingPage for logout
+// import 'package:zinzi/useranalytics.dart'; // Not used directly here
 // import 'social.dart'; // Not used directly here
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:zinzi2/user_cache.dart'; // Import UserCache
-import 'package:zinzi2/notifications/fcm_service.dart'; // Import FCMService
-import 'package:zinzi2/app_drawer_unified.dart';
-import 'package:zinzi2/cache_config.dart'; // Import CacheConfig
+import 'package:zinzi/user_cache.dart'; // Import UserCache
+import 'package:zinzi/notifications/fcm_service.dart'; // Import FCMService
+import 'package:zinzi/app_drawer_unified.dart';
+import 'package:zinzi/cache_config.dart'; // Import CacheConfig
 import 'package:shimmer/shimmer.dart'; // For loading effect
 import 'package:intl/intl.dart'; // For date formatting
 import 'package:flutter/services.dart'; // For input formatters

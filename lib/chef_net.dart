@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert'; // For jsonEncode and jsonDecode
 // Ensure cart prefix is consistently used or remove if not needed elsewhere
-// import 'package:zinzi2/cart.dart' as cart;
+// import 'package:zinzi/cart.dart' as cart;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -12,15 +12,15 @@ import 'package:shimmer/shimmer.dart';
 import 'package:shared_preferences/shared_preferences.dart'; // Needed for caching & user_id check
 import 'dart:async';
 import 'dart:math'; // Added for max used in _extractHumanReadableLocation (from target)
-import 'package:zinzi2/app_drawer_unified.dart'; // Import the AppDrawer
-import 'package:zinzi2/user_cache.dart'; // Import UserCache for caching
+import 'package:zinzi/app_drawer_unified.dart'; // Import the AppDrawer
+import 'package:zinzi/user_cache.dart'; // Import UserCache for caching
 
 // Import your actual Gig Creation Screen
-import 'package:zinzi2/create_gig_screen.dart'; // <-- MAKE SURE THIS PATH IS CORRECT
+import 'package:zinzi/create_gig_screen.dart'; // <-- MAKE SURE THIS PATH IS CORRECT
 // Import Cart and Landing Page if needed for navigation
-import 'package:zinzi2/cart.dart'; // <-- MAKE SURE THIS PATH IS CORRECT
-import 'package:zinzi2/onboard.dart'; // <-- MAKE SURE THIS PATH IS CORRECT (Replace with your actual home/landing page import)
-import 'package:zinzi2/signup_or_login.dart'; // Import SignUpOrLoginPage - Added from Source
+import 'package:zinzi/cart.dart'; // <-- MAKE SURE THIS PATH IS CORRECT
+import 'package:zinzi/onboard.dart'; // <-- MAKE SURE THIS PATH IS CORRECT (Replace with your actual home/landing page import)
+import 'package:zinzi/signup_or_login.dart'; // Import SignUpOrLoginPage - Added from Source
 
 // --- Color System --- (Using Target's Colors)
 const Color kColorPrimaryDarkest = Color(0xFF00352C);

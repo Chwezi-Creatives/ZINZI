@@ -5,7 +5,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:zinzi2/signup_or_Login.dart';
+import 'package:zinzi/signup_or_Login.dart';
 
 // --- Reusing Color Palette (from previous examples) ---
 const Color kColorPrimary = Color(0xFF00796B); // Teal Primary

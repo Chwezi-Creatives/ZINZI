@@ -1,17 +1,17 @@
 /*import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/chart_metrics.dart';
-import 'package:zinzi2/cookoption.dart';
-import 'package:zinzi2/customer.dart';
-import 'package:zinzi2/metrics_history.dart';
+import 'package:zinzi/chart_metrics.dart';
+import 'package:zinzi/cookoption.dart';
+import 'package:zinzi/customer.dart';
+import 'package:zinzi/metrics_history.dart';
 import 'dart:convert';
 import 'meal_recommendations_page.dart';
 import 'user_metrics.dart';
 import 'bmi_indicator.dart';
 import 'weight_indicator.dart';
 import 'healthtipcard.dart';
-import 'package:zinzi2/paymentmethod.dart';
+import 'package:zinzi/paymentmethod.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import your graph widget here
 
 final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';

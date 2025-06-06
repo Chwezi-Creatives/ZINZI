@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 import 'package:http/http.dart' as http;
-import 'package:zinzi2/app_drawer_unified.dart'; // Assuming this exists
-import 'package:zinzi2/user_cache.dart';       // Assuming this exists
-import 'package:zinzi2/cache_config.dart';    // Assuming this exists
-import 'package:zinzi2/utils/image_utils.dart'; // Assuming this exists
+import 'package:zinzi/app_drawer_unified.dart'; // Assuming this exists
+import 'package:zinzi/user_cache.dart';       // Assuming this exists
+import 'package:zinzi/cache_config.dart';    // Assuming this exists
+import 'package:zinzi/utils/image_utils.dart'; // Assuming this exists
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cached_network_image/cached_network_image.dart' as cn;
 import 'package:shimmer/shimmer.dart';
@@ -13,7 +13,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'nutri_detail.dart'; // Assuming this exists
-// import 'package:zinzi2/nutri_detail.dart'; // Duplicate import, removed one
+// import 'package:zinzi/nutri_detail.dart'; // Duplicate import, removed one
 
 const Color primaryTeal = Color(0xFF00796B);
 const Color lightTeal = Color(0xFFB2DFDB);

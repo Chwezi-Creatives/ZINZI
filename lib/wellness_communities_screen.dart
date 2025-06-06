@@ -74,7 +74,7 @@ class _WellnessCommunitiesScreenState extends State<WellnessCommunitiesScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Wellness Communities'),
-        backgroundColor: Colors.teal[800],
+        backgroundColor: Colors.teal[800],foregroundColor: Colors.white,
       ),
       body: Stack(
         children: [

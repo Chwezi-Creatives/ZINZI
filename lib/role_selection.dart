@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/signup_or_Login.dart';
+import 'package:zinzi/signup_or_Login.dart';
 
 class RoleSelectionPage extends StatefulWidget {
   @override

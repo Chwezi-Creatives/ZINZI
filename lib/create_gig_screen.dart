@@ -4,8 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'create_gig_screen_helpers.dart';
 import 'package:intl/intl.dart'; // For date/time formatting
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/cart.dart' as cart; // Use prefix
-import 'package:zinzi2/utils/overlay_utils.dart';
+import 'package:zinzi/cart.dart' as cart; // Use prefix
+import 'package:zinzi/utils/overlay_utils.dart';
 import 'dart:convert'; // For json.decode
 
 // Re-use color constants (or import from a central theme file)

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/transooter_dash_before_mapbox.dart';
+import 'package:zinzi/transooter_dash_before_mapbox.dart';
 import 'user_metrics.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'chef_dash8888.dart'; // Import for Chef Dashboard

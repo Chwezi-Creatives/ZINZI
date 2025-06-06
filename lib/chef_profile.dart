@@ -11,9 +11,9 @@ import 'dart:io'; // For File handling
 import 'package:multi_select_flutter/multi_select_flutter.dart';
 import 'dart:async'; // For Timer
 import 'package:geolocator/geolocator.dart';
-import 'package:zinzi2/user_cache.dart'; // Assuming this path is correct
-import 'package:zinzi2/cache_config.dart'; // Assuming this path is correct
-import 'package:zinzi2/utils/image_utils.dart'; // Assuming this path is correct
+import 'package:zinzi/user_cache.dart'; // Assuming this path is correct
+import 'package:zinzi/cache_config.dart'; // Assuming this path is correct
+import 'package:zinzi/utils/image_utils.dart'; // Assuming this path is correct
 import 'package:flutter/services.dart'; // For SystemUiOverlayStyle
 
 // --- Consistent Color Palette (from chefsignup222.dart) ---

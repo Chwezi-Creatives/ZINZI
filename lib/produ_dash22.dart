@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show SocketException, TimeoutException; // Added SocketException and TimeoutException
 
-import 'package:zinzi2/transooter_dash_before_mapbox.dart' show EarningsHistoryScreen, Payment;
+import 'package:zinzi/transooter_dash_before_mapbox.dart' show EarningsHistoryScreen, Payment;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // For FilteringTextInputFormatter & SystemUiOverlayStyle
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -11,12 +11,12 @@ import 'package:http/http.dart' as http;
 // import 'package:image_picker/image_picker.dart'; // Moved to producer_profile.dart
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart'; 
-// import 'package:zinzi2/cache_config.dart'; // Moved to producer_profile.dart
+// import 'package:zinzi/cache_config.dart'; // Moved to producer_profile.dart
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/app_drawer_unified.dart' as drawer;
-import 'package:zinzi2/notifications/notification_provider.dart';
-import 'package:zinzi2/user_cache.dart'; 
-import 'package:zinzi2/utils/route_observer.dart';
+import 'package:zinzi/app_drawer_unified.dart' as drawer;
+import 'package:zinzi/notifications/notification_provider.dart';
+import 'package:zinzi/user_cache.dart'; 
+import 'package:zinzi/utils/route_observer.dart';
 
 
 // --- UI Constants ---
@@ -644,12 +644,49 @@ class ProducerApiService {
 
   static Future<bool> updateOrderStatus(int orderId, String newStatus) async {
     final Uri uri = Uri.parse('$_apibaseurl/rr/orders/$orderId/status');
-    print("[ProducerDash] Updating order $orderId status to $newStatus at $uri");
+    print('[ProducerDash][API] Updating order $orderId status to $newStatus');
+    print('[ProducerDash][API] Endpoint: $uri');
+    
     try {
-      final response = await http.patch(uri, headers: await _getWriteHeaders(), body: jsonEncode({'order_status': newStatus}));
-      return response.statusCode == 200 || response.statusCode == 204;
-    } catch (e) {
-      print("[ProducerDash] Order status update error: $e");
+      final prefs = await SharedPreferences.getInstance();
+      final userPhone = prefs.getString('user_phone');
+      
+      final Map<String, dynamic> requestBody = {
+        'order_status': newStatus,
+        if (userPhone != null) 'restaurant_phone': userPhone,
+      };
+      
+      print('[ProducerDash][API] Request body: $requestBody');
+      
+      final headers = await _getWriteHeaders();
+      print('[ProducerDash][API] Headers: $headers');
+      
+      final response = await http.patch(
+        uri, 
+        headers: headers, 
+        body: jsonEncode(requestBody)
+      ).timeout(const Duration(seconds: 30));
+      
+      print('[ProducerDash][API] Response status: ${response.statusCode}');
+      print('[ProducerDash][API] Response body: ${response.body}');
+      
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        print('[ProducerDash][API] Status update successful');
+        return true;
+      } else {
+        print('[ProducerDash][API] Status update failed with status: ${response.statusCode}');
+        return false;
+      }
+    } on TimeoutException catch (e) {
+      print('[ProducerDash][API] Request timed out: $e');
+      return false;
+    } on SocketException catch (e) {
+      print('[ProducerDash][API] Network error: $e');
+      return false;
+    } catch (e, stackTrace) {
+      print('[ProducerDash][API] Unexpected error:');
+      print('Error: $e');
+      print('Stack trace: $stackTrace');
       return false;
     }
   }
@@ -658,10 +695,21 @@ class ProducerApiService {
     final Uri uri = Uri.parse('$_apibaseurl/rr/orders/$orderId/status');
     print("[ProducerDash] Assigning order $orderId to rider $riderId, status $newStatus at $uri");
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final userPhone = prefs.getString('user_phone');
+      
+      final Map<String, dynamic> requestBody = {
+        'order_status': newStatus,
+        'transporter_id': riderId,
+        if (userPhone != null) 'restaurant_phone': userPhone,
+      };
+      
       final response = await http.patch(
-        uri, headers: await _getWriteHeaders(),
-        body: jsonEncode(<String, dynamic>{'order_status': newStatus, 'transporter_id': riderId}),
+        uri, 
+        headers: await _getWriteHeaders(),
+        body: jsonEncode(requestBody),
       );
+      
       return response.statusCode == 200 || response.statusCode == 204;
     } catch (e) {
       print("[ProducerDash] Exception assigning order: $e");
@@ -1232,86 +1280,162 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
   }
 
   Future<void> _fetchOrdersAndProduce({bool forceRefresh = false}) async {
+    print('[ProducerDash][DEBUG] Starting _fetchOrdersAndProduce. Force refresh: $forceRefresh');
     const String ordersKey = 'producer_orders';
     const String ordersTsKey = 'producer_orders_cache_timestamp';
     const String produceKey = 'producer_produce';
     const String produceTsKey = 'producer_produce_cache_timestamp';
     final now = DateTime.now();
 
-    if (mounted) setState(() { _isLoadingOrders = true; _isLoadingProduce = true; });
+    if (mounted) {
+      setState(() { 
+        _isLoadingOrders = true; 
+        _isLoadingProduce = true; 
+      });
+    }
 
     bool loadedFromCache = false;
     List<Order>? cachedOrdersData;
     List<Product>? cachedProduceData;
 
+    // Try to load from cache if not forcing refresh
     if (!forceRefresh) {
-      final cachedOrdersJson = await UserCache.getData(ordersKey);
-      final cachedOrdersTs = await UserCache.getData(ordersTsKey);
-      final cachedProduceJson = await UserCache.getData(produceKey);
-      final cachedProduceTs = await UserCache.getData(produceTsKey);
-      bool ordersCacheValid = false, produceCacheValid = false;
+      print('[ProducerDash][CACHE] Attempting to load from cache...');
+      try {
+        final cachedOrdersJson = await UserCache.getData(ordersKey);
+        final cachedOrdersTs = await UserCache.getData(ordersTsKey);
+        final cachedProduceJson = await UserCache.getData(produceKey);
+        final cachedProduceTs = await UserCache.getData(produceTsKey);
+        bool ordersCacheValid = false, produceCacheValid = false;
 
-      if (cachedOrdersJson is List && cachedOrdersTs is String) {
-        final cacheTime = DateTime.tryParse(cachedOrdersTs);
-        if (cacheTime != null) { // Removed cache expiry check to match behavior of ProfileTab
-          try {
-            cachedOrdersData = (cachedOrdersJson).map((orderJson) => Order.fromJson(orderJson as Map<String, dynamic>)).toList();
-            ordersCacheValid = true;
-          } catch (e) { print("[ProducerDash] Error parsing cached orders: $e"); }
+        if (cachedOrdersJson is List && cachedOrdersJson.isNotEmpty && cachedOrdersTs is String) {
+          final cacheTime = DateTime.tryParse(cachedOrdersTs);
+          if (cacheTime != null) {
+            try {
+              print('[ProducerDash][CACHE] Parsing cached orders...');
+              cachedOrdersData = (cachedOrdersJson).map<Order>((orderJson) {
+                try {
+                  return Order.fromJson(orderJson as Map<String, dynamic>);
+                } catch (e) {
+                  print('[ProducerDash][CACHE] Error parsing order: $e');
+                  rethrow;
+                }
+              }).toList();
+              ordersCacheValid = true;
+              print('[ProducerDash][CACHE] Successfully parsed ${cachedOrdersData.length} orders from cache');
+            } catch (e) { 
+              print('[ProducerDash][CACHE] Error parsing cached orders: $e'); 
+            }
+          }
         }
-      }
-      if (cachedProduceJson is List && cachedProduceTs is String) {
-        final cacheTime = DateTime.tryParse(cachedProduceTs);
-        if (cacheTime != null) { // Removed cache expiry check
-          try {
-            cachedProduceData = (cachedProduceJson).map((prodJson) => Product.fromJson(prodJson as Map<String, dynamic>)).toList();
-            produceCacheValid = true;
-          } catch (e) { print("[ProducerDash] Error parsing cached produce: $e"); }
-        }
-      }
 
-      if (mounted && (ordersCacheValid || produceCacheValid)) {
-        setState(() {
-          if (ordersCacheValid && cachedOrdersData != null) { _orders = cachedOrdersData!; _sortOrders(); }
-          if (produceCacheValid && cachedProduceData != null) { _produce = cachedProduceData!; _produce.sort((a,b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase())); }
-          _isLoadingOrders = !ordersCacheValid; 
-          _isLoadingProduce = !produceCacheValid;
-        });
-        loadedFromCache = ordersCacheValid && produceCacheValid; 
+        if (cachedProduceJson is List && cachedProduceJson.isNotEmpty && cachedProduceTs is String) {
+          final cacheTime = DateTime.tryParse(cachedProduceTs);
+          if (cacheTime != null) {
+            try {
+              print('[ProducerDash][CACHE] Parsing cached produce...');
+              cachedProduceData = (cachedProduceJson).map<Product>((prodJson) {
+                try {
+                  return Product.fromJson(prodJson as Map<String, dynamic>);
+                } catch (e) {
+                  print('[ProducerDash][CACHE] Error parsing product: $e');
+                  rethrow;
+                }
+              }).toList();
+              produceCacheValid = true;
+              print('[ProducerDash][CACHE] Successfully parsed ${cachedProduceData.length} products from cache');
+            } catch (e) { 
+              print('[ProducerDash][CACHE] Error parsing cached produce: $e'); 
+            }
+          }
+        }
+
+        if (mounted && (ordersCacheValid || produceCacheValid)) {
+          print('[ProducerDash][CACHE] Updating UI with cached data');
+          setState(() {
+            if (ordersCacheValid && cachedOrdersData != null) { 
+              _orders = cachedOrdersData!; 
+              _sortOrders(); 
+              print('[ProducerDash][CACHE] Updated ${_orders.length} orders in UI');
+            }
+            if (produceCacheValid && cachedProduceData != null) { 
+              _produce = cachedProduceData!; 
+              _produce.sort((a,b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase()));
+              print('[ProducerDash][CACHE] Updated ${_produce.length} products in UI');
+            }
+            _isLoadingOrders = !ordersCacheValid; 
+            _isLoadingProduce = !produceCacheValid;
+          });
+          loadedFromCache = ordersCacheValid && produceCacheValid;
+          print('[ProducerDash][CACHE] Loaded from cache: $loadedFromCache');
+        }
+      } catch (e) {
+        print('[ProducerDash][CACHE] Error during cache processing: $e');
       }
+    } else {
+      print('[ProducerDash][CACHE] Skipping cache - force refresh requested');
     }
 
+    // Fetch fresh data from the server
     try {
+      print('[ProducerDash][API] Fetching fresh data from server...');
       final results = await Future.wait([
         ProducerApiService.fetchProducerOrders(),
         ProducerApiService.fetchProducerProduce(),
       ], eagerError: true);
+      
       if (mounted) {
         final fetchedOrders = results[0] as List<Order>;
         final fetchedProduce = results[1] as List<Product>;
+        
+        print('[ProducerDash][API] Fetched ${fetchedOrders.length} orders and ${fetchedProduce.length} products');
+        
         setState(() {
-          _orders = fetchedOrders; _produce = fetchedProduce;
-          _sortOrders(); _produce.sort((a,b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase()));
-          _isLoadingOrders = false; _isLoadingProduce = false;
+          _orders = fetchedOrders; 
+          _produce = fetchedProduce;
+          _sortOrders(); 
+          _produce.sort((a,b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase()));
+          _isLoadingOrders = false; 
+          _isLoadingProduce = false;
         });
-        await UserCache.saveData(ordersKey, fetchedOrders.map((o) => ProducerDash22._serializeOrder(o)).toList());
-        await UserCache.saveData(ordersTsKey, now.toIso8601String());
-        await UserCache.saveData(produceKey, fetchedProduce.map((p) => ProducerDash22._serializeProduct(p)).toList());
-        await UserCache.saveData(produceTsKey, now.toIso8601String());
-      }
-    } catch (e) {
-      print("[ProducerDash] Error fetching orders/produce: $e");
-      if (mounted) {
-        setState(() {
-          _isLoadingOrders = false; _isLoadingProduce = false;
-          if (!loadedFromCache && _error.isEmpty) {
-             if (_orders.isEmpty || _produce.isEmpty) _error = _error.isEmpty ? 'Failed to load orders/produce.' : _error;
-          }
-        });
-        if (loadedFromCache || _orders.isNotEmpty || _produce.isNotEmpty) {
-          _showErrorSnackBar('Showing available data.');
+        
+        try {
+          print('[ProducerDash][CACHE] Saving data to cache...');
+          await Future.wait([
+            UserCache.saveData(ordersKey, fetchedOrders.map((o) => ProducerDash22._serializeOrder(o)).toList()),
+            UserCache.saveData(ordersTsKey, now.toIso8601String()),
+            UserCache.saveData(produceKey, fetchedProduce.map((p) => ProducerDash22._serializeProduct(p)).toList()),
+            UserCache.saveData(produceTsKey, now.toIso8601String()),
+          ]);
+          print('[ProducerDash][CACHE] Data saved to cache');
+        } catch (e) {
+          print('[ProducerDash][CACHE] Error saving to cache: $e');
         }
       }
+    } catch (e, stackTrace) {
+      print('[ProducerDash][API] Error fetching data:');
+      print('Error: $e');
+      print('Stack trace: $stackTrace');
+      
+      if (mounted) {
+        setState(() {
+          _isLoadingOrders = false; 
+          _isLoadingProduce = false;
+          if (!loadedFromCache && _error.isEmpty) {
+            if (_orders.isEmpty || _produce.isEmpty) {
+              _error = 'Failed to load orders/produce. ${e.toString()}';
+            }
+          }
+        });
+        
+        if (loadedFromCache || _orders.isNotEmpty || _produce.isNotEmpty) {
+          _showErrorSnackBar('Showing available data. ${e.toString()}');
+        } else {
+          _showErrorSnackBar('Failed to load data. Please check your connection.');
+        }
+      }
+    } finally {
+      print('[ProducerDash] Finished _fetchOrdersAndProduce');
     }
   }
 
@@ -1339,43 +1463,82 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
 
 
   Future<void> _updateSimpleOrderStatus(Order order, String newStatus) async {
+    print('[ProducerDash][DEBUG] Starting order status update. Order ID: ${order.orderId}, New Status: $newStatus');
     final orderIndex = _findOrderIndex(order.orderId);
-    if (orderIndex == -1) return;
+    if (orderIndex == -1) {
+      print('[ProducerDash][ERROR] Order not found in local list: ${order.orderId}');
+      return;
+    }
+    
     if (mounted) ScaffoldMessenger.of(context).removeCurrentSnackBar();
     final originalStatus = _orders[orderIndex].orderStatus;
     final originalRiderId = _orders[orderIndex].assignedRiderId;
     final originalRiderName = _orders[orderIndex].assignedRiderName;
+    
+    print('[ProducerDash][DEBUG] Current status: $originalStatus, Will update to: $newStatus');
+    
+    // Update UI optimistically
     setState(() {
       _orders[orderIndex].orderStatus = newStatus;
       if ([Order.STATUS_ACCEPTED, Order.STATUS_PREPARING, Order.STATUS_CANCELLED].contains(newStatus)) {
-        _orders[orderIndex] = _orders[orderIndex].copyWith(assignedRiderId: () => null, assignedRiderName: () => null);
+        print('[ProducerDash][DEBUG] Clearing rider assignment for status: $newStatus');
+        _orders[orderIndex] = _orders[orderIndex].copyWith(
+          assignedRiderId: () => null, 
+          assignedRiderName: () => null
+        );
       }
       _sortOrders();
     });
+    
     _showLoadingSnackbar("Updating status to $newStatus...");
+    
     try {
+      print('[ProducerDash][DEBUG] Calling API to update order status...');
       bool success = await ProducerApiService.updateOrderStatus(order.orderId, newStatus);
       _dismissLoadingSnackbar();
-      if (!mounted) return;
+      
+      if (!mounted) {
+        print('[ProducerDash][DEBUG] Widget not mounted after API call, aborting');
+        return;
+      }
+      
       if (success) {
+        print('[ProducerDash][SUCCESS] Order ${order.orderId} status updated to $newStatus');
         _showSuccessSnackbar('Order ${order.orderId} status updated to $newStatus.');
         _showOrderNextStepDialog(newStatus);
+        
+        // Force refresh orders to ensure consistency
+        _fetchOrdersAndProduce(forceRefresh: true);
       } else {
+        print('[ProducerDash][ERROR] API returned failure for order ${order.orderId}');
         _showErrorSnackBar('Failed to update order ${order.orderId} status.');
+        
+        // Revert UI changes
         setState(() {
           _orders[orderIndex].orderStatus = originalStatus;
-          _orders[orderIndex] = _orders[orderIndex].copyWith(assignedRiderId: () => originalRiderId, assignedRiderName: () => originalRiderName);
+          _orders[orderIndex] = _orders[orderIndex].copyWith(
+            assignedRiderId: () => originalRiderId, 
+            assignedRiderName: () => originalRiderName
+          );
           _sortOrders();
         });
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
       _dismissLoadingSnackbar();
-      print("[ProducerDash] Error updating simple order status: $e");
+      print('[ProducerDash][EXCEPTION] Error updating order status:');
+      print('Error: $e');
+      print('Stack trace: $stackTrace');
+      
       if (mounted) {
-        _showErrorSnackBar('An error occurred updating status.');
+        _showErrorSnackBar('An error occurred while updating status.');
+        
+        // Revert UI changes
         setState(() {
           _orders[orderIndex].orderStatus = originalStatus;
-          _orders[orderIndex] = _orders[orderIndex].copyWith(assignedRiderId: () => originalRiderId, assignedRiderName: () => originalRiderName);
+          _orders[orderIndex] = _orders[orderIndex].copyWith(
+            assignedRiderId: () => originalRiderId, 
+            assignedRiderName: () => originalRiderName
+          );
           _sortOrders();
         });
       }

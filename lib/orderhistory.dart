@@ -10,7 +10,7 @@ import 'package:intl/intl.dart'; // For date and currency formatting
 import 'dart:async'; // For TimeoutException, Timer
 import 'package:shimmer/shimmer.dart'; // For loading shimmer
 import 'package:shared_preferences/shared_preferences.dart'; // For Shared Preferences
-import 'package:zinzi2/user_cache.dart';
+import 'package:zinzi/user_cache.dart';
 import 'package:provider/provider.dart';
 import 'notifications/notification_provider.dart'; // For notification refresh functionality
 

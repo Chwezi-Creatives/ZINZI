@@ -10,12 +10,12 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:shimmer/shimmer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/cart.dart' as cart;
+import 'package:zinzi/cart.dart' as cart;
 
-import 'package:zinzi2/app_drawer_unified.dart';
-import 'package:zinzi2/meal_detail.dart' as meal_detail;
-import 'package:zinzi2/user_cache.dart';
-import 'package:zinzi2/utils/image_utils.dart';
+import 'package:zinzi/app_drawer_unified.dart';
+import 'package:zinzi/meal_detail.dart' as meal_detail;
+import 'package:zinzi/user_cache.dart';
+import 'package:zinzi/utils/image_utils.dart';
 // Import CacheConfig
 
 // --- Re-add Color Constants (or import from a shared file) ---

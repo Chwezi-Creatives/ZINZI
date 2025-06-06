@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:zinzi2/app_drawer_unified.dart';
+import 'package:zinzi/app_drawer_unified.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -9,8 +9,8 @@ import 'package:flutter/foundation.dart'; // For kDebugMode
 // import 'package:geolocator/geolocator.dart'; // Geolocator is now used by LocationService
 import 'package:google_fonts/google_fonts.dart';
 import 'orderstatus polls.dart' as order_status;
-import 'package:zinzi2/cart.dart'; // Import ShoppingCart
-import 'package:zinzi2/services/location_service.dart'; // Import LocationService
+import 'package:zinzi/cart.dart'; // Import ShoppingCart
+import 'package:zinzi/services/location_service.dart'; // Import LocationService
 
 final String apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 
@@ -360,7 +360,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             : null,
         'notes': _notesController.text,
         'payment_mode': _selectedPaymentMethod.toLowerCase(),
-        'total_price': (item['price'] as num?)?.toDouble() ?? 0.0,
+        'total_price': item['type'] == 'gig' 
+            ? (item['gigDetails']?['price'] as num?)?.toDouble() ?? 0.0
+            : (item['price'] as num?)?.toDouble() ?? 0.0,
         'chef_id': item['selectedchef']?['chefid']?.toString(),
         'producer_id': item['selectedproducer']?['producer_id']?.toString(),
       };

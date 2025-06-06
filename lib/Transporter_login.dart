@@ -3,8 +3,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/transooter_dash_before_mapbox.dart';
-import 'package:zinzi2/transporter_signup.dart';
+import 'package:zinzi/transooter_dash_before_mapbox.dart';
+import 'package:zinzi/transporter_signup.dart';
 import 'notifications/fcm_service.dart';
 //import 'transoorter_dash_new.dartp'; // being tested for now
 

@@ -1,9 +1,9 @@
 /*import 'package:flutter/material.dart';
-import 'package:zinzi2/momo2.dart';
-import 'package:zinzi2/paymom.dart';
-import 'package:zinzi2/paypp1webviewstatic.dart';
-import 'package:zinzi2/paystrpworkingbutlimited.dart';
-import 'package:zinzi2/paystrpfaulty.dart';
+import 'package:zinzi/momo2.dart';
+import 'package:zinzi/paymom.dart';
+import 'package:zinzi/paypp1webviewstatic.dart';
+import 'package:zinzi/paystrpworkingbutlimited.dart';
+import 'package:zinzi/paystrpfaulty.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';

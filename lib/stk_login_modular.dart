@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:zinzi2/stakeholderdash222.dart';// Ensure this points to the correct dashboard class
+import 'package:zinzi/stakeholderdash222.dart';// Ensure this points to the correct dashboard class
 import 'base_login_modular.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'notifications/fcm_service.dart';

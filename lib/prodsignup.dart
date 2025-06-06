@@ -8,7 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io'; // For File
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/verification.dart';
+import 'package:zinzi/verification.dart';
 import 'notifications/fcm_service.dart';
 
 // --- Hardcoded Colors ---

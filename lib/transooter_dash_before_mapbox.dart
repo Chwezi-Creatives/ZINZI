@@ -13,11 +13,11 @@ import 'package:cached_network_image/cached_network_image.dart'; // Image cachin
 // Add these imports at the top of the file
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 // --- Assumed Imports (Ensure these files exist) ---
-import 'package:zinzi2/Transporter_login.dart'; // For logout navigation
-import 'package:zinzi2/user_cache.dart'; // <<< IMPORT UserCache
-import 'package:zinzi2/chef_verification_helper.dart'; // For verification dialog
+import 'package:zinzi/Transporter_login.dart'; // For logout navigation
+import 'package:zinzi/user_cache.dart'; // <<< IMPORT UserCache
+import 'package:zinzi/chef_verification_helper.dart'; // For verification dialog
 // Removed unused import // <<< IMPORT CacheConfig
-// import 'package:zinzi2/app_drawer.dart'; // If you reuse the drawer from old code
+// import 'package:zinzi/app_drawer.dart'; // If you reuse the drawer from old code
 
 // --- Environment Variables ---
 // Ensure loaded in main.dart: await dotenv.load(fileName: ".env");
@@ -239,8 +239,9 @@ class TransporterProfile {
 }
 
 class Order {
-  // Add user_phone field
+  // User and restaurant contact information
   final String? userPhone;
+  final String? restaurantPhone; // Added restaurant_phone field
   
   // Helper method to safely get string from dynamic value
   static String? _getStringSafe(dynamic value) {
@@ -402,7 +403,8 @@ class Order {
     this.transporterName,
     this.gigDetails,
     this.productName,
-    this.userPhone, // Add userPhone to constructor
+    this.userPhone,
+    this.restaurantPhone, // Add restaurantPhone to constructor
   });
 
   factory Order.fromJson(Map<String, dynamic> json) {
@@ -424,6 +426,7 @@ class Order {
 
     // Parse user_phone from JSON
     final userPhone = _getStringSafe(json['user_phone']);
+    final restaurantPhone = _getStringSafe(json['restaurant_phone']);
 
     return Order(
       orderId: parseIntSafe(json['order_id']), // Use safe parser
@@ -458,6 +461,7 @@ class Order {
       gigDetails: getStringSafe(json['gig_details']),
       productName: getStringSafe(json['product_name']), // Use safe getter
       userPhone: userPhone, // Add user_phone from JSON
+      restaurantPhone: restaurantPhone, // Add restaurant_phone from JSON
     );
   }
 
@@ -489,6 +493,7 @@ class Order {
         'gig_details': gigDetails,
         'product_name': productName,
         'user_phone': userPhone, // Include user_phone
+        'restaurant_phone': restaurantPhone, // Include restaurant_phone
       };
 
   // copyWith method adapted from old code
@@ -520,6 +525,7 @@ class Order {
     ValueGetter<String?>? gigDetails,
     ValueGetter<String?>? productName,
     ValueGetter<String?>? userPhone,
+    ValueGetter<String?>? restaurantPhone,
   }) {
     return Order(
       orderId: orderId ?? this.orderId,
@@ -553,6 +559,7 @@ class Order {
       gigDetails: gigDetails != null ? gigDetails() : this.gigDetails,
       productName: productName != null ? productName() : this.productName,
       userPhone: userPhone != null ? userPhone() : this.userPhone,
+      restaurantPhone: restaurantPhone != null ? restaurantPhone() : this.restaurantPhone,
     );
   }
 }
@@ -4454,11 +4461,15 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
   // *** MODIFIED: Added Navigation Button ***
   Widget _buildOrderDetailsCard() {
-    String restaurantPhone = "(256) 7XX-XXX-XXX"; // Placeholder Uganda format
+    // Get restaurant phone number or show placeholder if not available
+    final restaurantPhone = _currentOrder.restaurantPhone;
+    final hasValidRestaurantPhone = restaurantPhone != null && restaurantPhone.isNotEmpty && restaurantPhone != 'null';
+    final displayRestaurantPhone = hasValidRestaurantPhone ? restaurantPhone : 'Phone number not available';
+    
     // Get customer phone number or show 'Not available' if not found
     final customerPhone = _currentOrder.userPhone;
-    final hasValidPhone = customerPhone != null && customerPhone.isNotEmpty && customerPhone != 'null';
-    final displayPhone = hasValidPhone ? customerPhone : 'Phone number not available';
+    final hasValidCustomerPhone = customerPhone != null && customerPhone.isNotEmpty && customerPhone != 'null';
+    final displayCustomerPhone = hasValidCustomerPhone ? customerPhone : 'Phone number not available';
     return Card(
         elevation: 1,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -4480,7 +4491,16 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   isTitle: true),
               _buildDetailRow(null, _currentOrder.pickupAddress,
                   isAddress: true),
-              _buildDetailRow(Icons.phone_outlined, restaurantPhone),
+              hasValidRestaurantPhone
+                  ? _buildDetailRow(
+                      Icons.phone_outlined, 
+                      restaurantPhone,
+                      isPhone: true,
+                    )
+                  : _buildDetailRow(
+                      Icons.phone_disabled_outlined,
+                      displayRestaurantPhone,
+                    ),
               Divider(height: 24, color: _lightTeal),
               _buildDetailRow(Icons.person_outline, 'Customer',
                   isTitle: true), // Added Customer Title
@@ -4488,15 +4508,15 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   isTitle: false), // Changed to non-title
               _buildDetailRow(null, _currentOrder.simplifiedDeliveryAddress,
                   isAddress: true),
-              hasValidPhone
+              hasValidCustomerPhone
                   ? _buildDetailRow(
                       Icons.phone_outlined, 
-                      customerPhone!, // Known to be non-null here
+                      customerPhone, // Known to be non-null here
                       isPhone: true,
                     )
                   : _buildDetailRow(
                       Icons.phone_disabled_outlined,
-                      displayPhone,
+                      displayCustomerPhone,
                     ),
               Divider(height: 24, color: _lightTeal),
               Text('Order Items:',

@@ -1,8 +1,8 @@
 /*import 'package:flutter/material.dart';
-import 'package:zinzi2/allmeals.dart';
-import 'package:zinzi2/checkout.dart';
-import 'package:zinzi2/reco.dartp';
-import 'package:zinzi2/repeat.dartp';
+import 'package:zinzi/allmeals.dart';
+import 'package:zinzi/checkout.dart';
+import 'package:zinzi/reco.dartp';
+import 'package:zinzi/repeat.dartp';
 import 'cart.dart';
 
 class ChooseChef extends StatelessWidget {

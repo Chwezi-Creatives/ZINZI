@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:zinzi2/checkout.dart';
-import 'package:zinzi2/cart.dart';
-import 'package:zinzi2/chef.dart';
-import 'package:zinzi2/useranalytics.dart';
+import 'package:zinzi/checkout.dart';
+import 'package:zinzi/cart.dart';
+import 'package:zinzi/chef.dart';
+import 'package:zinzi/useranalytics.dart';
 import 'reco.dartp';
 import 'package:cached_network_image/cached_network_image.dart';
 

@@ -7,7 +7,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:intl/intl.dart'; // For date formatting
 import 'dart:async'; // For TimeoutException
 // import 'package:shimmer/shimmer.dart'; // Shimmer not currently used
-import 'package:zinzi2/widgets/app_drawer.dart'; // Import the AppDrawer
+import 'package:zinzi/widgets/app_drawer.dart'; // Import the AppDrawer
 
 // Assuming API_BASE_URL-intranet is set in your .env file
 final String apiBaseUrl = dotenv.env['API_BASE_URL'] ?? dotenv.env['API_BASE_URL-intranet'] ??

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:zinzi2/allmeals.dart';
-import 'package:zinzi2/app_drawer_unified.dart'
+import 'package:zinzi/allmeals.dart';
+import 'package:zinzi/app_drawer_unified.dart'
     as drawer; // Import the unified AppDrawer widget with prefix
 
 import 'package:google_fonts/google_fonts.dart';
-import 'package:zinzi2/checkout.dart';
+import 'package:zinzi/checkout.dart';
 import 'app_drawer_unified.dart'; // May be redundant if drawer.AppDrawer is used
 
 // ***************************************************************

@@ -3,9 +3,9 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-//import 'package:zinzi2/chefDashh.dartp';
-import 'package:zinzi2/chef_dash8888.dart'; //thisis the latesst dashboard
-import 'package:zinzi2/chef__dash__latest__uses_mock_data.dart';
+//import 'package:zinzi/chefDashh.dartp';
+import 'package:zinzi/chef_dash8888.dart'; //thisis the latesst dashboard
+import 'package:zinzi/chef__dash__latest__uses_mock_data.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 

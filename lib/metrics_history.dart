@@ -2,7 +2,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:zinzi2/dashboard_page.dart';
+import 'package:zinzi/dashboard_page.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';

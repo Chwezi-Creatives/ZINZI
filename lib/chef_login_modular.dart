@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:zinzi2/base_login_modular.dart';
+import 'package:zinzi/base_login_modular.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/chef_dash8888.dart';// Ensure this path is correct // Make sure this points to the right dashboard class
+import 'package:zinzi/chef_dash8888.dart';// Ensure this path is correct // Make sure this points to the right dashboard class
 import 'notifications/fcm_service.dart';
 
 class ChefLoginPageModular extends StatelessWidget {

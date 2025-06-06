@@ -7,7 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io'; // For File
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:zinzi2/verification.dart'; // Assuming this is your verification page
+import 'package:zinzi/verification.dart'; // Assuming this is your verification page
 
 // --- Hardcoded Colors ---
 const Color primaryTeal = Color(0xFF00796B); // Teal 700

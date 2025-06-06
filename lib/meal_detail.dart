@@ -2,24 +2,24 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:zinzi2/allmeals.dart'; // Assuming this screen exists
-import 'package:zinzi2/utils/overlay_utils.dart'; // Add this import
-import 'package:zinzi2/app_drawer_unified.dart'
+import 'package:zinzi/allmeals.dart'; // Assuming this screen exists
+import 'package:zinzi/utils/overlay_utils.dart'; // Add this import
+import 'package:zinzi/app_drawer_unified.dart'
     as drawer; // Import unified AppDrawer with prefix
 // **** IMPORT THE UPDATED CART ****
-import 'package:zinzi2/cart.dart'; // Imports the SHARED cart (with new methods) & favorites
+import 'package:zinzi/cart.dart'; // Imports the SHARED cart (with new methods) & favorites
 // **** END IMPORT ****
-import 'package:zinzi2/checkout.dart'; // Assuming this screen exists
-import 'package:zinzi2/useranalytics.dart'; // Assuming this screen exists if needed
+import 'package:zinzi/checkout.dart'; // Assuming this screen exists
+import 'package:zinzi/useranalytics.dart'; // Assuming this screen exists if needed
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'dart:async';
 import 'package:google_fonts/google_fonts.dart'; // For consistent font
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:zinzi2/user_cache.dart'; // Import UserCache
-import 'package:zinzi2/cache_config.dart'; // Import CacheConfig
-import 'package:zinzi2/utils/image_utils.dart'; // Import ImageUtils
+import 'package:zinzi/user_cache.dart'; // Import UserCache
+import 'package:zinzi/cache_config.dart'; // Import CacheConfig
+import 'package:zinzi/utils/image_utils.dart'; // Import ImageUtils
 import 'package:intl/intl.dart';
 
 // Assuming dotenv is initialized elsewhere in your main.dart or similar
