@@ -2343,7 +2343,7 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
                 o.order_id, o.user_id, o.order_type, o.product_id, o.chef_id, o.producer_id, o.transporter_id,
                 o.order_date, o.delivery_address, o.order_status, o.total_price, o.notes,
                 o.payment_status, o.payment_mode, o.amount_paid, o.transaction_id, o.quantity, o.user_phone,
-                o.gig_details, o.complementary_meals,
+                o.restaurant_phone, o.gig_details, o.complementary_meals,
                 o.updated_at, -- Ensure this column exists in your 'orders' table
                 COALESCE( md.meal_name, supd.product_name, hd.product_name, gd.product_name, sd.product_name, prod.product_name, CASE WHEN o.order_type = 'gig' THEN o.gig_details->>'gig_type' ELSE 'Unknown Product' END ) AS product_name,
                 md.ingredients, producer.name AS producer_name, producer.location AS producer_address, chef.name AS chef_name, chef.location AS chef_address, transporter.name AS transporter_name, COALESCE(chef.location, producer.location, '') AS pickup_location
@@ -2452,7 +2452,7 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
 #            self.app_state = app_state # and then use self.app_state.db_pool
 #            self.ALLOWED_ORDER_STATUSES = allowed_statuses
 
-    async def update_order_status(self, conn: asyncpg.Connection, order_id: int, new_status: str, transporter_id: Optional[int] = None, completion_code: Optional[str] = None) -> Dict[str, Any]:
+    async def update_order_status(self, conn: asyncpg.Connection, order_id: int, new_status: str, transporter_id: Optional[int] = None, completion_code: Optional[str] = None, restaurant_phone: Optional[str] = None) -> Dict[str, Any]:
         try:
             # ... (rest of the order fetching and initial status check logic remains IDENTICAL to your last working version) ...
             # This part is unchanged:
@@ -2534,7 +2534,13 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
             # ... (database update logic IDENTICAL) ...
             update_fields = ["order_status = $1", "updated_at = NOW()"]
             params_update: List[Any] = [status_to_update]
-            current_param_idx = 2 
+            current_param_idx = 2
+            
+            # Add restaurant_phone to update fields if provided
+            if restaurant_phone is not None:
+                update_fields.append(f"restaurant_phone = ${current_param_idx}")
+                params_update.append(restaurant_phone)
+                current_param_idx += 1
 
             if status_to_update in ['assigned', 'picked up', 'delivering'] and transporter_id is not None:
                 try:
@@ -4328,7 +4334,18 @@ async def create_order_endpoint(order_data: dict = Body(...), conn: asyncpg.Conn
         transaction_id = None
         payment_status = 'pending'
         amount_paid = 0.0
-        total_price = float(order_data.get('total_price', 0.0))
+        
+        # Get total price, for gig orders try to get from gig details if not in order_data
+        if order_type == 'gig' and not order_data.get('total_price') and order_data.get('items') and len(order_data['items']) > 0:
+            # Extract price from the first item's gig_details if available
+            first_item = order_data['items'][0]
+            if first_item.get('gig_details') and 'price' in first_item['gig_details']:
+                total_price = float(first_item['gig_details']['price'])
+                logger.info(f"[ORDER] Using gig price from gig_details: {total_price}")
+            else:
+                total_price = 0.0
+        else:
+            total_price = float(order_data.get('total_price', 0.0))
         
         # Get and validate phone number (required for all orders)
         user_phone = order_data.get('payment_phone_number')
@@ -4348,10 +4365,13 @@ async def create_order_endpoint(order_data: dict = Body(...), conn: asyncpg.Conn
             payer_number = user_phone
             
             if total_price <= 0:
-                logger.error(f"[PAYMENT] Invalid payment amount: {total_price}")
+                error_msg = f"[PAYMENT] Invalid payment amount: {total_price}"
+                if order_type == 'gig':
+                    error_msg += ". Please ensure the gig has a valid price set in gig_details"
+                logger.error(error_msg)
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid payment amount. Amount must be greater than 0"
+                    detail=error_msg
                 )
             
             # Generate a unique external ID for the transaction with extra random digits and underscores
@@ -4563,20 +4583,21 @@ async def update_order_status_endpoint(order_id: int, status_update: dict = Body
     new_status = status_update['order_status']
     transporter_id = status_update.get('transporter_id') # Optional transporter_id
     completion_code = status_update.get('completion_code') # Optional completion_code
+    restaurant_phone = status_update.get('restaurant_phone') # Optional restaurant_phone
 
     # Add validation for transporter_id if status is 'assigned'
     if str(new_status).lower().strip() == 'assigned' and transporter_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='"assigned" status needs "transporter_id"')
 
-    # Assuming orders_crud is an instance of the Orders class
+    # Update order status with all provided parameters
     result = await orders_crud.update_order_status(
         conn=conn,
         order_id=order_id,
         new_status=new_status,
         transporter_id=transporter_id,
-        completion_code=completion_code # Pass the optional completion_code
+        completion_code=completion_code, # Pass the optional completion_code
+        restaurant_phone=restaurant_phone # Pass the optional restaurant_phone
     )
-    # update_order_status now returns dict on success or raises exception
     return result
 
 
