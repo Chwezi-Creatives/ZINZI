@@ -489,50 +489,56 @@ class AuthenticationAndUsers(BaseRepository):
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An error occurred while fetching metrics")
     # Existing methods...
     # Methods now accept 'conn' from Depends(get_db)   #currently a private method buill come back later to decide wether to make it a class of its own or a public method,etc
-    async def _handle_email_verification(self, conn: asyncpg.Connection, email: str, user_id: int, user_type: str) -> None:
+    async def _handle_email_verification(self, conn: asyncpg.Connection, email: str, user_id: int, user_type: str, verification_code: str = None) -> str:
         """
-        Handles the email verification process - generates code, stores it, and sends email.
+        Handles the email verification process - generates and stores a verification code.
+        Returns the verification code for sending in a background task.
         
         Args:
             conn: Database connection
             email: User's email address
             user_id: User's ID
             user_type: Type of user (user, chef, producer, etc.)
+            verification_code: Optional pre-generated verification code to use
+            
+        Returns:
+            str: The verification code (generated or provided)
         """
-        try:
-            # Generate a 6-digit numeric code (fits within VARCHAR(10) and is user-friendly)
-            verification_code = generate_random_code(length=6, use_digits=True, use_uppercase=False)
-            
-            # First, check if there's an existing verification for this user
-            await conn.execute(
-                """
-                DELETE FROM email_verifications 
-                WHERE user_id = $1 AND user_type = $2
-                """,
-                user_id, user_type
-            )
-            
-            # Verify code length before insertion
-            if len(verification_code) > 10:
-                raise ValueError(f"Generated code '{verification_code}' is too long for the database column")
-                
-            # Insert new verification code
-            await conn.execute(
-                """
-                INSERT INTO email_verifications 
-                (user_id, verification_code, user_type, created_at, expires_at) 
-                VALUES ($1, $2, $3, NOW(), NOW() + INTERVAL '10 minutes')
-                """,
-                user_id, verification_code, user_type
-            )
-            
-            logger.info(f"Verification code created for {user_type} ID {user_id}")
-            
-        except Exception as e:
-            logger.error(f"Error in _handle_email_verification: {str(e)}")
-            raise
+        # Generate a new code if none provided
+        if verification_code is None:
+            verification_code = ''.join(random.choices(string.digits, k=6))
         
-        # Send verification email
+        # Delete any existing verification codes for this user
+        await conn.execute(
+            """
+            DELETE FROM email_verifications 
+            WHERE user_id = $1 AND user_type = $2
+            """,
+            user_id, user_type
+        )
+        
+        # Insert new verification code
+        await conn.execute(
+            """
+            INSERT INTO email_verifications 
+            (user_id, verification_code, user_type, created_at, expires_at) 
+            VALUES ($1, $2, $3, NOW(), NOW() + INTERVAL '10 minutes')
+            """,
+            user_id, verification_code, user_type
+        )
+        
+        logger.info(f"Verification code {'created' if verification_code is None else 'stored'} for {user_type} ID {user_id}")
+        return verification_code
+        
+    async def _send_verification_email(self, email: str, verification_code: str, user_type: str) -> None:
+        """
+        Sends a verification email in the background.
+        
+        Args:
+            email: User's email address
+            verification_code: The verification code to send
+            user_type: Type of user (for logging purposes)
+        """
         try:
             self.send_verification_email_gmail(email, verification_code)
             logger.info(f"Verification email sent to {email} for user type {user_type}")
@@ -541,28 +547,124 @@ class AuthenticationAndUsers(BaseRepository):
             # Don't fail the signup if email sending fails, just log it
             # The user can request a new code if needed
     
-    async def signup_user(self, conn: asyncpg.Connection, name: str, email: str, password: str, user_type: str, image: Optional[str] = None) -> Dict[str, Any]:
+    async def signup_user(self, conn: asyncpg.Connection, name: str, email: str, password: str, user_type: str = 'user', 
+                        image: Optional[str] = None, phone: Optional[str] = None, 
+                        background_tasks: Optional[BackgroundTasks] = None) -> Dict[str, Any]:
+        """
+        Register a new user with email verification.
+        
+        Args:
+            conn: Database connection
+            name: User's full name
+            email: User's email address (will be converted to lowercase)
+            password: Plain text password (will be hashed)
+            user_type: Type of user (default: 'user')
+            image: Optional URL to user's profile image
+            phone: Optional user's phone number
+            background_tasks: FastAPI BackgroundTasks instance for sending verification email asynchronously
+            
+        Returns:
+            Dict containing user_id, phone, and success status
+            
+        Raises:
+            HTTPException: If signup validation fails or user already exists
+        """
+        # Input validation
+        email_lower = email.strip().lower()
+        if not email_lower or '@' not in email_lower or '.' not in email_lower.split('@')[-1]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please provide a valid email address"
+            )
+            
+        if not name or len(name.strip()) < 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please provide a valid name (at least 2 characters)"
+            )
+            
+        if not password or len(password) < 8:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password must be at least 8 characters long"
+            )
+        
+        # Normalize user_type
+        user_type = (user_type or 'user').lower().strip()
+        
+        # Hash password
         hashed_pw = hash_password(password)
-        user_id = None
+        
         try:
-            async with conn.transaction(): # Use transaction
-                # Check for existing email and user_type combination
-                email_user_type_query = "SELECT user_id FROM users WHERE lower(email) = lower($1) AND user_type = $2"
-                existing_user = await conn.fetchval(email_user_type_query, email, user_type)
-                if existing_user: raise ValueError(f"Email '{email}' is already registered for user type '{user_type}'.")
-
-            logger.info(f"User '{name}' (ID: {user_id}) registered successfully with user type {user_type}.")
-            return {"user_id": user_id, "phone": phone_number, "success": True}
+            # Check if email already exists first, before starting a transaction
+            existing_user = await conn.fetchval(
+                "SELECT user_id FROM users WHERE lower(email) = $1 AND user_type = $2",
+                email_lower, user_type
+            )
+            
+            if existing_user:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Email '{email}' is already registered for user type '{user_type}'"
+                )
+            
+            # Start transaction after the initial check
+            async with conn.transaction():
+                # Insert the new user
+                user_id = await conn.fetchval(
+                    """
+                    INSERT INTO users (name, email, hashed_password, user_type, phone_number, image, registration_date, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+                    RETURNING user_id
+                    """,
+                    name.strip(),
+                    email_lower,
+                    hashed_pw,
+                    user_type,
+                    phone.strip() if phone else None,
+                    image.strip() if image else None
+                )
+                
+                # Generate and store verification code (synchronously)
+                verification_code = await self._handle_email_verification(conn, email_lower, user_id, user_type)
+                
+                # Schedule email sending in background if background_tasks is provided
+                if background_tasks is not None:
+                    background_tasks.add_task(
+                        self._send_verification_email,
+                        email=email_lower,
+                        verification_code=verification_code,
+                        user_type=user_type
+                    )
+                else:
+                    # Fallback to synchronous sending if no background_tasks provided
+                    await self._send_verification_email(email_lower, verification_code, user_type)
+                
+                logger.info(f"User '{name}' (ID: {user_id}) registered successfully with user type {user_type}")
+                return {
+                    "user_id": user_id, 
+                    "phone": phone.strip() if phone else None, 
+                    "email": email_lower,
+                    "success": True,
+                    "message": "User registered successfully. Please check your email for verification."
+                }
+                
+        except HTTPException as he:
+            # Re-raise HTTPException to maintain the original status code
+            logger.warning(f"Signup failed for {email}: {he.detail}")
+            raise he
         except ValueError as e:
             logger.warning(f"Signup validation failed for {email}: {e}")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
         except asyncpg.exceptions.UniqueViolationError as e:
-             logger.warning(f"Signup failed due to unique constraint for {email}: {e.detail}")
-             # Determine if it was email or name based on the error detail if possible
-             detail = "Email or Name already exists."
-             if 'email' in str(e.detail).lower() or 'users_email_key' in str(e.constraint_name): detail = f"Email '{email}' is already registered."
-             elif 'name' in str(e.detail).lower() or 'users_name_key' in str(e.constraint_name): detail = f"Name '{name}' is already taken."
-             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail) from e
+            logger.warning(f"Signup failed due to unique constraint for {email}: {e.detail}")
+            # Determine if it was email or name based on the error detail if possible
+            detail = "Email or Name already exists."
+            if 'email' in str(e.detail).lower() or 'users_email_key' in str(e.constraint_name): 
+                detail = f"Email '{email}' is already registered."
+            elif 'name' in str(e.detail).lower() or 'users_name_key' in str(e.constraint_name): 
+                detail = f"Name '{name}' is already taken."
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail) from e
         except asyncpg.PostgresError as e:
             logger.error(f"Database error during signup for {email}: {e}", exc_info=True)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An internal error occurred during signup.") from e
@@ -570,26 +672,133 @@ class AuthenticationAndUsers(BaseRepository):
             logger.error(f"Unexpected error during signup for {email}: {e}", exc_info=True)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected server error occurred.") from e
     async def verify_user_email(self, conn: asyncpg.Connection, user_id: int, verification_code: str, user_type: str) -> None:
-        # ... (implementation unchanged, uses passed 'conn') ...
-        check_query = "SELECT verification_code FROM email_verifications WHERE user_id = $1 AND verification_code = $2 AND user_type = $3 AND expires_at > NOW()"
+        # Get current timestamp for reference
+        current_time = datetime.now()
+        
+        # Log the verification attempt with all relevant details
+        logger.info(
+            f"Verification attempt - "
+            f"User ID: {user_id}, "
+            f"Type: {user_type}, "
+            f"Code: {verification_code}, "
+            f"Current Time: {current_time}"
+        )
+        
+        # First, check if there are any verification codes for this user at all
+        user_codes_query = """
+            SELECT verification_code, created_at, expires_at, 
+                   NOW() > expires_at as is_expired,
+                   expires_at - NOW() as time_remaining,
+                   user_type as actual_user_type
+            FROM email_verifications 
+            WHERE user_id = $1 AND LOWER(user_type) = LOWER($2)
+            ORDER BY created_at DESC
+        """
+        
+        # Then check for the specific code (case-insensitive user_type)
+        check_query = """
+            SELECT verification_code, created_at, expires_at, 
+                   NOW() > expires_at as is_expired,
+                   expires_at - NOW() as time_remaining,
+                   user_type as actual_user_type
+            FROM email_verifications 
+            WHERE user_id = $1 
+              AND verification_code = $2 
+              AND LOWER(user_type) = LOWER($3)
+        """
+        
         update_query = "UPDATE users SET is_email_verified = TRUE WHERE user_id = $1"
         delete_query = "DELETE FROM email_verifications WHERE user_id = $1 AND verification_code = $2"
+        
         try:
             async with conn.transaction():
-                 code_exists = await conn.fetchval(check_query, user_id, verification_code, user_type)
-                 if not code_exists:
-                     logger.warning(f"Email verification failed for user {user_id} with type {user_type}: Invalid or expired code.")
-                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid or expired verification code or incorrect user type.')
-                 await conn.execute(update_query, user_id)
-                 await conn.execute(delete_query, user_id, verification_code)
-            logger.info(f"Email successfully verified for user ID {user_id} with type {user_type}.")
-        except HTTPException: raise
-        except (asyncpg.PostgresError) as e:
-            logger.error(f"Database error during email verification for user {user_id} with type {user_type}: {e}", exc_info=True)
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='An error occurred during email verification.') from e
+                # Get the verification record with expiration info
+                record = await conn.fetchrow(check_query, user_id, verification_code, user_type)
+                
+                if not record:
+                    # Log all verification codes for this user to help with debugging
+                    user_codes = await conn.fetch(user_codes_query, user_id, user_type)
+                    if user_codes:
+                        codes_info = [
+                            f"Code: {code['verification_code']} "
+                            f"(Created: {code['created_at']}, "
+                            f"Expires: {code['expires_at']}, "
+                            f"Status: {'Expired' if code['is_expired'] else 'Active'})"
+                            for code in user_codes
+                        ]
+                        logger.warning(
+                            f"Verification failed - No matching code found. "
+                            f"User ID: {user_id}, Type: {user_type}, "
+                            f"Code provided: {verification_code}. "
+                            f"User's verification codes: {', '.join(codes_info)}"
+                        )
+                    else:
+                        logger.warning(
+                            f"Verification failed - No verification codes found for user. "
+                            f"User ID: {user_id}, Type: {user_type}, "
+                            f"Code provided: {verification_code}"
+                        )
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST, 
+                        detail='Invalid verification code or incorrect user type.'
+                    )
+                
+                # Log detailed verification status
+                logger.info(
+                    f"Verification details - "
+                    f"Code created: {record['created_at']}, "
+                    f"Expires at: {record['expires_at']}, "
+                    f"Is expired: {record['is_expired']}, "
+                    f"Time remaining: {record['time_remaining']}, "
+                    f"User type in DB: {record['actual_user_type']}, "
+                    f"User type provided: {user_type}"
+                )
+                
+                if record['is_expired']:
+                    logger.warning(
+                        f"Verification failed - Code expired. "
+                        f"Expired at: {record['expires_at']}, "
+                        f"Current time: {current_time}"
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST, 
+                        detail='Verification code has expired. Please request a new one.'
+                    )
+                
+                # If we get here, verification is successful
+                await conn.execute(update_query, user_id)
+                await conn.execute(delete_query, user_id, verification_code)
+                
+                logger.info(
+                    f"Verification successful - "
+                    f"User ID: {user_id}, "
+                    f"Type: {user_type}, "
+                    f"Code verified at: {current_time}, "
+                    f"Time to expiry: {record['time_remaining']}"
+                )
+                
+        except HTTPException as he:
+            raise
+        except asyncpg.PostgresError as e:
+            logger.error(
+                f"Database error during verification - "
+                f"User ID: {user_id}, Type: {user_type}, Error: {str(e)}", 
+                exc_info=True
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                detail='An error occurred during email verification.'
+            ) from e
         except Exception as e:
-            logger.error(f"Unexpected error during email verification for user {user_id}: {e}", exc_info=True)
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='An unexpected server error occurred during verification.') from e
+            logger.error(
+                f"Unexpected error during verification - "
+                f"User ID: {user_id}, Type: {user_type}, Error: {str(e)}", 
+                exc_info=True
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                detail='An unexpected server error occurred during verification.'
+            ) from e
 
     def send_verification_email_gmail(self, to_email: str, verification_code: str):
         """
@@ -819,16 +1028,198 @@ class AuthenticationAndUsers(BaseRepository):
         except Exception as e: logger.error(f"Unexpected error deleting user {user_id}: {e}", exc_info=True); return False
 
     # --- Metrics Methods (async, use passed conn) ---
-    async def create_metric(self, conn: asyncpg.Connection, metric_data: Dict[str, Any]) -> Dict[str, int]:
-        # ... (implementation uses _execute_query with conn) ...
+    async def create_metric(
+        self, 
+        conn: asyncpg.Connection, 
+        metric_data: Dict[str, Any],
+        background_tasks: Optional[BackgroundTasks] = None
+    ) -> Dict[str, int]:
+        """
+        Create a new user metric entry with non-blocking calculation of dependent fields.
+        
+        Args:
+            conn: Database connection
+            metric_data: Dictionary containing metric data
+            background_tasks: Optional FastAPI BackgroundTasks instance for non-blocking calculation
+            
+        Returns:
+            Dictionary containing the metric_id of the created record
+        """
         metric_data_lower = lowercase_keys(metric_data)
         check_required_fields(metric_data_lower, ['user_id', 'weight', 'height', 'cholesterol_level', 'sys_bp', 'dia_bp', 'pulse'])
-        sql = "INSERT INTO user_metrics (user_id, age_range, weight, height, cholesterol_level, sys_bp, dia_bp, pulse, recorded_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW()) RETURNING metric_id"
-        try: params = (int(metric_data_lower['user_id']), metric_data_lower.get('age_range'), float(metric_data_lower['weight']), float(metric_data_lower['height']), float(metric_data_lower['cholesterol_level']), int(metric_data_lower['sys_bp']), int(metric_data_lower['dia_bp']), int(metric_data_lower['pulse']))
-        except (ValueError, TypeError) as e: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid metric format: {e}") from e
-        metric_id = await self._execute_query(conn, sql, params, returning_id_column='metric_id')
-        if metric_id: logger.info(f"Created metric ID: {metric_id}"); return {"metric_id": metric_id}
-        else: raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Metric creation failed.")
+        
+        # First, insert the basic metrics
+        sql = """
+            INSERT INTO user_metrics 
+            (user_id, age_range, weight, height, cholesterol_level, 
+             sys_bp, dia_bp, pulse, sex, activity_level, recorded_at) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW()) 
+            RETURNING metric_id, user_id, weight, height, age_range, sex, activity_level
+        """
+        try: 
+            user_id = int(metric_data_lower['user_id'])
+            weight = float(metric_data_lower['weight'])
+            height = float(metric_data_lower['height'])
+            age_range = metric_data_lower.get('age_range')
+            sex = metric_data_lower.get('sex')
+            activity_level = metric_data_lower.get('activity_level')
+            
+            params = (
+                user_id, 
+                age_range, 
+                weight, 
+                height, 
+                float(metric_data_lower['cholesterol_level']), 
+                int(metric_data_lower['sys_bp']), 
+                int(metric_data_lower['dia_bp']), 
+                int(metric_data_lower['pulse']),
+                sex,
+                activity_level
+            )
+        except (ValueError, TypeError) as e: 
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid metric format: {e}") from e
+            
+        # Get the inserted row with all the values we need for calculation
+        row = await conn.fetchrow(sql, *params)
+        if not row or 'metric_id' not in row:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Metric creation failed.")
+            
+        metric_id = row['metric_id']
+        logger.info(f"Created metric ID: {metric_id}")
+        
+        # Prepare calculation data
+        calc_data = {
+            'metric_id': metric_id,
+            'user_id': row['user_id'],
+            'weight': float(row['weight']),
+            'height': float(row['height']),
+            'age_range': row['age_range'],
+            'sex': row['sex'],
+            'activity_level': row['activity_level']
+        }
+        
+        # Run calculation in background if possible, otherwise run synchronously
+        if background_tasks is not None:
+            background_tasks.add_task(
+                self._calculate_and_update_metrics,
+                conn,
+                **calc_data
+            )
+            logger.info(f"Queued background calculation for metric ID: {metric_id}")
+        else:
+            # Fallback to synchronous calculation if no background_tasks provided
+            try:
+                await self._calculate_and_update_metrics(conn, **calc_data)
+            except Exception as e:
+                logger.error(f"Error in synchronous calculation for metric {metric_id}: {e}", exc_info=True)
+        
+        return {"metric_id": metric_id}
+        
+    async def _calculate_and_update_metrics(
+        self,
+        conn: asyncpg.Connection,
+        metric_id: int,
+        user_id: int,
+        weight: float,
+        height: float,
+        age_range: Optional[str],
+        sex: Optional[str],
+        activity_level: Optional[str]
+    ) -> None:
+        """
+        Calculate and update dependent metrics for a given metric entry.
+        
+        This method is designed to be run in the background.
+        If no goal is found in preferences, the calculation is skipped.
+        
+        Args:
+            conn: Database connection
+            metric_id: ID of the metric to update
+            user_id: ID of the user
+            weight: User's weight in kg
+            height: User's height in cm
+            age_range: User's age range
+            sex: User's sex
+            activity_level: User's activity level
+        """
+        try:
+            # Get user preferences for goals if available
+            pref_row = await conn.fetchrow(
+                """
+                SELECT goals FROM user_preferences 
+                WHERE user_id = $1 
+                ORDER BY preference_id DESC
+                LIMIT 1
+                """,
+                user_id
+            )
+            
+            # If no goals found, skip the calculation
+            if not pref_row or not pref_row.get('goals'):
+                logger.debug(f"No goals found in preferences for user {user_id}. Skipping metric calculation.")
+                return
+                
+            goals = pref_row['goals']
+            
+            # Calculate all dependent values
+            calc = CalculationLogic()
+            bmi = calc.calculate_bmi(weight, height)
+            bmr = calc.calculate_bmr(weight, height, age_range, sex) if age_range and sex else None
+            
+            # Calculate ideal weight and ensure it's rounded to 1 decimal place
+            ideal_weight = round(calc.calculate_ideal_weight(height, sex), 1) if sex else None
+            
+            # Calculate and adjust calories based on weight goal
+            daily_calories = calc.calculate_daily_calories(bmr, activity_level, goals) if bmr and activity_level else None
+            bmi_category = calc.calculate_bmi_category(bmi) if bmi is not None else None
+            
+            # Ensure all values are properly typed before the query
+            bmi_val = float(bmi) if bmi is not None else None
+            bmi_cat = str(bmi_category) if bmi_category is not None else None
+            bmr_val = float(bmr) if bmr is not None else None
+            ideal_wt = float(ideal_weight) if ideal_weight is not None else None
+            daily_cals = float(daily_calories) if daily_calories is not None else None
+            user_id_int = int(user_id)
+            
+            logger.debug(f"Updating metrics with values - bmi: {bmi_val}, bmi_category: {bmi_cat}, bmr: {bmr_val}, ideal_weight: {ideal_wt}, daily_calories: {daily_cals}")
+            
+            # Update the metrics with calculated values for the user's most recent metric entry
+            result = await conn.execute(
+                """
+                WITH latest_metric AS (
+                    SELECT metric_id 
+                    FROM user_metrics 
+                    WHERE user_id = $6 
+                    ORDER BY recorded_at DESC 
+                    LIMIT 1
+                    FOR UPDATE
+                )
+                UPDATE user_metrics um
+                SET bmi = $1::numeric, 
+                    bmi_category = $2::varchar,
+                    bmr = $3::numeric,
+                    ideal_weight = $4::numeric,
+                    daily_calories = $5::numeric
+                FROM latest_metric lm
+                WHERE um.metric_id = lm.metric_id
+                RETURNING um.metric_id
+                """,
+                bmi_val,
+                bmi_cat,
+                bmr_val,
+                ideal_wt,
+                daily_cals,
+                user_id_int
+            )
+            
+            if not result or 'UPDATE 0' in result:
+                logger.warning(f"No metrics found to update for user_id: {user_id}")
+            else:
+                logger.info(f"Successfully updated dependent fields for user_id: {user_id}")
+                
+        except Exception as e:
+            logger.error(f"Error calculating dependent fields for user_id {user_id}: {e}", exc_info=True)
+        # Don't re-raise to prevent background tasks from failing silently
 
     async def _recalculate_daily_calories(self, conn: asyncpg.Connection, user_id: int):
         """
@@ -1066,15 +1457,111 @@ class AuthenticationAndUsers(BaseRepository):
         return []
 
     # --- Preferences Methods (async, use passed conn) ---
-    async def create_preference(self, conn: asyncpg.Connection, preference_data: Dict[str, Any]) -> Dict[str, int]:
-        # ... (implementation uses _execute_query with conn) ...
-        data_lower=lowercase_keys(preference_data); check_required_fields(data_lower, ['user_id', 'goals', 'diet_type'])
-        sql="INSERT INTO user_preferences (user_id, goals, diet_type, food_restrictions, cuisine_preferences) VALUES ($1, $2, $3, $4, $5) RETURNING preference_id"
-        try: params=(int(data_lower['user_id']), data_lower['goals'], data_lower['diet_type'], serialize_list(data_lower.get('food_restrictions', [])), serialize_list(data_lower.get('cuisine_preferences', [])))
-        except ValueError: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user_id format.")
-        preference_id = await self._execute_query(conn, sql, params, returning_id_column='preference_id')
-        if preference_id: logger.info(f"Created preference ID: {preference_id}"); return {"preference_id": preference_id}
-        else: raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Preference creation failed.")
+    async def create_preference(
+        self, 
+        conn: asyncpg.Connection, 
+        preference_data: Dict[str, Any],
+        background_tasks: Optional[BackgroundTasks] = None
+    ) -> Dict[str, int]:
+        """
+        Create a new user preference entry and trigger metric recalculation if goals are provided.
+        
+        Args:
+            conn: Database connection
+            preference_data: Dictionary containing preference data
+            background_tasks: Optional FastAPI BackgroundTasks instance for non-blocking operations
+            
+        Returns:
+            Dictionary containing the preference_id of the created record
+        """
+        data_lower = lowercase_keys(preference_data)
+        check_required_fields(data_lower, ['user_id', 'goals', 'diet_type'])
+        
+        try:
+            user_id = int(data_lower['user_id'])
+            goals = data_lower['goals']
+            diet_type = data_lower['diet_type']
+            food_restrictions = serialize_list(data_lower.get('food_restrictions', []))
+            cuisine_preferences = serialize_list(data_lower.get('cuisine_preferences', []))
+            
+            # Insert the new preference
+            sql = """
+                INSERT INTO user_preferences 
+                (user_id, goals, diet_type, food_restrictions, cuisine_preferences) 
+                VALUES ($1, $2, $3, $4, $5) 
+                RETURNING preference_id
+            """
+            params = (user_id, goals, diet_type, food_restrictions, cuisine_preferences)
+            
+            preference_id = await self._execute_query(
+                conn, sql, params, returning_id_column='preference_id'
+            )
+            
+            if not preference_id:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Preference creation failed."
+                )
+                
+            logger.info(f"Created preference ID: {preference_id}")
+            
+            # Since we know goals is required and always provided, we'll always try to recalculate metrics
+            # Get the latest metrics for this user
+            metrics = await conn.fetchrow(
+                """
+                SELECT * FROM user_metrics 
+                WHERE user_id = $1 
+                ORDER BY recorded_at DESC 
+                LIMIT 1
+                """,
+                user_id
+            )
+            
+            if metrics:
+                # Log that we're triggering a recalculation due to new preferences
+                logger.info(f"Triggering metric recalculation for new preference. User ID: {user_id}, Goals: {goals}")
+                
+                # Create a task with a new database connection
+                async def recalculate_metrics():
+                    try:
+                        # Create a new connection for this background task
+                        async with db_pool.acquire() as new_conn:
+                            await self._calculate_and_update_metrics(
+                                new_conn,
+                                metrics['metric_id'],
+                                user_id,
+                                float(metrics['weight']),
+                                float(metrics['height']),
+                                metrics['age_range'],
+                                metrics['sex'],
+                                metrics['activity_level']
+                            )
+                    except Exception as e:
+                        logger.error(f"Error in background metric recalculation: {str(e)}", exc_info=True)
+                
+                # Start the background task
+                if background_tasks is not None:
+                    background_tasks.add_task(recalculate_metrics)
+                    logger.debug(f"Queued background metric recalculation for user {user_id}")
+                else:
+                    asyncio.create_task(recalculate_metrics())
+                    logger.debug(f"Started async metric recalculation for user {user_id}")
+            else:
+                logger.info(f"No metrics found for user {user_id}. Will recalculate when metrics are added.")
+            
+            return {"preference_id": preference_id}
+            
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail="Invalid user_id format. Must be an integer."
+            )
+        except Exception as e:
+            logger.error(f"Error creating preference: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create preference: {str(e)}"
+            )
 
     async def update_preference(self, conn: asyncpg.Connection, preference_id: int, updates: Dict[str, Any]):
         # ... (implementation uses _execute_query with conn) ...
@@ -1209,23 +1696,81 @@ async def list_calorie_history(self, conn: asyncpg.Connection, user_id: int) -> 
 class Chefs(BaseRepository):
     # _validate_stock remains synchronous helper
     def _validate_stock(self, stock_data, is_chef=True):
-        # ... (implementation unchanged) ...
-        if stock_data is None: return []
-        if not isinstance(stock_data, list): raise ValueError(f"Stock must be a list, got {type(stock_data)}")
+        logger.info(f"Validating stock data: {stock_data}")
+        if stock_data is None: 
+            logger.info("Stock data is None, returning empty list")
+            return []
+            
+        if not isinstance(stock_data, list): 
+            error_msg = f"Stock must be a list, got {type(stock_data)}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+            
         id_field = 'meal_id' if is_chef else 'produce_id'
-        for item in stock_data:
-            if not isinstance(item, dict): raise ValueError(f"Stock item must be a dict, got {type(item)}")
-            name_val = item.get('Name')
-            if not isinstance(name_val, str) or not name_val.strip(): raise ValueError("Stock item Name required")
-            id_val = item.get(id_field);
-            if id_val is not None and not isinstance(id_val, str): raise ValueError(f"{id_field} must be string or null")
-            qty_val = item.get('quantity')
+        logger.info(f"Validating stock items with id_field: {id_field}")
+        
+        validated_stock = []
+        for i, item in enumerate(stock_data):
+            logger.info(f"Validating stock item {i}: {item}")
+            
+            if not isinstance(item, dict): 
+                error_msg = f"Stock item must be a dict, got {type(item)}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            # Create a case-insensitive dict for field lookup
+            item_lower = {str(k).lower(): v for k, v in item.items()}
+            
+            # Get name with case-insensitive lookup
+            name_val = None
+            for name_key in ['name', 'Name', 'NAME']:
+                if name_key in item:
+                    name_val = item[name_key]
+                    break
+                
+            logger.info(f"Item {i} Name value: {name_val} (type: {type(name_val)})")
+            
+            if not isinstance(name_val, str) or not name_val.strip():
+                error_msg = f"Stock item Name required. Got: {name_val} (type: {type(name_val)})"
+                logger.error(error_msg)
+                raise ValueError("Stock item Name required")
+            
+            # Create validated item with correct case
+            validated_item = {
+                'Name': name_val.strip(),
+                id_field: item.get(id_field),
+                'price': item_lower.get('price'),
+                'image': item_lower.get('image'),
+                'quantity': item_lower.get('quantity')
+            }
+            
+            # Log field values for debugging
+            logger.info(f"Item {i} {id_field} value: {validated_item[id_field]} (type: {type(validated_item[id_field]) if validated_item[id_field] is not None else 'None'})")
+            
+            # Validate ID field if present
+            if validated_item[id_field] is not None and not isinstance(validated_item[id_field], str):
+                error_msg = f"{id_field} must be string or null, got {type(validated_item[id_field])}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            # Validate quantity if present
+            qty_val = validated_item['quantity']
+            logger.info(f"Item {i} quantity value: {qty_val} (type: {type(qty_val) if qty_val is not None else 'None'})")
+            
             if qty_val is not None:
-                try: item['quantity'] = float(qty_val)
-                except (ValueError, TypeError): raise ValueError("Stock quantity must be number or null")
-        return stock_data
+                try: 
+                    validated_item['quantity'] = float(qty_val)
+                except (ValueError, TypeError) as e:
+                    error_msg = f"Stock quantity must be number or null, got {qty_val} ({type(qty_val)})"
+                    logger.error(error_msg)
+                    raise ValueError("Stock quantity must be number or null") from e
+                    
+            validated_stock.append(validated_item)
+            
+        logger.info("Stock validation successful")
+        return validated_stock
 
-    async def create_chef(self, conn: asyncpg.Connection, chef_data: dict):
+    async def create_chef(self, conn: asyncpg.Connection, chef_data: dict, background_tasks: Optional[BackgroundTasks] = None):
         # ... (uses conn for fetchval and _execute_query) ...
         chef_data_lower = lowercase_keys(chef_data)
         required = ['name', 'password', 'email', 'chef_type', 'phone_number', 'location', 'experience', 'responsetime', 'minnotice', 'teamsize', 'bio', 'image', 'pricing']
@@ -1257,8 +1802,19 @@ class Chefs(BaseRepository):
         if chef_id:
             # Initialize AuthenticationAndUsers to access email verification
             auth = AuthenticationAndUsers()
-            # Send verification email
-            await auth._handle_email_verification(conn, email, chef_id, user_type)
+            # Generate and store verification code (synchronously)
+            verification_code = await auth._handle_email_verification(conn, email, chef_id, user_type)
+            # Schedule email sending in background if background_tasks is provided
+            if background_tasks is not None:
+                background_tasks.add_task(
+                    auth._send_verification_email,
+                    email=email,
+                    verification_code=verification_code,
+                    user_type=user_type
+                )
+            else:
+                # Fallback to synchronous sending if no background_tasks provided
+                await auth._send_verification_email(email, verification_code, user_type)
             logger.info(f"Created chef ID: {chef_id}")
             return {"Chef_id": chef_id, "user_type": user_type, "message": "Chef created"}
         else: 
@@ -1435,7 +1991,7 @@ class Producers(BaseRepository):
         sql = f"UPDATE producers SET {','.join(set_clauses)} WHERE producer_id = ${idx}"; params.append(producer_id)
         await self._execute_query(conn, sql, tuple(params)); logger.info(f"Updated producer ID: {producer_id}")
 
-    async def create_producer(self, conn: asyncpg.Connection, producer_data: dict):
+    async def create_producer(self, conn: asyncpg.Connection, producer_data: dict, background_tasks: Optional[BackgroundTasks] = None):
         # ... (uses conn for fetchval and _execute_query) ...
         producer_data_lower=lowercase_keys(producer_data); check_required_fields(producer_data_lower,['name','password','email'])
         email=producer_data_lower['email']; check_sql="SELECT producer_id FROM producers WHERE lower(email)=lower($1)"
@@ -1452,8 +2008,19 @@ class Producers(BaseRepository):
         if producer_id: 
             # Initialize AuthenticationAndUsers to access email verification
             auth = AuthenticationAndUsers()
-            # Send verification email
-            await auth._handle_email_verification(conn, email, producer_id, user_type)
+            # Generate and store verification code (synchronously)
+            verification_code = await auth._handle_email_verification(conn, email, producer_id, user_type)
+            # Schedule email sending in background if background_tasks is provided
+            if background_tasks is not None:
+                background_tasks.add_task(
+                    auth._send_verification_email,
+                    email=email,
+                    verification_code=verification_code,
+                    user_type=user_type
+                )
+            else:
+                # Fallback to synchronous sending if no background_tasks provided
+                await auth._send_verification_email(email, verification_code, user_type)
             logger.info(f"Created producer ID: {producer_id}")
             return {"producer_id": producer_id, "UserType": user_type}
         else: 
@@ -1537,7 +2104,7 @@ class Producers(BaseRepository):
 
 # --- Transporters Class ---
 class Transporters(BaseRepository):
-    async def create_transporter(self, conn: asyncpg.Connection, transporter_data: dict):
+    async def create_transporter(self, conn: asyncpg.Connection, transporter_data: dict, background_tasks: Optional[BackgroundTasks] = None):
         # ... (uses conn for fetchval and _execute_query) ...
         data_lower=lowercase_keys(transporter_data); check_required_fields(data_lower,['name','password','email'])
         email=data_lower['email']; check_sql="SELECT transporter_id FROM transporters WHERE lower(email)=lower($1)"
@@ -1549,8 +2116,19 @@ class Transporters(BaseRepository):
         if transporter_id: 
             # Initialize AuthenticationAndUsers to access email verification
             auth = AuthenticationAndUsers()
-            # Send verification email
-            await auth._handle_email_verification(conn, email, transporter_id, user_type)
+            # Generate and store verification code (synchronously)
+            verification_code = await auth._handle_email_verification(conn, email, transporter_id, user_type)
+            # Schedule email sending in background if background_tasks is provided
+            if background_tasks is not None:
+                background_tasks.add_task(
+                    auth._send_verification_email,
+                    email=email,
+                    verification_code=verification_code,
+                    user_type=user_type
+                )
+            else:
+                # Fallback to synchronous sending if no background_tasks provided
+                await auth._send_verification_email(email, verification_code, user_type)
             logger.info(f"Created transporter ID: {transporter_id}")
             return {"transporter_id": transporter_id, "UserType": user_type, "message":"Transporter created"}
         else: 
@@ -1614,7 +2192,7 @@ class Transporters(BaseRepository):
 
 # --- Stakeholders Class ---
 class Stakeholders(BaseRepository):
-    async def create_stakeholder(self, conn: asyncpg.Connection, stakeholder_data: dict):
+    async def create_stakeholder(self, conn: asyncpg.Connection, stakeholder_data: dict, background_tasks: Optional[BackgroundTasks] = None):
         # ... (uses conn for fetchval and _execute_query) ...
         data_lower=lowercase_keys(stakeholder_data); check_required_fields(data_lower,['name','password','email','full_name'])
         email=data_lower['email']; check_sql="SELECT stakeholder_id FROM stakeholders WHERE lower(email)=lower($1)"
@@ -1628,8 +2206,19 @@ class Stakeholders(BaseRepository):
         if stakeholder_id: 
             # Initialize AuthenticationAndUsers to access email verification
             auth = AuthenticationAndUsers()
-            # Send verification email
-            await auth._handle_email_verification(conn, email, stakeholder_id, user_type)
+            # Generate and store verification code (synchronously)
+            verification_code = await auth._handle_email_verification(conn, email, stakeholder_id, user_type)
+            # Schedule email sending in background if background_tasks is provided
+            if background_tasks is not None:
+                background_tasks.add_task(
+                    auth._send_verification_email,
+                    email=email,
+                    verification_code=verification_code,
+                    user_type=user_type
+                )
+            else:
+                # Fallback to synchronous sending if no background_tasks provided
+                await auth._send_verification_email(email, verification_code, user_type)
             logger.info(f"Created stakeholder ID: {stakeholder_id}")
             return {"stakeholder_id": stakeholder_id, "UserType": user_type}
         else: 
@@ -3422,15 +4011,133 @@ async def get_favicon():
     return FileResponse("static/favicon.ico")
 
 # === USER Endpoints ===
-@app.post('/rr/signup_user', status_code=status.HTTP_201_CREATED)
-async def signup_user_endpoint(user_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
-    # ... (implementation unchanged, uses conn from dependency) ...
+@app.post("/rr/resend_verification_email", status_code=status.HTTP_202_ACCEPTED)
+async def resend_verification_email(
+    user_id: int = Body(..., embed=True),
+    user_type: str = Body(..., embed=True),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Resend verification email to the user with a new verification code.
+    
+    Args:
+        user_id: ID of the user to resend verification email to
+        user_type: Type of the user (e.g., 'user', 'chef', 'producer')
+        
+    Returns:
+        dict: Status message indicating success or failure
+    """
+    # Normalize user_type to lowercase for consistency
+    user_type_lower = user_type.lower().strip()
+    
     try:
-        name=user_data['name']; email=user_data['email']; password=user_data['password']; image=user_data.get('image')
-        user_info = await auth_users.create_user(conn, {'Name': name, 'Email': email, 'Password': password, 'Image': image}) # Pass conn
-        return {'message':'User registered. Verify email.', 'user_id': user_info['user_id']}
+        # Get user's email based on user_type
+        email_to_send = None
+        user_type_to_send = user_type_lower
+        
+        # Map user types to their respective tables
+        user_type_mapping = {
+            'user': 'users',
+            'chef': 'chefs',
+            'producer': 'producers',
+            'transporter': 'transporters'
+        }
+        
+        table_name = user_type_mapping.get(user_type_lower)
+        if not table_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid user type: {user_type}"
+            )
+        
+        # Get user's email from the appropriate table
+        email_result = await conn.fetchval(
+            f"SELECT email FROM {table_name} WHERE {table_name.rstrip('s')}_id = $1",
+            user_id
+        )
+        
+        if not email_result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User with ID {user_id} not found in {table_name} table"
+            )
+            
+        email_to_send = email_result.lower().strip()
+        
+        # Background task to handle verification code and email sending
+        async def send_verification_email():
+            logger.info(f"Attempting to resend verification email to {email_to_send}")
+            try:
+                # Get a new connection from the pool for the background task
+                async with db_pool.acquire() as bg_conn:
+                    auth_handler = AuthenticationAndUsers()
+                    # Let _handle_email_verification handle code generation and storage
+                    # This will also handle deleting any existing codes for this user
+                    verification_code = await auth_handler._handle_email_verification(
+                        bg_conn, email_to_send, user_id, user_type_lower
+                    )
+                    # Send the email with the verification code
+                    await auth_handler._send_verification_email(
+                        email_to_send, verification_code, user_type_lower
+                    )
+                    # Success message is logged in _send_verification_email
+            except Exception as e:
+                logger.error(f"Error in background email sending task: {e}", exc_info=True)
+        
+        # Start the background task
+        asyncio.create_task(send_verification_email())
+        
+        return {"message": "Verification email resent successfully"}
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error resending verification email: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while resending the verification email"
+        )
+
+@app.post('/rr/signup_user', status_code=status.HTTP_201_CREATED)
+async def signup_user_endpoint(
+    user_data: dict = Body(...), 
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    try:
+        name = user_data['name']
+        email = user_data['email']
+        password = user_data['password']
+        image = user_data.get('image')
+        user_type = user_data.get('user_type', 'user')
+        phone = user_data.get('phone_number')
+        
+        # Call signup_user directly with background_tasks
+        result = await auth_users.signup_user(
+            conn=conn,
+            name=name,
+            email=email,
+            password=password,
+            user_type=user_type,
+            image=image,
+            phone=phone,
+            background_tasks=background_tasks
+        )
+        
+        return {
+            'message': 'User registered. Please check your email for verification.',
+            'user_id': result['user_id'],
+            'user_type': user_type,
+            'phone': result['phone']
+        }
+    except HTTPException as he:
+        # Re-raise HTTPException to maintain the original status code and detail
+        raise he
     except KeyError as ke:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Missing field: {ke}')
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail=f'Missing required field: {ke}'
+        )
 
 @app.post('/rr/verify_user')
 async def verify_user_endpoint(verification_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
@@ -3521,8 +4228,12 @@ async def delete_user_endpoint(user_id: int, conn: asyncpg.Connection = Depends(
 
 # === CHEF Endpoints ===
 @app.post('/rr/signup_chef', status_code=status.HTTP_201_CREATED)
-async def create_chef_endpoint(chef_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
-    return await chefs_crud.create_chef(conn, chef_data) # Pass conn
+async def create_chef_endpoint(
+    chef_data: dict = Body(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    return await chefs_crud.create_chef(conn, chef_data, background_tasks) # Pass conn and background_tasks
 
 @app.post('/rr/login/chefs')
 async def login_chef_endpoint(login_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
@@ -3544,10 +4255,26 @@ async def get_chef_by_id_endpoint(chef_id: int = Path(..., gt=0), conn: asyncpg.
 @app.put('/rr/chefs/{chef_id}')
 @app.patch('/rr/chefs/{chef_id}')
 async def update_chef_endpoint(chef_id: int, updates: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
-    await chefs_crud.update_chef(conn, chef_id, updates) # Pass conn
-    updated_chef_list = await chefs_crud.list_chefs(conn, chef_id=chef_id) # Pass conn
-    if updated_chef_list: return {'message': 'Chef updated', 'data': updated_chef_list[0]}
-    else: raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Chef not found after update.')
+    # Log the incoming request data for debugging
+    logger.info(f"Received update request for chef {chef_id}")
+    logger.info(f"Update data: {updates}")
+    if 'stock' in updates:
+        logger.info(f"Stock data type: {type(updates['stock'])}")
+        if isinstance(updates['stock'], list) and updates['stock']:
+            logger.info(f"First stock item: {updates['stock'][0]}")
+            logger.info(f"First stock item type: {type(updates['stock'][0])}")
+    
+    try:
+        await chefs_crud.update_chef(conn, chef_id, updates) # Pass conn
+        updated_chef_list = await chefs_crud.list_chefs(conn, chef_id=chef_id) # Pass conn
+        if updated_chef_list: 
+            return {'message': 'Chef updated', 'data': updated_chef_list[0]}
+        else: 
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, 
+                            detail='Chef not found after update.')
+    except Exception as e:
+        logger.error(f"Error updating chef {chef_id}: {str(e)}", exc_info=True)
+        raise
 
 @app.delete('/rr/chefs/{chef_id}', status_code=status.HTTP_200_OK)
 async def delete_chef_endpoint(chef_id: int, conn: asyncpg.Connection = Depends(get_db)):
@@ -3633,8 +4360,12 @@ async def get_meal_calories(meal_id: str, conn: asyncpg.Connection = Depends(get
 
 # === PRODUCER Endpoints ===
 @app.post('/rr/aproducers', status_code=status.HTTP_201_CREATED)
-async def add_producer_endpoint(producer_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
-    return await producers_crud.create_producer(conn, producer_data) # Pass conn
+async def add_producer_endpoint(
+    producer_data: dict = Body(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    return await producers_crud.create_producer(conn, producer_data, background_tasks) # Pass conn and background_tasks
 
 @app.post('/rr/login/producers')
 async def login_producer_endpoint(login_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
@@ -3676,8 +4407,12 @@ async def update_producer_status_endpoint(producer_id: int, status_update: dict 
 
 # === TRANSPORTER Endpoints ===
 @app.post('/rr/transporters/signup', status_code=status.HTTP_201_CREATED)
-async def signup_transporter_endpoint(transporter_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
-    return await transporters_crud.create_transporter(conn, transporter_data) # Pass conn
+async def signup_transporter_endpoint(
+    transporter_data: dict = Body(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    return await transporters_crud.create_transporter(conn, transporter_data, background_tasks) # Pass conn and background_tasks
 
 @app.post('/rr/transporters/login')
 async def login_transporter_endpoint(login_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
@@ -4094,9 +4829,13 @@ async def get_notification_history(
     except Exception as e:
         logger.error(f"Error getting notification history: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-@app.post('/rr/create_stakeholders', status_code=status.HTTP_201_CREATED)
-async def add_stakeholder_endpoint(stakeholder_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
-    return await stakeholders_crud.create_stakeholder(conn, stakeholder_data) # Pass conn
+@app.post('/rr/stakeholders', status_code=status.HTTP_201_CREATED)
+async def add_stakeholder_endpoint(
+    stakeholder_data: dict = Body(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    return await stakeholders_crud.create_stakeholder(conn, stakeholder_data, background_tasks) # Pass conn and background_tasks
 
 @app.post('/rr/login/stakeholders')
 async def login_stakeholder_endpoint(login_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
