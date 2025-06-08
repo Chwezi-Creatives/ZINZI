@@ -724,7 +724,7 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
         // Use lowercase keys to match API response
         String title = meal['meal_name'] ?? 'Unknown Meal';
         String imagePath =
-            meal['image_link'] ?? 'assets/images/mealimageplaceholder.jpg';
+            meal['image_link'] ?? 'assets/images/mealimageplaceholder.png';
         String mealId = meal['meal_id']?.toString() ?? 'unknown-$index';
 
         // Use helper to process image path (Handles GDrive, HTTP, Assets, Placeholders)
@@ -767,7 +767,7 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
           child: Container(color: kColorSurface),
         ),
         errorWidget: (context, url, error) => Image.asset(
-          'assets/images/mealimageplaceholder.jpg',
+          'assets/images/mealimageplaceholder.png',
           fit: BoxFit.cover,
         ),
       );
@@ -777,7 +777,7 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
         imagePath,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) => Image.asset(
-          'assets/images/mealimageplaceholder.jpg',
+          'assets/images/mealimageplaceholder.png',
           fit: BoxFit.cover,
         ),
       );
@@ -850,7 +850,7 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
     } else {
       // If it's not a recognized format, use placeholder
       print("Invalid or unrecognized image path for $mealName: $rawPath");
-      return 'assets/images/mealimageplaceholder.jpg';
+      return 'assets/images/mealimageplaceholder.png';
     }
   }
 
@@ -872,7 +872,7 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
 
       // Ensure all required fields have values
       normalizedMeal['Meal_name'] = normalizedMeal['Meal_name'] ?? 'Unknown Meal';
-      normalizedMeal['Image_link'] = normalizedMeal['Image_link'] ?? 'assets/images/mealimageplaceholder.jpg';
+      normalizedMeal['Image_link'] = normalizedMeal['Image_link'] ?? 'assets/images/mealimageplaceholder.png';
       normalizedMeal['Description'] = normalizedMeal['Description'] ?? 'No description available';
       
       // Handle price field

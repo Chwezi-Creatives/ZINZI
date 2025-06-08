@@ -21,6 +21,7 @@ import 'package:zinzi/signup_or_Login.dart';
 import 'package:zinzi/useranalytics.dart';
 import 'package:zinzi/orderhistory.dart';
 import 'package:zinzi/onboard.dart';
+import 'package:zinzi/user_cache.dart';
 
 // --- Color Constants ---
 const Color kColorPrimaryDark = Color(0xFF004D40);
@@ -382,13 +383,21 @@ class _AppDrawerState extends State<AppDrawer> {
 
   Future<void> _logout() async {
     try {
+      // Get user ID before clearing prefs
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('user_id');
+      
       // Clear user cache if user info is available
       if (_userId != null && _userType != null) {
         await AppDrawer.clearUserCache(_userId!, _userType!);
       }
       
+      // Clear user-specific caches
+      if (userId != null) {
+        await UserCache.clearUserData(userId);
+      }
+      
       // Clear all user-related data from SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
       await prefs.remove('user_id');
       await prefs.remove('user_type');
       

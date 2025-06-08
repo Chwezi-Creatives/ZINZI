@@ -52,7 +52,7 @@ class _UserMetricsPageState extends State<UserMetricsPage>
   String? _sex;
   String? _activityLevel;
 
-  int? _userId;
+  String? _userId;
 
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
@@ -117,13 +117,15 @@ class _UserMetricsPageState extends State<UserMetricsPage>
   Future<void> _loadUserId() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _userId = prefs.getInt('user_id');
+      _userId = prefs.getString('user_id');
     });
 
-    if (_userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('User ID not found. Please log in again.'),
-      ));
+    if (_userId == null || _userId!.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('User ID not found. Please log in again.'),
+        ));
+      }
     }
   }
 
@@ -139,13 +141,9 @@ class _UserMetricsPageState extends State<UserMetricsPage>
     _parseAndUpdateWeight();
     _parseAndUpdateHeight();
 
-
     if (_formKey.currentState!.validate()) { // Validate before submitting
       try {
-        final response = await http.post(
-          Uri.parse('$apibaseurl/rr/metrics'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
+        final payload = {
           'user_id': _userId,
           'age_range': _ageRange,
           'weight': _weight,
@@ -156,33 +154,50 @@ class _UserMetricsPageState extends State<UserMetricsPage>
           'pulse': _pulse,
           'sex': _sex,
           'activity_level': _activityLevel,
-          }),
+        };
+
+        // Log the payload being sent
+        debugPrint('📤 METRICS PAYLOAD: ${jsonEncode(payload)}');
+        debugPrint('🌐 Sending request to: $apibaseurl/rr/metrics');
+
+        final response = await http.post(
+          Uri.parse('$apibaseurl/rr/metrics'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode(payload),
         );
 
+        // Log the response
+        debugPrint('📥 METRICS RESPONSE:');
+        debugPrint('Status Code: ${response.statusCode}');
+        debugPrint('Response Body: ${response.body}');
+
         if (response.statusCode == 201) {
-          Navigator.pushReplacement( // Use pushReplacement if appropriate
+          debugPrint('✅ Metrics submitted successfully');
+          Navigator.pushReplacement(
             context,
-          PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) =>
-                UserPreferencesPage(),
-            transitionsBuilder:
-                (context, animation, secondaryAnimation, child) {
-              return FadeTransition(
-                opacity: animation,
-                child: child,
-              );
-            },
-          ),
-        );
-      } else {
+            PageRouteBuilder(
+              pageBuilder: (context, animation, secondaryAnimation) =>
+                  UserPreferencesPage(),
+              transitionsBuilder:
+                  (context, animation, secondaryAnimation, child) {
+                return FadeTransition(
+                  opacity: animation,
+                  child: child,
+                );
+              },
+            ),
+          );
+        } else {
+          debugPrint('❌ Failed to submit metrics. Status: ${response.statusCode}');
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Failed to submit metrics data. Please try again.'),
+          ));
+        }
+      } catch (e) {
+        debugPrint('❌ Error submitting metrics: $e');
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Failed to submit metrics data. Please try again.'),
+          content: Text('Error submitting metrics: $e'),
         ));
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Error submitting metrics: $e'),
-      ));
       }
     } else {
        ScaffoldMessenger.of(context).showSnackBar(SnackBar(

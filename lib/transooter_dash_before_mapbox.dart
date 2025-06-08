@@ -1837,8 +1837,16 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
 
     if (confirm == true) {
       try {
-        // Dynamically clear all user-related keys from SharedPreferences
+        // Get user ID before clearing prefs
         final prefs = await SharedPreferences.getInstance();
+        final userId = prefs.getString('transporter_user_id') ?? prefs.getString('user_id');
+        
+        // Clear user-specific caches
+        if (userId != null) {
+          await UserCache.clearUserData(userId);
+        }
+        
+        // Dynamically clear all user-related keys from SharedPreferences
         final keys = prefs.getKeys();
         final patterns = [RegExp(r'_id\b'), RegExp(r'_user_type\b')];
         for (final key in keys) {
@@ -1847,8 +1855,11 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           }
         }
         // Clear specific keys
-        await prefs.remove('transporter_token'); // **VERIFY KEY NAME**
-        await prefs.remove('transporter_user_id'); // **VERIFY KEY NAME**
+        await prefs.remove('transporter_token');
+        await prefs.remove('transporter_user_id');
+        await prefs.remove('user_id');
+        await prefs.remove('user_type');
+        
         // Clear profile cache
         await UserCache.removeData(_profileCacheKey);
         await UserCache.removeData(_profileCacheTimestampKey);

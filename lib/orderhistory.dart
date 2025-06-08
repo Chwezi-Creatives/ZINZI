@@ -134,11 +134,21 @@ class OrderHistoryScreen extends StatefulWidget {
 
   /// Preload order history cache for splash screen (no UI, no context needed)
   static Future<void> preloadCacheForSplash() async {
-    const String cacheKey = 'order_history_cache';
-    const String cacheTsKey = 'order_history_cache_ts';
+    final prefs = await SharedPreferences.getInstance();
+    final String? userId = prefs.getString('user_id');
+    if (userId == null) {
+      print('[Splash][OrderHistory] No user ID found, skipping cache preload');
+      return;
+    }
+    
+    final String cacheKey = 'order_history_cache';
+    final String cacheTsKey = 'order_history_cache_ts';
     final now = DateTime.now();
-    final cachedOrders = await UserCache.getData(cacheKey);
-    final cachedTs = await UserCache.getData(cacheTsKey);
+    
+    // Use user-specific cache methods
+    final cachedOrders = await UserCache.getUserData(cacheKey, userId: userId);
+    final cachedTs = await UserCache.getUserData(cacheTsKey, userId: userId);
+    
     bool cacheValid = false;
     if (cachedOrders != null && cachedTs != null) {
       final cacheTime = DateTime.tryParse(cachedTs.toString());
@@ -177,8 +187,8 @@ class OrderHistoryScreen extends StatefulWidget {
                   }
                 }
               }
-              await UserCache.saveData(cacheKey, orders);
-              await UserCache.saveData(cacheTsKey, now.toIso8601String());
+              await UserCache.saveUserData(cacheKey, orders, userId: userId);
+              await UserCache.saveUserData(cacheTsKey, now.toIso8601String(), userId: userId);
             }
           }
         }
@@ -200,6 +210,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
   List<Map<String, dynamic>> _filteredOrders = [];
   static const String _cacheKey = 'order_history_cache';
   static const String _cacheTsKey = 'order_history_cache_ts';
+  String? _userId; // Store user ID for cache operations
   final Map<int, bool> _isExpandedMap = {};
   Timer? _pollingTimer;
   bool _isRefreshing = false;
@@ -421,6 +432,20 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
         _isVerificationProcessActive = false; // Ensure reset on full refresh
       });
     }
+    
+    // Get user ID for cache operations
+    final prefs = await SharedPreferences.getInstance();
+    _userId = prefs.getString('user_id');
+    if (_userId == null || _userId!.isEmpty) {
+      final int? intUserId = prefs.getInt('user_id');
+      if (intUserId != null) {
+        _userId = intUserId.toString();
+        await prefs.setString('user_id', _userId!);
+      } else {
+        print("User ID not found in preferences. User needs to log in.");
+        throw Exception("User not logged in.");
+      }
+    }
     try {
       final prefs = await SharedPreferences.getInstance();
       String? userId = prefs.getString('user_id');
@@ -434,12 +459,13 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
           throw Exception("User not logged in.");
         }
       }
-      // --- CACHE-FIRST: Try loading from cache first ---
+      // --- CACHE-FIRST: Try loading from user-specific cache first ---
       bool cacheValid = false;
       List<Map<String, dynamic>> cachedOrders = [];
-      final cachedData = await UserCache.getData(_cacheKey);
-      final cachedTs = await UserCache.getData(_cacheTsKey);
+      final cachedData = await UserCache.getUserData(_cacheKey, userId: _userId);
+      final cachedTs = await UserCache.getUserData(_cacheTsKey, userId: _userId);
       final now = DateTime.now();
+      
       if (cachedData != null && cachedTs != null) {
         final cacheTime = DateTime.tryParse(cachedTs.toString());
         if (cacheTime != null && now.difference(cacheTime) < const Duration(minutes: 15)) {
@@ -447,16 +473,28 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
           cacheValid = true;
         }
       }
+      
       if (cacheValid) {
-        print('[OrderHistory] Loaded from cache.');
+        print('[OrderHistory] Loaded from user-specific cache.');
         // Start background fetch but return cached data immediately
-        _fetchAndUpdateOrderHistory(userId);
-        if (mounted) setState(() { _orders = List<Map<String, dynamic>>.from(cachedOrders); });
+        _fetchAndUpdateOrderHistory(_userId!);
+        if (mounted) {
+          setState(() { 
+            _orders = List<Map<String, dynamic>>.from(cachedOrders);
+            _applyFilters();
+          });
+        }
         return List<Map<String, dynamic>>.from(cachedOrders);
       } else {
         // No valid cache, fetch from API
-        final freshOrders = await _fetchAndUpdateOrderHistory(userId!);
-        if (mounted) setState(() { _orders = freshOrders; });
+        print('[OrderHistory] No valid cache, fetching from API...');
+        final freshOrders = await _fetchAndUpdateOrderHistory(_userId!);
+        if (mounted) {
+          setState(() { 
+            _orders = freshOrders;
+            _applyFilters();
+          });
+        }
         return freshOrders;
       }
     } catch (e) {
@@ -471,10 +509,12 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
     final orders = await _fetchOrderHistoryDetails(userId);
     print('[DEBUG] After await _fetchOrderHistoryDetails in _fetchAndUpdateOrderHistory');
     try {
-      await UserCache.saveData(_cacheKey, orders);
-      await UserCache.saveData(_cacheTsKey, DateTime.now().toIso8601String());
+      // Save to user-specific cache
+      await UserCache.saveUserData(_cacheKey, orders, userId: userId);
+      await UserCache.saveUserData(_cacheTsKey, DateTime.now().toIso8601String(), userId: userId);
+      print('[OrderHistory] Saved to user-specific cache');
     } catch (e) {
-      print('[OrderHistory] Error saving to cache: $e');
+      print('[OrderHistory] Error saving to user-specific cache: $e');
     }
     print('[DEBUG] Exiting _fetchAndUpdateOrderHistory for userId=$userId');
     return orders;

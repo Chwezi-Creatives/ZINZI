@@ -1,3 +1,4 @@
+
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -11,10 +12,8 @@ import 'package:shimmer/shimmer.dart';
 import 'package:zinzi/app_drawer_unified.dart' as drawer;
 import 'package:zinzi/notifications/notification_widget.dart';
 import 'package:zinzi/transooter_dash_before_mapbox.dart' show Payment;
-// Removed image_picker, multi_select_flutter, geolocator, dart:io, dart:async (specific to ProfileTab)
-// Removed user_cache, cache_config (specific to ProfileTab caching)
-import 'package:zinzi/chef_verification_helper.dart'; // Import verification helper
-import 'package:zinzi/utils/image_utils.dart'; // Import ImageUtils for URL processing
+import 'package:zinzi/chef_verification_helper.dart';
+import 'package:zinzi/utils/image_utils.dart';
 
 // --- Consistent Color Palette ---
 const Color primaryTeal = Color(0xFF00796B); // Teal 700
@@ -43,24 +42,20 @@ const String statusAssigned = 'Assigned';
 const String statusOutForDelivery = 'Out for Delivery';
 const String statusDelivered = 'Delivered';
 const String statusCancelled = 'Cancelled';
-const String statusRejected = 'Rejected'; 
-const String statusShipped = 'Shipped'; 
-const String statusCompleted = 'Completed'; 
+const String statusRejected = 'Rejected';
+const String statusShipped = 'Shipped';
+const String statusCompleted = 'Completed';
 const String statusVerificationNeeded = 'Verification Needed';
-
-// Predefined value lists like responseTimes, allLanguages etc. have been moved to chef_profile.dart
 
 String get _apibaseurl {
   try {
-    return dotenv.env['API_BASE_URL-intranet'] ?? 'https://api.example.com'; 
+    return dotenv.env['API_BASE_URL-intranet'] ?? 'https://api.example.com';
   } catch (e) {
     print(
         "Error accessing dotenv for API_BASE_URL-intranet. Ensure dotenv.load() was called. Using fallback. Error: $e");
-    return 'https://api.example.com'; 
+    return 'https://api.example.com';
   }
 }
-
-// ChefProfile class moved to chef_profile.dart
 
 class Order {
   final int orderId;
@@ -80,6 +75,7 @@ class Order {
   String? assignedRiderName;
   final String? customerName;
   final double? orderTotal;
+  final List<Map<String, dynamic>>? complementaryMeals;
 
   Order({
     required this.orderId,
@@ -99,6 +95,7 @@ class Order {
     this.assignedRiderName,
     this.customerName,
     this.orderTotal,
+    this.complementaryMeals,
   });
 
   factory Order.fromMockJson(Map<String, dynamic> json) {
@@ -111,7 +108,8 @@ class Order {
     } catch (e) {
       try {
         parsedDate = json['order_date'] != null
-            ? (DateTime.tryParse(json['order_date'])?.toUtc() ?? DateTime.now().toUtc())
+            ? (DateTime.tryParse(json['order_date'])?.toUtc() ??
+                DateTime.now().toUtc())
             : DateTime.now().toUtc();
       } catch (e2) {
         print("Error parsing date: ${json['order_date']} - $e - $e2");
@@ -146,24 +144,41 @@ class Order {
       return null;
     }
 
+    List<Map<String, dynamic>>? _parseComplementaryMeals(dynamic value) {
+      if (value == null || value is! List) return null;
+      try {
+        return List<Map<String, dynamic>>.from(value);
+      } catch (e) {
+        print('Error parsing complementary meals: $e');
+        return null;
+      }
+    }
+
     return Order(
       orderId: _parseIntSafe(json['order_id']),
-      mealName: _getStringSafe(json['product_name'] ?? json['meal_name'] ?? json['gig_title']) ?? 'N/A',
+      mealName: _getStringSafe(
+              json['product_name'] ?? json['meal_name'] ?? json['gig_title']) ??
+          'N/A',
       producerName: _getStringSafe(json['producer_name']),
       orderDate: parsedDate,
       orderStatus: _getStringSafe(json['order_status']) ?? 'Unknown',
       paymentStatus: _getStringSafe(json['payment_status']) ?? 'Unknown',
       totalPrice: _getStringSafe(json['total_price']) ?? '0.00',
-      deliveryAddress: _getStringSafe(json['delivery_address'] ?? json['gig_location']),
-      ingredients: _getStringSafe(json['ingredients'] ?? json['gig_requirements']),
+      deliveryAddress:
+          _getStringSafe(json['delivery_address'] ?? json['gig_location']),
+      ingredients:
+          _getStringSafe(json['ingredients'] ?? json['gig_requirements']),
       notes: _getStringSafe(json['notes']),
       quantity: _parseIntSafe(json['quantity'] ?? json['gig_guests']),
       userId: _parseIntNullable(json['user_id']),
       orderType: _getStringSafe(json['order_type']),
-      assignedRiderId: _parseIntNullable(json['assigned_rider_id'] ?? json['assigned_staff_id']),
-      assignedRiderName: _getStringSafe(json['assigned_rider_name'] ?? json['assigned_staff_name']),
+      assignedRiderId: _parseIntNullable(
+          json['assigned_rider_id'] ?? json['assigned_staff_id']),
+      assignedRiderName: _getStringSafe(
+          json['assigned_rider_name'] ?? json['assigned_staff_name']),
       customerName: _getStringSafe(json['customer_name']),
       orderTotal: _parseDoubleNullable(json['order_total']),
+      complementaryMeals: _parseComplementaryMeals(json['complementary_meals']),
     );
   }
 }
@@ -221,19 +236,29 @@ class MealProduct {
     }
 
     return MealProduct(
-      mealId: _getStringSafe(json['Meal_id'] ?? json['meal_id'] ?? json['id']) ?? 'N/A_ID',
-      mealName: _getStringSafe(json['Meal_name'] ?? json['meal_name'] ?? json['name']) ?? 'N/A',
-      mealDescription: _getStringSafe(json['Meal_description'] ?? json['meal_description'] ?? json['description']),
-      imageLink: _isValidUrl(_getStringSafe(json['Image_link'] ?? json['image_link'] ?? json['image']))
-          ? _getStringSafe(json['Image_link'] ?? json['image_link'] ?? json['image'])
-          : null,
+      mealId: _getStringSafe(json['Meal_id'] ?? json['meal_id'] ?? json['id']) ??
+          'N/A_ID',
+      mealName:
+          _getStringSafe(json['Meal_name'] ?? json['meal_name'] ?? json['name']) ??
+              'N/A',
+      mealDescription: _getStringSafe(json['Meal_description'] ??
+          json['meal_description'] ??
+          json['description']),
+      imageLink:
+          _isValidUrl(_getStringSafe(json['Image_link'] ?? json['image_link'] ?? json['image']))
+              ? _getStringSafe(
+                  json['Image_link'] ?? json['image_link'] ?? json['image'])
+              : null,
       price: parsePrice(json['Price'] ?? json['price']),
       ingredients: _getStringSafe(json['Ingredients'] ?? json['ingredients']),
       prepTime: _getStringSafe(json['Prep_time'] ?? json['prep_time']),
       skillLevel: _getStringSafe(json['Skill_level'] ?? json['skill_level']),
-      mealCategory: _getStringSafe(json['Meal_category'] ?? json['meal_category']),
-      complementaryDishes: _getStringSafe(json['Complementary_dishes'] ?? json['complementary_dishes']),
-      dietaryPreference: _getStringSafe(json['Dietary_preference'] ?? json['dietary_preference']),
+      mealCategory:
+          _getStringSafe(json['Meal_category'] ?? json['meal_category']),
+      complementaryDishes: _getStringSafe(
+          json['Complementary_dishes'] ?? json['complementary_dishes']),
+      dietaryPreference: _getStringSafe(
+          json['Dietary_preference'] ?? json['dietary_preference']),
       allergies: _getStringSafe(json['Allergies'] ?? json['allergies']),
     );
   }
@@ -274,8 +299,12 @@ class Rider {
     }
 
     return Rider(
-      id: _parseIntNullable(json['rider_id'] ?? json['transporter_id'] ?? json['id']) ?? 0,
-      name: _getStringSafe(json['name'] ?? json['rider_name'] ?? json['transporter_name']) ?? 'Unnamed Rider',
+      id: _parseIntNullable(
+              json['rider_id'] ?? json['transporter_id'] ?? json['id']) ??
+          0,
+      name: _getStringSafe(
+              json['name'] ?? json['rider_name'] ?? json['transporter_name']) ??
+          'Unnamed Rider',
       status: _getStringSafe(json['status']) ?? 'unknown',
       isActive: _parseBoolSafe(json['is_active']),
     );
@@ -286,7 +315,7 @@ class ApiService {
   final String _baseUrl = _apibaseurl;
   static String get _staticBaseUrl => _apibaseurl;
 
-  ApiService(); 
+  ApiService();
 
   static Future<String?> _getChefId() async {
     try {
@@ -298,9 +327,73 @@ class ApiService {
     }
   }
 
-  Future<bool> updateChefStock(String payload) async {
-    print("Stock Update Triggered (Coming Soon)");
-    return false;
+  // Fetches chef profile, primarily to get the current 'stock'
+  static Future<Map<String, dynamic>> fetchChefProfile() async {
+    final chefId = await _getChefId();
+    if (chefId == null) {
+      throw Exception('Chef ID not found. Please log in again.');
+    }
+    final uri = Uri.parse('$_staticBaseUrl/rr/rchefs/$chefId');
+    print("[API] Fetching chef profile from: $uri");
+
+    try {
+      final response = await http.get(uri).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data is List && data.isNotEmpty) {
+          return data.first as Map<String, dynamic>;
+        }
+        if (data is Map<String, dynamic>) {
+          return data;
+        }
+        throw Exception('Unexpected profile data format.');
+      } else {
+        throw Exception(
+            'Failed to load chef profile (Status code: ${response.statusCode})');
+      }
+    } on TimeoutException {
+      throw Exception('Request timed out while fetching profile.');
+    } catch (e) {
+      throw Exception('Failed to load chef profile: $e');
+    }
+  }
+
+  // Sends a PATCH request to update the chef's stock
+  static Future<bool> updateChefStock(Map<String, dynamic> updateData) async {
+    final chefId = await _getChefId();
+    if (chefId == null) {
+      throw Exception("Chef ID not found. Cannot update stock.");
+    }
+    
+    final Uri uri = Uri.parse('$_staticBaseUrl/rr/chefs/$chefId');
+    final headers = {
+      'Content-Type': 'application/json; charset=UTF-8',
+      'Accept': 'application/json',
+    };
+    
+    print("[API] Updating chef stock for chef $chefId at $uri");
+    print("[API] Payload: ${jsonEncode(updateData)}");
+
+    try {
+      final response = await http.patch(
+        uri,
+        headers: headers,
+        body: jsonEncode(updateData),
+      ).timeout(const Duration(seconds: 20));
+
+      if (response.statusCode == 200) {
+        print("[API] Stock update successful: ${response.body}");
+        return true;
+      } else {
+        print("[API] Error updating stock: ${response.statusCode} ${response.body}");
+        return false;
+      }
+    } on TimeoutException {
+      throw Exception("Request timed out. Please try again.");
+    } catch (e) {
+      print("[API] Exception updating stock: $e");
+      rethrow;
+    }
   }
 
   static dynamic _handleApiResponse(dynamic responseData) {
@@ -312,24 +405,25 @@ class ApiService {
       } else if (responseData['data'] is Map) {
         return responseData['data'];
       } else {
-        print("API Warning: Response has 'data' key but value is not a List or Map.");
+        print(
+            "API Warning: Response has 'data' key but value is not a List or Map.");
         return responseData['data'];
       }
     } else if (responseData is Map && responseData.containsKey('All_Meals')) {
       if (responseData['All_Meals'] is List) {
         return responseData['All_Meals'];
       } else {
-        print("API Warning: Response has 'All_Meals' key but value is not a List.");
+        print(
+            "API Warning: Response has 'All_Meals' key but value is not a List.");
         return null;
       }
     } else if (responseData is Map && responseData.isNotEmpty) {
       return responseData;
     }
-    print("API Warning: Unhandled response format. Expected List or Map. Got: ${responseData.runtimeType}");
+    print(
+        "API Warning: Unhandled response format. Expected List or Map. Got: ${responseData.runtimeType}");
     return null;
   }
-
-  // fetchChefProfile, updateChefProfile, updateChefProfileImage, uploadImageToImgur, updateProfileStatus moved to chef_profile.dart
 
   Future<List<Order>> fetchOrders() async {
     final chefId = await _getChefId();
@@ -351,20 +445,25 @@ class ApiService {
                 if (jsonItem is Map<String, dynamic>) {
                   return Order.fromMockJson(jsonItem);
                 } else {
-                  print("API Warning: Skipping non-map item in orders list: $jsonItem");
+                  print(
+                      "API Warning: Skipping non-map item in orders list: $jsonItem");
                   return null;
                 }
               })
               .whereType<Order>()
               .toList();
         } else {
-          print("Orders API response format unexpected. Got: ${ordersList?.runtimeType}");
-          if (ordersList == null || (ordersList is Map && ordersList.isEmpty)) return [];
-          throw Exception('Failed to parse orders: Unexpected API response format (not a list)');
+          print(
+              "Orders API response format unexpected. Got: ${ordersList?.runtimeType}");
+          if (ordersList == null || (ordersList is Map && ordersList.isEmpty))
+            return [];
+          throw Exception(
+              'Failed to parse orders: Unexpected API response format (not a list)');
         }
       } else {
         print("Error fetching orders: ${response.statusCode} ${response.body}");
-        throw Exception('Failed to load orders (Status code: ${response.statusCode})');
+        throw Exception(
+            'Failed to load orders (Status code: ${response.statusCode})');
       }
     } on TimeoutException {
       print("Timeout fetching orders for chef $chefId");
@@ -380,7 +479,8 @@ class ApiService {
     final Uri uri = Uri.parse('$_staticBaseUrl/rr/meals');
     print("Fetching products/menu from: $uri");
     try {
-      final response = await http.get(uri).timeout(const Duration(seconds: 20));
+      final response =
+          await http.get(uri).timeout(const Duration(seconds: 20));
       if (response.statusCode == 200) {
         final dynamic rawData = json.decode(response.body);
         List<dynamic>? menuList;
@@ -389,7 +489,8 @@ class ApiService {
         } else if (rawData is Map<String, dynamic>) {
           if (rawData.containsKey('data') && rawData['data'] is List) {
             menuList = rawData['data'];
-          } else if (rawData.containsKey('All_Meals') && rawData['All_Meals'] is List) {
+          } else if (rawData.containsKey('All_Meals') &&
+              rawData['All_Meals'] is List) {
             menuList = rawData['All_Meals'];
           } else if (rawData.isEmpty) {
             menuList = [];
@@ -401,11 +502,12 @@ class ApiService {
           if (handledData is List) {
             menuList = handledData;
           } else {
-            print("Products API Warning: Response is not a recognized list format. Handling returned: ${handledData?.runtimeType}");
+            print(
+                "Products API Warning: Response is not a recognized list format. Handling returned: ${handledData?.runtimeType}");
             menuList = null;
           }
         }
-        
+
         if (menuList != null) {
           if (menuList.isEmpty) return [];
           return menuList
@@ -413,19 +515,24 @@ class ApiService {
                 if (jsonItem is Map<String, dynamic>) {
                   return MealProduct.fromMockJson(jsonItem);
                 } else {
-                  print("API Warning: Skipping non-map item in menu/products list: $jsonItem");
+                  print(
+                      "API Warning: Skipping non-map item in menu/products list: $jsonItem");
                   return null;
                 }
               })
               .whereType<MealProduct>()
               .toList();
         } else {
-           print("Products API response format unexpected after all handling attempts. Raw data type: ${rawData.runtimeType}");
-           throw Exception('Failed to parse products: Unexpected API response format');
+          print(
+              "Products API response format unexpected after all handling attempts. Raw data type: ${rawData.runtimeType}");
+          throw Exception(
+              'Failed to parse products: Unexpected API response format');
         }
       } else {
-        print("Error fetching products: ${response.statusCode} ${response.body}");
-        throw Exception('Failed to load products (Status code: ${response.statusCode})');
+        print(
+            "Error fetching products: ${response.statusCode} ${response.body}");
+        throw Exception(
+            'Failed to load products (Status code: ${response.statusCode})');
       }
     } on TimeoutException {
       print("Timeout fetching products");
@@ -444,14 +551,15 @@ class ApiService {
     };
     return headers;
   }
-  
-  static Future<bool> updateOrderStatus(int orderId, String newStatus, {int? chefId, String? completionCode}) async {
+
+  static Future<bool> updateOrderStatus(int orderId, String newStatus,
+      {int? chefId, String? completionCode}) async {
     final Uri uri = Uri.parse('$_staticBaseUrl/rr/orders/$orderId/status');
     debugPrint('[API] Updating order $orderId status to: $newStatus');
     try {
       final prefs = await SharedPreferences.getInstance();
       final userPhone = prefs.getString('user_phone');
-      
+
       final Map<String, dynamic> body = {
         'order_status': newStatus,
         if (userPhone != null) 'restaurant_phone': userPhone,
@@ -459,16 +567,19 @@ class ApiService {
       if (chefId != null) body['chef_id'] = chefId;
       if (completionCode != null) body['completion_code'] = completionCode;
 
-      final response = await http.patch(
-        uri,
-        headers: _getWriteHeaders(),
-        body: jsonEncode(body),
-      ).timeout(const Duration(seconds: 25));
+      final response = await http
+          .patch(
+            uri,
+            headers: _getWriteHeaders(),
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 25));
 
       if (response.statusCode == 200 || response.statusCode == 204) {
         return true;
       } else {
-        print("Error updating order status: ${response.statusCode} ${response.body}");
+        print(
+            "Error updating order status: ${response.statusCode} ${response.body}");
         String apiErrorMsg = "Failed to update order status.";
         try {
           final errorBody = json.decode(response.body);
@@ -476,37 +587,43 @@ class ApiService {
             apiErrorMsg = errorBody['message'];
           }
         } catch (_) {}
-        throw Exception(apiErrorMsg); 
+        throw Exception(apiErrorMsg);
       }
     } on TimeoutException {
       print("Timeout updating order $orderId status.");
       throw Exception("Request timed out. Please try again.");
     } catch (e) {
       print("Exception updating order status: $e");
-      if (e is Exception && e.toString().contains("Failed to update order status.")) rethrow;
+      if (e is Exception &&
+          e.toString().contains("Failed to update order status.")) rethrow;
       throw Exception("An error occurred: ${e.toString()}");
     }
   }
 
-  static Future<bool> assignOrderToRider(int orderId, int riderId, String newStatus) async {
-    final Uri uri = Uri.parse('$_staticBaseUrl/rr/orders/$orderId/status'); 
-    print("Assigning order $orderId to rider $riderId, setting status to $newStatus");
+  static Future<bool> assignOrderToRider(
+      int orderId, int riderId, String newStatus) async {
+    final Uri uri =
+        Uri.parse('$_staticBaseUrl/rr/orders/$orderId/status');
+    print(
+        "Assigning order $orderId to rider $riderId, setting status to $newStatus");
 
     try {
       final prefs = await SharedPreferences.getInstance();
       final userPhone = prefs.getString('user_phone');
-      
+
       final Map<String, dynamic> requestBody = {
         'order_status': newStatus,
         'transporter_id': riderId,
         if (userPhone != null) 'restaurant_phone': userPhone,
       };
 
-      final response = await http.patch(
-        uri,
-        headers: _getWriteHeaders(),
-        body: jsonEncode(requestBody),
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .patch(
+            uri,
+            headers: _getWriteHeaders(),
+            body: jsonEncode(requestBody),
+          )
+          .timeout(const Duration(seconds: 15));
       if (response.statusCode == 200 || response.statusCode == 204) {
         return true;
       } else {
@@ -535,20 +652,25 @@ class ApiService {
                 if (jsonItem is Map<String, dynamic>) {
                   return Rider.fromJson(jsonItem);
                 } else {
-                  print("API Warning: Skipping non-map item in riders list: $jsonItem");
+                  print(
+                      "API Warning: Skipping non-map item in riders list: $jsonItem");
                   return null;
                 }
               })
               .whereType<Rider>()
               .toList();
         } else {
-          print("Riders API response format unexpected. Got: ${riderList?.runtimeType}");
-           if (riderList == null || (riderList is Map && riderList.isEmpty)) return [];
-          throw Exception('Failed to parse riders: Unexpected API response format');
+          print(
+              "Riders API response format unexpected. Got: ${riderList?.runtimeType}");
+          if (riderList == null || (riderList is Map && riderList.isEmpty))
+            return [];
+          throw Exception(
+              'Failed to parse riders: Unexpected API response format');
         }
       } else {
         print("Error fetching riders: ${response.statusCode} ${response.body}");
-        throw Exception('Failed to load riders (Status code: ${response.statusCode})');
+        throw Exception(
+            'Failed to load riders (Status code: ${response.statusCode})');
       }
     } on TimeoutException {
       print("Timeout fetching riders.");
@@ -558,26 +680,6 @@ class ApiService {
       if (e is Exception) rethrow;
       throw Exception('Failed to load riders: $e');
     }
-  }
-
-  static Future<MealProduct?> addProduct(Map<String, dynamic> productData) async {
-    print("Add Product Triggered (Coming Soon)");
-    return null;
-  }
-
-  static Future<bool> updateProduct(String mealId, Map<String, dynamic> productData) async {
-    print("Update Product Triggered (Coming Soon)");
-    return false;
-  }
-
-  static Future<bool> deleteProduct(String mealId) async {
-    print("Delete Product Triggered (Coming Soon)");
-    return false;
-  }
-
-  static Future<bool> addMealsToChefStock(List<String> mealIds) async {
-    print("Add Meals to Stock Triggered (Coming Soon)");
-    return false;
   }
 
   static Future<List<dynamic>?> fetchChefsStatic() async {
@@ -591,11 +693,14 @@ class ApiService {
         final dynamic rawData = json.decode(response.body);
         final dynamic chefsList = _handleApiResponse(rawData);
         if (chefsList is List) return chefsList;
-        if (chefsList == null || (chefsList is Map && chefsList.isEmpty)) return [];
-        print('Static fetchChefs: Unexpected response format after handling: ${chefsList?.runtimeType}');
+        if (chefsList == null || (chefsList is Map && chefsList.isEmpty))
+          return [];
+        print(
+            'Static fetchChefs: Unexpected response format after handling: ${chefsList?.runtimeType}');
         return null;
       } else {
-        print('Static fetchChefs: Failed to load chefs. Status code: ${response.statusCode}.');
+        print(
+            'Static fetchChefs: Failed to load chefs. Status code: ${response.statusCode}.');
         return null;
       }
     } on TimeoutException {
@@ -618,11 +723,14 @@ class ApiService {
         final dynamic rawData = json.decode(response.body);
         final dynamic producerList = _handleApiResponse(rawData);
         if (producerList is List) return producerList;
-        if (producerList == null || (producerList is Map && producerList.isEmpty)) return [];
-        print('Static fetchProducers: Unexpected response format after handling: ${producerList?.runtimeType}');
+        if (producerList == null ||
+            (producerList is Map && producerList.isEmpty)) return [];
+        print(
+            'Static fetchProducers: Unexpected response format after handling: ${producerList?.runtimeType}');
         return null;
       } else {
-        print('Static fetchProducers: Failed to load producers. Status code: ${response.statusCode}.');
+        print(
+            'Static fetchProducers: Failed to load producers. Status code: ${response.statusCode}.');
         return null;
       }
     } on TimeoutException {
@@ -635,6 +743,7 @@ class ApiService {
   }
 }
 
+// --- MISSING WIDGET RESTORED HERE ---
 class CachedImageWithShimmer extends StatelessWidget {
   final String? imageUrl;
   final double width;
@@ -679,26 +788,26 @@ class CachedImageWithShimmer extends StatelessWidget {
       imageWidget = _buildErrorWidget(context, shimmerBase, shimmerHighlight);
     } else {
       imageWidget = CachedNetworkImage(
-        imageUrl: processedUrl,
-        width: width,
-        height: height,
-        fit: fit,
-        placeholder: (context, url) => Shimmer.fromColors(
-              baseColor: shimmerBase,
-              highlightColor: shimmerHighlight,
-              child: Container(
-                width: width,
-                height: height,
-                decoration: BoxDecoration(
-                  color: Theme.of(context).cardColor,
-                  borderRadius: BorderRadius.circular(borderRadius),
+          imageUrl: processedUrl,
+          width: width,
+          height: height,
+          fit: fit,
+          placeholder: (context, url) => Shimmer.fromColors(
+                baseColor: shimmerBase,
+                highlightColor: shimmerHighlight,
+                child: Container(
+                  width: width,
+                  height: height,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(borderRadius),
+                  ),
                 ),
               ),
-            ),
-        errorWidget: (context, url, error) {
-          print("CachedNetworkImage Error: Failed to load $url - $error");
-          return _buildErrorWidget(context, shimmerBase, shimmerHighlight);
-        });
+          errorWidget: (context, url, error) {
+            print("CachedNetworkImage Error: Failed to load $url - $error");
+            return _buildErrorWidget(context, shimmerBase, shimmerHighlight);
+          });
     }
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
@@ -725,8 +834,9 @@ class CachedImageWithShimmer extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4.0),
               child: Text(
-errorText!,
-                style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+                errorText!,
+                style: textTheme.bodySmall
+                    ?.copyWith(color: Colors.grey.shade600),
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -739,7 +849,6 @@ errorText!,
   }
 }
 
-
 class ChefDash88new extends StatelessWidget {
   const ChefDash88new({super.key});
 
@@ -747,10 +856,10 @@ class ChefDash88new extends StatelessWidget {
   Widget build(BuildContext context) {
     const Color lightBackgroundColor = Color(0xFFF5F5F5);
     const Color cardBackgroundColor = whiteColor;
-    const Color primaryTextColorValue = darkTeal; 
-    const Color secondaryTextColorValue = Color(0xFF455A64); 
-    const Color iconColorValue = primaryTeal; 
-    const Color dividerColorValue = lightTeal; 
+    const Color primaryTextColorValue = darkTeal;
+    const Color secondaryTextColorValue = Color(0xFF455A64);
+    const Color iconColorValue = primaryTeal;
+    const Color dividerColorValue = lightTeal;
     const Color onlineColor = Colors.green;
     const Color offlineColor = Colors.grey;
 
@@ -803,47 +912,79 @@ class ChefDash88new extends StatelessWidget {
           ),
           chipTheme: ChipThemeData(
             backgroundColor: lighterTeal,
-            labelStyle: const TextStyle(color: primaryTextColorValue, fontWeight: FontWeight.w500),
-            padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            labelStyle: const TextStyle(
+                color: primaryTextColorValue, fontWeight: FontWeight.w500),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             side: BorderSide.none,
             elevation: 0,
           ),
           listTileTheme: const ListTileThemeData(
             iconColor: iconColorValue,
-            titleTextStyle: TextStyle(fontWeight: FontWeight.w500, color: primaryTextColorValue, fontSize: 16),
-            subtitleTextStyle: TextStyle(color: secondaryTextColorValue, fontSize: 13),
+            titleTextStyle: TextStyle(
+                fontWeight: FontWeight.w500,
+                color: primaryTextColorValue,
+                fontSize: 16),
+            subtitleTextStyle:
+                TextStyle(color: secondaryTextColorValue, fontSize: 13),
             contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           ),
           switchTheme: SwitchThemeData(
-            thumbColor: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
+            thumbColor: MaterialStateProperty.resolveWith<Color?>(
+                (Set<MaterialState> states) {
               if (states.contains(MaterialState.selected)) return onlineColor;
-              if (states.contains(MaterialState.disabled)) return Colors.grey.shade400;
+              if (states.contains(MaterialState.disabled))
+                return Colors.grey.shade400;
               return offlineColor;
             }),
-            trackColor: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
-              if (states.contains(MaterialState.selected)) return onlineColor.withOpacity(0.5);
-              if (states.contains(MaterialState.disabled)) return Colors.grey.shade300;
+            trackColor: MaterialStateProperty.resolveWith<Color?>(
+                (Set<MaterialState> states) {
+              if (states.contains(MaterialState.selected))
+                return onlineColor.withOpacity(0.5);
+              if (states.contains(MaterialState.disabled))
+                return Colors.grey.shade300;
               return offlineColor.withOpacity(0.4);
             }),
             trackOutlineColor: MaterialStateProperty.all(Colors.transparent),
           ),
           textTheme: const TextTheme(
-            headlineSmall: TextStyle(fontWeight: FontWeight.bold, color: darkTeal, fontSize: 22, letterSpacing: 0.2),
-            titleLarge: TextStyle(fontWeight: FontWeight.w600, color: darkTeal, fontSize: 18),
-            titleMedium: TextStyle(fontWeight: FontWeight.w600, color: primaryTextColorValue, fontSize: 16),
-            titleSmall: TextStyle(fontWeight: FontWeight.w500, color: primaryTextColorValue, fontSize: 14),
-            bodyLarge: TextStyle(color: primaryTextColorValue, fontSize: 16, height: 1.4),
-            bodyMedium: TextStyle(color: secondaryTextColorValue, fontSize: 14, height: 1.4),
-            bodySmall: TextStyle(color: subtleTextColor, fontSize: 12, height: 1.3),
-            labelLarge: TextStyle(color: whiteColor, fontWeight: FontWeight.w600, fontSize: 15, letterSpacing: 0.8),
-            labelMedium: TextStyle(color: primaryTeal, fontWeight: FontWeight.w500, fontSize: 14),
+            headlineSmall: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: darkTeal,
+                fontSize: 22,
+                letterSpacing: 0.2),
+            titleLarge: TextStyle(
+                fontWeight: FontWeight.w600, color: darkTeal, fontSize: 18),
+            titleMedium: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: primaryTextColorValue,
+                fontSize: 16),
+            titleSmall: TextStyle(
+                fontWeight: FontWeight.w500,
+                color: primaryTextColorValue,
+                fontSize: 14),
+            bodyLarge:
+                TextStyle(color: primaryTextColorValue, fontSize: 16, height: 1.4),
+            bodyMedium: TextStyle(
+                color: secondaryTextColorValue, fontSize: 14, height: 1.4),
+            bodySmall:
+                TextStyle(color: subtleTextColor, fontSize: 12, height: 1.3),
+            labelLarge: TextStyle(
+                color: whiteColor,
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+                letterSpacing: 0.8),
+            labelMedium: TextStyle(
+                color: primaryTeal, fontWeight: FontWeight.w500, fontSize: 14),
           ),
           floatingActionButtonTheme: FloatingActionButtonThemeData(
             backgroundColor: accentTeal,
             foregroundColor: whiteColor,
             elevation: 4,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           ),
           inputDecorationTheme: InputDecorationTheme(
             filled: true,
@@ -860,11 +1001,15 @@ class ChefDash88new extends StatelessWidget {
               borderSide: const BorderSide(color: primaryTeal, width: 1.5),
               borderRadius: BorderRadius.circular(10),
             ),
-            labelStyle: const TextStyle(color: primaryTeal, fontWeight: FontWeight.w500),
-            floatingLabelStyle: const TextStyle(color: primaryTeal, fontWeight: FontWeight.w600),
+            labelStyle: const TextStyle(
+                color: primaryTeal, fontWeight: FontWeight.w500),
+            floatingLabelStyle: const TextStyle(
+                color: primaryTeal, fontWeight: FontWeight.w600),
             hintStyle: const TextStyle(color: subtleTextColor),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            errorStyle: TextStyle(color: Colors.redAccent[700]?.withOpacity(0.9), fontSize: 11.5),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            errorStyle:
+                TextStyle(color: Colors.redAccent[700]?.withOpacity(0.9), fontSize: 11.5),
             errorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
               borderSide: BorderSide(color: Colors.redAccent[700]!, width: 1.0),
@@ -879,7 +1024,8 @@ class ChefDash88new extends StatelessWidget {
               foregroundColor: primaryTeal,
               textStyle: const TextStyle(fontWeight: FontWeight.w600),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
           ),
           elevatedButtonTheme: ElevatedButtonThemeData(
@@ -887,13 +1033,20 @@ class ChefDash88new extends StatelessWidget {
                 backgroundColor: primaryTeal,
                 foregroundColor: whiteColor,
                 elevation: 0,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, letterSpacing: 0.5)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+                textStyle: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                    letterSpacing: 0.5)),
           ),
-          dividerTheme: const DividerThemeData(color: dividerColorValue, thickness: 0.8, space: 24),
+          dividerTheme:
+              const DividerThemeData(color: dividerColorValue, thickness: 0.8, space: 24),
           iconTheme: const IconThemeData(color: iconColorValue, size: 22),
-          progressIndicatorTheme: const ProgressIndicatorThemeData(color: primaryTeal),
+          progressIndicatorTheme:
+              const ProgressIndicatorThemeData(color: primaryTeal),
           snackBarTheme: SnackBarThemeData(
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -906,29 +1059,37 @@ class ChefDash88new extends StatelessWidget {
   }
 }
 
+// ... (Rest of the code is unchanged from the version with the stock management UI)
+// ... ChefDashboardScreen, OrdersTab, GigsTab, EarningsTab etc. ...
+
+// ... (This code is exactly as provided in the previous "full code" response)
+// Make sure to include the modified ProductsTab from that same response.
+// --- START of previous full code (from ChefDashboardScreen down) ---
 class ChefDashboardScreen extends StatefulWidget {
   const ChefDashboardScreen({super.key});
   @override
   State<ChefDashboardScreen> createState() => _ChefDashboardScreenState();
 }
 
-class _ChefDashboardScreenState extends State<ChefDashboardScreen> with TickerProviderStateMixin {
+class _ChefDashboardScreenState extends State<ChefDashboardScreen>
+    with TickerProviderStateMixin {
   // Add route observer for tracking page visibility
   final RouteObserver<PageRoute> _routeObserver = RouteObserver<PageRoute>();
   late TabController _tabController;
   late AnimationController _refreshIconController;
   bool _isRefreshing = false;
 
-  // Removed _profileTabKey
   final GlobalKey<_OrdersTabState> _ordersTabKey = GlobalKey<_OrdersTabState>();
   final GlobalKey<_GigsTabState> _gigsTabKey = GlobalKey<_GigsTabState>();
-  final GlobalKey<_ProductsTabState> _productsTabKey = GlobalKey<_ProductsTabState>();
-  final GlobalKey<_EarningsTabState> _earningsTabKey = GlobalKey<_EarningsTabState>();
+  final GlobalKey<_ProductsTabState> _productsTabKey =
+      GlobalKey<_ProductsTabState>();
+  final GlobalKey<_EarningsTabState> _earningsTabKey =
+      GlobalKey<_EarningsTabState>();
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this); // Length is now 4
+    _tabController = TabController(length: 4, vsync: this);
     _refreshIconController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
@@ -942,31 +1103,30 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen> with TickerPr
   void _handleTabChangeForPolling() {
     final ordersTab = _ordersTabKey.currentState;
     final gigsTab = _gigsTabKey.currentState;
-    
+
     if (ordersTab != null) {
       ordersTab._ordersPollingTimer?.cancel();
     }
     if (gigsTab != null) {
       gigsTab._gigsPollingTimer?.cancel();
     }
-    
+
     bool pollingNow = false;
     switch (_tabController.index) {
-      case 0: // Was Orders (index 1)
+      case 0:
         if (ordersTab != null) {
           ordersTab._startOrdersPolling();
           pollingNow = true;
         }
         break;
-      case 1: // Was Gigs (index 2)
+      case 1:
         if (gigsTab != null) {
           gigsTab._startGigsPolling();
           pollingNow = true;
         }
         break;
-      // Case for Products tab (index 2) - no polling needed for it
     }
-    
+
     if (pollingNow && !_refreshIconController.isAnimating && !_isRefreshing) {
       _refreshIconController.repeat();
     } else if (!pollingNow && !_isRefreshing) {
@@ -992,29 +1152,28 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen> with TickerPr
       if (mounted) {
         final currentIndex = _tabController.index;
         switch (currentIndex) {
-          // Case 0 for Profile removed
-          case 0: // OrdersTab (was index 1)
+          case 0:
             final state = _ordersTabKey.currentState;
             if (state != null && state.mounted) {
               await state.manualRefreshFromAppBar();
               didRefresh = true;
             }
             break;
-          case 1: // GigsTab (was index 2)
+          case 1:
             final state = _gigsTabKey.currentState;
             if (state != null && state.mounted) {
               await state.manualRefreshFromAppBar();
               didRefresh = true;
             }
             break;
-          case 2: // ProductsTab (was index 3)
+          case 2:
             final state = _productsTabKey.currentState;
             if (state != null && state.mounted) {
               await state.manualRefreshFromAppBar();
               didRefresh = true;
             }
             break;
-          case 3: // EarningsTab
+          case 3:
             final state = _earningsTabKey.currentState;
             if (state != null && state.mounted) {
               await state.refreshEarningsTab();
@@ -1024,7 +1183,8 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen> with TickerPr
         }
       }
       if (!didRefresh) {
-        print("Warning: Could not trigger refresh for tab ${_tabController.index}. Using fallback delay.");
+        print(
+            "Warning: Could not trigger refresh for tab ${_tabController.index}. Using fallback delay.");
         await Future.delayed(const Duration(milliseconds: 900));
       }
     } catch (e) {
@@ -1086,7 +1246,6 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen> with TickerPr
   }
 }
 
-// ProfileTab and _ProfileTabState moved to chef_profile.dart
 
 class OrdersTab extends StatefulWidget {
   const OrdersTab({super.key});
@@ -1106,8 +1265,9 @@ extension OrdersTabRefreshExtension on _OrdersTabState {
   }
 }
 
-class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixin, RouteAware {
-  final Set<int> _loadingOrderIds = {}; 
+class _OrdersTabState extends State<OrdersTab>
+    with AutomaticKeepAliveClientMixin, RouteAware {
+  final Set<int> _loadingOrderIds = {};
 
   Future<List<Order>>? _ordersFuture;
   List<Order> _allFetchedOrders = [];
@@ -1117,9 +1277,17 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
   bool _didLoadOrders = false;
 
   final List<String> _orderStatusesForFilter = [
-    'All', statusPending, statusAccepted, statusPreparing, statusReadyForPickup,
-    statusAssigned, statusOutForDelivery, statusDelivered, statusCancelled,
-    statusVerificationNeeded, statusCompleted,
+    'All',
+    statusPending,
+    statusAccepted,
+    statusPreparing,
+    statusReadyForPickup,
+    statusAssigned,
+    statusOutForDelivery,
+    statusDelivered,
+    statusCancelled,
+    statusVerificationNeeded,
+    statusCompleted,
   ];
 
   Timer? _ordersPollingTimer;
@@ -1129,9 +1297,10 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
 
   void _startOrdersPolling() {
     if (!_isRouteActive) return;
-    
+
     _ordersPollingTimer?.cancel();
-    _ordersPollingTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
+    _ordersPollingTimer =
+        Timer.periodic(const Duration(seconds: 10), (_) async {
       if (!mounted || !_isRouteActive) return;
       await _pollOrdersStatus();
     });
@@ -1142,7 +1311,8 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
       final fetchedOrders = await ApiService().fetchOrders();
       if (!mounted) return;
       for (final fetched in fetchedOrders) {
-        final idx = _mealOrders.indexWhere((o) => o.orderId == fetched.orderId);
+        final idx =
+            _mealOrders.indexWhere((o) => o.orderId == fetched.orderId);
         if (idx != -1 && _mealOrders[idx].orderStatus != fetched.orderStatus) {
           setState(() {
             _mealOrders[idx].orderStatus = fetched.orderStatus;
@@ -1162,7 +1332,8 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
   void dispose() {
     final route = ModalRoute.of(context);
     if (route != null) {
-      RouteObserver<PageRoute>? routeObserver = context.findAncestorStateOfType<_ChefDashboardScreenState>()?._routeObserver;
+      RouteObserver<PageRoute>? routeObserver =
+          context.findAncestorStateOfType<_ChefDashboardScreenState>()?._routeObserver;
       routeObserver?.unsubscribe(this);
     }
     _ordersPollingTimer?.cancel();
@@ -1204,10 +1375,11 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
     super.didChangeDependencies();
     final route = ModalRoute.of(context);
     if (route != null) {
-      RouteObserver<PageRoute>? routeObserver = context.findAncestorStateOfType<_ChefDashboardScreenState>()?._routeObserver;
+      RouteObserver<PageRoute>? routeObserver =
+          context.findAncestorStateOfType<_ChefDashboardScreenState>()?._routeObserver;
       routeObserver?.subscribe(this, route as PageRoute);
     }
-    
+
     if (!_didLoadOrders) {
       _didLoadOrders = true;
       _loadOrders();
@@ -1224,7 +1396,8 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
       _ordersFuture = ApiService().fetchOrders();
     });
     try {
-      final fetchedOrders = await _ordersFuture!.timeout(const Duration(seconds: 20));
+      final fetchedOrders =
+          await _ordersFuture!.timeout(const Duration(seconds: 20));
       if (!mounted) return;
       _allFetchedOrders = fetchedOrders;
       _mealOrders = _allFetchedOrders
@@ -1237,7 +1410,8 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
     } on TimeoutException {
       print("Timeout fetching orders.");
       if (mounted) {
-        _showErrorSnackbar('Request timed out. Please check your connection and try again.');
+        _showErrorSnackbar(
+            'Request timed out. Please check your connection and try again.');
         _allFetchedOrders = [];
         _mealOrders = [];
       }
@@ -1258,7 +1432,8 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
     final result = await showDialog<dynamic>(
       context: context,
       barrierDismissible: false,
-      builder: (BuildContext context) => _RiderSelectionDialog(apiService: ApiService(), orderId: order.orderId),
+      builder: (BuildContext context) =>
+          _RiderSelectionDialog(apiService: ApiService(), orderId: order.orderId),
     );
     if (!mounted || result == null) {
       if (result == null) print('Rider assignment cancelled or dialog closed.');
@@ -1285,18 +1460,25 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
             children: [
               const Text('Assign this order to rider:'),
               const SizedBox(height: 8),
-              Text('  Name: ${rider.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text('  Name: ${rider.name}',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
               Text('  Status: ${rider.isActive ? "Active" : "Inactive"}'),
               Text('  ID: ${rider.id}'),
               if (!rider.isActive)
                 Padding(
                     padding: const EdgeInsets.only(top: 8.0),
-                    child: Text('Warning: Rider is currently inactive.', style: TextStyle(color: Colors.orange.shade800))),
+                    child: Text('Warning: Rider is currently inactive.',
+                        style: TextStyle(color: Colors.orange.shade800))),
             ]),
         actions: <Widget>[
-          TextButton(child: const Text('Cancel'), onPressed: () => Navigator.of(dialogContext).pop(false)),
           TextButton(
-              child: Text(rider.isActive ? 'Confirm Assignment' : 'Assign Anyway', style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(dialogContext).pop(false)),
+          TextButton(
+              child: Text(
+                  rider.isActive ? 'Confirm Assignment' : 'Assign Anyway',
+                  style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary)),
               onPressed: () => Navigator.of(dialogContext).pop(true)),
         ],
       ),
@@ -1315,7 +1497,8 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
     final originalStatus = _mealOrders[orderIndex].orderStatus;
     final originalRiderId = _mealOrders[orderIndex].assignedRiderId;
     final originalRiderName = _mealOrders[orderIndex].assignedRiderName;
-    final allIndex = _allFetchedOrders.indexWhere((o) => o.orderId == order.orderId);
+    final allIndex =
+        _allFetchedOrders.indexWhere((o) => o.orderId == order.orderId);
 
     setState(() {
       _mealOrders[orderIndex].orderStatus = statusAssigned;
@@ -1330,22 +1513,25 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
     _showLoadingSnackbar("Assigning to ${rider.name}...");
 
     try {
-      bool success = await ApiService.assignOrderToRider(order.orderId, rider.id, statusAssigned);
+      bool success = await ApiService.assignOrderToRider(
+          order.orderId, rider.id, statusAssigned);
       _dismissLoadingSnackbar();
       if (mounted) {
         if (success) {
-          _showSuccessSnackbar('Order ${order.orderId} assigned to ${rider.name}.');
+          _showSuccessSnackbar(
+              'Order ${order.orderId} assigned to ${rider.name}.');
           _showOrderNextStepDialog(statusAssigned);
         } else {
-          _showErrorSnackbar('Failed to assign order ${order.orderId} to ${rider.name}.');
+          _showErrorSnackbar(
+              'Failed to assign order ${order.orderId} to ${rider.name}.');
           setState(() {
             _mealOrders[orderIndex].orderStatus = originalStatus;
             _mealOrders[orderIndex].assignedRiderId = originalRiderId;
             _mealOrders[orderIndex].assignedRiderName = originalRiderName;
             if (allIndex != -1) {
-                 _allFetchedOrders[allIndex].orderStatus = originalStatus;
-                 _allFetchedOrders[allIndex].assignedRiderId = originalRiderId;
-                 _allFetchedOrders[allIndex].assignedRiderName = originalRiderName;
+              _allFetchedOrders[allIndex].orderStatus = originalStatus;
+              _allFetchedOrders[allIndex].assignedRiderId = originalRiderId;
+              _allFetchedOrders[allIndex].assignedRiderName = originalRiderName;
             }
           });
         }
@@ -1355,14 +1541,14 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
       if (mounted) {
         _showErrorSnackbar('An error occurred assigning rider.');
         setState(() {
-            _mealOrders[orderIndex].orderStatus = originalStatus;
-            _mealOrders[orderIndex].assignedRiderId = originalRiderId;
-            _mealOrders[orderIndex].assignedRiderName = originalRiderName;
-            if (allIndex != -1) {
-                 _allFetchedOrders[allIndex].orderStatus = originalStatus;
-                 _allFetchedOrders[allIndex].assignedRiderId = originalRiderId;
-                 _allFetchedOrders[allIndex].assignedRiderName = originalRiderName;
-            }
+          _mealOrders[orderIndex].orderStatus = originalStatus;
+          _mealOrders[orderIndex].assignedRiderId = originalRiderId;
+          _mealOrders[orderIndex].assignedRiderName = originalRiderName;
+          if (allIndex != -1) {
+            _allFetchedOrders[allIndex].orderStatus = originalStatus;
+            _allFetchedOrders[allIndex].assignedRiderId = originalRiderId;
+            _allFetchedOrders[allIndex].assignedRiderName = originalRiderName;
+          }
         });
       }
     }
@@ -1372,32 +1558,37 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
     final orderIndex = _findOrderIndex(order.orderId);
     if (orderIndex == -1) return;
     final originalStatus = _mealOrders[orderIndex].orderStatus;
-    final allIndex = _allFetchedOrders.indexWhere((o) => o.orderId == order.orderId);
+    final allIndex =
+        _allFetchedOrders.indexWhere((o) => o.orderId == order.orderId);
 
     setState(() {
       _mealOrders[orderIndex].orderStatus = statusReadyForPickup;
       _mealOrders[orderIndex].assignedRiderId = null;
       _mealOrders[orderIndex].assignedRiderName = null;
       if (allIndex != -1) {
-          _allFetchedOrders[allIndex].orderStatus = statusReadyForPickup;
-          _allFetchedOrders[allIndex].assignedRiderId = null;
-          _allFetchedOrders[allIndex].assignedRiderName = null;
+        _allFetchedOrders[allIndex].orderStatus = statusReadyForPickup;
+        _allFetchedOrders[allIndex].assignedRiderId = null;
+        _allFetchedOrders[allIndex].assignedRiderName = null;
       }
     });
     _showLoadingSnackbar("Marking order as ready...");
 
     try {
-      bool success = await ApiService.updateOrderStatus(order.orderId, statusReadyForPickup);
+      bool success =
+          await ApiService.updateOrderStatus(order.orderId, statusReadyForPickup);
       _dismissLoadingSnackbar();
       if (mounted) {
         if (success) {
-          _showSuccessSnackbar('Order ${order.orderId} marked as Ready for Pickup.');
+          _showSuccessSnackbar(
+              'Order ${order.orderId} marked as Ready for Pickup.');
           _showOrderNextStepDialog(statusReadyForPickup);
         } else {
-          _showErrorSnackbar('Failed to mark order ${order.orderId} as Ready for Pickup.');
+          _showErrorSnackbar(
+              'Failed to mark order ${order.orderId} as Ready for Pickup.');
           setState(() {
-              _mealOrders[orderIndex].orderStatus = originalStatus;
-              if (allIndex != -1) _allFetchedOrders[allIndex].orderStatus = originalStatus;
+            _mealOrders[orderIndex].orderStatus = originalStatus;
+            if (allIndex != -1)
+              _allFetchedOrders[allIndex].orderStatus = originalStatus;
           });
         }
       }
@@ -1406,8 +1597,9 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
       if (mounted) {
         _showErrorSnackbar('Error updating order status.');
         setState(() {
-            _mealOrders[orderIndex].orderStatus = originalStatus;
-            if (allIndex != -1) _allFetchedOrders[allIndex].orderStatus = originalStatus;
+          _mealOrders[orderIndex].orderStatus = originalStatus;
+          if (allIndex != -1)
+            _allFetchedOrders[allIndex].orderStatus = originalStatus;
         });
       }
     }
@@ -1418,7 +1610,8 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
     if (orderIndex == -1) return;
     if (mounted) ScaffoldMessenger.of(context).removeCurrentSnackBar();
     final originalStatus = _mealOrders[orderIndex].orderStatus;
-    final allIndex = _allFetchedOrders.indexWhere((o) => o.orderId == order.orderId);
+    final allIndex =
+        _allFetchedOrders.indexWhere((o) => o.orderId == order.orderId);
 
     setState(() {
       _mealOrders[orderIndex].orderStatus = newStatus;
@@ -1435,18 +1628,22 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
     _showLoadingSnackbar("Updating status to $newStatus...");
 
     try {
-      bool success = await ApiService.updateOrderStatus(order.orderId, newStatus);
+      bool success =
+          await ApiService.updateOrderStatus(order.orderId, newStatus);
       _dismissLoadingSnackbar();
       if (mounted) {
         if (!success) {
           setState(() {
-              _mealOrders[orderIndex].orderStatus = originalStatus;
-              if (allIndex != -1) _allFetchedOrders[allIndex].orderStatus = originalStatus;
-              // Potentially revert rider info if applicable
+            _mealOrders[orderIndex].orderStatus = originalStatus;
+            if (allIndex != -1)
+              _allFetchedOrders[allIndex].orderStatus = originalStatus;
+            // Potentially revert rider info if applicable
           });
-          _showErrorSnackbar('Failed to update order ${order.orderId} status.');
+          _showErrorSnackbar(
+              'Failed to update order ${order.orderId} status.');
         } else {
-          _showSuccessSnackbar('Order ${order.orderId} status updated to $newStatus.');
+          _showSuccessSnackbar(
+              'Order ${order.orderId} status updated to $newStatus.');
           _showOrderNextStepDialog(newStatus);
           setState(() {});
         }
@@ -1455,14 +1652,15 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
       _dismissLoadingSnackbar();
       if (mounted) {
         setState(() {
-            _mealOrders[orderIndex].orderStatus = originalStatus;
-            if (allIndex != -1) _allFetchedOrders[allIndex].orderStatus = originalStatus;
+          _mealOrders[orderIndex].orderStatus = originalStatus;
+          if (allIndex != -1)
+            _allFetchedOrders[allIndex].orderStatus = originalStatus;
         });
         _showErrorSnackbar('Error updating order status: ${e.toString()}');
       }
     }
   }
-  
+
   Future<void> _initiateCompletionFlow(Order order, String targetStatus) async {
     if (!mounted) return;
     final orderId = order.orderId;
@@ -1484,7 +1682,8 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
     }
   }
 
-  void _showCompletionCodeVerificationDialog(BuildContext context, Order order, String targetStatus) {
+  void _showCompletionCodeVerificationDialog(
+      BuildContext context, Order order, String targetStatus) {
     showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -1492,8 +1691,7 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
         return _CompletionCodeDialog(
           order: order,
           targetStatus: targetStatus,
-          onSuccess: () {
-          },
+          onSuccess: () {},
           onError: (String errorMessage) {
             if (mounted) {
               _showErrorSnackbar(errorMessage);
@@ -1523,7 +1721,8 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
   List<Order> _getFilteredMealOrders() {
     if (_selectedFilter == 'All') return _mealOrders;
     return _mealOrders
-        .where((order) => order.orderStatus.toLowerCase() == _selectedFilter.toLowerCase())
+        .where((order) =>
+            order.orderStatus.toLowerCase() == _selectedFilter.toLowerCase())
         .toList();
   }
 
@@ -1538,15 +1737,19 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
         if (isLoading && _mealOrders.isEmpty) {
           body = _buildOrdersShimmer();
         } else if (snapshot.hasError && _mealOrders.isEmpty) {
-          body = _buildErrorState(snapshot.error?.toString() ?? 'Unknown error.');
+          body =
+              _buildErrorState(snapshot.error?.toString() ?? 'Unknown error.');
         } else {
           final filteredOrders = _getFilteredMealOrders();
           if (_mealOrders.isEmpty && !isLoading) {
             body = _buildEmptyState('You have no meal orders yet.');
-          } else if (filteredOrders.isEmpty && _mealOrders.isNotEmpty && _selectedFilter != 'All') {
+          } else if (filteredOrders.isEmpty &&
+              _mealOrders.isNotEmpty &&
+              _selectedFilter != 'All') {
             body = _buildEmptyState('No meal orders match "$_selectedFilter".');
           } else {
-            body = _buildOrderList(_selectedFilter == 'All' ? _mealOrders : filteredOrders);
+            body = _buildOrderList(
+                _selectedFilter == 'All' ? _mealOrders : filteredOrders);
           }
         }
         return Column(children: [
@@ -1606,7 +1809,9 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
     ScaffoldMessenger.of(context).removeCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Row(children: [
-        const CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(whiteColor)),
+        const CircularProgressIndicator(
+            strokeWidth: 2,
+            valueColor: AlwaysStoppedAnimation<Color>(whiteColor)),
         const SizedBox(width: 16),
         Text(message)
       ]),
@@ -1627,7 +1832,8 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
     switch (newStatus) {
       case statusAccepted:
         title = "Order Accepted!";
-        message = "Great! Start preparing. Mark 'Ready' or 'Assign Rider' when done.";
+        message =
+            "Great! Start preparing. Mark 'Ready' or 'Assign Rider' when done.";
         break;
       case statusPreparing:
         title = "Preparation Started";
@@ -1671,18 +1877,25 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
     showDialog(
         context: context,
         builder: (BuildContext context) => AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
               title: Text(title),
               content: Text(message),
               actions: <Widget>[
-                TextButton(child: const Text("OK"), onPressed: () => Navigator.of(context).pop())
+                TextButton(
+                    child: const Text("OK"),
+                    onPressed: () => Navigator.of(context).pop())
               ],
             ));
   }
 
   Widget _buildOrdersShimmer() {
-    final shimmerBase = Theme.of(context).brightness == Brightness.light ? Colors.grey.shade300 : Colors.grey.shade700;
-    final shimmerHighlight = Theme.of(context).brightness == Brightness.light ? Colors.grey.shade100 : Colors.grey.shade500;
+    final shimmerBase = Theme.of(context).brightness == Brightness.light
+        ? Colors.grey.shade300
+        : Colors.grey.shade700;
+    final shimmerHighlight = Theme.of(context).brightness == Brightness.light
+        ? Colors.grey.shade100
+        : Colors.grey.shade500;
     return Shimmer.fromColors(
       baseColor: shimmerBase,
       highlightColor: shimmerHighlight,
@@ -1693,16 +1906,37 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
         itemBuilder: (_, __) => Card(
             margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
               child: Row(children: [
-                Container(width: 44, height: 44, decoration: BoxDecoration(color: whiteColor, borderRadius: BorderRadius.circular(22))),
+                Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                        color: whiteColor,
+                        borderRadius: BorderRadius.circular(22))),
                 const SizedBox(width: 16),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Container(width: double.infinity, height: 18, color: whiteColor, margin: const EdgeInsets.only(bottom: 6)),
-                  Container(width: MediaQuery.of(context).size.width * 0.4, height: 14, color: whiteColor),
-                ])),
+                Expanded(
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      Container(
+                          width: double.infinity,
+                          height: 18,
+                          color: whiteColor,
+                          margin: const EdgeInsets.only(bottom: 6)),
+                      Container(
+                          width: MediaQuery.of(context).size.width * 0.4,
+                          height: 14,
+                          color: whiteColor),
+                    ])),
                 const SizedBox(width: 16),
-                Container(width: 80, height: 25, decoration: BoxDecoration(color: whiteColor, borderRadius: BorderRadius.circular(15))),
+                Container(
+                    width: 80,
+                    height: 25,
+                    decoration: BoxDecoration(
+                        color: whiteColor,
+                        borderRadius: BorderRadius.circular(15))),
               ]),
             )),
       ),
@@ -1714,13 +1948,29 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
         child: Padding(
       padding: const EdgeInsets.all(24.0),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.error_outline_rounded, color: Theme.of(context).colorScheme.error, size: 50),
+        Icon(Icons.error_outline_rounded,
+            color: Theme.of(context).colorScheme.error, size: 50),
         const SizedBox(height: 16),
-        Text('Error Loading Orders', style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Theme.of(context).colorScheme.error), textAlign: TextAlign.center),
+        Text('Error Loading Orders',
+            style: Theme.of(context)
+                .textTheme
+                .titleLarge
+                ?.copyWith(color: Theme.of(context).colorScheme.error),
+            textAlign: TextAlign.center),
         const SizedBox(height: 8),
-        Text(error, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]), textAlign: TextAlign.center, maxLines: 3, overflow: TextOverflow.ellipsis),
+        Text(error,
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: Colors.grey[600]),
+            textAlign: TextAlign.center,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis),
         const SizedBox(height: 24),
-        ElevatedButton.icon(icon: const Icon(Icons.refresh_rounded, size: 20), label: const Text('Retry'), onPressed: _loadOrders)
+        ElevatedButton.icon(
+            icon: const Icon(Icons.refresh_rounded, size: 20),
+            label: const Text('Retry'),
+            onPressed: _loadOrders)
       ]),
     ));
   }
@@ -1732,20 +1982,27 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Icon(Icons.inbox_outlined, size: 60, color: Colors.grey[400]),
         const SizedBox(height: 16),
-        Text(message, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.grey[600]), textAlign: TextAlign.center),
+        Text(message,
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(color: Colors.grey[600]),
+            textAlign: TextAlign.center),
         const SizedBox(height: 24),
         ElevatedButton.icon(
             icon: const Icon(Icons.refresh_rounded, size: 20),
             label: const Text('Refresh'),
             onPressed: _loadOrders,
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[300], foregroundColor: Colors.grey[700]))
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.grey[300],
+                foregroundColor: Colors.grey[700]))
       ]),
     ));
   }
 
   Widget _buildFilterChips(bool showChips) {
     if (!showChips) return const SizedBox.shrink();
-    final statuses = _orderStatusesForFilter; 
+    final statuses = _orderStatusesForFilter;
     final chipTheme = Theme.of(context).chipTheme;
     final colorScheme = Theme.of(context).colorScheme;
     return Padding(
@@ -1766,11 +2023,18 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
                 selectedColor: colorScheme.primary.withOpacity(0.15),
                 backgroundColor: chipTheme.backgroundColor ?? lighterTeal,
                 labelStyle: TextStyle(
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                    color: isSelected ? colorScheme.primary : (chipTheme.labelStyle?.color ?? Colors.black),
+                    fontWeight:
+                        isSelected ? FontWeight.w600 : FontWeight.w500,
+                    color: isSelected
+                        ? colorScheme.primary
+                        : (chipTheme.labelStyle?.color ?? Colors.black),
                     fontSize: 13),
-                side: isSelected ? BorderSide(color: colorScheme.primary, width: 1) : (chipTheme.side ?? BorderSide(color: Colors.grey.shade300, width: 0.8)),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                side: isSelected
+                    ? BorderSide(color: colorScheme.primary, width: 1)
+                    : (chipTheme.side ??
+                        BorderSide(color: Colors.grey.shade300, width: 0.8)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                 visualDensity: VisualDensity.compact,
               );
             }).toList()),
@@ -1781,10 +2045,10 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
   Widget _buildOrderCard(BuildContext context, Order order,
       {required Function(Order) handleReadyForShipping,
       required Function(Order, String) updateSimpleStatus}) {
-    debugPrint('[GIGS] _buildOrderCard called for orderId: \\${order.orderId}, status: \\${order.orderStatus}');
     final textTheme = Theme.of(context).textTheme;
     final colorScheme = Theme.of(context).colorScheme;
-    final dateFormat = DateFormat('MMM d, yyyy \'at\' h:mm a', Localizations.localeOf(context).toString());
+    final dateFormat = DateFormat('MMM d, yyyy \'at\' h:mm a',
+        Localizations.localeOf(context).toString());
     final statusColor = _getStatusColor(order.orderStatus);
     final statusIcon = _getStatusIcon(order.orderStatus);
 
@@ -1792,17 +2056,26 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
       clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
         key: PageStorageKey<int>(order.orderId),
-        tilePadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+        tilePadding:
+            const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
         onExpansionChanged: (isExpanding) {
-          debugPrint('[GIGS] onExpansionChanged called for orderId: \\${order.orderId}, isExpanding: \\${isExpanding}, status: \\${order.orderStatus}');
-          if (isExpanding && order.orderStatus.toLowerCase() == statusVerificationNeeded.toLowerCase()) {
-            debugPrint('[GIGS] Triggering verification dialog for orderId: \\${order.orderId} (status: \\${order.orderStatus})');
-            _initiateCompletionFlow(order, statusDelivered); 
+          if (isExpanding &&
+              order.orderStatus.toLowerCase() ==
+                  statusVerificationNeeded.toLowerCase()) {
+            _initiateCompletionFlow(order, statusDelivered);
           }
         },
-        leading: CircleAvatar(backgroundColor: statusColor.withOpacity(0.15), child: Icon(statusIcon, color: statusColor, size: 22)),
-        title: Text(order.mealName, style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600), maxLines: 2, overflow: TextOverflow.ellipsis),
-        subtitle: Padding(padding: const EdgeInsets.only(top: 5.0), child: Text('#${order.orderId} • ${dateFormat.format(order.orderDate.toLocal())}', style: textTheme.bodySmall)),
+        leading: CircleAvatar(
+            backgroundColor: statusColor.withOpacity(0.15),
+            child: Icon(statusIcon, color: statusColor, size: 22)),
+        title: Text(order.mealName,
+            style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis),
+        subtitle: Padding(
+            padding: const EdgeInsets.only(top: 5.0),
+            child: Text('#${order.orderId} • ${dateFormat.format(order.orderDate.toLocal())}',
+                style: textTheme.bodySmall)),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           if (_loadingOrderIds.contains(order.orderId))
             Padding(
@@ -1812,16 +2085,22 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
                 height: 22,
                 child: CircularProgressIndicator(
                   strokeWidth: 2.2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                      Theme.of(context).colorScheme.primary),
                 ),
               ),
             ),
-          if (order.orderStatus.toLowerCase() == statusVerificationNeeded.toLowerCase())
-            Padding(padding: const EdgeInsets.only(right: 4.0), child: Icon(Icons.warning_amber_rounded, color: kColorWarning, size: 20)),
+          if (order.orderStatus.toLowerCase() ==
+              statusVerificationNeeded.toLowerCase())
+            Padding(
+                padding: const EdgeInsets.only(right: 4.0),
+                child: Icon(Icons.warning_amber_rounded,
+                    color: kColorWarning, size: 20)),
           Chip(
             label: Text(order.orderStatus, overflow: TextOverflow.ellipsis),
             backgroundColor: statusColor.withOpacity(0.15),
-            labelStyle: TextStyle(color: statusColor, fontWeight: FontWeight.w600, fontSize: 11),
+            labelStyle: TextStyle(
+                color: statusColor, fontWeight: FontWeight.w600, fontSize: 11),
             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
             visualDensity: VisualDensity.compact,
             side: BorderSide.none,
@@ -1831,48 +2110,112 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
         collapsedIconColor: Colors.grey[500],
         backgroundColor: colorScheme.surface,
         collapsedBackgroundColor: colorScheme.surface,
-        childrenPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0).copyWith(top: 0),
+        childrenPadding:
+            const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0)
+                .copyWith(top: 0),
         children: [
-          Builder(builder: (_) {
-            debugPrint('[GIGS] ExpansionTile children built for orderId: ${order.orderId}');
-            return SizedBox.shrink();
-          }),
           const Divider(height: 1, thickness: 0.5),
           const SizedBox(height: 10),
-          _buildDetailRow(context, Icons.person_outline_rounded, 'Customer ID', order.userId?.toString() ?? 'N/A'),
-          _buildDetailRow(context, Icons.storefront_outlined, 'Producer', order.producerName),
-          _buildDetailRow(context, Icons.shopping_bag_outlined, 'Quantity', order.quantity.toString()),
-          _buildDetailRow(context, Icons.payment_rounded, 'Payment', '${order.paymentStatus} (${order.totalPrice})'),
-          _buildDetailRow(context, Icons.location_on_outlined, 'Delivery To', order.deliveryAddress),
-          _buildDetailRow(context, Icons.restaurant_outlined, 'Ingredients Req.', order.ingredients),
+          _buildDetailRow(context, Icons.person_outline_rounded, 'Customer ID',
+              order.userId?.toString() ?? 'N/A'),
+          _buildDetailRow(
+              context, Icons.storefront_outlined, 'Producer', order.producerName),
+          _buildDetailRow(context, Icons.shopping_bag_outlined, 'Quantity',
+              order.quantity.toString()),
+          _buildDetailRow(context, Icons.payment_rounded, 'Payment',
+              '${order.paymentStatus} (${order.totalPrice})'),
+          _buildDetailRow(context, Icons.location_on_outlined, 'Delivery To',
+              order.deliveryAddress),
+          _buildDetailRow(context, Icons.restaurant_outlined,
+              'Ingredients Req.', order.ingredients),
           _buildDetailRow(context, Icons.notes_rounded, 'Notes', order.notes),
+          if (order.complementaryMeals != null &&
+              order.complementaryMeals!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 7.0),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Icon(Icons.card_giftcard_rounded,
+                    size: 18,
+                    color: Theme.of(context).iconTheme.color?.withOpacity(0.8)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Complementary Meals',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.w500)),
+                      const SizedBox(height: 6),
+                      ...order.complementaryMeals!.map((meal) => Padding(
+                            padding: const EdgeInsets.only(bottom: 6.0),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                if (meal['image'] != null &&
+                                    meal['image'].toString().isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 8.0),
+                                    child: CachedImageWithShimmer(
+                                      imageUrl: meal['image']?.toString(),
+                                      width: 28,
+                                      height: 28,
+                                      borderRadius: 4.0,
+                                      errorIcon: Icons.fastfood_outlined,
+                                      iconSize: 16,
+                                    ),
+                                  ),
+                                Expanded(
+                                  child: Text(
+                                    '${meal['name'] ?? 'Meal'} (${meal['price'] ?? 'N/A'})',
+                                    style:
+                                        Theme.of(context).textTheme.bodyMedium,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )),
+                    ],
+                  ),
+                ),
+              ]),
+            ),
           if (order.assignedRiderId != null)
-            _buildDetailRow(context, Icons.two_wheeler_rounded, 'Assigned Rider', '${order.assignedRiderName ?? 'Rider ID: ${order.assignedRiderId}'}'),
+            _buildDetailRow(context, Icons.two_wheeler_rounded, 'Assigned Rider',
+                '${order.assignedRiderName ?? 'Rider ID: ${order.assignedRiderId}'}'),
           const SizedBox(height: 16),
-          _buildActionButtons(context, order, handleReadyForShipping, updateSimpleStatus),
+          _buildActionButtons(
+              context, order, handleReadyForShipping, updateSimpleStatus),
           const SizedBox(height: 8),
         ],
       ),
     );
   }
 
-  Widget _buildActionButtons(BuildContext context, Order order, Function(Order) handleReadyForShipping, Function(Order, String) updateSimpleStatus) {
+  Widget _buildActionButtons(BuildContext context, Order order,
+      Function(Order) handleReadyForShipping, Function(Order, String) updateSimpleStatus) {
     final currentStatus = order.orderStatus.toLowerCase();
     final colorScheme = Theme.of(context).colorScheme;
 
     final canAccept = currentStatus == statusPending.toLowerCase();
-    final canReadyOrAssign = currentStatus == statusPreparing.toLowerCase() || currentStatus == statusAccepted.toLowerCase();
+    final canReadyOrAssign = currentStatus == statusPreparing.toLowerCase() ||
+        currentStatus == statusAccepted.toLowerCase();
     final canReject = currentStatus != statusDelivered.toLowerCase() &&
         currentStatus != statusCompleted.toLowerCase() &&
         currentStatus != statusCancelled.toLowerCase() &&
         currentStatus != statusOutForDelivery.toLowerCase();
-    final canMarkDelivered = (currentStatus == statusOutForDelivery.toLowerCase() ||
+    final canMarkDelivered = (currentStatus ==
+                statusOutForDelivery.toLowerCase() ||
             currentStatus == statusAssigned.toLowerCase() ||
             currentStatus == statusReadyForPickup.toLowerCase()) &&
         currentStatus != statusDelivered.toLowerCase() &&
         currentStatus != statusCompleted.toLowerCase();
-    final canMarkCompleted = (currentStatus == statusDelivered.toLowerCase() || currentStatus == statusOutForDelivery.toLowerCase()) && currentStatus != statusCompleted.toLowerCase();
-    
+    final canMarkCompleted = (currentStatus == statusDelivered.toLowerCase() ||
+            currentStatus == statusOutForDelivery.toLowerCase()) &&
+        currentStatus != statusCompleted.toLowerCase();
+
     return Padding(
       padding: const EdgeInsets.only(top: 8.0),
       child: Wrap(
@@ -1884,7 +2227,8 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
               TextButton.icon(
                   icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
                   label: const Text('Accept'),
-                  style: TextButton.styleFrom(foregroundColor: Colors.green.shade700),
+                  style:
+                      TextButton.styleFrom(foregroundColor: Colors.green.shade700),
                   onPressed: () => updateSimpleStatus(order, statusAccepted)),
             if (canReadyOrAssign)
               Tooltip(
@@ -1892,42 +2236,55 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
                   child: TextButton.icon(
                       icon: const Icon(Icons.local_shipping_outlined, size: 18),
                       label: const Text('Ready/Assign'),
-                      style: TextButton.styleFrom(foregroundColor: readyForPickupColor),
+                      style:
+                          TextButton.styleFrom(foregroundColor: readyForPickupColor),
                       onPressed: () => handleReadyForShipping(order))),
             if (canMarkDelivered)
               TextButton.icon(
                   icon: const Icon(Icons.check_circle_rounded, size: 18),
                   label: const Text('Mark Delivered'),
-                  style: TextButton.styleFrom(foregroundColor: Colors.green.shade700),
-                  onPressed: () => _initiateCompletionFlow(order, statusDelivered)),
+                  style:
+                      TextButton.styleFrom(foregroundColor: Colors.green.shade700),
+                  onPressed: () =>
+                      _initiateCompletionFlow(order, statusDelivered)),
             if (canMarkCompleted)
               TextButton.icon(
                   icon: const Icon(Icons.assignment_turned_in_outlined, size: 18),
                   label: const Text('Mark Completed'),
-                  style: TextButton.styleFrom(foregroundColor: Colors.blue.shade700),
-                  onPressed: () => _initiateCompletionFlow(order, statusCompleted)),
+                  style: TextButton.styleFrom(
+                      foregroundColor: Colors.blue.shade700),
+                  onPressed: () =>
+                      _initiateCompletionFlow(order, statusCompleted)),
             if (canReject)
               TextButton.icon(
                   icon: const Icon(Icons.cancel_outlined, size: 18),
                   label: const Text('Reject'),
                   style: TextButton.styleFrom(foregroundColor: colorScheme.error),
-                  onPressed: () => _showRejectConfirmation(context, order, updateSimpleStatus)),
+                  onPressed: () => _showRejectConfirmation(
+                      context, order, updateSimpleStatus)),
           ]),
     );
   }
 
-  void _showRejectConfirmation(BuildContext context, Order order, Function(Order, String) updateSimpleStatusCallback) {
+  void _showRejectConfirmation(BuildContext context, Order order,
+      Function(Order, String) updateSimpleStatusCallback) {
     if (!mounted) return;
     showDialog(
         context: context,
         builder: (BuildContext dialogContext) => AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
               title: const Text("Confirm Rejection"),
-              content: Text("Reject Order #${order.orderId} (${order.mealName})? This cannot be undone."),
+              content: Text(
+                  "Reject Order #${order.orderId} (${order.mealName})? This cannot be undone."),
               actions: <Widget>[
-                TextButton(child: const Text("Cancel"), onPressed: () => Navigator.of(dialogContext).pop()),
                 TextButton(
-                    child: Text("Reject Order", style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    child: const Text("Cancel"),
+                    onPressed: () => Navigator.of(dialogContext).pop()),
+                TextButton(
+                    child: Text("Reject Order",
+                        style:
+                            TextStyle(color: Theme.of(context).colorScheme.error)),
                     onPressed: () {
                       Navigator.of(dialogContext).pop();
                       updateSimpleStatusCallback(order, statusCancelled);
@@ -1936,15 +2293,19 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
             ));
   }
 
-  Widget _buildDetailRow(BuildContext context, IconData icon, String label, String? value) {
+  Widget _buildDetailRow(
+      BuildContext context, IconData icon, String label, String? value) {
     if (value == null || value.trim().isEmpty) return const SizedBox.shrink();
     final textTheme = Theme.of(context).textTheme;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 7.0),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Icon(icon, size: 18, color: Theme.of(context).iconTheme.color?.withOpacity(0.8)),
+        Icon(icon,
+            size: 18, color: Theme.of(context).iconTheme.color?.withOpacity(0.8)),
         const SizedBox(width: 12),
-        Expanded(child: RichText(text: TextSpan(style: textTheme.bodyMedium, children: [
+        Expanded(
+            child: RichText(
+                text: TextSpan(style: textTheme.bodyMedium, children: [
           TextSpan(text: '$label: ', style: const TextStyle(fontWeight: FontWeight.w500)),
           TextSpan(text: value),
         ])))
@@ -1954,32 +2315,58 @@ class _OrdersTabState extends State<OrdersTab> with AutomaticKeepAliveClientMixi
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
-      case 'pending': return Colors.orange.shade600;
-      case 'accepted': return Colors.lightBlue.shade600;
-      case 'preparing': return Colors.blue.shade700;
-      case 'ready for pickup': return readyForPickupColor;
-      case 'assigned': return assignedColor;
-      case 'shipped': case 'out for delivery': return Colors.purple.shade500;
-      case 'delivered': case 'completed': return Colors.green.shade600;
-      case 'verification needed': return kColorWarning;
-      case 'cancelled': case 'rejected': return Colors.red.shade500;
-      default: return Colors.grey.shade600;
+      case 'pending':
+        return Colors.orange.shade600;
+      case 'accepted':
+        return Colors.lightBlue.shade600;
+      case 'preparing':
+        return Colors.blue.shade700;
+      case 'ready for pickup':
+        return readyForPickupColor;
+      case 'assigned':
+        return assignedColor;
+      case 'shipped':
+      case 'out for delivery':
+        return Colors.purple.shade500;
+      case 'delivered':
+      case 'completed':
+        return Colors.green.shade600;
+      case 'verification needed':
+        return kColorWarning;
+      case 'cancelled':
+      case 'rejected':
+        return Colors.red.shade500;
+      default:
+        return Colors.grey.shade600;
     }
   }
 
   IconData _getStatusIcon(String status) {
     switch (status.toLowerCase()) {
-      case 'pending': return Icons.hourglass_bottom_rounded;
-      case 'accepted': return Icons.thumb_up_alt_outlined;
-      case 'preparing': return Icons.soup_kitchen_rounded;
-      case 'ready for pickup': return Icons.inventory_2_outlined;
-      case 'assigned': return Icons.person_pin_circle_outlined;
-      case 'shipped': return Icons.local_shipping_outlined;
-      case 'out for delivery': return Icons.two_wheeler_rounded;
-      case 'delivered': case 'completed': return Icons.check_circle_rounded;
-      case 'verification needed': return Icons.password_rounded;
-      case 'cancelled': case 'rejected': return Icons.cancel_rounded;
-      default: return Icons.help_outline_rounded;
+      case 'pending':
+        return Icons.hourglass_bottom_rounded;
+      case 'accepted':
+        return Icons.thumb_up_alt_outlined;
+      case 'preparing':
+        return Icons.soup_kitchen_rounded;
+      case 'ready for pickup':
+        return Icons.inventory_2_outlined;
+      case 'assigned':
+        return Icons.person_pin_circle_outlined;
+      case 'shipped':
+        return Icons.local_shipping_outlined;
+      case 'out for delivery':
+        return Icons.two_wheeler_rounded;
+      case 'delivered':
+      case 'completed':
+        return Icons.check_circle_rounded;
+      case 'verification needed':
+        return Icons.password_rounded;
+      case 'cancelled':
+      case 'rejected':
+        return Icons.cancel_rounded;
+      default:
+        return Icons.help_outline_rounded;
     }
   }
 }
@@ -2007,7 +2394,8 @@ class _CompletionCodeDialog extends StatefulWidget {
 }
 
 class _CompletionCodeDialogState extends State<_CompletionCodeDialog> {
-  final TextEditingController _completionCodeController = TextEditingController();
+  final TextEditingController _completionCodeController =
+      TextEditingController();
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   String? _errorMessage;
 
@@ -2016,7 +2404,7 @@ class _CompletionCodeDialogState extends State<_CompletionCodeDialog> {
     _completionCodeController.dispose();
     super.dispose();
   }
-  
+
   void _setError(String message) {
     setState(() {
       _errorMessage = message;
@@ -2027,30 +2415,40 @@ class _CompletionCodeDialogState extends State<_CompletionCodeDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      title: Text('Verify Completion Code', style: TextStyle(fontWeight: FontWeight.bold, color: primaryTeal)),
+      title: Text('Verify Completion Code',
+          style: TextStyle(fontWeight: FontWeight.bold, color: primaryTeal)),
       content: Form(
           key: _formKey,
           child: SingleChildScrollView(
               child: ListBody(children: <Widget>[
-            Text('Please ask the customer for the completion code to mark order as ${widget.targetStatus.toLowerCase()}:', style: TextStyle(color: subtleTextColor)),
+            Text(
+                'Please ask the customer for the completion code to mark order as ${widget.targetStatus.toLowerCase()}:',
+                style: TextStyle(color: subtleTextColor)),
             const SizedBox(height: 16),
             TextFormField(
               controller: _completionCodeController,
-              decoration: InputDecoration(labelText: 'Completion Code', border: OutlineInputBorder()),
-              validator: (value) => (value == null || value.isEmpty) ? 'Please enter code' : null,
+              decoration: InputDecoration(
+                  labelText: 'Completion Code', border: OutlineInputBorder()),
+              validator: (value) =>
+                  (value == null || value.isEmpty) ? 'Please enter code' : null,
             ),
-             if (_errorMessage != null && _errorMessage!.isNotEmpty)
+            if (_errorMessage != null && _errorMessage!.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 12.0),
                 child: Text(
                   _errorMessage!,
-                  style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.w500),
+                  style: TextStyle(
+                      color: Colors.red,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500),
                   textAlign: TextAlign.center,
                 ),
               ),
           ]))),
       actions: <Widget>[
-        TextButton(child: const Text("Cancel"), onPressed: () => Navigator.of(context).pop()),
+        TextButton(
+            child: const Text("Cancel"),
+            onPressed: () => Navigator.of(context).pop()),
         ElevatedButton(child: const Text('Submit Code'), onPressed: _submitCode),
       ],
     );
@@ -2062,18 +2460,20 @@ class _CompletionCodeDialogState extends State<_CompletionCodeDialog> {
       widget.showLoadingCallback('Submitting code...');
 
       try {
-        bool success = await ApiService.updateOrderStatus(widget.order.orderId, widget.targetStatus, completionCode: codeToSubmit);
+        bool success = await ApiService.updateOrderStatus(
+            widget.order.orderId, widget.targetStatus,
+            completionCode: codeToSubmit);
         widget.dismissLoadingCallback();
         if (mounted) {
           if (success) {
-            Navigator.of(context).pop(); 
+            Navigator.of(context).pop();
             widget.onSuccess();
-          } 
+          }
         }
       } catch (e) {
         widget.dismissLoadingCallback();
         if (mounted) {
-           _setError(e.toString());
+          _setError(e.toString());
         }
       }
     }
@@ -2083,7 +2483,9 @@ class _CompletionCodeDialogState extends State<_CompletionCodeDialog> {
 class _RiderSelectionDialog extends StatefulWidget {
   final ApiService apiService;
   final int orderId;
-  const _RiderSelectionDialog({required this.apiService, required this.orderId, Key? key}) : super(key: key);
+  const _RiderSelectionDialog(
+      {required this.apiService, required this.orderId, Key? key})
+      : super(key: key);
   @override
   _RiderSelectionDialogState createState() => _RiderSelectionDialogState();
 }
@@ -2100,7 +2502,11 @@ class _RiderSelectionDialogState extends State<_RiderSelectionDialog> {
   }
 
   Future<void> _fetchRiders() async {
-    if (mounted) setState(() { _isLoading = true; _errorMessage = null; });
+    if (mounted)
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
     try {
       final riders = await widget.apiService.fetchAvailableRiders();
       if (mounted) {
@@ -2109,10 +2515,17 @@ class _RiderSelectionDialogState extends State<_RiderSelectionDialog> {
           if (!a.isActive && b.isActive) return 1;
           return a.name.toLowerCase().compareTo(b.name.toLowerCase());
         });
-        setState(() { _allRiders = riders; _isLoading = false; });
+        setState(() {
+          _allRiders = riders;
+          _isLoading = false;
+        });
       }
     } catch (e) {
-      if (mounted) setState(() { _errorMessage = "Error fetching riders: ${e.toString()}"; _isLoading = false; });
+      if (mounted)
+        setState(() {
+          _errorMessage = "Error fetching riders: ${e.toString()}";
+          _isLoading = false;
+        });
     }
   }
 
@@ -2134,8 +2547,12 @@ class _RiderSelectionDialogState extends State<_RiderSelectionDialog> {
           height: MediaQuery.of(context).size.height * 0.5,
           child: _buildContent()),
       actions: <Widget>[
-        TextButton(child: const Text("Mark Ready (Any)"), onPressed: () => Navigator.of(context).pop(true)), 
-        TextButton(child: const Text("Cancel"), onPressed: () => Navigator.of(context).pop(null)),
+        TextButton(
+            child: const Text("Mark Ready (Any)"),
+            onPressed: () => Navigator.of(context).pop(true)),
+        TextButton(
+            child: const Text("Cancel"),
+            onPressed: () => Navigator.of(context).pop(null)),
       ],
     );
   }
@@ -2143,36 +2560,61 @@ class _RiderSelectionDialogState extends State<_RiderSelectionDialog> {
   Widget _buildContent() {
     if (_isLoading) return const Center(child: CircularProgressIndicator());
     if (_errorMessage != null)
-      return Center(child: Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text(_errorMessage!, style: TextStyle(color: Theme.of(context).colorScheme.error), textAlign: TextAlign.center),
-            const SizedBox(height: 10),
-            ElevatedButton(onPressed: _fetchRiders, child: const Text("Retry"))
-          ])));
+      return Center(
+          child: Padding(
+              padding: const EdgeInsets.all(8.0),
+              child:
+                  Column(mainAxisSize: MainAxisSize.min, children: [
+                Text(_errorMessage!,
+                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    textAlign: TextAlign.center),
+                const SizedBox(height: 10),
+                ElevatedButton(onPressed: _fetchRiders, child: const Text("Retry"))
+              ])));
     if (_allRiders.isEmpty)
-      return const Center(child: Padding(padding: EdgeInsets.all(8.0), child: Text("No riders/staff found.", textAlign: TextAlign.center)));
+      return const Center(
+          child: Padding(
+              padding: EdgeInsets.all(8.0),
+              child: Text("No riders/staff found.",
+                  textAlign: TextAlign.center)));
 
     return ListView.builder(
       itemCount: _allRiders.length,
       itemBuilder: (context, index) {
         final rider = _allRiders[index];
         final bool isAvailable = rider.isActive;
-        final Color tileColor = isAvailable ? Theme.of(context).dialogBackgroundColor : Colors.grey.shade200;
-        final Color textColor = isAvailable ? (Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black) : Colors.grey.shade600;
+        final Color tileColor = isAvailable
+            ? Theme.of(context).dialogBackgroundColor
+            : Colors.grey.shade200;
+        final Color textColor = isAvailable
+            ? (Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black)
+            : Colors.grey.shade600;
         final Color iconColor = isAvailable ? primaryTeal : Colors.grey.shade500;
 
         return Card(
           margin: const EdgeInsets.symmetric(vertical: 4),
           elevation: isAvailable ? 0.5 : 0.5,
           color: tileColor,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0), side: isAvailable ? BorderSide.none : BorderSide(color: Colors.grey.shade300)),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8.0),
+              side: isAvailable
+                  ? BorderSide.none
+                  : BorderSide(color: Colors.grey.shade300)),
           child: ListTile(
-            leading: CircleAvatar(backgroundColor: iconColor.withOpacity(0.1), child: Icon(Icons.two_wheeler, color: iconColor, size: 20)),
-            title: Text(rider.name, style: TextStyle(color: textColor, fontWeight: isAvailable ? FontWeight.normal : FontWeight.w300)),
-            subtitle: Text(isAvailable ? 'Status: Active' : 'Status: Inactive', style: TextStyle(color: textColor.withOpacity(0.7))),
-            trailing: isAvailable ? const Icon(Icons.chevron_right) : Icon(Icons.block, color: Colors.grey.shade500, size: 18), 
-            onTap: () => Navigator.of(context).pop(rider), 
+            leading: CircleAvatar(
+                backgroundColor: iconColor.withOpacity(0.1),
+                child: Icon(Icons.two_wheeler, color: iconColor, size: 20)),
+            title: Text(rider.name,
+                style: TextStyle(
+                    color: textColor,
+                    fontWeight:
+                        isAvailable ? FontWeight.normal : FontWeight.w300)),
+            subtitle: Text(isAvailable ? 'Status: Active' : 'Status: Inactive',
+                style: TextStyle(color: textColor.withOpacity(0.7))),
+            trailing: isAvailable
+                ? const Icon(Icons.chevron_right)
+                : Icon(Icons.block, color: Colors.grey.shade500, size: 18),
+            onTap: () => Navigator.of(context).pop(rider),
             dense: true,
           ),
         );
@@ -2199,7 +2641,8 @@ extension GigsTabRefreshExtension on _GigsTabState {
   }
 }
 
-class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, RouteAware {
+class _GigsTabState extends State<GigsTab>
+    with AutomaticKeepAliveClientMixin, RouteAware {
   final Set<int> _loadingOrderIds = {};
 
   @override
@@ -2228,10 +2671,11 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
     // Subscribe to route changes
     final route = ModalRoute.of(context);
     if (route != null) {
-      RouteObserver<PageRoute>? routeObserver = context.findAncestorStateOfType<_ChefDashboardScreenState>()?._routeObserver;
+      RouteObserver<PageRoute>? routeObserver =
+          context.findAncestorStateOfType<_ChefDashboardScreenState>()?._routeObserver;
       routeObserver?.subscribe(this, route as PageRoute);
     }
-    
+
     // Load orders if not already loaded
     if (!_didLoadGigs) {
       _didLoadGigs = true;
@@ -2243,7 +2687,8 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
   void dispose() {
     final route = ModalRoute.of(context);
     if (route != null) {
-      RouteObserver<PageRoute>? routeObserver = context.findAncestorStateOfType<_ChefDashboardScreenState>()?._routeObserver;
+      RouteObserver<PageRoute>? routeObserver =
+          context.findAncestorStateOfType<_ChefDashboardScreenState>()?._routeObserver;
       routeObserver?.unsubscribe(this);
     }
     _gigsPollingTimer?.cancel();
@@ -2282,9 +2727,10 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
 
   void _startGigsPolling() {
     if (!_isRouteActive) return;
-    
+
     _gigsPollingTimer?.cancel();
-    _gigsPollingTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
+    _gigsPollingTimer =
+        Timer.periodic(const Duration(seconds: 10), (_) async {
       if (!mounted || !_isRouteActive || _isVerificationProcessActive) return;
       await _pollGigsStatus();
     });
@@ -2294,8 +2740,13 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
     try {
       final fetchedOrders = await ApiService().fetchOrders();
       if (!mounted) return;
-      final newGigOrders = fetchedOrders.where((o) => o.orderType?.toLowerCase() == 'gig').toList()..sort((a, b) => b.orderDate.compareTo(a.orderDate));
-      final Map<int, String> newStatusMap = { for (final o in newGigOrders) o.orderId: o.orderStatus };
+      final newGigOrders = fetchedOrders
+          .where((o) => o.orderType?.toLowerCase() == 'gig')
+          .toList()
+        ..sort((a, b) => b.orderDate.compareTo(a.orderDate));
+      final Map<int, String> newStatusMap = {
+        for (final o in newGigOrders) o.orderId: o.orderStatus
+      };
       bool dataChanged = false;
       if (newGigOrders.length != _gigOrders.length) {
         dataChanged = true;
@@ -2303,7 +2754,10 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
         for (int i = 0; i < newGigOrders.length; i++) {
           final old = _gigOrders[i];
           final updated = newGigOrders[i];
-          if (old.orderId != updated.orderId || old.orderStatus != updated.orderStatus || old.orderDate != updated.orderDate || old.totalPrice != updated.totalPrice) {
+          if (old.orderId != updated.orderId ||
+              old.orderStatus != updated.orderStatus ||
+              old.orderDate != updated.orderDate ||
+              old.totalPrice != updated.totalPrice) {
             dataChanged = true;
             break;
           }
@@ -2325,8 +2779,6 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
     } catch (_) {}
   }
 
-
-
   Future<void> _loadOrders() async {
     if (!mounted) return;
     ScaffoldMessenger.of(context).removeCurrentSnackBar();
@@ -2341,14 +2793,20 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
       final fetchedOrders = await _ordersFuture!;
       if (mounted) {
         _allFetchedOrders = fetchedOrders;
-        _gigOrders = _allFetchedOrders.where((o) => o.orderType?.toLowerCase() == 'gig').toList();
+        _gigOrders = _allFetchedOrders
+            .where((o) => o.orderType?.toLowerCase() == 'gig')
+            .toList();
         _gigOrders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
         setState(() => _isLoadingGigs = false);
       }
     } catch (e, stackTrace) {
       if (mounted) {
         _errorMessage = "Failed to load gigs: ${e.toString()}";
-        setState(() { _isLoadingGigs = false; _allFetchedOrders = []; _gigOrders = []; });
+        setState(() {
+          _isLoadingGigs = false;
+          _allFetchedOrders = [];
+          _gigOrders = [];
+        });
       }
     }
   }
@@ -2358,7 +2816,8 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
     final result = await showDialog<dynamic>(
       context: context,
       barrierDismissible: false,
-      builder: (BuildContext context) => _RiderSelectionDialog(apiService: ApiService(), orderId: order.orderId),
+      builder: (BuildContext context) =>
+          _RiderSelectionDialog(apiService: ApiService(), orderId: order.orderId),
     );
     if (!mounted || result == null) {
       if (result == null) print('Staff assignment cancelled for Gig.');
@@ -2376,19 +2835,37 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
     final bool? confirm = await showDialog<bool>(
         context: context,
         builder: (BuildContext dialogContext) => AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
               title: Text('Confirm Assignment for Gig #${order.orderId}'),
-              content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Assign this Gig to:'),
-                const SizedBox(height: 8),
-                Text('  Name: ${rider.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                Text('  Status: ${rider.isActive ? "Active" : "Inactive"}'),
-                Text('  ID: ${rider.id}'),
-                if (!rider.isActive) Padding(padding: const EdgeInsets.only(top: 8.0), child: Text('Warning: Staff is currently inactive.', style: TextStyle(color: Colors.orange.shade800))),
-              ]),
+              content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Assign this Gig to:'),
+                    const SizedBox(height: 8),
+                    Text('  Name: ${rider.name}',
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    Text('  Status: ${rider.isActive ? "Active" : "Inactive"}'),
+                    Text('  ID: ${rider.id}'),
+                    if (!rider.isActive)
+                      Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: Text('Warning: Staff is currently inactive.',
+                              style:
+                                  TextStyle(color: Colors.orange.shade800))),
+                  ]),
               actions: <Widget>[
-                TextButton(child: const Text('Cancel'), onPressed: () => Navigator.of(dialogContext).pop(false)),
-                TextButton(child: Text(rider.isActive ? 'Confirm Assignment' : 'Assign Anyway'), style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.primary), onPressed: () => Navigator.of(dialogContext).pop(true)),
+                TextButton(
+                    child: const Text('Cancel'),
+                    onPressed: () => Navigator.of(dialogContext).pop(false)),
+                TextButton(
+                    child: Text(
+                        rider.isActive ? 'Confirm Assignment' : 'Assign Anyway'),
+                    style: TextButton.styleFrom(
+                        foregroundColor:
+                            Theme.of(context).colorScheme.primary),
+                    onPressed: () => Navigator.of(dialogContext).pop(true)),
               ],
             ));
     if (confirm == true) {
@@ -2405,39 +2882,46 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
     final originalStatus = _gigOrders[orderIndex].orderStatus;
     final originalRiderId = _gigOrders[orderIndex].assignedRiderId;
     final originalRiderName = _gigOrders[orderIndex].assignedRiderName;
-    final allIndex = _allFetchedOrders.indexWhere((o) => o.orderId == order.orderId);
+    final allIndex =
+        _allFetchedOrders.indexWhere((o) => o.orderId == order.orderId);
     setState(() {
       _gigOrders[orderIndex].orderStatus = statusAssigned;
       _gigOrders[orderIndex].assignedRiderId = rider.id;
       _gigOrders[orderIndex].assignedRiderName = rider.name;
       if (allIndex != -1) {
-          _allFetchedOrders[allIndex].orderStatus = statusAssigned;
-          _allFetchedOrders[allIndex].assignedRiderId = rider.id;
-          _allFetchedOrders[allIndex].assignedRiderName = rider.name;
+        _allFetchedOrders[allIndex].orderStatus = statusAssigned;
+        _allFetchedOrders[allIndex].assignedRiderId = rider.id;
+        _allFetchedOrders[allIndex].assignedRiderName = rider.name;
       }
     });
     _showLoadingSnackbar("Assigning ${rider.name} to Gig...");
     try {
-      bool success = await ApiService.assignOrderToRider(order.orderId, rider.id, statusAssigned);
+      bool success = await ApiService.assignOrderToRider(
+          order.orderId, rider.id, statusAssigned);
       _dismissLoadingSnackbar();
       if (mounted) {
         if (success) {
-          _showSuccessSnackbar("Staff ${rider.name} assigned to Gig ${order.orderId}.");
+          _showSuccessSnackbar(
+              "Staff ${rider.name} assigned to Gig ${order.orderId}.");
           _showOrderNextStepDialog(statusAssigned);
         } else {
           _showErrorSnackbar('Failed to assign ${rider.name}.');
           setState(() {
-              _gigOrders[orderIndex].orderStatus = originalStatus;
-              _gigOrders[orderIndex].assignedRiderId = originalRiderId;
-              _gigOrders[orderIndex].assignedRiderName = originalRiderName;
-              if (allIndex != -1) { /* revert _allFetchedOrders too */ }
+            _gigOrders[orderIndex].orderStatus = originalStatus;
+            _gigOrders[orderIndex].assignedRiderId = originalRiderId;
+            _gigOrders[orderIndex].assignedRiderName = originalRiderName;
+            if (allIndex != -1) {
+              /* revert _allFetchedOrders too */
+            }
           });
         }
       }
     } catch (e) {
       _dismissLoadingSnackbar();
       if (mounted) {
-        setState(() { /* Revert */ });
+        setState(() {
+          /* Revert */
+        });
         _showErrorSnackbar('Error assigning staff.');
       }
     }
@@ -2447,16 +2931,20 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
     final orderIndex = _findOrderIndex(order.orderId);
     if (orderIndex == -1) return;
     final originalStatus = _gigOrders[orderIndex].orderStatus;
-    final allIndex = _allFetchedOrders.indexWhere((o) => o.orderId == order.orderId);
+    final allIndex =
+        _allFetchedOrders.indexWhere((o) => o.orderId == order.orderId);
     setState(() {
-      _gigOrders[orderIndex].orderStatus = statusReadyForPickup; 
+      _gigOrders[orderIndex].orderStatus = statusReadyForPickup;
       _gigOrders[orderIndex].assignedRiderId = null;
       _gigOrders[orderIndex].assignedRiderName = null;
-      if (allIndex != -1) { /* update _allFetchedOrders */ }
+      if (allIndex != -1) {
+        /* update _allFetchedOrders */
+      }
     });
     _showLoadingSnackbar("Marking Gig as Ready...");
     try {
-      bool success = await ApiService.updateOrderStatus(order.orderId, statusReadyForPickup);
+      bool success =
+          await ApiService.updateOrderStatus(order.orderId, statusReadyForPickup);
       _dismissLoadingSnackbar();
       if (mounted) {
         if (success) {
@@ -2464,14 +2952,18 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
           _showOrderNextStepDialog(statusReadyForPickup);
         } else {
           _showErrorSnackbar('Failed to mark Gig Ready.');
-          setState(() { /* Revert */ });
+          setState(() {
+            /* Revert */
+          });
         }
       }
     } catch (e) {
       _dismissLoadingSnackbar();
       if (mounted) {
         _showErrorSnackbar('Error marking Gig Ready.');
-        setState(() { /* Revert */ });
+        setState(() {
+          /* Revert */
+        });
       }
     }
   }
@@ -2481,12 +2973,15 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
     if (orderIndex == -1) return;
     if (mounted) ScaffoldMessenger.of(context).removeCurrentSnackBar();
     final originalStatus = _gigOrders[orderIndex].orderStatus;
-    final allIndex = _allFetchedOrders.indexWhere((o) => o.orderId == order.orderId);
+    final allIndex =
+        _allFetchedOrders.indexWhere((o) => o.orderId == order.orderId);
     setState(() {
       _gigOrders[orderIndex].orderStatus = newStatus;
       if (allIndex != -1) {
         _allFetchedOrders[allIndex].orderStatus = newStatus;
-        if (newStatus == statusPreparing || newStatus == statusCancelled || newStatus == statusAccepted) {
+        if (newStatus == statusPreparing ||
+            newStatus == statusCancelled ||
+            newStatus == statusAccepted) {
           _gigOrders[orderIndex].assignedRiderId = null;
           _gigOrders[orderIndex].assignedRiderName = null;
           _allFetchedOrders[allIndex].assignedRiderId = null;
@@ -2496,7 +2991,8 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
     });
     _showLoadingSnackbar("Updating Gig status to $newStatus...");
     try {
-      bool success = await ApiService.updateOrderStatus(order.orderId, newStatus);
+      bool success =
+          await ApiService.updateOrderStatus(order.orderId, newStatus);
       _dismissLoadingSnackbar();
       if (mounted) {
         if (success) {
@@ -2505,13 +3001,17 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
           setState(() {});
         } else {
           _showErrorSnackbar('Failed to update Gig status.');
-          setState(() { /* Revert */ });
+          setState(() {
+            /* Revert */
+          });
         }
       }
     } catch (e) {
       _dismissLoadingSnackbar();
       if (mounted) {
-        setState(() { /* Revert */ });
+        setState(() {
+          /* Revert */
+        });
         _showErrorSnackbar('Error updating Gig status: ${e.toString()}');
       }
     }
@@ -2530,13 +3030,14 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
         _showErrorSnackbar('Chef ID not found.');
         return;
       }
-      bool success = await ApiService.updateOrderStatus(orderId, targetStatus, chefId: chefId);
+      bool success =
+          await ApiService.updateOrderStatus(orderId, targetStatus, chefId: chefId);
       if (!mounted) return;
       setState(() => _loadingOrderIds.remove(orderId));
       if (success) {
         if (!mounted) return;
         _showSuccessSnackbar('Gig #$orderId marked as $targetStatus.');
-         // Refresh to reflect changes
+        // Refresh to reflect changes
         _loadOrders();
       } else {
         if (!mounted) return;
@@ -2550,7 +3051,8 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
   }
 
   Future<void> _initiateCompletionFlow(Order order, String targetStatus) async {
-    debugPrint('[GIGS][FLOW] _initiateCompletionFlow called for orderId: ${order.orderId}, status: ${order.orderStatus}, targetStatus: ${targetStatus}');
+    debugPrint(
+        '[GIGS][FLOW] _initiateCompletionFlow called for orderId: ${order.orderId}, status: ${order.orderStatus}, targetStatus: ${targetStatus}');
     if (!mounted) return;
     final orderId = order.orderId;
     setState(() => _loadingOrderIds.add(orderId));
@@ -2571,8 +3073,10 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
     }
   }
 
-  void _showCompletionCodeVerificationDialog(BuildContext context, Order order, String targetStatus) {
-     debugPrint('[GIGS][DIALOG] Showing completion code verification dialog for orderId: ${order.orderId}, targetStatus: ${targetStatus}');
+  void _showCompletionCodeVerificationDialog(
+      BuildContext context, Order order, String targetStatus) {
+    debugPrint(
+        '[GIGS][DIALOG] Showing completion code verification dialog for orderId: ${order.orderId}, targetStatus: ${targetStatus}');
     showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -2598,39 +3102,222 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
     );
   }
 
-  int _findOrderIndex(int orderId) => _gigOrders.indexWhere((o) => o.orderId == orderId);
-  void _showErrorSnackbar(String message) { if (!mounted) return; ScaffoldMessenger.of(context).removeCurrentSnackBar(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), backgroundColor: Theme.of(context).colorScheme.error, duration: const Duration(seconds: 4))); }
-  void _showSuccessSnackbar(String message) { if (!mounted) return; ScaffoldMessenger.of(context).removeCurrentSnackBar(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), backgroundColor: Colors.green.shade600)); }
-  void _showInfoSnackbar(String message) { if (!mounted) return; ScaffoldMessenger.of(context).removeCurrentSnackBar(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), backgroundColor: Colors.blueGrey.shade600)); }
-  void _showLoadingSnackbar(String message) { if (!mounted) return; ScaffoldMessenger.of(context).removeCurrentSnackBar(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Row(children: [const CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(whiteColor)), const SizedBox(width: 16), Text(message)]), duration: const Duration(minutes: 1), backgroundColor: Colors.black87)); }
-  void _dismissLoadingSnackbar() { if (!mounted) return; ScaffoldMessenger.of(context).hideCurrentSnackBar(); }
-  void _showOrderNextStepDialog(String newStatus) { /* ... Same as OrdersTab, but messages adjusted for Gigs ... */ 
+  int _findOrderIndex(int orderId) =>
+      _gigOrders.indexWhere((o) => o.orderId == orderId);
+  void _showErrorSnackbar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(message),
+        backgroundColor: Theme.of(context).colorScheme.error,
+        duration: const Duration(seconds: 4)));
+  }
+
+  void _showSuccessSnackbar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: Colors.green.shade600));
+  }
+
+  void _showInfoSnackbar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(message), backgroundColor: Colors.blueGrey.shade600));
+  }
+
+  void _showLoadingSnackbar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Row(children: [
+          const CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(whiteColor)),
+          const SizedBox(width: 16),
+          Text(message)
+        ]),
+        duration: const Duration(minutes: 1),
+        backgroundColor: Colors.black87));
+  }
+
+  void _dismissLoadingSnackbar() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+  }
+
+  void _showOrderNextStepDialog(String newStatus) {
+    /* ... Same as OrdersTab, but messages adjusted for Gigs ... */
     if (!mounted) return;
     String title = "Gig Status Updated";
     String message = "Gig status changed to $newStatus.";
     switch (newStatus) {
-      case statusAccepted: title = "Gig Accepted!"; message = "Great! Prepare. Mark 'Ready' or 'Assign Staff' when set."; break;
-      case statusPreparing: title = "Gig Preparation Started"; message = "Mark 'Ready' or 'Assign Staff' once complete."; break;
-      case statusReadyForPickup: title = "Gig Ready!"; message = "Gig ready. Staff/rider can proceed."; break;
-      case statusAssigned: title = "Staff Assigned!"; message = "Assigned person notified for this gig."; break;
-      case statusOutForDelivery: title = "Gig In Progress"; message = "Service is underway."; break;
-      case statusDelivered: case statusCompleted: title = "Gig Completed!"; message = "Fantastic! Gig successfully completed."; break;
-      case statusCancelled: title = "Gig Cancelled"; message = "The gig has been cancelled."; break;
-      case statusShipped: title = "Gig Service Started"; message = "Service for this gig has begun."; break;
-      default: message = "Gig status is now '$newStatus'.";
+      case statusAccepted:
+        title = "Gig Accepted!";
+        message = "Great! Prepare. Mark 'Ready' or 'Assign Staff' when set.";
+        break;
+      case statusPreparing:
+        title = "Gig Preparation Started";
+        message = "Mark 'Ready' or 'Assign Staff' once complete.";
+        break;
+      case statusReadyForPickup:
+        title = "Gig Ready!";
+        message = "Gig ready. Staff/rider can proceed.";
+        break;
+      case statusAssigned:
+        title = "Staff Assigned!";
+        message = "Assigned person notified for this gig.";
+        break;
+      case statusOutForDelivery:
+        title = "Gig In Progress";
+        message = "Service is underway.";
+        break;
+      case statusDelivered:
+      case statusCompleted:
+        title = "Gig Completed!";
+        message = "Fantastic! Gig successfully completed.";
+        break;
+      case statusCancelled:
+        title = "Gig Cancelled";
+        message = "The gig has been cancelled.";
+        break;
+      case statusShipped:
+        title = "Gig Service Started";
+        message = "Service for this gig has begun.";
+        break;
+      default:
+        message = "Gig status is now '$newStatus'.";
     }
-    showDialog(context: context, builder: (BuildContext context) => AlertDialog(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), title: Text(title), content: Text(message), actions: <Widget>[TextButton(child: const Text("OK"), onPressed: () => Navigator.of(context).pop())]));
+    showDialog(
+        context: context,
+        builder: (BuildContext context) => AlertDialog(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            title: Text(title),
+            content: Text(message),
+            actions: <Widget>[
+              TextButton(
+                  child: const Text("OK"),
+                  onPressed: () => Navigator.of(context).pop())
+            ]));
   }
-  Widget _buildOrdersShimmer() { /* ... Same as OrdersTab ... */ 
-    final shimmerBase = Theme.of(context).brightness == Brightness.light ? Colors.grey.shade300 : Colors.grey.shade700;
-    final shimmerHighlight = Theme.of(context).brightness == Brightness.light ? Colors.grey.shade100 : Colors.grey.shade500;
-    return Shimmer.fromColors(baseColor: shimmerBase, highlightColor: shimmerHighlight, child: ListView.builder(padding: const EdgeInsets.only(top: 8.0, bottom: 80.0), itemCount: 5, physics: const NeverScrollableScrollPhysics(), itemBuilder: (_, __) => Card(margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16), child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0), child: Row(children: [Container(width: 44, height: 44, decoration: BoxDecoration(color: whiteColor, borderRadius: BorderRadius.circular(22))), const SizedBox(width: 16), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Container(width: double.infinity, height: 18, color: whiteColor, margin: const EdgeInsets.only(bottom: 6)), Container(width: MediaQuery.of(context).size.width * 0.4, height: 14, color: whiteColor)])), const SizedBox(width: 16), Container(width: 80, height: 25, decoration: BoxDecoration(color: whiteColor, borderRadius: BorderRadius.circular(15)))])))));
+
+  Widget _buildOrdersShimmer() {
+    /* ... Same as OrdersTab ... */
+    final shimmerBase = Theme.of(context).brightness == Brightness.light
+        ? Colors.grey.shade300
+        : Colors.grey.shade700;
+    final shimmerHighlight = Theme.of(context).brightness == Brightness.light
+        ? Colors.grey.shade100
+        : Colors.grey.shade500;
+    return Shimmer.fromColors(
+        baseColor: shimmerBase,
+        highlightColor: shimmerHighlight,
+        child: ListView.builder(
+            padding: const EdgeInsets.only(top: 8.0, bottom: 80.0),
+            itemCount: 5,
+            physics: const NeverScrollableScrollPhysics(),
+            itemBuilder: (_, __) => Card(
+                margin:
+                    const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16.0, vertical: 12.0),
+                    child: Row(children: [
+                      Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                              color: whiteColor,
+                              borderRadius: BorderRadius.circular(22))),
+                      const SizedBox(width: 16),
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            Container(
+                                width: double.infinity,
+                                height: 18,
+                                color: whiteColor,
+                                margin: const EdgeInsets.only(bottom: 6)),
+                            Container(
+                                width:
+                                    MediaQuery.of(context).size.width * 0.4,
+                                height: 14,
+                                color: whiteColor)
+                          ])),
+                      const SizedBox(width: 16),
+                      Container(
+                          width: 80,
+                          height: 25,
+                          decoration: BoxDecoration(
+                              color: whiteColor,
+                              borderRadius: BorderRadius.circular(15)))
+                    ])))));
   }
-  Widget _buildErrorState(String errorMsg) { /* ... Same as OrdersTab ... */ 
-    return Center(child: Padding(padding: const EdgeInsets.all(24.0), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.error_outline_rounded, color: Theme.of(context).colorScheme.error, size: 50), const SizedBox(height: 16), Text('Error Loading Gigs', style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Theme.of(context).colorScheme.error), textAlign: TextAlign.center), const SizedBox(height: 8), Text(errorMsg, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]), textAlign: TextAlign.center, maxLines: 3, overflow: TextOverflow.ellipsis), const SizedBox(height: 24), ElevatedButton.icon(icon: const Icon(Icons.refresh_rounded, size: 20), label: const Text('Retry'), onPressed: _loadOrders)])));
+
+  Widget _buildErrorState(String errorMsg) {
+    /* ... Same as OrdersTab ... */
+    return Center(
+        child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.error_outline_rounded,
+                      color: Theme.of(context).colorScheme.error, size: 50),
+                  const SizedBox(height: 16),
+                  Text('Error Loading Gigs',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(
+                              color: Theme.of(context).colorScheme.error),
+                      textAlign: TextAlign.center),
+                  const SizedBox(height: 8),
+                  Text(errorMsg,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(color: Colors.grey[600]),
+                      textAlign: TextAlign.center,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 24),
+                  ElevatedButton.icon(
+                      icon: const Icon(Icons.refresh_rounded, size: 20),
+                      label: const Text('Retry'),
+                      onPressed: _loadOrders)
+                ])));
   }
-  Widget _buildEmptyState(String message) { /* ... Same as OrdersTab, maybe different icon ... */ 
-    return Center(child: Padding(padding: const EdgeInsets.all(24.0), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.work_off_outlined, size: 60, color: Colors.grey[400]), const SizedBox(height: 16), Text(message, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.grey[600]), textAlign: TextAlign.center), const SizedBox(height: 24), ElevatedButton.icon(icon: const Icon(Icons.refresh_rounded, size: 20), label: const Text('Refresh'), onPressed: _loadOrders, style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[300], foregroundColor: Colors.grey[700]))])));
+
+  Widget _buildEmptyState(String message) {
+    /* ... Same as OrdersTab, maybe different icon ... */
+    return Center(
+        child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.work_off_outlined,
+                      size: 60, color: Colors.grey[400]),
+                  const SizedBox(height: 16),
+                  Text(message,
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(color: Colors.grey[600]),
+                      textAlign: TextAlign.center),
+                  const SizedBox(height: 24),
+                  ElevatedButton.icon(
+                      icon: const Icon(Icons.refresh_rounded, size: 20),
+                      label: const Text('Refresh'),
+                      onPressed: _loadOrders,
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.grey[300],
+                          foregroundColor: Colors.grey[700]))
+                ])));
   }
 
   @override
@@ -2641,9 +3328,14 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
       builder: (context, snapshot) {
         final bool isLoading = _isLoadingGigs;
         if (isLoading && _gigOrders.isEmpty) return _buildOrdersShimmer();
-        if (_errorMessage != null && _gigOrders.isEmpty) return _buildErrorState(_errorMessage!);
-        if (snapshot.hasError && _gigOrders.isEmpty && _errorMessage == null) return _buildErrorState(snapshot.error.toString());
-        if (_gigOrders.isEmpty && !isLoading) return _buildEmptyState('You have no gigs yet.');
+        if (_errorMessage != null && _gigOrders.isEmpty)
+          return _buildErrorState(_errorMessage!);
+        if (snapshot.hasError &&
+            _gigOrders.isEmpty &&
+            _errorMessage == null)
+          return _buildErrorState(snapshot.error.toString());
+        if (_gigOrders.isEmpty && !isLoading)
+          return _buildEmptyState('You have no gigs yet.');
         return _buildGigList();
       },
     );
@@ -2658,7 +3350,8 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
         physics: const AlwaysScrollableScrollPhysics(),
         itemCount: _gigOrders.length,
         itemBuilder: (context, index) => _buildOrderCard(
-          context, _gigOrders[index],
+          context,
+          _gigOrders[index],
           handleReadyForShipping: _handleReadyForShipping,
           updateSimpleStatus: _updateSimpleOrderStatus,
         ),
@@ -2666,59 +3359,92 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
     );
   }
 
-  Widget _buildOrderCard(BuildContext context, Order order, {required Function(Order) handleReadyForShipping, required Function(Order, String) updateSimpleStatus}) {
+  Widget _buildOrderCard(BuildContext context, Order order,
+      {required Function(Order) handleReadyForShipping,
+      required Function(Order, String) updateSimpleStatus}) {
     final textTheme = Theme.of(context).textTheme;
-    final dateFormat = DateFormat('MMM d, yyyy \'at\' h:mm a', Localizations.localeOf(context).toString());
+    final dateFormat = DateFormat('MMM d, yyyy \'at\' h:mm a',
+        Localizations.localeOf(context).toString());
     final statusColor = _getStatusColor(order.orderStatus);
     final statusIcon = _getStatusIcon(order.orderStatus);
-    
-    bool isVerificationPending = order.orderStatus.toLowerCase() == statusVerificationNeeded.toLowerCase();
+
+    bool isVerificationPending =
+        order.orderStatus.toLowerCase() == statusVerificationNeeded.toLowerCase();
 
     return Card(
       clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
         key: PageStorageKey<int>(order.orderId),
-        tilePadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-        leading: CircleAvatar(backgroundColor: statusColor.withOpacity(0.15), child: Icon(statusIcon, color: statusColor, size: 22)),
-        title: Text(order.mealName, style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600), maxLines: 2, overflow: TextOverflow.ellipsis),
-        subtitle: Padding(padding: const EdgeInsets.only(top: 5.0), child: Text('#${order.orderId} • ${dateFormat.format(order.orderDate.toLocal())}', style: textTheme.bodySmall)),
+        tilePadding:
+            const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+        leading: CircleAvatar(
+            backgroundColor: statusColor.withOpacity(0.15),
+            child: Icon(statusIcon, color: statusColor, size: 22)),
+        title: Text(order.mealName,
+            style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis),
+        subtitle: Padding(
+            padding: const EdgeInsets.only(top: 5.0),
+            child: Text('#${order.orderId} • ${dateFormat.format(order.orderDate.toLocal())}',
+                style: textTheme.bodySmall)),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           if (_loadingOrderIds.contains(order.orderId))
             Padding(
               padding: const EdgeInsets.only(right: 8.0),
-              child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.2, valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary))),
+              child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2.2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                          Theme.of(context).colorScheme.primary))),
             ),
           _buildStatusChip(order.orderStatus),
         ]),
         onExpansionChanged: (isExpanding) async {
-            if (isExpanding && isVerificationPending) {
-                 try {
-                    setState(() => _isVerificationProcessActive = true);
-                    final bool verified = await ChefVerificationHelper.showVerificationDialog(context, order);
-                    if (verified && mounted) {
-                      await ChefVerificationHelper.updateOrderStatusAfterVerification(order.orderId, statusCompleted);
-                      _showSuccessSnackbar('Gig #${order.orderId} verified and marked as completed!');
-                      _loadOrders(); 
-                    }
-                  } catch (e) {
-                    if (mounted) _showErrorSnackbar('Verification failed: ${e.toString()}');
-                  } finally {
-                    if (mounted) setState(() => _isVerificationProcessActive = false);
-                  }
+          if (isExpanding && isVerificationPending) {
+            try {
+              setState(() => _isVerificationProcessActive = true);
+              final bool verified =
+                  await ChefVerificationHelper.showVerificationDialog(
+                      context, order);
+              if (verified && mounted) {
+                await ChefVerificationHelper.updateOrderStatusAfterVerification(
+                    order.orderId, statusCompleted);
+                _showSuccessSnackbar(
+                    'Gig #${order.orderId} verified and marked as completed!');
+                _loadOrders();
+              }
+            } catch (e) {
+              if (mounted)
+                _showErrorSnackbar('Verification failed: ${e.toString()}');
+            } finally {
+              if (mounted) setState(() => _isVerificationProcessActive = false);
             }
+          }
         },
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18.0, vertical: 8.0),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _buildDetailRow(context, Icons.person_outline, 'Customer', order.customerName),
-              _buildDetailRow(context, Icons.location_on_outlined, 'Location', order.deliveryAddress),
-              _buildDetailRow(context, Icons.list_alt_rounded, 'Requirements', order.ingredients),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _buildDetailRow(
+                  context, Icons.person_outline, 'Customer', order.customerName),
+              _buildDetailRow(context, Icons.location_on_outlined, 'Location',
+                  order.deliveryAddress),
+              _buildDetailRow(context, Icons.list_alt_rounded, 'Requirements',
+                  order.ingredients),
               _buildDetailRow(context, Icons.notes_rounded, 'Notes', order.notes),
               if (order.assignedRiderId != null)
-                _buildDetailRow(context, Icons.badge_outlined, 'Assigned Staff', order.assignedRiderName ?? 'ID: ${order.assignedRiderId}'),
+                _buildDetailRow(
+                    context,
+                    Icons.badge_outlined,
+                    'Assigned Staff',
+                    order.assignedRiderName ?? 'ID: ${order.assignedRiderId}'),
               const SizedBox(height: 16),
-              _buildActionButtons(context, order, handleReadyForShipping, updateSimpleStatus),
+              _buildActionButtons(
+                  context, order, handleReadyForShipping, updateSimpleStatus),
               const SizedBox(height: 8),
             ]),
           ),
@@ -2727,14 +3453,19 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
     );
   }
 
-  Widget _buildActionButtons(BuildContext context, Order order, Function(Order) handleReadyForShipping, Function(Order, String) updateSimpleStatus) {
+  Widget _buildActionButtons(BuildContext context, Order order,
+      Function(Order) handleReadyForShipping, Function(Order, String) updateSimpleStatus) {
     final currentStatus = order.orderStatus.toLowerCase();
     final colorScheme = Theme.of(context).colorScheme;
     final isPending = currentStatus == statusPending.toLowerCase();
     final isAccepted = currentStatus == statusAccepted.toLowerCase();
-    final isInProgress = currentStatus == statusPreparing.toLowerCase() || currentStatus == statusOutForDelivery.toLowerCase(); // 'Shipped' could also be here
-    final isCompleted = currentStatus == statusCompleted.toLowerCase() || currentStatus == statusDelivered.toLowerCase();
-    final needsVerification = currentStatus == statusVerificationNeeded.toLowerCase();
+    final isInProgress = currentStatus == statusPreparing.toLowerCase() ||
+        currentStatus ==
+            statusOutForDelivery.toLowerCase(); // 'Shipped' could also be here
+    final isCompleted = currentStatus == statusCompleted.toLowerCase() ||
+        currentStatus == statusDelivered.toLowerCase();
+    final needsVerification =
+        currentStatus == statusVerificationNeeded.toLowerCase();
 
     return Padding(
       padding: const EdgeInsets.only(top: 8.0),
@@ -2747,15 +3478,20 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
               TextButton.icon(
                 icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
                 label: const Text('Accept'),
-                style: TextButton.styleFrom(foregroundColor: Colors.green.shade700),
+                style:
+                    TextButton.styleFrom(foregroundColor: Colors.green.shade700),
                 onPressed: () => _updateGigStatus(order, statusAccepted),
               ),
             if (isAccepted)
-              TextButton.icon( // Change to 'Start Gig' or 'Prepare'
+              TextButton.icon(
+                // Change to 'Start Gig' or 'Prepare'
                 icon: const Icon(Icons.play_circle_outline, size: 18),
-                label: const Text('Start Prep'), // Or "Start Gig" if applicable
-                style: TextButton.styleFrom(foregroundColor: Colors.orange.shade700),
-                onPressed: () => _updateGigStatus(order, statusPreparing), // Or statusShipped/OutForDelivery
+                label:
+                    const Text('Start Prep'), // Or "Start Gig" if applicable
+                style: TextButton.styleFrom(
+                    foregroundColor: Colors.orange.shade700),
+                onPressed: () => _updateGigStatus(order,
+                    statusPreparing), // Or statusShipped/OutForDelivery
               ),
             if (needsVerification)
               TextButton.icon(
@@ -2763,26 +3499,36 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
                 label: const Text('Verify Completion'),
                 style: TextButton.styleFrom(foregroundColor: kColorWarning),
                 onPressed: () async {
-                   try {
+                  try {
                     setState(() => _isVerificationProcessActive = true);
-                    final bool verified = await ChefVerificationHelper.showVerificationDialog(context, order);
+                    final bool verified =
+                        await ChefVerificationHelper.showVerificationDialog(
+                            context, order);
                     if (verified && mounted) {
-                      await ChefVerificationHelper.updateOrderStatusAfterVerification(order.orderId, statusCompleted);
-                      _showSuccessSnackbar('Gig #${order.orderId} verified and marked as completed!');
-                      _loadOrders(); 
+                      await ChefVerificationHelper
+                          .updateOrderStatusAfterVerification(
+                              order.orderId, statusCompleted);
+                      _showSuccessSnackbar(
+                          'Gig #${order.orderId} verified and marked as completed!');
+                      _loadOrders();
                     }
                   } catch (e) {
-                    if (mounted) _showErrorSnackbar('Verification failed: ${e.toString()}');
+                    if (mounted)
+                      _showErrorSnackbar('Verification failed: ${e.toString()}');
                   } finally {
-                    if (mounted) setState(() => _isVerificationProcessActive = false);
+                    if (mounted)
+                      setState(() => _isVerificationProcessActive = false);
                   }
                 },
               ),
-             if ((isInProgress || currentStatus == statusShipped.toLowerCase()) && !isCompleted && !needsVerification) // If gig is in progress/shipped
+            if ((isInProgress || currentStatus == statusShipped.toLowerCase()) &&
+                !isCompleted &&
+                !needsVerification) // If gig is in progress/shipped
               TextButton.icon(
                 icon: const Icon(Icons.assignment_turned_in_outlined, size: 18),
                 label: const Text('Mark Completed'),
-                style: TextButton.styleFrom(foregroundColor: Colors.blue.shade700),
+                style: TextButton.styleFrom(
+                    foregroundColor: Colors.blue.shade700),
                 onPressed: () => _initiateCompletionFlow(order, statusCompleted),
               ),
             // Consider adding reject/cancel if business logic allows
@@ -2790,15 +3536,19 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
     );
   }
 
-  Widget _buildDetailRow(BuildContext context, IconData icon, String label, String? value) {
+  Widget _buildDetailRow(
+      BuildContext context, IconData icon, String label, String? value) {
     if (value == null || value.trim().isEmpty) return const SizedBox.shrink();
     final textTheme = Theme.of(context).textTheme;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 7.0),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Icon(icon, size: 18, color: Theme.of(context).iconTheme.color?.withOpacity(0.8)),
+        Icon(icon,
+            size: 18, color: Theme.of(context).iconTheme.color?.withOpacity(0.8)),
         const SizedBox(width: 12),
-        Expanded(child: RichText(text: TextSpan(style: textTheme.bodyMedium, children: [
+        Expanded(
+            child: RichText(
+                text: TextSpan(style: textTheme.bodyMedium, children: [
           TextSpan(text: '$label: ', style: const TextStyle(fontWeight: FontWeight.w500)),
           TextSpan(text: value),
         ])))
@@ -2808,31 +3558,57 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
-      case 'pending': return Colors.orange.shade600;
-      case 'accepted': return Colors.lightBlue.shade600;
-      case 'preparing': return Colors.blue.shade700;
-      case 'ready for pickup': return readyForPickupColor; 
-      case 'assigned': return assignedColor;
-      case 'shipped': case 'out for delivery': return Colors.purple.shade500;
-      case 'delivered': case 'completed': return Colors.green.shade600;
-      case 'verification needed': return kColorWarning;
-      case 'cancelled': case 'rejected': return Colors.red.shade500;
-      default: return Colors.grey.shade600;
+      case 'pending':
+        return Colors.orange.shade600;
+      case 'accepted':
+        return Colors.lightBlue.shade600;
+      case 'preparing':
+        return Colors.blue.shade700;
+      case 'ready for pickup':
+        return readyForPickupColor;
+      case 'assigned':
+        return assignedColor;
+      case 'shipped':
+      case 'out for delivery':
+        return Colors.purple.shade500;
+      case 'delivered':
+      case 'completed':
+        return Colors.green.shade600;
+      case 'verification needed':
+        return kColorWarning;
+      case 'cancelled':
+      case 'rejected':
+        return Colors.red.shade500;
+      default:
+        return Colors.grey.shade600;
     }
   }
 
   IconData _getStatusIcon(String status) {
     switch (status.toLowerCase()) {
-      case 'pending': return Icons.hourglass_bottom_rounded;
-      case 'accepted': return Icons.thumb_up_alt_outlined;
-      case 'preparing': return Icons.construction_outlined; 
-      case 'ready for pickup': return Icons.flag_circle_outlined; 
-      case 'assigned': return Icons.badge_outlined; 
-      case 'shipped': case 'out for delivery': return Icons.directions_run_outlined; 
-      case 'delivered': case 'completed': return Icons.celebration_outlined; 
-      case 'verification needed': return Icons.password_rounded;
-      case 'cancelled': case 'rejected': return Icons.cancel_rounded;
-      default: return Icons.help_outline_rounded;
+      case 'pending':
+        return Icons.hourglass_bottom_rounded;
+      case 'accepted':
+        return Icons.thumb_up_alt_outlined;
+      case 'preparing':
+        return Icons.construction_outlined;
+      case 'ready for pickup':
+        return Icons.flag_circle_outlined;
+      case 'assigned':
+        return Icons.badge_outlined;
+      case 'shipped':
+      case 'out for delivery':
+        return Icons.directions_run_outlined;
+      case 'delivered':
+      case 'completed':
+        return Icons.celebration_outlined;
+      case 'verification needed':
+        return Icons.password_rounded;
+      case 'cancelled':
+      case 'rejected':
+        return Icons.cancel_rounded;
+      default:
+        return Icons.help_outline_rounded;
     }
   }
 
@@ -2841,19 +3617,13 @@ class _GigsTabState extends State<GigsTab> with AutomaticKeepAliveClientMixin, R
     return Chip(
       label: Text(status, overflow: TextOverflow.ellipsis),
       backgroundColor: statusColor.withOpacity(0.15),
-      labelStyle: TextStyle(color: statusColor, fontWeight: FontWeight.w600, fontSize: 11),
+      labelStyle: TextStyle(
+          color: statusColor, fontWeight: FontWeight.w600, fontSize: 11),
       padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
       visualDensity: VisualDensity.compact,
       side: BorderSide.none,
     );
   }
-}
-
-class ProductsTab extends StatefulWidget {
-  const ProductsTab({Key? key}) : super(key: key);
-
-  @override
-  _ProductsTabState createState() => _ProductsTabState();
 }
 
 class EarningsTab extends StatefulWidget {
@@ -2865,8 +3635,9 @@ class EarningsTab extends StatefulWidget {
 
 class ChefEarningsHistoryScreen extends StatelessWidget {
   final List<Payment> payments;
-  
-  const ChefEarningsHistoryScreen({Key? key, required this.payments}) : super(key: key);
+
+  const ChefEarningsHistoryScreen({Key? key, required this.payments})
+      : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -2889,14 +3660,15 @@ class ChefEarningsHistoryScreen extends StatelessWidget {
             .where((p) => p.disbursementTransactionStatus == 'Successful')
             .fold(0.0, (sum, p) => sum + p.amount);
         String formattedDate = DateFormat('EEEE, MMM d, yyyy').format(date);
-        
+
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -2919,8 +3691,11 @@ class ChefEarningsHistoryScreen extends StatelessWidget {
                   ],
                 ),
               ),
-              const Divider(height: 1, thickness: 0.5, color: Color(0xFFF0F0F0)),
-              ...dailyPayments.map((payment) => _buildPaymentItem(payment)).toList(),
+              const Divider(
+                  height: 1, thickness: 0.5, color: Color(0xFFF0F0F0)),
+              ...dailyPayments
+                  .map((payment) => _buildPaymentItem(payment))
+                  .toList(),
             ],
           ),
         );
@@ -2932,12 +3707,12 @@ class ChefEarningsHistoryScreen extends StatelessWidget {
     Color statusColor;
     IconData statusIcon;
     String statusText = payment.disbursementTransactionStatus;
-    
+
     // Handle null or empty status
     if (statusText.isEmpty) {
       statusText = 'Pending';
     }
-    
+
     // Determine status color and icon
     switch (statusText.toLowerCase()) {
       case 'successful':
@@ -2967,9 +3742,10 @@ class ChefEarningsHistoryScreen extends StatelessWidget {
       default:
         statusColor = Colors.grey;
         statusIcon = Icons.help_outline;
-        statusText = statusText[0].toUpperCase() + statusText.substring(1).toLowerCase();
+        statusText =
+            statusText[0].toUpperCase() + statusText.substring(1).toLowerCase();
     }
-    
+
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 12.0),
       decoration: BoxDecoration(
@@ -2984,7 +3760,8 @@ class ChefEarningsHistoryScreen extends StatelessWidget {
               color: Colors.teal.withOpacity(0.1),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.receipt_long_outlined, color: Colors.teal, size: 18),
+            child: const Icon(Icons.receipt_long_outlined,
+                color: Colors.teal, size: 18),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -3022,7 +3799,8 @@ class ChefEarningsHistoryScreen extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: statusColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(10),
@@ -3048,11 +3826,11 @@ class ChefEarningsHistoryScreen extends StatelessWidget {
         ],
       ),
     );
-  
   }
 }
 
-class _EarningsTabState extends State<EarningsTab> with AutomaticKeepAliveClientMixin {
+class _EarningsTabState extends State<EarningsTab>
+    with AutomaticKeepAliveClientMixin {
   bool _isLoading = true;
   String _error = '';
   List<Payment> _payments = [];
@@ -3085,7 +3863,7 @@ class _EarningsTabState extends State<EarningsTab> with AutomaticKeepAliveClient
         throw Exception('User ID not found in SharedPreferences');
       }
       final response = await http.get(
-        Uri.parse('${_apibaseurl}/rr/disbursements/chef').replace(
+        Uri.parse('$_apibaseurl/rr/disbursements/chef').replace(
           queryParameters: {'chef_id': userId},
         ),
       );
@@ -3103,7 +3881,8 @@ class _EarningsTabState extends State<EarningsTab> with AutomaticKeepAliveClient
         }
       } else {
         setState(() {
-          _error = 'Failed to load payments. Status code: ${response.statusCode}';
+          _error =
+              'Failed to load payments. Status code: ${response.statusCode}';
         });
       }
     } catch (e) {
@@ -3121,7 +3900,8 @@ class _EarningsTabState extends State<EarningsTab> with AutomaticKeepAliveClient
 
   double _calculateTotalEarnings() {
     return _payments
-        .where((p) => p.disbursementTransactionStatus.toLowerCase() == 'successful')
+        .where((p) =>
+            p.disbursementTransactionStatus.toLowerCase() == 'successful')
         .fold(0.0, (sum, p) => sum + p.amount);
   }
 
@@ -3139,7 +3919,7 @@ class _EarningsTabState extends State<EarningsTab> with AutomaticKeepAliveClient
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    
+
     if (_isLoading && _payments.isEmpty) {
       return const Center(child: CircularProgressIndicator(color: primaryTeal));
     }
@@ -3211,15 +3991,18 @@ class _EarningsTabState extends State<EarningsTab> with AutomaticKeepAliveClient
                         // Earnings History Header
                         Container(
                           width: double.infinity,
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 14),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFE0F2F1), // Light teal background
+                            color: const Color(
+                                0xFFE0F2F1), // Light teal background
                             borderRadius: const BorderRadius.only(
                               topLeft: Radius.circular(12),
                               topRight: Radius.circular(12),
                             ),
                             border: Border.all(
-                              color: const Color(0xFFB2DFDB), // Slightly darker teal border
+                              color: const Color(
+                                  0xFFB2DFDB), // Slightly darker teal border
                               width: 1.0,
                             ),
                           ),
@@ -3232,7 +4015,10 @@ class _EarningsTabState extends State<EarningsTab> with AutomaticKeepAliveClient
                             ),
                           ),
                         ),
-                        const Divider(height: 1, thickness: 0.5, color: Color(0xFFF0F0F0)),
+                        const Divider(
+                            height: 1,
+                            thickness: 0.5,
+                            color: Color(0xFFF0F0F0)),
                         // Earnings Content
                         ConstrainedBox(
                           constraints: BoxConstraints(
@@ -3261,7 +4047,8 @@ class _EarningsTabState extends State<EarningsTab> with AutomaticKeepAliveClient
     );
   }
 
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
+  Widget _buildStatCard(
+      String title, String value, IconData icon, Color color) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(12),
@@ -3279,7 +4066,8 @@ class _EarningsTabState extends State<EarningsTab> with AutomaticKeepAliveClient
                 const SizedBox(width: 4),
                 Text(
                   title,
-                  style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
+                  style:
+                      TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
                 ),
               ],
             ),
@@ -3327,114 +4115,381 @@ class _EarningsTabState extends State<EarningsTab> with AutomaticKeepAliveClient
   }
 }
 
+class ProductsTab extends StatefulWidget {
+  const ProductsTab({Key? key}) : super(key: key);
+
+  @override
+  _ProductsTabState createState() => _ProductsTabState();
+}
+
 extension ProductsTabRefreshExtension on _ProductsTabState {
   Future<void> manualRefreshFromAppBar() async {
     if (!mounted) return;
     print("ProductsTab: manualRefreshFromAppBar triggered.");
-    _loadProducts();
-    while (mounted && _isLoadingProducts) {
+    _loadData();
+    while (mounted && (_isLoadingProducts || _isUpdatingStock)) {
       await Future.delayed(const Duration(milliseconds: 100));
     }
     print("ProductsTab: manualRefreshFromAppBar completed.");
   }
 }
 
-class _ProductsTabState extends State<ProductsTab> with AutomaticKeepAliveClientMixin {
-  Future<List<MealProduct>>? _productsFuture;
+class _ProductsTabState extends State<ProductsTab>
+    with AutomaticKeepAliveClientMixin {
   List<MealProduct> _products = [];
-  bool _isLoadingProducts = false;
-  bool _didLoadProducts = false;
+  final Set<String> _inStockMealIds = {};
+
+  bool _isLoadingProducts = true;
+  bool _isUpdatingStock = false;
+  bool _didLoad = false;
+  String? _error;
 
   @override
   bool get wantKeepAlive => true;
 
   @override
-  void initState() {
-    super.initState();
-  }
-
-  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!_didLoadProducts) {
-      _didLoadProducts = true;
-      _loadProducts();
+    if (!_didLoad) {
+      _didLoad = true;
+      _loadData();
     }
   }
 
-  void _loadProducts() {
-    if (mounted) ScaffoldMessenger.of(context).removeCurrentSnackBar();
+  Future<void> _loadData() async {
+    if (!mounted) return;
     setState(() {
       _isLoadingProducts = true;
-      _products = [];
-      _productsFuture = ApiService.fetchProducts();
+      _error = null;
     });
-    _productsFuture!.then((products) {
-      if (mounted) {
-        _products = products;
-        _products.sort((a, b) => a.mealName.compareTo(b.mealName));
-        setState(() => _isLoadingProducts = false);
+
+    try {
+      print('=== Starting _loadData ===');
+      
+      // Fetch master list of all meals and chef's current stock in parallel
+      print('Fetching products and chef profile...');
+      final results = await Future.wait([
+        ApiService.fetchProducts(),
+        ApiService.fetchChefProfile(),
+      ]);
+
+      if (!mounted) return;
+
+      final allProducts = results[0] as List<MealProduct>;
+      final chefProfileResponse = results[1] as Map<String, dynamic>;
+      
+      print('=== Received Chef Profile Response ===');
+      print('Response keys: ${chefProfileResponse.keys.toList()}');
+      
+      // Check if we have a data field in the response
+      final chefData = chefProfileResponse['data'];
+      print('Chef data type: ${chefData?.runtimeType}');
+      
+      List<dynamic>? currentStock;
+      
+      if (chefData is Map) {
+        print('Chef data keys: ${chefData.keys.toList()}');
+        currentStock = chefData['stock'] as List<dynamic>?;
+        print('Stock data from response: $currentStock');
       }
-    }).catchError((error, stackTrace) {
-      if (mounted) {
-        _showErrorSnackbar('Error loading menu: ${error.toString()}');
-        setState(() { _isLoadingProducts = false; _products = []; });
+      
+      print('=== Products Data ===');
+      print('Total products: ${allProducts.length}');
+      print('Current stock type: ${currentStock?.runtimeType}');
+      
+      if (currentStock != null) {
+        print('Current stock items count: ${currentStock.length}');
+        if (currentStock.isNotEmpty) {
+          print('First stock item: ${currentStock.first}');
+          print('First stock item type: ${currentStock.first.runtimeType}');
+        }
       }
-    });
+
+      // Clear previous selections
+      _inStockMealIds.clear();
+      print('\n=== Processing Stock Items ===');
+
+      // Populate current "in stock" list from chef profile
+      if (currentStock != null && currentStock is List) {
+        for (var i = 0; i < currentStock.length; i++) {
+          final item = currentStock[i];
+          print('\nProcessing stock item $i: $item');
+          
+          if (item is Map) {
+            print('Item $i is a Map with keys: ${item.keys.toList()}');
+            
+            // Case-insensitive lookup for meal_id
+            final mealIdKey = item.keys.firstWhere(
+              (key) => key.toString().toLowerCase() == 'meal_id',
+              orElse: () => 'meal_id',
+            );
+            
+            print('Found meal_id key: "$mealIdKey" (type: ${mealIdKey.runtimeType})');
+            print('Value for $mealIdKey: ${item[mealIdKey]} (type: ${item[mealIdKey]?.runtimeType})');
+            
+            if (item[mealIdKey] != null) {
+              final mealId = item[mealIdKey].toString();
+              print('Adding to _inStockMealIds: $mealId');
+              _inStockMealIds.add(mealId);
+            } else {
+              print('Skipping item $i: meal_id is null');
+            }
+          } else {
+            print('Skipping item $i: Not a Map (${item.runtimeType})');
+          }
+        }
+      } else {
+        print('No stock items found or invalid format');
+      }
+      
+      print('\n=== Current _inStockMealIds ===');
+      print(_inStockMealIds);
+
+      _products = allProducts;
+      _products.sort((a, b) => a.mealName.compareTo(b.mealName));
+
+      setState(() {
+        _isLoadingProducts = false;
+      });
+    } catch (e, stackTrace) {
+      print("Error loading products/stock: $e\n$stackTrace");
+      if (mounted) {
+        setState(() {
+          _isLoadingProducts = false;
+          _error = 'Failed to load menu. Please try again.';
+        });
+      }
+    }
   }
 
-  void _showComingSoonSnackbar(String featureName) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).removeCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('$featureName feature is Coming Soon!', style: const TextStyle(color: whiteColor)),
-      backgroundColor: Theme.of(context).colorScheme.secondary,
-      duration: const Duration(seconds: 2),
+  Future<void> _handleUpdateStock() async {
+    if (_isUpdatingStock) return;
+
+    setState(() => _isUpdatingStock = true);
+    
+    // Show loading indicator
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    scaffoldMessenger.removeCurrentSnackBar();
+    scaffoldMessenger.showSnackBar(const SnackBar(
+      content: Text('Updating stock...'),
+      backgroundColor: Colors.blueGrey,
+      duration: Duration(seconds: 5),
     ));
-  }
 
-  void _handleAddProduct() => _showComingSoonSnackbar("Adding new meals");
-  void _handleEditProduct(MealProduct product) => _showComingSoonSnackbar("Editing meals");
-  void _handleDeleteProduct(MealProduct product) => _showComingSoonSnackbar("Deleting meals");
-  void _handleToggleSelection(MealProduct product) => _showComingSoonSnackbar("Selecting meals for stock");
+    try {
+      // Create the stock update payload in the expected format
+      final List<Map<String, dynamic>> stockItems = [];
+      
+      // Add all selected meals to stock
+      for (String mealId in _inStockMealIds) {
+        final meal = _products.firstWhere((p) => p.mealId == mealId);
+        // Create a new map with explicit types to ensure proper JSON serialization
+        final Map<String, dynamic> stockItem = {
+          'Name': meal.mealName.toString(),  // Ensure it's a string
+          'meal_id': meal.mealId.toString(),  // Ensure it's a string
+          'price': meal.price is int ? meal.price.toDouble() : meal.price,  // Ensure it's a double
+          'image': meal.imageLink.toString(),  // Ensure it's a string
+          'quantity': 1.0,  // Explicitly use double
+        };
+        print('Adding stock item: ${jsonEncode(stockItem)}');
+        stockItems.add(stockItem);
+      }
+      
+      // Log the stock items for debugging
+      print('Stock items to update: ${stockItems.map((item) => '${item['Name']} (${item['meal_id']})').join(', ')}');
+
+      // Create the update payload with stock items
+      final Map<String, dynamic> updateData = {'stock': stockItems};
+
+      // Log the payload for debugging
+      final encodedPayload = jsonEncode(updateData);
+      print('Sending stock update: $encodedPayload');
+
+      final success = await ApiService.updateChefStock(updateData);
+
+      if (mounted) {
+        scaffoldMessenger.removeCurrentSnackBar();
+        scaffoldMessenger.showSnackBar(SnackBar(
+          content: Text(
+            success 
+                ? 'Stock updated successfully!'
+                : 'Failed to update stock. Please try again.',
+          ),
+          backgroundColor: success ? Colors.green : Colors.orange,
+          duration: const Duration(seconds: 3),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        scaffoldMessenger.removeCurrentSnackBar();
+        _showErrorSnackbar('Error updating stock: ${e.toString()}');
+        print('Error updating stock: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isUpdatingStock = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
     return Scaffold(
-      body: FutureBuilder<List<MealProduct>>(
-        future: _productsFuture,
-        builder: (context, snapshot) {
-          final bool isLoading = _isLoadingProducts;
-          if (isLoading && _products.isEmpty) return _buildProductsShimmer();
-          if (snapshot.hasError && _products.isEmpty) return _buildErrorState(snapshot.error?.toString() ?? 'Unknown error.');
-          if (_products.isEmpty && !isLoading) return _buildEmptyState('No menu items. Add your first meal!');
-          return _buildProductList(_products);
-        },
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _handleAddProduct,
-        tooltip: 'Add New Meal (Coming Soon)',
-        icon: const Icon(Icons.add_rounded),
-        label: const Text("Add Meal"),
+      // We remove the FloatingActionButton
+      body: Column(
+        children: [
+          Expanded(
+            child: _buildBody(),
+          ),
+          // Add a persistent "Update Stock" button at the bottom
+          _buildUpdateStockButton(),
+        ],
       ),
     );
   }
 
+  Widget _buildBody() {
+    if (_isLoadingProducts) {
+      return _buildProductsShimmer();
+    }
+    if (_error != null) {
+      return _buildErrorState(_error!);
+    }
+    if (_products.isEmpty) {
+      return _buildEmptyState('No meals found in the system.');
+    }
+    return _buildProductList(_products);
+  }
+
   Widget _buildProductList(List<MealProduct> productsToShow) {
     return RefreshIndicator(
-      onRefresh: () async => _loadProducts(),
+      onRefresh: _loadData,
       color: Theme.of(context).colorScheme.primary,
       child: ListView.builder(
-        padding: const EdgeInsets.only(top: 8.0, bottom: 90.0),
+        padding: const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 16.0),
         physics: const AlwaysScrollableScrollPhysics(),
         itemCount: productsToShow.length,
-        itemBuilder: (context, index) => _buildProductCard(
-            context, productsToShow[index],
-            onEdit: () => _handleEditProduct(productsToShow[index]),
-            onSelectToggle: () => _handleToggleSelection(productsToShow[index]),
-            onDelete: () => _handleDeleteProduct(productsToShow[index]),
-            isSelected: false), 
+        itemBuilder: (context, index) =>
+            _buildProductCard(context, productsToShow[index]),
+      ),
+    );
+  }
+
+  Widget _buildProductCard(BuildContext context, MealProduct product) {
+    final textTheme = Theme.of(context).textTheme;
+    final colorScheme = Theme.of(context).colorScheme;
+    final formatCurrency =
+        NumberFormat.currency(locale: 'en_UG', symbol: 'UGX ', decimalDigits: 0);
+    final bool isSelected = _inStockMealIds.contains(product.mealId);
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 12, 12, 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 80,
+              height: 80,
+              child: CachedImageWithShimmer(
+                imageUrl: product.imageLink,
+                width: 80,
+                height: 80,
+                borderRadius: 8.0,
+                fit: BoxFit.cover,
+                errorIcon: Icons.restaurant_menu_outlined,
+                iconSize: 35,
+                errorText: "No Image",
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    product.mealName.isEmpty ? '(No Name)' : product.mealName,
+                    style: textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w600),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    product.mealDescription ?? 'No description.',
+                    style: textTheme.bodySmall,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    formatCurrency.format(product.price),
+                    style: textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: colorScheme.primary),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            // The main interactive element is now the Switch
+            Switch(
+              value: isSelected,
+              onChanged: (bool value) {
+                setState(() {
+                  if (value) {
+                    _inStockMealIds.add(product.mealId);
+                  } else {
+                    _inStockMealIds.remove(product.mealId);
+                  }
+                });
+              },
+              activeColor: primaryTeal,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUpdateStockButton() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: ElevatedButton.icon(
+        icon: _isUpdatingStock
+            ? Container(
+                width: 20,
+                height: 20,
+                padding: const EdgeInsets.all(2.0),
+                child: const CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2,
+                ),
+              )
+            : const Icon(Icons.check_circle_outline_rounded),
+        label: Text(_isUpdatingStock ? 'UPDATING...' : 'Update Stock'),
+        onPressed: _isUpdatingStock ? null : _handleUpdateStock,
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
       ),
     );
   }
@@ -3442,129 +4497,114 @@ class _ProductsTabState extends State<ProductsTab> with AutomaticKeepAliveClient
   void _showErrorSnackbar(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).removeCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), backgroundColor: Theme.of(context).colorScheme.error, duration: const Duration(seconds: 4)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(message),
+        backgroundColor: Theme.of(context).colorScheme.error,
+        duration: const Duration(seconds: 4)));
   }
 
   Widget _buildProductsShimmer() {
-    final shimmerBase = Theme.of(context).brightness == Brightness.light ? Colors.grey.shade300 : Colors.grey.shade700;
-    final shimmerHighlight = Theme.of(context).brightness == Brightness.light ? Colors.grey.shade100 : Colors.grey.shade500;
     return Shimmer.fromColors(
-      baseColor: shimmerBase,
-      highlightColor: shimmerHighlight,
+      baseColor: Colors.grey.shade300,
+      highlightColor: Colors.grey.shade100,
       child: ListView.builder(
-        padding: const EdgeInsets.only(top: 8.0, bottom: 90.0),
-        itemCount: 4,
-        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 16.0),
+        itemCount: 6,
         itemBuilder: (_, __) => Card(
-            margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Container(width: 90, height: 90, decoration: BoxDecoration(color: whiteColor, borderRadius: BorderRadius.circular(8))),
+          margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+          child: Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Row(
+              children: [
+                Container(
+                    width: 80,
+                    height: 80,
+                    color: Colors.white,
+                    child: const SizedBox()),
                 const SizedBox(width: 16),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Container(width: double.infinity, height: 18, color: whiteColor, margin: const EdgeInsets.only(bottom: 6)),
-                  Container(width: double.infinity, height: 14, color: whiteColor, margin: const EdgeInsets.only(bottom: 6)),
-                  Container(width: MediaQuery.of(context).size.width * 0.25, height: 14, color: whiteColor, margin: const EdgeInsets.only(bottom: 8)),
-                  Container(width: MediaQuery.of(context).size.width * 0.2, height: 18, color: whiteColor),
-                ])),
-                const SizedBox(width: 8),
-                Column(mainAxisAlignment: MainAxisAlignment.start, children: [
-                  Container(width: 36, height: 36, decoration: BoxDecoration(color: whiteColor, borderRadius: BorderRadius.circular(18))),
-                ])
-              ]),
-            )),
+                Expanded(
+                    child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(height: 18, width: 200, color: Colors.white),
+                    const SizedBox(height: 8),
+                    Container(height: 14, width: 250, color: Colors.white),
+                    const SizedBox(height: 4),
+                    Container(height: 14, width: 150, color: Colors.white),
+                    const SizedBox(height: 8),
+                    Container(height: 16, width: 80, color: Colors.white),
+                  ],
+                )),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
 
   Widget _buildErrorState(String error) {
     return Center(
-        child: Padding(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Icon(Icons.restaurant_menu_outlined, color: Theme.of(context).colorScheme.error, size: 50),
-        const SizedBox(height: 16),
-        Text('Error Loading Menu', style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Theme.of(context).colorScheme.error), textAlign: TextAlign.center),
-        const SizedBox(height: 8),
-        Text(error, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]), textAlign: TextAlign.center, maxLines: 3, overflow: TextOverflow.ellipsis),
-        const SizedBox(height: 24),
-        ElevatedButton.icon(icon: const Icon(Icons.refresh_rounded, size: 20), label: const Text('Retry'), onPressed: _loadProducts)
-      ]),
-    ));
-  }
-
-  Widget _buildEmptyState(String message) {
-    return Center(
-        child: Padding(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Icon(Icons.menu_book_rounded, size: 60, color: Colors.grey[400]),
-        const SizedBox(height: 16),
-        Text(message, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.grey[600]), textAlign: TextAlign.center),
-        const SizedBox(height: 10),
-        Text("Use the '+' button below to add one (Coming Soon).", style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey[500]), textAlign: TextAlign.center),
-        const SizedBox(height: 24),
-        ElevatedButton.icon(
-            icon: const Icon(Icons.refresh_rounded, size: 20),
-            label: const Text('Refresh'),
-            onPressed: _loadProducts,
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[300], foregroundColor: Colors.grey[700]))
-      ]),
-    ));
-  }
-
-  Widget _buildProductCard(BuildContext context, MealProduct product, {required VoidCallback onEdit, required VoidCallback onSelectToggle, required VoidCallback onDelete, required bool isSelected}) {
-    final textTheme = Theme.of(context).textTheme;
-    final colorScheme = Theme.of(context).colorScheme;
-    final formatCurrency = NumberFormat.currency(locale: 'en_UG', symbol: 'UGX ', decimalDigits: 0);
-    return Card(
-      clipBehavior: Clip.antiAlias,
       child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SizedBox(
-              width: 90,
-              height: 90,
-              child: CachedImageWithShimmer( // localFile is not passed here, which is correct
-                imageUrl: product.imageLink,
-                width: 90,
-                height: 90,
-                borderRadius: 8.0,
-                fit: BoxFit.cover,
-                errorIcon: Icons.restaurant_menu_outlined,
-                iconSize: 35,
-                errorText: "No Image",
-              )),
-          const SizedBox(width: 16),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(product.mealName.isEmpty ? '(No Name)' : product.mealName, style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
-            const SizedBox(height: 5),
-            Text(product.mealDescription ?? 'No description.', style: textTheme.bodySmall, maxLines: 2, overflow: TextOverflow.ellipsis),
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.cloud_off,
+                color: Theme.of(context).colorScheme.error, size: 50),
+            const SizedBox(height: 16),
+            Text('Error Loading Menu',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(color: Theme.of(context).colorScheme.error),
+                textAlign: TextAlign.center),
             const SizedBox(height: 8),
-            Text(formatCurrency.format(product.price), style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: colorScheme.primary)),
-          ])),
-          const SizedBox(width: 8),
-          Column(mainAxisAlignment: MainAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            _buildActionButton(context, icon: Icons.radio_button_unchecked_rounded, tooltip: 'Select (Coming Soon)', color: Colors.grey.shade400, onPressed: onSelectToggle),
-          ])
-        ]),
+            Text(error,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(color: Colors.grey[600]),
+                textAlign: TextAlign.center,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+                icon: const Icon(Icons.refresh_rounded, size: 20),
+                label: const Text('Retry'),
+                onPressed: _loadData)
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildActionButton(BuildContext context, {required IconData icon, required String tooltip, required Color color, required VoidCallback onPressed}) {
-    return SizedBox(
-        height: 36,
-        width: 36,
-        child: IconButton(
-          icon: Icon(icon, size: 20),
-          color: color,
-          tooltip: tooltip,
-          onPressed: onPressed,
-          visualDensity: VisualDensity.compact,
-          padding: EdgeInsets.zero,
-          splashRadius: 22,
-        ));
+  Widget _buildEmptyState(String message) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.menu_book_rounded, size: 60, color: Colors.grey[400]),
+            const SizedBox(height: 16),
+            Text(message,
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(color: Colors.grey[600]),
+                textAlign: TextAlign.center),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+                icon: const Icon(Icons.refresh_rounded, size: 20),
+                label: const Text('Refresh'),
+                onPressed: _loadData,
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.grey[300],
+                    foregroundColor: Colors.grey[700]))
+          ],
+        ),
+      ),
+    );
   }
 }

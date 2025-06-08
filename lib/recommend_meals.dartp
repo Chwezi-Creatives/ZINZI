@@ -214,7 +214,7 @@ class _Recommend_Meals_ScreenState extends State<Recommend_Meals_Screen> {
       itemBuilder: (context, index) {
         final meal = _filteredMeals[index];
         String title = meal['Meal_name'] ?? 'Unknown Meal';
-        String imagePath = meal['Image_link'] ?? 'assets/images/mealimageplaceholder.jpg';
+        String imagePath = meal['Image_link'] ?? 'assets/images/mealimageplaceholder.png';
         double price = double.tryParse(meal['Nutritional_Info']['calories'] ?? '0') ?? 5.0; // Default price if not provided
 
         if (imagePath.contains('drive.google.com')) {
@@ -262,7 +262,7 @@ class _Recommend_Meals_ScreenState extends State<Recommend_Meals_Screen> {
                   fit: BoxFit.cover,
                   placeholder: (context, url) => CircularProgressIndicator(),
                   errorWidget: (context, url, error) => Image.asset(
-                    'assets/images/mealimageplaceholder.jpg',
+                    'assets/images/mealimageplaceholder.png',
                     fit: BoxFit.cover,
                   ),
                 ),

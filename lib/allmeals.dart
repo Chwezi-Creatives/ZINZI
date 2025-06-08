@@ -842,7 +842,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
         // Use PascalCase keys
         String title = meal['Meal_name'] ?? 'Unknown Meal';
         String imagePath =
-            meal['Image_link'] ?? 'assets/images/mealimageplaceholder.jpg';
+            meal['Image_link'] ?? 'assets/images/mealimageplaceholder.png';
         String mealId = meal['Meal_id']?.toString() ?? 'unknown-$index';
 
         // Use helper to process image path (Handles GDrive, HTTP, Assets, Placeholders)
@@ -885,7 +885,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
           child: Container(color: kColorSurface),
         ),
         errorWidget: (context, url, error) => Image.asset(
-          'assets/images/mealimageplaceholder.jpg',
+          'assets/images/mealimageplaceholder.png',
           fit: BoxFit.cover,
         ),
       );
@@ -895,7 +895,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
         imagePath,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) => Image.asset(
-          'assets/images/mealimageplaceholder.jpg',
+          'assets/images/mealimageplaceholder.png',
           fit: BoxFit.cover,
         ),
       );
@@ -968,7 +968,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
     } else {
       // If it's not a recognized format, use placeholder
       print("Invalid or unrecognized image path for $mealName: $rawPath");
-      return 'assets/images/mealimageplaceholder.jpg';
+      return 'assets/images/mealimageplaceholder.png';
     }
   }
 
@@ -1032,7 +1032,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
 
       // Ensure the meal has all required fields with default values if missing
       mealToSend['Meal_name'] = mealToSend['Meal_name'] ?? 'Unknown Meal';
-      mealToSend['Image_link'] = mealToSend['Image_link'] ?? 'assets/images/mealimageplaceholder.jpg';
+      mealToSend['Image_link'] = mealToSend['Image_link'] ?? 'assets/images/mealimageplaceholder.png';
       mealToSend['Description'] = mealToSend['Description'] ?? 'No description available';
       mealToSend['Price'] = mealToSend['Price'] ?? 0.0;
       mealToSend['Rating'] = mealToSend['Rating'] ?? 0.0;

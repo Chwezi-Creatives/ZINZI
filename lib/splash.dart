@@ -50,6 +50,7 @@ class _SplashScreenState extends State<SplashScreen>
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
   bool _isPreloading = false;
+  late Widget _nextScreen; // Store the next screen for manual navigation
 
   @override
   void initState() {
@@ -219,8 +220,13 @@ class _SplashScreenState extends State<SplashScreen>
     await Future.delayed(const Duration(milliseconds: 0));
 
     if (mounted) {
-      setState(() => _isPreloading = false);
-      _navigateWithSlideTransition(context, nextScreen);
+      setState(() {
+        _isPreloading = false;
+        _nextScreen = nextScreen; // Store the next screen for manual navigation
+      });
+      // Auto-navigation is disabled for banner testing
+      // Uncomment the line below to restore auto-navigation
+      // _navigateWithSlideTransition(context, nextScreen);
     }
     return;
   }
@@ -237,6 +243,21 @@ class _SplashScreenState extends State<SplashScreen>
       body: Stack(
         fit: StackFit.expand,
         children: [
+          // Banner Image at the top
+          Positioned(
+            top: 0, // or 340, // or 170.0, // Added 170 pixels of space from the top
+            left: 0,
+            right: 0,
+            child: Opacity(
+            opacity: 0.08, //or 0.02, // or 1.0, // 100% opacity
+            child: Image.asset(
+              'assets/images/sp.jpg',
+              fit: BoxFit.cover,
+              height: MediaQuery.of(context).size.height * 1.0, //orMediaQuery.of(context).size.height * 0.2,  // or just plain pixels figure of 500, // Reduced height from 150px to 80px
+              width: MediaQuery.of(context).size.width,
+            ),
+          ),
+          ),
           FadeTransition(
             opacity: _fadeAnimation,
             child: Column(
@@ -298,7 +319,9 @@ class _SplashScreenState extends State<SplashScreen>
                           ),
                           const SizedBox(height: 50),
                           ElevatedButton(
-                            onPressed: null,
+                            onPressed: _isPreloading 
+                                ? null 
+                                : () => _navigateWithSlideTransition(context, _nextScreen),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: kColorPrimary,
                               foregroundColor: kColorTextOnPrimary,
@@ -311,7 +334,7 @@ class _SplashScreenState extends State<SplashScreen>
                               shadowColor: kColorPrimary.withOpacity(0.3),
                             ),
                             child: Text(
-                              "Get Started",
+                              _isPreloading ? "Loading..." : "Get Started",
                               style: GoogleFonts.poppins(
                                 fontSize: 17,
                                 fontWeight: FontWeight.w600,

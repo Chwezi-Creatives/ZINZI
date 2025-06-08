@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:zinzi/onboard.dart';
 import 'package:zinzi/profile.dart';
 import 'package:flutter/services.dart'; // Import for SystemChrome
 
@@ -30,7 +31,7 @@ class _UserPreferencesPageState extends State<UserPreferencesPage>
   String _goals = ''; // Renamed for clarity
   String _dietType = '';
   String _foodRestrictions = '';
-  int? _userId;
+  String? _userId;
   bool _isLoading = false;
 
   late AnimationController _controller;
@@ -82,13 +83,15 @@ class _UserPreferencesPageState extends State<UserPreferencesPage>
     // Ensure setState is called only if the widget is still mounted
     if (mounted) {
       setState(() {
-        _userId = prefs.getInt('user_id');
+        _userId = prefs.getString('user_id');
       });
-       if (_userId == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('User ID not found. Please log in again.'),
-          backgroundColor: errorColor,
-        ));
+      if (_userId == null || _userId!.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('User ID not found. Please log in again.'),
+            backgroundColor: errorColor,
+          ));
+        }
       }
     }
   }
@@ -96,10 +99,11 @@ class _UserPreferencesPageState extends State<UserPreferencesPage>
   Future<void> _submitPreferences() async {
     if (!_formKey.currentState!.validate()) return; // Validate form first
 
-    if (_userId == null) {
+    if (_userId == null || _userId!.isEmpty) {
+      debugPrint('❌ User ID is missing or empty');
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('User ID is missing. Cannot submit preferences.'),
-         backgroundColor: errorColor,
+        backgroundColor: errorColor,
       ));
       return;
     }
@@ -107,28 +111,41 @@ class _UserPreferencesPageState extends State<UserPreferencesPage>
     setState(() => _isLoading = true); // Start loading
 
     try {
+      final payload = {
+        'user_id': _userId,
+        'goals': _goals,
+        'diet_type': _dietType,
+        'food_restrictions': _foodRestrictions,
+      };
+
+      // Log the payload being sent
+      debugPrint('📤 PREFERENCES PAYLOAD: ${jsonEncode(payload)}');
+      debugPrint('🌐 Sending request to: $apibaseurl/rr/preferences');
+
       final response = await http.post(
         Uri.parse('$apibaseurl/rr/preferences'),
         headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'user_id': _userId,
-          'goals': _goals, // Use updated variable name
-          'diet_type': _dietType,
-          'food_restrictions': _foodRestrictions,
-        }),
+        body: json.encode(payload),
       );
 
+      // Log the response
+      debugPrint('📥 PREFERENCES RESPONSE:');
+      debugPrint('Status Code: ${response.statusCode}');
+      debugPrint('Response Body: ${response.body}');
+
       if (response.statusCode == 201) {
-         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-           content: Text('Preferences saved successfully!'),
-           backgroundColor: primaryTeal,
-         ));
+        debugPrint('✅ Preferences saved successfully');
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Preferences saved successfully!'),
+          backgroundColor: primaryTeal,
+        ));
+        
         // Navigate to Profile Page after successful submission
-        Navigator.pushReplacement( // Use pushReplacement to avoid going back here
+        Navigator.pushReplacement(
           context,
           PageRouteBuilder(
             pageBuilder: (context, animation, secondaryAnimation) =>
-                const ProfilePage(),
+                LandingPage(),
             transitionsBuilder:
                 (context, animation, secondaryAnimation, child) {
               const begin = Offset(1.0, 0.0);
@@ -141,27 +158,29 @@ class _UserPreferencesPageState extends State<UserPreferencesPage>
                 child: SlideTransition(position: animation.drive(tween), child: child),
               );
             },
-             transitionDuration: const Duration(milliseconds: 400), // Adjust duration
+            transitionDuration: const Duration(milliseconds: 400),
           ),
         );
       } else {
-         final errorData = json.decode(response.body);
-         final errorMessage = errorData['message'] ?? 'Failed to submit preferences data.';
+        final errorData = json.decode(response.body);
+        final errorMessage = errorData['message'] ?? 'Failed to submit preferences data.';
+        debugPrint('❌ Failed to save preferences. Status: ${response.statusCode}, Message: $errorMessage');
+        
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('$errorMessage Please try again.'),
-           backgroundColor: errorColor,
+          backgroundColor: errorColor,
         ));
       }
     } catch (e) {
-       print("Preferences Submit Error: $e");
+      debugPrint('❌ Error submitting preferences: $e');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('An error occurred: $e'),
-         backgroundColor: errorColor,
+        backgroundColor: errorColor,
       ));
     } finally {
-       if (mounted) {
-         setState(() => _isLoading = false); // Stop loading
-       }
+      if (mounted) {
+        setState(() => _isLoading = false); // Stop loading
+      }
     }
   }
 
@@ -221,7 +240,7 @@ class _UserPreferencesPageState extends State<UserPreferencesPage>
                               height: 150, // Adjust size if needed
                               width: 150,
                               child: Image.asset(
-                                  'assets/images/heart.svg'))), // Consider image visibility
+                                  'assets/images/hh.png'))), // Consider image visibility
                        const SizedBox(height: 15),
                        Text(
                          "Tell us about your diet",

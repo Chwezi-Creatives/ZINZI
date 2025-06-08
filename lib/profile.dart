@@ -66,61 +66,63 @@ class ProfilePage extends StatefulWidget {
   /// Preload the user profile cache for splash screen (no UI, no context needed)
   static Future<void> preloadCacheForSplash() async {
     final prefs = await SharedPreferences.getInstance();
-    final cachedData = await UserCache.getData('user_details_cache');
-    final cachedTimestampMillis = prefs.getInt('user_details_cache_timestamp');
+    final userId = prefs.getInt('user_id');
+    
+    if (userId == null) {
+      print('[Splash][Profile] preload skipped: No user ID found.');
+      return;
+    }
+    
+    final cachedData = await UserCache.getUserData('user_details_cache', userId: userId.toString());
+    final cachedTimestampMillis = await prefs.getInt('user_details_cache_${userId}_timestamp');
     final now = DateTime.now();
     bool cacheValid = false;
+    
     if (cachedData != null &&
         cachedTimestampMillis != null &&
-        now.difference(
-                DateTime.fromMillisecondsSinceEpoch(cachedTimestampMillis)) <
+        now.difference(DateTime.fromMillisecondsSinceEpoch(cachedTimestampMillis)) <
             CacheConfig.profileCacheDuration) {
       cacheValid = true;
     }
+    
     if (!cacheValid) {
       try {
-        final apiBaseUrlForPreload = dotenv.env[
-                'API_BASE_URL'] ?? // Use a different var name to avoid confusion if needed
+        final apiBaseUrlForPreload = dotenv.env['API_BASE_URL'] ??
             dotenv.env['API_BASE_URL-intranet'] ??
             'https://default.url';
-        int? userId = prefs.getInt('user_id');
-        if (userId != null) {
-          final response = await http
-              .get(Uri.parse(
-                  '$apiBaseUrlForPreload/rr/rusers/$userId')) // Assuming /rr/rusers endpoint
-              .timeout(const Duration(seconds: 10));
-          if (response.statusCode == 200) {
-            final responseData = json.decode(response.body);
-            Map<String, dynamic>? userMap =
-                _parseUserResponseStatic(responseData);
-            if (userMap != null && userMap['user_id'] != null) {
-              // Ensure correct keys for cache
-              final cacheUserMap = {
-                'name': userMap['name'] ?? '',
-                'email': userMap['email'] ?? '',
-                'user_id': userMap['user_id']?.toString() ?? '',
-                ...userMap // preserve other keys as well
-              };
-              await UserCache.saveData('user_details_cache', cacheUserMap);
-              await prefs.setInt('user_details_cache_timestamp',
-                  DateTime.now().millisecondsSinceEpoch);
-              print('[Splash][Profile] preload cache updated.');
-            } else {
-              print(
-                  '[Splash][Profile] preload skipped: Failed to parse user data from response.');
-            }
+            
+        final response = await http
+            .get(Uri.parse('$apiBaseUrlForPreload/rr/rusers/$userId'))
+            .timeout(const Duration(seconds: 20));
+            
+        if (response.statusCode == 200) {
+          final responseData = json.decode(response.body);
+          Map<String, dynamic>? userMap = _parseUserResponseStatic(responseData);
+          
+          if (userMap != null && userMap['user_id'] != null) {
+            // Ensure correct keys for cache
+            final cacheUserMap = {
+              'name': userMap['name'] ?? '',
+              'email': userMap['email'] ?? '',
+              'user_id': userMap['user_id']?.toString() ?? '',
+              ...userMap // preserve other keys as well
+            };
+            
+            await UserCache.saveUserData('user_details_cache', cacheUserMap, userId: userId.toString());
+            await prefs.setInt('user_details_cache_${userId}_timestamp',
+                DateTime.now().millisecondsSinceEpoch);
+            print('[Splash][Profile] preload cache updated for user $userId.');
           } else {
-            print(
-                '[Splash][Profile] preload skipped: API error ${response.statusCode}');
+            print('[Splash][Profile] preload skipped: Failed to parse user data from response.');
           }
         } else {
-          print('[Splash][Profile] preload skipped: No user ID found.');
+          print('[Splash][Profile] preload skipped: API error ${response.statusCode}');
         }
       } catch (e) {
         print('[Splash][Profile] preload error: $e');
       }
     } else {
-      print('[Splash][Profile] preload skipped: Cache still valid.');
+      print('[Splash][Profile] preload skipped: Cache still valid for user $userId.');
     }
   }
 
@@ -327,9 +329,18 @@ class _ProfilePageState extends State<ProfilePage>
 
     if (_userId != null) {
       final prefs = await SharedPreferences.getInstance();
-      final cachedData = await UserCache.getData('user_details_cache');
-      final cachedTimestampMillis =
-          prefs.getInt('user_details_cache_timestamp');
+      final userIdStr = _userId?.toString();
+      if (userIdStr == null) {
+        setState(() {
+          _isLoading = false;
+          _isLoadingUserDetails = false;
+          _fetchError = 'User not logged in.';
+        });
+        return;
+      }
+
+      final cachedData = await UserCache.getUserData('user_details_cache', userId: userIdStr);
+      final cachedTimestampMillis = prefs.getInt('user_details_cache_${_userId}_timestamp');
       final now = DateTime.now();
 
       bool isUserDetailsCacheComplete(Map<String, dynamic>? data) {
@@ -345,8 +356,7 @@ class _ProfilePageState extends State<ProfilePage>
 
       bool isCacheValid = cachedData != null &&
           cachedTimestampMillis != null &&
-          now.difference(
-                  DateTime.fromMillisecondsSinceEpoch(cachedTimestampMillis)) <
+          now.difference(DateTime.fromMillisecondsSinceEpoch(cachedTimestampMillis)) <
               CacheConfig.profileCacheDuration;
 
       if (isCacheValid && isUserDetailsCacheComplete(cachedData)) {
@@ -438,11 +448,12 @@ class _ProfilePageState extends State<ProfilePage>
       if (mounted) setState(() => _isLoadingUserDetails = false);
       return;
     }
+    final prefs = await SharedPreferences.getInstance();
     final url = '$apiBaseUrl/rr/rusers/$_userId';
     print('[Profile] API fetch: Fetching user details... from URL: $url');
     try {
       final response =
-          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 20));
       print("User Details Response: ${response.statusCode} - ${response.body}");
       if (!mounted) return;
 
@@ -457,9 +468,8 @@ class _ProfilePageState extends State<ProfilePage>
             ...userMap
           };
           _updateStateWithUserDetails(userMap);
-          await UserCache.saveData('user_details_cache', cacheUserMap);
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setInt('user_details_cache_timestamp',
+          await UserCache.saveUserData('user_details_cache', cacheUserMap, userId: _userId.toString());
+          await prefs.setInt('user_details_cache_${_userId}_timestamp',
               DateTime.now().millisecondsSinceEpoch);
         } else {
           print(
@@ -523,8 +533,14 @@ class _ProfilePageState extends State<ProfilePage>
     if (mounted) setState(() => _isLoadingMetrics = true);
 
     final prefs = await SharedPreferences.getInstance();
-    final cachedMetrics = await UserCache.getData('user_metrics_cache');
-    final cachedTimestamp = prefs.getInt('user_metrics_cache_timestamp');
+    final userIdStr = _userId?.toString();
+    if (userIdStr == null) {
+      if (mounted) setState(() => _isLoadingMetrics = false);
+      return;
+    }
+
+    final cachedMetrics = await UserCache.getUserData('user_metrics_cache', userId: userIdStr);
+    final cachedTimestamp = await prefs.getInt('user_metrics_cache_${_userId}_timestamp');
     final now = DateTime.now();
 
     if (!forceRefresh &&
@@ -544,7 +560,7 @@ class _ProfilePageState extends State<ProfilePage>
     final url = '$apiBaseUrl/rr/metrics/$_userId';
     try {
       final response =
-          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 20));
       if (!mounted) return;
 
       if (response.statusCode == 200) {
@@ -646,8 +662,14 @@ class _ProfilePageState extends State<ProfilePage>
     if (mounted) setState(() => _isLoadingPreferences = true);
 
     final prefs = await SharedPreferences.getInstance();
-    final cachedPrefs = await UserCache.getData('user_preferences_cache');
-    final cachedTimestamp = prefs.getInt('user_preferences_cache_timestamp');
+    final userIdStr = _userId?.toString();
+    if (userIdStr == null) {
+      if (mounted) setState(() => _isLoadingPreferences = false);
+      return;
+    }
+
+    final cachedPrefs = await UserCache.getUserData('user_preferences_cache', userId: userIdStr);
+    final cachedTimestamp = await prefs.getInt('user_preferences_cache_${_userId}_timestamp');
     final now = DateTime.now();
 
     if (!forceRefresh &&
@@ -667,7 +689,7 @@ class _ProfilePageState extends State<ProfilePage>
     final url = '$apiBaseUrl/rr/preferences/$_userId';
     try {
       final response =
-          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 20));
       if (!mounted) return;
 
       if (response.statusCode == 200) {
@@ -2030,7 +2052,7 @@ class _ProfilePageState extends State<ProfilePage>
             'https://geocode.maps.co/reverse?lat=${position.latitude}&lon=${position.longitude}';
         final geocodeResponse = await http
             .get(Uri.parse(geocodeApiUrl))
-            .timeout(const Duration(seconds: 10));
+            .timeout(const Duration(seconds: 20));
         if (geocodeResponse.statusCode == 200) {
           final geocodeData = json.decode(geocodeResponse.body);
           if (geocodeData['display_name'] != null) {

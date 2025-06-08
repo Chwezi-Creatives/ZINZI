@@ -1,8 +1,9 @@
+
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show SocketException, TimeoutException; // Added SocketException and TimeoutException
+import 'dart:io' show SocketException;
 
-import 'package:zinzi/transooter_dash_before_mapbox.dart' show EarningsHistoryScreen, Payment;
+// Payment model is used in this file
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // For FilteringTextInputFormatter & SystemUiOverlayStyle
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -113,6 +114,7 @@ class Order {
   final String? paymentStatus;
   int? assignedRiderId;
   String? assignedRiderName;
+  final List<Map<String, dynamic>>? complementaryMeals;
 
   Order({
     required this.orderId,
@@ -128,12 +130,11 @@ class Order {
     this.paymentStatus,
     this.assignedRiderId,
     this.assignedRiderName,
+    this.complementaryMeals,
   });
 
   factory Order.fromJson(Map<String, dynamic> json) {
-    String orderStatus = (json['order_status'] != null)
-        ? (json['order_status'] as String).trim().toLowerCase()
-        : '';
+    // Remove unused orderStatus variable since we're using it directly in the Order constructor
     DateTime parsedDate;
     try {
       parsedDate = DateTime.parse(json['order_date'] as String);
@@ -144,6 +145,16 @@ class Order {
       } catch (e2) {
         print("[ProducerDash] Error parsing date: ${json['order_date']} - $e - $e2. Using current time.");
         parsedDate = DateTime.now(); 
+      }
+    }
+    
+    List<Map<String, dynamic>>? parseComplementaryMeals(dynamic value) {
+      if (value == null || value is! List) return null;
+      try {
+        return List<Map<String, dynamic>>.from(value);
+      } catch (e) {
+        print('Error parsing complementary meals: $e');
+        return null;
       }
     }
 
@@ -162,6 +173,7 @@ class Order {
         ingredients: _getStringSafe(json['ingredients']),
         assignedRiderId: _parseIntNullable(json['assigned_rider_id'] ?? json['transporter_id']), 
         assignedRiderName: _getStringSafe(json['assigned_rider_name']),
+        complementaryMeals: parseComplementaryMeals(json['complementary_meals']),
       );
       return order;
     } catch (e, stack) {
@@ -174,7 +186,7 @@ class Order {
     int? orderId, String? mealName, DateTime? orderDate, double? totalPrice, int? quantity,
     String? orderStatus, String? customerName, String? deliveryAddress, String? notes,
     String? ingredients, String? paymentStatus, ValueGetter<int?>? assignedRiderId,
-    ValueGetter<String?>? assignedRiderName,
+    ValueGetter<String?>? assignedRiderName, List<Map<String, dynamic>>? complementaryMeals,
   }) {
     return Order(
       orderId: orderId ?? this.orderId, mealName: mealName ?? this.mealName,
@@ -185,6 +197,7 @@ class Order {
       paymentStatus: paymentStatus ?? this.paymentStatus,
       assignedRiderId: assignedRiderId != null ? assignedRiderId() : this.assignedRiderId,
       assignedRiderName: assignedRiderName != null ? assignedRiderName() : this.assignedRiderName,
+      complementaryMeals: complementaryMeals ?? this.complementaryMeals,
     );
   }
 
@@ -968,6 +981,7 @@ class ProducerDash22 extends StatefulWidget {
         'notes': order.notes, 'ingredients': order.ingredients,
         'payment_status': order.paymentStatus, 'assigned_rider_id': order.assignedRiderId,
         'assigned_rider_name': order.assignedRiderName,
+        'complementary_meals': order.complementaryMeals,
       };
     }
     print("[ProducerDash] Warning: Could not serialize order of type ${order.runtimeType}");
@@ -1023,6 +1037,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
 
   Set<String> _selectedProduceIds = {};
   Map<String, int> _produceQuantities = {};
+  final Map<int, bool> _expandedOrders = {}; // Track expanded state for each order
 
   // Profile Editing State variables removed
 
@@ -1455,7 +1470,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     print("[ProducerDash] Stock sync from profile is now managed within producer_profile.dart.");
     // If we still need to initialize _selectedProduceIds and _produceQuantities from *some* source on init,
     // it would need to be from a dedicated API call or local cache if profile data isn't directly here.
-    // For simplicity, let's assume it starts empty and is populated by user interaction or a later API call if needed.
     // OR, if we want to retain the old stock values from a previous session on this dashboard itself:
     // _loadStockSelectionFromCache(); // A new method to load _selectedProduceIds and _produceQuantities from UserCache.
     // This is outside the scope of "just removing profile", so I'll leave it as is for now.
@@ -1807,8 +1821,9 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     });
   }
 
-  void _handleProdDeleteuce(Product product) { // Name kept from original
-    if (!mounted /*|| _isEditingProfile*/ || (_editingProduceId != null && _editingProduceId != product.produceId)) return;
+  // Fix method name typo and ensure it's used
+  void _handleProductDelete(Product product) async { 
+    if (!mounted || (_editingProduceId != null && _editingProduceId != product.produceId)) return;
     debugPrint('Delete Produce Action Triggered for ID: ${product.produceId}');
     if (product.produceId.startsWith('TEMP_')) { _cancelProduceEdit(); return; }
     showDialog(context: context, builder: (BuildContext ctx) => AlertDialog(
@@ -2380,9 +2395,22 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
         side: BorderSide(color: primaryTeal.withOpacity(0.3), width: 1),
       ),
       child: ExpansionTile(
-        key: PageStorageKey<int>(order.orderId), tilePadding: const EdgeInsets.fromLTRB(12.0, 8.0, 12.0, 8.0),
-        childrenPadding: EdgeInsets.zero, expandedAlignment: Alignment.topLeft, expandedCrossAxisAlignment: CrossAxisAlignment.start,
-        iconColor: subtleText, collapsedIconColor: subtleText,
+        key: PageStorageKey<int>(order.orderId),
+        tilePadding: const EdgeInsets.fromLTRB(12.0, 8.0, 12.0, 8.0),
+        childrenPadding: EdgeInsets.zero,
+        expandedAlignment: Alignment.topLeft,
+        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+        maintainState: true,
+        initiallyExpanded: _expandedOrders[order.orderId] ?? false,
+        onExpansionChanged: (expanded) {
+          if (mounted) {
+            setState(() {
+              _expandedOrders[order.orderId] = expanded;
+            });
+          }
+        },
+        iconColor: subtleText,
+        collapsedIconColor: subtleText,
         leading: Tooltip(message: order.orderStatus, child: CircleAvatar(
           radius: 18, backgroundColor: statusColor.withOpacity(0.15),
           child: Icon(statusIcon, color: statusColor, size: 18),
@@ -2402,7 +2430,93 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
             _buildOrderDetailItem('Payment', order.paymentStatus ?? 'Unknown'),
             if (order.notes != null && order.notes!.isNotEmpty) _buildOrderDetailItem('Notes', order.notes!),
             if (order.deliveryAddress != null && order.deliveryAddress!.isNotEmpty) _buildOrderDetailItem('Delivery To', order.deliveryAddress!),
-            if (order.assignedRiderId != null) _buildOrderDetailItem('Assigned Rider', '${order.assignedRiderName ?? 'ID: ${order.assignedRiderId}'}', color: assignedColor),
+            if (order.assignedRiderId != null) 
+              _buildOrderDetailItem('Assigned Rider', '${order.assignedRiderName ?? 'ID: ${order.assignedRiderId}'}', color: assignedColor),
+            
+            // --- MODIFIED SECTION START ---
+            // Display complementary meals if any, with improved styling and robustness
+            if (order.complementaryMeals != null && order.complementaryMeals!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Icon on the left
+                    Padding(
+                      padding: const EdgeInsets.only(top: 1.0), // Align icon with text
+                      child: Icon(Icons.cases_outlined, size: 18, color: subtleText),
+                    ),
+                    const SizedBox(width: 12),
+                    // Title and list of meals on the right
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Title
+                          Text(
+                            'Complementary Meals',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12,
+                              color: textOnWhite,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          // List of meals
+                          ...order.complementaryMeals!.map((meal) => Padding(
+                            padding: const EdgeInsets.only(bottom: 6.0),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                // Image
+                                if (_getStringSafe(meal['image']) != null && _getStringSafe(meal['image'])!.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 8.0),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(4.0),
+                                      child: Image.network(
+                                        _getStringSafe(meal['image'])!,
+                                        width: 28,
+                                        height: 28,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (context, error, stackTrace) => Container(
+                                          width: 28, height: 28, color: Colors.grey.shade200,
+                                          child: const Icon(Icons.broken_image, size: 16, color: subtleText),
+                                        ),
+                                        loadingBuilder: (context, child, loadingProgress) {
+                                          if (loadingProgress == null) return child;
+                                          return SizedBox(
+                                            width: 28, height: 28,
+                                            child: Center(child: CircularProgressIndicator(
+                                              strokeWidth: 2, 
+                                              color: primaryTeal,
+                                              value: loadingProgress.expectedTotalBytes != null
+                                                  ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                                  : null,
+                                            )),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                // Meal Name and Price
+                                Expanded(
+                                  child: Text(
+                                    '${_getStringSafe(meal['name']) ?? 'Unnamed Meal'} (${_getStringSafe(meal['price']) ?? '0'})',
+                                    style: const TextStyle(fontSize: 12, color: subtleText),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )).toList(),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            // --- MODIFIED SECTION END ---
+
             const SizedBox(height: 12),
             _buildOrderActions(order),
           ])),

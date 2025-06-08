@@ -77,7 +77,7 @@ class _MealDetailScreenPriorState extends State<MealDetailScreenPrior> {
     final mealTitle = widget.meal['Meal_name'] ?? 'Unknown Meal';
     final mealDescription = widget.meal['Meal_description'] ?? 'No description available';
     final mealPrice = (widget.meal['price'] is num) ? (widget.meal['price'] as num).toDouble() : 5.0;
-    final mealImage = widget.meal['Image_link'] ?? 'assets/images/mealimageplaceholder.jpg';
+    final mealImage = widget.meal['Image_link'] ?? 'assets/images/mealimageplaceholder.png';
     final ingredients = (widget.meal['Ingredients'] is List)
         ? List<String>.from(widget.meal['Ingredients'])
         : (widget.meal['Ingredients']?.toString().split(', ') ?? []);
@@ -152,7 +152,7 @@ class _MealDetailScreenPriorState extends State<MealDetailScreenPrior> {
                               placeholder: (context, url) =>
                                   Center(child: CircularProgressIndicator()),
                               errorWidget: (context, url, error) => Image.asset(
-                                'assets/images/mealimageplaceholder.jpg',
+                                'assets/images/mealimageplaceholder.png',
                                 fit: BoxFit.cover,
                               ),
                               fit: BoxFit.cover,
@@ -238,7 +238,7 @@ class _MealDetailScreenPriorState extends State<MealDetailScreenPrior> {
       if (isFavorite) {
         Favorites.removeItem(title);
       } else {
-        String imagePath = widget.meal['Image_link'] ?? 'assets/images/mealimageplaceholder.jpg';
+        String imagePath = widget.meal['Image_link'] ?? 'assets/images/mealimageplaceholder.png';
         Favorites.addItem(title, price, imagePath);
         showCustomSnackBar(context, '$title added to favorites!');
       }
@@ -259,7 +259,7 @@ class _MealDetailScreenPriorState extends State<MealDetailScreenPrior> {
           selectedchef: selectedChef ?? {},
           meal: {
             'name': title,
-            'imagePath': widget.meal['Image_link'] ?? 'assets/images/mealimageplaceholder.jpg',
+            'imagePath': widget.meal['Image_link'] ?? 'assets/images/mealimageplaceholder.png',
             'description': widget.meal['Meal_description'] ?? 'No description available',
             'price': price,
           },
@@ -405,7 +405,7 @@ class _MealDetailScreenPriorState extends State<MealDetailScreenPrior> {
                   final complementary = complementaries[index];
                   final image = complementaryImages.isNotEmpty && index < complementaryImages.length
                       ? complementaryImages[index]
-                      : 'assets/images/mealimageplaceholder.jpg';
+                      : 'assets/images/mealimageplaceholder.png';
                   return Padding(
                     padding: const EdgeInsets.only(right: 8.0),
                     child: Column(
@@ -482,7 +482,7 @@ class _MealDetailScreenPriorState extends State<MealDetailScreenPrior> {
           selectedChef['price'],
           meal: {
             'name': widget.meal['Meal_name'] ?? 'Unknown Meal',
-            'imagePath': widget.meal['Image_link'] ?? 'assets/images/mealimageplaceholder.jpg',
+            'imagePath': widget.meal['Image_link'] ?? 'assets/images/mealimageplaceholder.png',
             'description': widget.meal['Meal_description'] ?? 'No description available',
             'price': widget.meal['price'] ?? 0.0,
           },

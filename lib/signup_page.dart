@@ -40,6 +40,7 @@ class _UserSignUpPageState extends State<UserSignUpPage>
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmPasswordController =
       TextEditingController(); // Controller for confirm password
@@ -113,8 +114,9 @@ class _UserSignUpPageState extends State<UserSignUpPage>
     _controller.dispose();
     _nameController.dispose();
     _emailController.dispose();
+    _phoneController.dispose();
     _passwordController.dispose();
-    _confirmPasswordController.dispose(); // Dispose the new controller
+    _confirmPasswordController.dispose();
     _imageUrlController.dispose();
     super.dispose();
   }
@@ -258,11 +260,20 @@ class _UserSignUpPageState extends State<UserSignUpPage>
         body: jsonEncode({
           'name': _nameController.text.trim(),
           'email': _emailController.text.trim(),
+          'phone_number': _phoneController.text.trim(),
           'password': _passwordController.text.trim(),
           if (_imageUrlController.text.trim().isNotEmpty) 'image': _imageUrlController.text.trim(),
-          'user_type': 'User', // Set the user type explicitly
+          'user_type': 'user', // Set the user type explicitly
         }),
       );
+
+      // Debug logging - only in debug mode
+      assert(() {
+        debugPrint('🟢 SIGNUP RESPONSE:');
+        debugPrint('Status Code: ${response.statusCode}');
+        debugPrint('Response Body: ${response.body}');
+        return true;
+      }());
 
       if (response.statusCode == 201) {
         final responseData = json.decode(response.body);
@@ -270,8 +281,8 @@ class _UserSignUpPageState extends State<UserSignUpPage>
         final String? phoneNumber = responseData['phone'] as String?;
 
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setInt('user_id', userId);
-        await prefs.setString('user_type', 'User');
+        await prefs.setString('user_id', userId.toString()); //do not remove this or change the data type
+        await prefs.setString('user_type', 'user');
         await prefs.setString('user_email', _emailController.text.trim());
         await prefs.setBool('is_logged_in', true);
         
@@ -288,33 +299,24 @@ class _UserSignUpPageState extends State<UserSignUpPage>
           // Use pushReplacement if you don't want to go back here
           context,
           _createSlideFadeTransition(
-              const EmailVerificationPage()), // Navigate to verification page
+            const EmailVerificationPage(isNewUser: true), // Set isNewUser to true for new signups
+          ),
         );
       } else {
         // Improved error handling for specific backend messages
         String displayMessage = 'Signup failed. Please try again.'; // Default message
-        try {
-          if (response.statusCode == 409) {
-            displayMessage = 'An account with this email already exists. Please log in or use a different email.';
-          } else {
+        
+        if (response.statusCode == 409) {
+          displayMessage = 'An account with this email already exists. Please try logging in instead.';
+        } else {
+          try {
             final errorResponse = json.decode(response.body);
             final backendMessage = errorResponse['message'] as String?;
-
             if (backendMessage != null) {
-              // Check for the specific "already registered" error
-              if (backendMessage.toLowerCase().contains('is already registered')) {
-                displayMessage = 'This email address is already registered. Please use a different email or log in.';
-              } else {
-                // Use the backend message if it's not the specific one we handled
-                displayMessage = backendMessage;
-              }
+              displayMessage = backendMessage;
             }
-          }
-        } catch (e) {
-          // If parsing the error response fails, check status code
-          print("Error parsing error response: $e");
-          if (response.statusCode == 409) {
-            displayMessage = 'An account with this email already exists. Please log in or use a different email.';
+          } catch (e) {
+            print("Error parsing error response: $e");
           }
         }
 
@@ -500,6 +502,23 @@ class _UserSignUpPageState extends State<UserSignUpPage>
                           ),
                           const SizedBox(height: 16),
                           _buildTextField(
+                            controller: _phoneController,
+                            label: "Phone Number",
+                            icon: Icons.phone,
+                            validator: (value) {
+                              if (value == null || value.trim().isEmpty) {
+                                return "Enter your phone number";
+                              }
+                              // Basic phone number validation (adjust regex as needed)
+                              final phoneRegex = RegExp(r'^\+?[0-9]{10,15}$');
+                              if (!phoneRegex.hasMatch(value.trim())) {
+                                return "Enter a valid phone number";
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                          _buildTextField(
                             controller: _passwordController,
                             label: "Password",
                             icon: Icons.lock,
@@ -569,37 +588,56 @@ class _UserSignUpPageState extends State<UserSignUpPage>
                             opacity: _buttonFadeAnimation,
                             child: ScaleTransition(
                               scale: _buttonScaleAnimation,
-                              child: ElevatedButton(
-                                onPressed: _isLoading ? null : _signUp,
-                                style: ElevatedButton.styleFrom(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 16),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(
-                                        12), // Match login style
+                              child: MouseRegion(
+                                cursor: SystemMouseCursors.click,
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  curve: Curves.easeInOut,
+                                  decoration: BoxDecoration(
+                                    color: primaryTeal, // Using explicit color constant
+                                    borderRadius: BorderRadius.circular(12),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: darkTeal.withOpacity(0.3), // Using darkTeal constant
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 4),
+                                      ),
+                                    ],
                                   ),
-                                  backgroundColor:
-                                      Colors.teal, // Match login style
-                                  foregroundColor: Colors.white, // Text color
-                                  minimumSize: const Size(
-                                      double.infinity, 60), // Match login style
-                                  textStyle: GoogleFonts.poppins(
-                                      // Match login style
-                                      fontSize: 16,
-                                      fontWeight: FontWeight
-                                          .bold, // Keep bold from signup
-                                      color: Colors.white),
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: _isLoading ? null : _signUp,
+                                      borderRadius: BorderRadius.circular(12),
+                                      splashColor: whiteColor.withOpacity(0.2), // Using whiteColor constant
+                                      highlightColor: whiteColor.withOpacity(0.1), // Using whiteColor constant
+                                      child: Container(
+                                        width: double.infinity,
+                                        height: 56,
+                                        padding: const EdgeInsets.symmetric(vertical: 16),
+                                        alignment: Alignment.center,
+                                        child: _isLoading
+                                            ? const SizedBox(
+                                                height: 24,
+                                                width: 24,
+                                                child: CircularProgressIndicator(
+                                                  color: whiteColor, // Using whiteColor constant
+                                                  strokeWidth: 2.5,
+                                                ),
+                                              )
+                                            : Text(
+                                                "SIGN UP",
+                                                style: GoogleFonts.poppins(
+                                                  color: whiteColor, // Using whiteColor constant
+                                                  fontSize: 16,
+                                                  fontWeight: FontWeight.bold,
+                                                  letterSpacing: 1.0,
+                                                ),
+                                              ),
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                                child: _isLoading
-                                    ? const SizedBox(
-                                        height: 20,
-                                        width: 20,
-                                        child: CircularProgressIndicator(
-                                          color: Colors.white,
-                                          strokeWidth: 2.0,
-                                        ),
-                                      )
-                                    : const Text("Sign Up"),
                               ),
                             ),
                           ),

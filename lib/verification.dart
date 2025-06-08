@@ -12,7 +12,12 @@ final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ??
     'https://default.url'; // Ensure API base URL is available
 
 class EmailVerificationPage extends StatefulWidget {
-  const EmailVerificationPage({super.key});
+  final bool isNewUser;
+  
+  const EmailVerificationPage({
+    super.key,
+    this.isNewUser = false,
+  });
 
   @override
   _EmailVerificationPageState createState() => _EmailVerificationPageState();
@@ -27,6 +32,7 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
   String? _transporterId; // Add state variable for transporter ID
   bool _isUserDataLoaded =
       false; // Track whether user data (ID and type) has been loaded
+  bool _verificationFailed = false; // Track if verification has failed
 
   @override
   void initState() {
@@ -39,9 +45,21 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
     try {
       final prefs = await SharedPreferences.getInstance();
       
-      // Get user_id as string
-      final userIdString = prefs.getString('user_id');
-      print('🔍 user_id from prefs: $userIdString');
+      // First, try to get user_id as string (preferred method)
+      String? userIdString = prefs.getString('user_id');
+      
+      // If string is not available, try to get as int and convert to string
+      if (userIdString == null || userIdString.isEmpty) {
+        try {
+          final userIdInt = prefs.getInt('user_id');
+          if (userIdInt != null) {
+            userIdString = userIdInt.toString();
+            print('🔍 Converted int user_id to string: $userIdString');
+          }
+        } catch (e) {
+          print('⚠️ Error reading user_id as int: $e');
+        }
+      }
       
       // Get other user data
       final userType = prefs.getString('user_type');
@@ -52,24 +70,19 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
       print('   - User Type: $userType');
       print('   - Transporter ID: $transporterId');
 
-      // Validate user ID
+      // Validate required fields
       if (userIdString == null || userIdString.isEmpty) {
         print('❌ user_id is null or empty in SharedPreferences');
       } else {
-        // Try to parse to int to validate it's a valid number
-        try {
-          final userIdInt = int.parse(userIdString);
-          print('✅ Valid user ID (parsed as int): $userIdInt');
-        } catch (e) {
-          print('⚠️ user_id is not a valid integer: $userIdString');
-        }
+        print('✅ Valid user ID: $userIdString');
       }
 
       setState(() {
         _userId = userIdString; // Store as string in the state
         _userType = userType;
-        _transporterId = transporterId ?? userIdString;
-        _isUserDataLoaded = true; // Always mark as loaded to prevent infinite loading
+        // Use transporterId if available, otherwise fall back to user_id
+        _transporterId = transporterId ?? userIdString ?? '';
+        _isUserDataLoaded = true; // Mark as loaded to prevent infinite loading
       });
       
       print('✅ User data loading completed');
@@ -152,39 +165,41 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
       print('   - Body: ${response.body}');
 
       if (response.statusCode == 200) {
-        // Navigate based on user type
+        // Navigate based on user type and whether it's a new user
         Widget nextPage;
-        switch (_userType) {
-          case 'user':
-            nextPage = const UserMetricsPage();
-            break;
-          case 'chef':
-            nextPage = const ChefDash88new();
-            break;
-          case 'producer':
-            nextPage = const ProducerDash22();
-            break;
-          case 'transporter':
-            // Pass transporterId to the Transporter dashboard
-            if (_transporterId != null) {
-              nextPage = TransporterDashNew(
-                  transporterId:
-                      _transporterId!); // Assuming TransporterDashBeforeMapbox takes transporterId
-            } else {
-              // Handle case where transporterId is not available
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Transporter ID not found.'),
-              ));
-              setState(() {
-                _isLoading = false; // Reset loading state
-              });
-              return; // Stop navigation
-            }
-            break;
-          default:
-            // Default navigation or error handling for unknown user types
-            nextPage = const UserMetricsPage(); // Or an error page
-            break;
+        
+        // If it's a new user, always navigate to UserMetricsPage
+        if (widget.isNewUser) {
+          nextPage = const UserMetricsPage();
+        } else {
+          // Existing logic for non-new users
+          switch (_userType) {
+            case 'user':
+              nextPage = const UserMetricsPage();
+              break;
+            case 'chef':
+              nextPage = const ChefDash88new();
+              break;
+            case 'producer':
+              nextPage = const ProducerDash22();
+              break;
+            case 'transporter':
+              if (_transporterId != null) {
+                nextPage = TransporterDashNew(transporterId: _transporterId!);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Transporter ID not found.'),
+                ));
+                setState(() {
+                  _isLoading = false; // Reset loading state
+                });
+                return; // Stop navigation
+              }
+              break;
+            default:
+              nextPage = const UserMetricsPage();
+              break;
+          }
         }
 
         Navigator.pushReplacement(
@@ -193,8 +208,12 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
         );
       } else {
         final responseData = json.decode(response.body);
+        setState(() {
+          _verificationFailed = true; // Show resend option
+        });
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(responseData['message'] ?? 'Verification failed'),
+          duration: const Duration(seconds: 5),
         ));
       }
     } catch (error, stackTrace) {
@@ -209,6 +228,114 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
     } finally {
       setState(() {
         _isLoading = false; // Reset loading state
+      });
+    }
+  }
+
+  Future<void> _resendVerificationCode() async {
+    print('🔄 Starting verification code resend process...');
+    
+    if (!_isUserDataLoaded || _userId == null || _userType == null) {
+      final errorMsg = '❌ User information not available. ' +
+          'isUserDataLoaded: $_isUserDataLoaded, ' +
+          'userId: $_userId, userType: $_userType';
+      print(errorMsg);
+      
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('User information not available. Please try again.'),
+      ));
+      return;
+    }
+
+    print('🔍 User data loaded:');
+    print('   - User ID: $_userId (type: ${_userId.runtimeType})');
+    print('   - User Type: $_userType (type: ${_userType.runtimeType})');
+    print('   - Transporter ID: $_transporterId');
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // Convert user ID to int for the API
+      final userIdInt = int.tryParse(_userId!);
+      if (userIdInt == null) {
+        throw Exception('Invalid user ID format');
+      }
+
+      final requestBody = {
+        'user_id': userIdInt,
+        'user_type': _userType,
+      };
+
+      // Detailed debug logging
+      print('📤 Preparing verification code resend request:');
+      print('   - Endpoint: $apibaseurl/rr/resend_verification_email');
+      print('   - Headers: {Content-Type: application/json}');
+      print('   - Request body:');
+      print('     - user_id: $userIdInt (type: ${userIdInt.runtimeType})');
+      print('     - user_type: "$_userType" (type: ${_userType.runtimeType})');
+      print('   - Full JSON payload: ${jsonEncode(requestBody)}');
+      
+      final stopwatch = Stopwatch()..start();
+      print('   - Sending request...');
+      
+      final response = await http.post(
+        Uri.parse('$apibaseurl/rr/resend_verification_email'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode(requestBody),
+      );
+
+      stopwatch.stop();
+      print('📥 Received response:');
+      print('   - Status code: ${response.statusCode}');
+      print('   - Response time: ${stopwatch.elapsedMilliseconds}ms');
+      print('   - Headers: ${response.headers}');
+      print('   - Response body:');
+      print('     ${response.body}');
+      
+      // Log the raw response for debugging
+      if (response.body.isNotEmpty) {
+        try {
+          final jsonResponse = jsonDecode(response.body);
+          print('   - Parsed JSON response: $jsonResponse');
+        } catch (e) {
+          print('   - Could not parse response as JSON: $e');
+        }
+      }
+
+      if (response.statusCode == 202) {
+        final responseData = json.decode(response.body);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(responseData['message'] ?? 'New verification code sent'),
+          backgroundColor: Colors.green,
+        ));
+        setState(() {
+          _verificationFailed = false; // Hide resend option after successful request
+        });
+      } else {
+        final responseData = json.decode(response.body);
+        throw Exception(responseData['message'] ?? 'Failed to resend verification code');
+      }
+    } catch (error, stackTrace) {
+      print('❌ Error resending verification code:');
+      print('   - Error type: ${error.runtimeType}');
+      print('   - Error message: $error');
+      if (error is http.ClientException) {
+        print('   - Request URI: ${error.uri}');
+        print('   - Request method: ${error.message}');
+      }
+      print('   - Stack trace: $stackTrace');
+      
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Error: ${error.toString()}'),
+        backgroundColor: Colors.red,
+      ));
+    } finally {
+      setState(() {
+        _isLoading = false;
       });
     }
   }
@@ -314,11 +441,25 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
                             style: TextStyle(color: Colors.white)),
                   ),
                   const SizedBox(height: 20),
-                  const Text(
-                    "Didn't receive a code? Check your email it could take a few seconds to arrive.",
-                    style: TextStyle(fontSize: 14, color: Colors.black54),
-                    textAlign: TextAlign.center,
-                  ),
+                  if (_verificationFailed) ...[
+                    const SizedBox(height: 10),
+                    TextButton(
+                      onPressed: _isLoading ? null : _resendVerificationCode,
+                      child: const Text(
+                        'Resend Verification Code',
+                        style: TextStyle(
+                          color: Colors.teal,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                  ] else
+                    const Text(
+                      "Didn't receive a code? Check your email it could take a few seconds to arrive.",
+                      style: TextStyle(fontSize: 14, color: Colors.black54),
+                      textAlign: TextAlign.center,
+                    ),
                 ],
               ),
             ),
