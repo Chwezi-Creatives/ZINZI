@@ -813,7 +813,7 @@ class MealRecommendation4:
                 "postpartum weight management", "postpartum",
                 "control chronic conditions", "chronic disease management",
                 "diabetes management", "hypertension management",
-                "reduce inflammation", "reduce inflamation",  # Common typo
+                #"reduce inflammation", "reduce inflamation","reduced inflamation",  # Common typo #tmporarily commented out,wll re-enable manually after stakeholder meeting
                 "detox", "cleanse", "detox and cleanse",
                 #"satiety", "improve satiety", "prevent overeating", thisline is currently disabled as it caused issus, will reanalbe it later after refactoring
                 "improve metabolic health", "metabolic health",

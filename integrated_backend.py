@@ -1624,7 +1624,7 @@ class AuthenticationAndUsers(BaseRepository):
         params = []
         idx = 1
         # Define allowed fields for update based on create_user and list_users
-        allowed = ['name', 'email', 'location', 'phone_number' , 'password', 'is_email_verified', 'user_type', 'image']
+        allowed = ['name', 'location', 'password', 'is_email_verified', 'user_type', 'image']
 
         if not updates_lower:
              raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields provided for update.")
@@ -1692,6 +1692,76 @@ async def list_calorie_history(self, conn: asyncpg.Connection, user_id: int) -> 
 # 1. Remove __init__ if it only dealt with DB connection.
 # 2. Add 'conn: asyncpg.Connection' as the first argument to all methods performing DB operations.
 # 3. Call self._execute_query(conn, ...) within those methods.
+
+class BaseRepository:
+    async def _execute_query(self, conn, sql, params=(), fetch_one=False, fetch_all=False, returning_id_column=None):
+        """Generic query executor with error handling and logging."""
+        try:
+            if fetch_one:
+                result = await conn.fetchrow(sql, *params)
+                logger.debug(f"Query returned {len(result) if result else 0} rows")  # Log row count
+                return result
+            elif fetch_all:
+                result = await conn.fetch(sql, *params)
+                logger.debug(f"Query returned {len(result)} rows")  # Log row count
+                return result
+            else:
+                result = await conn.execute(sql, *params)
+                logger.debug(f"Query affected {result} rows")  # Log affected rows
+                if returning_id_column:
+                    # For INSERT ... RETURNING id
+                    if hasattr(result, '__getitem__') and returning_id_column in result:
+                        return result[returning_id_column]
+                    # For INSERT ... RETURNING id
+                    elif hasattr(result, 'get'):
+                        return result.get(returning_id_column)
+                return result
+        except asyncpg.exceptions.UniqueViolationError as e:
+            logger.error(f"Unique constraint violation: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A record with these details already exists."
+            )
+        except asyncpg.exceptions.ForeignKeyViolationError as e:
+            logger.error(f"Foreign key violation: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid reference to non-existent record."
+            )
+        except asyncpg.exceptions.NotNullViolationError as e:
+            logger.error(f"Not null violation: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Required field cannot be null."
+            )
+        except asyncpg.exceptions.DataError as e:
+            logger.error(f"Data error: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid data format or type: {str(e)}"
+            )
+        except Exception as e:
+            logger.error(f"Database error: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="An error occurred while processing your request."
+            )
+            
+    def _check_restricted_fields(self, updates: dict, restricted_fields: list = None):
+        """
+        Check if any restricted fields are present in the updates dictionary.
+        Raises HTTP 403 if restricted fields are found.
+        """
+        if restricted_fields is None:
+            restricted_fields = ['email', 'phone_number']
+            
+        restricted_updates = [field for field in restricted_fields if field in updates]
+        if restricted_updates:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                headers={"X-Error-Code": "FIELD_UPDATE_NOT_ALLOWED"},
+                detail=f"The following fields cannot be updated: {', '.join(restricted_updates)}"
+            )
 
 class Chefs(BaseRepository):
     # _validate_stock remains synchronous helper
@@ -1885,8 +1955,32 @@ class Chefs(BaseRepository):
             
         return processed_chefs
 
+    def _check_restricted_fields(self, updates: dict, restricted_fields: list = None):
+        """
+        Check if any restricted fields are being updated.
+        
+        Args:
+            updates: Dictionary of updates to check
+            restricted_fields: List of field names that cannot be updated
+            
+        Raises:
+            HTTPException: 403 if any restricted fields are found in updates
+        """
+        if restricted_fields is None:
+            restricted_fields = ['email', 'phone_number']
+            
+        restricted_updates = [f for f in restricted_fields if f in updates]
+        if restricted_updates:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"The following fields cannot be updated: {', '.join(restricted_updates)}",
+                headers={"X-Error-Code": "FIELD_UPDATE_NOT_ALLOWED"}
+            )
+
     async def update_chef(self, conn: asyncpg.Connection, chef_id: int, updates: dict):
-        # ... (uses conn for _execute_query) ...
+        # Check for restricted fields first
+        self._check_restricted_fields(updates)
+        
         updates_lower = lowercase_keys(updates); set_clauses = []; params = []; idx = 1;
         if not updates_lower: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No updates.")
         if 'pricing' in updates_lower:
@@ -1970,7 +2064,12 @@ class Producers(BaseRepository):
 
     async def update_producer(self, conn: asyncpg.Connection, producer_id: int, updates: dict):
         # ... (uses conn for fetchval and _execute_query) ...
-        updates_lower = lowercase_keys(updates); set_clauses = []; params = []; idx = 1;
+        updates_lower = lowercase_keys(updates)
+        
+        # Check for restricted fields first
+        self._check_restricted_fields(updates_lower)
+        
+        set_clauses = []; params = []; idx = 1;
         allowed = ['name','image','producer_type','is_active','rating','phone_number','location','reviews']
         if not updates_lower: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No updates.")
         if 'stock' in updates_lower:
@@ -2149,7 +2248,12 @@ class Transporters(BaseRepository):
 
     async def update_transporter(self, conn: asyncpg.Connection, transporter_id: int, updates: dict):
         # ... (uses conn for _execute_query) ...
-        updates_lower=lowercase_keys(updates); set_clauses=[]; params=[]; idx=1;
+        updates_lower=lowercase_keys(updates)
+        
+        # Check for restricted fields first
+        self._check_restricted_fields(updates_lower)
+        
+        set_clauses=[]; params=[]; idx=1;
         allowed=['name','phone_number','profile_image_url','vehicle_type','license_plate','is_active','rating','location','reviews']
         if not updates_lower: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No updates.")
         for k,v in updates_lower.items():
@@ -2278,7 +2382,12 @@ class Stakeholders(BaseRepository):
 
     async def update_stakeholder(self, conn: asyncpg.Connection, stakeholder_id: int, updates: dict):
         # ... (uses conn for _execute_query) ...
-        updates_lower=lowercase_keys(updates); set_clauses=[]; params=[]; idx=1;
+        updates_lower=lowercase_keys(updates)
+        
+        # Check for restricted fields first
+        self._check_restricted_fields(updates_lower)
+        
+        set_clauses=[]; params=[]; idx=1;
         allowed=['name','full_name','image','is_active','rating','phone_number','location']
         if not updates_lower: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No updates.")
         for k,v in updates_lower.items():
