@@ -8,6 +8,7 @@ import time
 import uuid
 import string
 from datetime import datetime, timedelta, date
+from functools import lru_cache  #for distance caching leave it synchronous.
 from typing import Dict, Any, Optional, List, Tuple, Union, AsyncGenerator # Added Union, Tuple, AsyncGenerator
 from dotenv import load_dotenv
 from async_lru import alru_cache # Import alru_cache for async caching
@@ -21,6 +22,7 @@ from google.auth.exceptions import RefreshError
 from email.mime.text import MIMEText
 from firebase_admin import messaging
 import logging
+import re  # For regular expressions
 import paypalrestsdk # Keep sync for now
 import stripe # Keep sync for now
 import requests # Keep sync for now
@@ -37,7 +39,8 @@ from contextlib import asynccontextmanager # For lifespan manager
 from fastapi.responses import ORJSONResponse, FileResponse # Use ORJSON, Import FileResponse
 import json
 import asyncio
-from typing import Dict, Any, Optional, List, Union
+import math
+from typing import Dict, Any, Optional, List, Union, Tuple
 
 # Import notification service
 from services.notification_service import NotificationService
@@ -999,6 +1002,9 @@ class AuthenticationAndUsers(BaseRepository):
                 logger.warning(f"Login failed: Identifier '{identifier}' not found.")
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name or account not found.')
             user_id = result['user_id']; stored_hashed_password = result['hashed_password']; user_type = result.get('user_type', 'user'); is_verified = result.get('is_email_verified', False)
+            if not is_verified:
+                logger.warning(f"Login failed: Email not verified for user '{identifier}'")
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Email not verified. Please verify your email before logging in.')
             stored_hashed_pw_bytes = stored_hashed_password.encode('utf-8') if isinstance(stored_hashed_password, str) else stored_hashed_password
             if not isinstance(stored_hashed_pw_bytes, bytes):
                  logger.error(f"Invalid hashed_password type for user {user_id}. Type: {type(stored_hashed_password)}")
@@ -2008,15 +2014,19 @@ class Chefs(BaseRepository):
         if not set_clauses: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields.")
         set_clauses.append(f"updated_at=NOW()")
         sql = f"UPDATE chefs SET {','.join(set_clauses)} WHERE chefid = ${idx}"; params.append(chef_id)
-        await self._execute_query(conn, sql, tuple(params)); logger.info(f"Updated chef ID: {chef_id}")
 
     async def login_chef(self, conn: asyncpg.Connection, identifier: str, password: str):
         # ... (uses conn for _execute_query) ...
         sql = "SELECT chefid, hashed_password, user_type, is_email_verified, phone_number FROM chefs WHERE lower(name) = lower($1) OR lower(email) = lower($2)"
         params = (identifier.lower(), identifier.lower())
         result = await self._execute_query(conn, sql, params, fetch_one=True)
-        if not result: logger.warning(f"Chef login fail: '{identifier}'"); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
+        if not result: 
+            logger.warning(f"Chef login fail: '{identifier}'")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
         chef_id = result['chefid']; stored_hash = result['hashed_password']; user_type = result['user_type']; is_verified = result['is_email_verified']
+        if not is_verified:
+            logger.warning(f"Login failed: Email not verified for chef '{identifier}'")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Email not verified. Please verify your email before logging in.')
         stored_hash_bytes = stored_hash.encode() if isinstance(stored_hash, str) else stored_hash
         if not isinstance(stored_hash_bytes, bytes): logger.error(f"Bad hash type chef {chef_id}"); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Login error.')
         if bcrypt.checkpw(password.encode(), stored_hash_bytes):
@@ -2177,8 +2187,13 @@ class Producers(BaseRepository):
         sql = "SELECT producer_id, hashed_password, user_type, is_email_verified, phone_number FROM producers WHERE lower(name) = lower($1) OR lower(email) = lower($2)"
         params = (identifier.lower(), identifier.lower())
         result = await self._execute_query(conn, sql, params, fetch_one=True)
-        if not result: logger.warning(f"Producer login fail: '{identifier}'"); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
+        if not result:
+            logger.warning(f"Producer login fail: '{identifier}'")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
         producer_id=result['producer_id']; stored_hash=result['hashed_password']; user_type=result['user_type']; is_verified=result['is_email_verified']
+        if not is_verified:
+            logger.warning(f"Login failed: Email not verified for producer '{identifier}'")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Email not verified. Please verify your email before logging in.')
         stored_hash_bytes = stored_hash.encode() if isinstance(stored_hash, str) else stored_hash
         if not isinstance(stored_hash_bytes, bytes): logger.error(f"Bad hash producer {producer_id}"); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Login error.')
         if bcrypt.checkpw(password.encode(), stored_hash_bytes):
@@ -2270,8 +2285,13 @@ class Transporters(BaseRepository):
         sql="SELECT transporter_id, hashed_password, user_type, is_email_verified, phone_number FROM transporters WHERE lower(name)=lower($1) OR lower(email)=lower($2)"
         params=(identifier.lower(), identifier.lower())
         result = await self._execute_query(conn, sql, params, fetch_one=True)
-        if not result: logger.warning(f"Transporter login fail: '{identifier}'"); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
+        if not result:
+            logger.warning(f"Transporter login fail: '{identifier}'")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
         transporter_id=result['transporter_id']; stored_hash=result['hashed_password']; user_type=result.get('user_type','transporter'); is_verified=result.get('is_email_verified',True) # Assume verified if column missing
+        if not is_verified:
+            logger.warning(f"Login failed: Email not verified for transporter '{identifier}'")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Email not verified. Please verify your email before logging in.')
         stored_hash_bytes = stored_hash.encode() if isinstance(stored_hash, str) else stored_hash
         if not isinstance(stored_hash_bytes, bytes): logger.error(f"Bad hash transporter {transporter_id}"); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Login error.')
         if bcrypt.checkpw(password.encode(), stored_hash_bytes):
@@ -2404,8 +2424,13 @@ class Stakeholders(BaseRepository):
         sql="SELECT stakeholder_id, hashed_password, user_type, is_email_verified FROM stakeholders WHERE lower(name)=lower($1) OR lower(email)=lower($2)"
         params=(identifier.lower(), identifier.lower())
         result = await self._execute_query(conn, sql, params, fetch_one=True)
-        if not result: raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
+        if not result:
+            logger.warning(f"Stakeholder login fail: '{identifier}'")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
         stakeholder_id=result['stakeholder_id']; stored_hash=result['hashed_password']; user_type=result.get('user_type','stakeholder'); is_verified=result.get('is_email_verified',False)
+        if not is_verified:
+            logger.warning(f"Login failed: Email not verified for stakeholder '{identifier}'")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Email not verified. Please verify your email before logging in.')
         stored_hash_bytes = stored_hash.encode() if isinstance(stored_hash, str) else stored_hash
         if not isinstance(stored_hash_bytes, bytes): raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Login error.')
         if bcrypt.checkpw(password.encode(), stored_hash_bytes):
@@ -3123,6 +3148,11 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
                 processed_results.append(processed_order)
 
             logger.info(f"Retrieved and processed {len(processed_results)} orders.")
+            
+            # Calculate distances if transporter_id is provided
+            if transporter_id is not None:
+                await self._add_distances_to_orders(conn, processed_results)
+                
             return processed_results
 
         except HTTPException: # Re-raise specific HTTP exceptions from _safe_int
@@ -3150,6 +3180,150 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
 #            self.app_state = app_state # and then use self.app_state.db_pool
 #            self.ALLOWED_ORDER_STATUSES = allowed_statuses
 
+    @staticmethod
+    @lru_cache(maxsize=4096)
+    def haversine(coord1: Tuple[float, float], coord2: Tuple[float, float]) -> float:
+        """
+        Calculate the great circle distance between two points 
+        on the earth specified in decimal degrees.
+        
+        This function uses LRU cache to improve performance when the same 
+        coordinate pairs are used repeatedly.
+        
+        Args:
+            coord1: Tuple of (latitude, longitude) for first point
+            coord2: Tuple of (latitude, longitude) for second point
+            
+        Returns:
+            Distance in kilometers between the two points
+            
+        Cache Details:
+            - Max cache size: 4,096 unique coordinate pairs
+            - Memory usage: ~32KB (8 bytes per float * 4 floats * 1,024 entries)
+            - Hit ratio: Expected >90% for repeated coordinate calculations
+        """
+        # Convert decimal degrees to radians 
+        lat1, lon1 = coord1
+        lat2, lon2 = coord2
+        lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+        
+        # Haversine formula 
+        dlat = lat2 - lat1 
+        dlon = lon2 - lon1 
+        a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+        c = 2 * math.asin(math.sqrt(a)) 
+        
+        # Radius of earth in kilometers
+        return 6371.0 * c
+    
+    # Pre-compile regex patterns once at module level
+    _COORD_PATTERNS = [
+        # Combined pattern for most common formats
+        re.compile(
+            r'(?x)'  # Verbose mode for better readability
+            r'[\[\(]?\s*'  # Optional opening bracket or parenthesis
+            r'([+-]?\d{1,3}\.\d+)\s*'  # First number (lat)
+            r'[,\s/]+'  # Separator (comma, space, or slash)
+            r'([+-]?\d{1,3}\.\d+)\s*'  # Second number (lng)
+            r'[\]\)]?'  # Optional closing bracket or parenthesis
+            r'|'  # OR
+            r'([-+]?\d{1,3}\.\d+)[°º]?\s*[NS]?[,\s/]+([-+]?\d{1,3}\.\d+)[°º]?\s*[EW]?'  # With degree symbols
+        ),
+    ]
+    
+    @classmethod
+    def _extract_coordinates(cls, address: Optional[str]) -> Optional[Tuple[float, float]]:
+        """
+        Efficiently extract coordinates from address string in various formats.
+        Optimized for performance with pre-compiled regex patterns.
+        
+        Handles formats like:
+        - "lat, lng"
+        - "(lat, lng)" or "[lat, lng]"
+        - '"lat", "lng"' or "'lat', 'lng'"
+        - "Some Address (lat, lng)"
+        - "lat°N, lng°E"
+        
+        Returns:
+            Tuple[float, float] or None: (latitude, longitude) if valid, None otherwise
+        """
+        if not address or not isinstance(address, str) or len(address) > 200:  # Quick length check
+            return None
+            
+        # Try pre-compiled patterns first (fast path)
+        for pattern in cls._COORD_PATTERNS:
+            if match := pattern.search(address):
+                # Check which group matched (accounts for alternation in the pattern)
+                lat_str = match.group(1) or match.group(3)
+                lng_str = match.group(2) or match.group(4)
+                
+                try:
+                    lat, lng = float(lat_str), float(lng_str)
+                    # Validate ranges
+                    if -90 <= lat <= 90 and -180 <= lng <= 180:
+                        return (lat, lng)
+                except (ValueError, TypeError):
+                    continue
+        
+        # Fast path for simple comma/space separated numbers (common case)
+        try:
+            # Quick check if string contains at least one digit and a comma/space
+            if any(c.isdigit() for c in address) and any(c in address for c in ', '):
+                # Extract first two numbers using a simple state machine
+                nums = []
+                current = []
+                for c in address + ' ':
+                    if c in '+-.0123456789':
+                        current.append(c)
+                    elif current:
+                        try:
+                            num = float(''.join(current))
+                            if -180 <= num <= 180:  # Valid coordinate range
+                                nums.append(num)
+                                if len(nums) == 2:
+                                    lat, lng = nums
+                                    if -90 <= lat <= 90:  # Additional lat validation
+                                        return (lat, lng)
+                                    break
+                        except ValueError:
+                            pass
+                        current = []
+        except Exception:
+            pass
+            
+        return None
+    
+    async def _add_distances_to_orders(self, conn: asyncpg.Connection, orders: List[Dict[str, Any]]) -> None:
+        """
+        Add distance field to each order by calculating haversine distance
+        between pickup location and delivery address.
+        """
+        for order in orders:
+            try:
+                # Get pickup location (prefer chef_address, fall back to pickup_location)
+                pickup_loc = order.get('chef_address') or order.get('pickup_location')
+                delivery_loc = order.get('delivery_address')
+                
+                # Extract coordinates from addresses
+                pickup_coords = self._extract_coordinates(pickup_loc)
+                delivery_coords = self._extract_coordinates(delivery_loc)
+                
+                # Calculate distance if we have both sets of coordinates
+                if pickup_coords and delivery_coords:
+                    # Run sync haversine in thread pool to avoid blocking
+                    distance_km = await asyncio.get_event_loop().run_in_executor(
+                        None,  # Use default ThreadPoolExecutor
+                        lambda: self.haversine(pickup_coords, delivery_coords)
+                    )
+                    order['distance'] = round(distance_km, 2)  # Round to 2 decimal places
+                else:
+                    order['distance'] = None
+                    logger.warning(f"Could not calculate distance for order {order.get('order_id')}: "
+                                 f"pickup_coords={pickup_coords is not None}, delivery_coords={delivery_coords is not None}")
+            except Exception as e:
+                order['distance'] = None
+                logger.error(f"Error calculating distance for order {order.get('order_id')}: {str(e)}", exc_info=True)
+    
     async def update_order_status(self, conn: asyncpg.Connection, order_id: int, new_status: str, transporter_id: Optional[int] = None, completion_code: Optional[str] = None, restaurant_phone: Optional[str] = None) -> Dict[str, Any]:
         try:
             # ... (rest of the order fetching and initial status check logic remains IDENTICAL to your last working version) ...
