@@ -55,6 +55,9 @@ momo_service = MomoService()
 # Import meal recommendation algorithm
 from meal_algorithm4 import MealRecommendation4
 
+# Global singleton instance of MealRecommendation4
+meal_recommender = None
+
 # --- Configuration Loading ---
 load_dotenv()
 
@@ -78,21 +81,20 @@ db_pool: Optional[asyncpg.Pool] = None
 
 # Function to preload meal data to avoid slow first request
 async def preload_meal_data():
-    """Preload meal data into cache to improve first request performance."""
+    """Preload meal data and initialize the global MealRecommendation4 instance."""
+    global meal_recommender
     try:
-        logger.info("Preloading meal data into cache...")
-        # Import here to avoid circular imports
-        from meal_algorithm4 import MealRecommendation4
+        logger.info("Initializing global MealRecommendation4 instance and preloading data...")
         
-        # Create a default instance to populate the shared cache
-        default_recommender = MealRecommendation4(1)  # Use a default user ID
+        # Create the singleton instance
+        meal_recommender = MealRecommendation4(1)  # Use default user ID 1 for initialization
         
         # Trigger data loading into the shared cache
-        meals = default_recommender.fetch_all_meals()
-        logger.info(f"Successfully preloaded {len(meals)} meals into cache")
+        meals = meal_recommender.fetch_all_meals()
+        logger.info(f"Successfully initialized MealRecommendation4 and preloaded {len(meals)} meals into cache")
         return True
     except Exception as e:
-        logger.error(f"Error preloading meal data: {e}")
+        logger.error(f"Error initializing MealRecommendation4: {e}", exc_info=True)
         return False
 
 @asynccontextmanager
@@ -2977,7 +2979,15 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
                 payment_mode_l, paid_f, transaction_id, qty_i, gig_details_json,
                 complementary_meals_serialized_json, user_phone
             )
-            order_id = await self._execute_query(conn, sql, params, returning_id_column='order_id')
+            # Execute the query and get the raw result
+            result = await conn.fetchrow(sql, *params)
+            if not result or 'order_id' not in result:
+                logger.error(f"Order creation failed - no order_id returned from database. Result: {result}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Order creation failed (no order ID returned from database)"
+                )
+            order_id = result['order_id']
 
             if not order_id:
                 logger.error(f"Order creation attempt failed for user {user_id_i} (no ID returned).")
@@ -3620,12 +3630,15 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
             
             logger.debug(f"log_meal_calories: Order {order_id} (type: meal) - User ID: {user_id}, Meal ID (Product ID): {meal_id}")
 
-            from meal_algorithm4 import MealRecommendation4 
-            
-            recommender = MealRecommendation4(1) # As per your original
+            global meal_recommender
+            if meal_recommender is None:
+                logger.error("log_meal_calories: Meal recommender singleton not initialized")
+                return False
+                
             logger.debug(f"log_meal_calories: Calculating calories for meal_id {meal_id} (order {order_id}).")
             
-            meal_data = await recommender.calculate_meal_calories(str(meal_id)) 
+            # Use the global singleton instance
+            meal_data = await meal_recommender.calculate_meal_calories(str(meal_id)) 
             
             if not meal_data:
                 logger.error(f"log_meal_calories: Failed to calculate calories for meal_id {meal_id} (order {order_id}). meal_data is empty.")
@@ -4588,14 +4601,21 @@ async def get_meal_recommendations(user_id: int, conn: asyncpg.Connection = Depe
     Returns:
         List of recommended meals with success status
     """
+    global meal_recommender
+    
+    if meal_recommender is None:
+        logger.error("Meal recommender not initialized")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Meal recommendation service not available"
+        )
+    
     try:
-        # Always create a new instance to ensure fresh data
-        # This is important to detect changes in user preferences/metrics
-        from meal_algorithm4 import MealRecommendation4
-        recommender = MealRecommendation4(user_id)
+        # Update the user ID for this request
+        meal_recommender.user_id = user_id
         
-        # Get recommendations (will handle caching internally)
-        recommendations = recommender.recommend_meals()
+        # Get recommendations using the singleton instance
+        recommendations = meal_recommender.recommend_meals()
         
         return {"recommended_meals": recommendations, "success": True}
         
@@ -4606,40 +4626,47 @@ async def get_meal_recommendations(user_id: int, conn: asyncpg.Connection = Depe
             detail="Failed to generate meal recommendations"
         )
 
-@app.get("/rr/meal_calories/{meal_id}")
+@app.get("/rr/meal_calories/{meal_id}") # PS: meal_id is str not int
 async def get_meal_calories(meal_id: str, conn: asyncpg.Connection = Depends(get_db)):
     """
-    Calculate calories and nutritional information for a specific meal.
+    Get detailed nutrition information for a specific meal.
     
     Args:
-        meal_id: ID of the meal to calculate calories for
+        meal_id: ID of the meal to get calories for
     
     Returns:
-        Dictionary containing:
-        - calories: Total calories in the meal
-        - nutritional_info: Full nutritional information
-        - serving_size: Recommended serving size in grams
-        - meal_name: Name of the meal
+        Dict containing detailed nutrition information
     """
-    global meal_recommender
-    
     try:
-        # Lazy initialize the meal recommender
-        if meal_recommender is None:
-            from meal_algorithm4 import MealRecommendation4
-            meal_recommender = MealRecommendation4(1)  # Use default user_id 1 since we only need meal info
+        # Get detailed meal info using the meals_crud instance
+        meal_info = await meal_recommender.calculate_meal_calories(str(meal_id)) 
         
-        # Calculate meal calories asynchronously
-        result = await meal_recommender.calculate_meal_calories(meal_id)
-        
-        if "error" in result:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result["error"])
+        if not meal_info:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Meal with ID {meal_id} not found"
+            )
             
-        return result
+        return {
+            "success": True,
+            "meal_id": meal_id,
+            "calories": meal_info.get('calories', 0),
+            "nutrition_info": {
+                "protein": meal_info.get('protein', 0),
+                "carbs": meal_info.get('carbs', 0),
+                "fats": meal_info.get('fats', 0),
+                # Include any other nutrition fields you need
+            }
+        }
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error calculating meal calories: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to calculate meal calories")
+        logger.error(f"Error getting meal calories for meal {meal_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get meal calories: {str(e)}"
+        )
 
 # === PRODUCER Endpoints ===
 @app.post('/rr/aproducers', status_code=status.HTTP_201_CREATED)

@@ -25,9 +25,16 @@ class MealRecommendation4:
     # Define robust dietary preference mappings
     DIETARY_PREFERENCE_MAPPINGS = {
         'vegan': [
-            'vegan', 'vegetarian (f/p)', 'dairy-free', 'lactose-free',
-            'nut-free', 'soy-free', 'gluten-free', 'low-sodium',
-            'diabetes-friendly', 'low-sugar', 'hohfap', 'organic'
+            'vegan', 'plant-based', 'dairy-free', 'lactose-free', 'egg-free',
+            'honey-free', 'animal-free', 'cruelty-free', 'nut-free', 'soy-free',
+            'gluten-free', 'low-sodium', 'diabetes-friendly', 'low-sugar',
+            'hohfap', 'organic', 'vegetable-based'
+        ],
+        'vegetarian': [
+            'vegetarian', 'lacto-vegetarian', 'ovo-vegetarian', 'lacto-ovo-vegetarian',
+            'dairy', 'eggs', 'honey', 'plant-based', 'nut-free', 'soy-free',
+            'gluten-free', 'low-sodium', 'diabetes-friendly', 'low-sugar',
+            'hohfap', 'organic', 'vegetable-based', 'dairy products', 'egg products'
         ],
         'keto': [
             'keto', 'dairy-free', 'lactose-free', 'nut-free', 'soy-free',
@@ -44,11 +51,11 @@ class MealRecommendation4:
             'diabetes-friendly', 'low-sugar', 'low-fat', 'organic', 'omnivore'
         ],
         'omnivore': [
-            'omnivore', 'halal', 'kosher', 'vegetarian (f/p)', 'pescatarian',
+            'omnivore', 'halal', 'kosher', 'vegetarian', 'pescatarian',
             'primarily plant-based with occasional meats', 'high-protein',
             'low-fat', 'dairy-free', 'lactose-free', 'nut-free', 'soy-free',
             'gluten-free', 'low-sodium', 'diabetes-friendly', 'low-sugar',
-            'hohfap', 'organic'
+            'hohfap', 'organic', 'dairy', 'eggs'
         ]
     }
 
@@ -551,13 +558,6 @@ class MealRecommendation4:
                         if self.user_preferences and 'diet_type' in self.user_preferences else None,
                  True,  # Strict (dietary requirements are important)
                  1),    # Only relax after trying everything else
-                
-                ("health condition", 
-                 lambda m: self._match_disease(m),
-                 lambda: self.user_metrics.get('health_conditions') 
-                        if self.user_metrics and 'health_conditions' in self.user_metrics else None,
-                 True,  # Strict (health conditions are important)
-                 2),
                  
                 ("calorie budget",
                  lambda m: self._is_meal_within_calorie_budget(m, self._determine_meal_type(m)),
@@ -576,11 +576,11 @@ class MealRecommendation4:
                  lambda m: self._match_goal(m),
                  lambda: self.user_preferences.get('goals') 
                         if self.user_preferences and 'goals' in self.user_preferences else None,
-                 False,  # Can be relaxed
+                 True,  # Can be relaxed
                  5)      # Lowest priority - goals are more flexible
             ]
             
-            for filter_name, filter_func, get_value_func, is_strict, _ in filters:
+            for filter_name, filter_func, get_value_func, _, _ in filters:
                 filter_value = get_value_func()
                 logging.info(f"Applying {filter_name} filter with value: {filter_value}")
                 
@@ -598,68 +598,13 @@ class MealRecommendation4:
                 
                 filtered_meals = log_remaining(filtered_meals, filter_name, filter_value, False)
                 
-                if not filtered_meals and not is_strict:
-                    # If no meals left and filter isn't strict, try without it
-                    logging.warning(f"No meals remaining after {filter_name}, but it's not a strict requirement. Trying without it.")
-                    filtered_meals = meals.copy()  # Reset to before this filter
-                    if applied_filters:  # Only pop if there are filters to remove
-                        applied_filters.pop()  # Remove the last filter
-                    else:
-                        logging.warning(f"No filters to remove when trying to skip {filter_name}")
-                elif not filtered_meals and is_strict:
-                    logging.error(f"No meals remaining after strict filter: {filter_name} (value: {filter_value})")
-                    break
+                if not filtered_meals:
+                    logging.warning(f"No meals remaining after applying {filter_name} filter with value: {filter_value}")
+                    return []  # Return empty list if no meals match the filters
             
-            # If we still have no meals, try a more aggressive fallback approach
+            # If we have no meals after applying all filters, return empty list
             if not filtered_meals:
-                logging.warning("No meals found with initial filter pass. Trying fallback approach...")
-                
-                # Sort filters by fallback priority (lowest number = last to be removed)
-                fallback_filters = sorted(filters, key=lambda x: x[4], reverse=True)
-                
-                # Try removing one filter at a time, starting with the least important
-                for i, (filter_name, _, get_value_func, is_strict, _) in enumerate(fallback_filters):
-                    if is_strict:
-                        continue  # Don't remove strict filters
-                        
-                    temp_meals = meals.copy()
-                    remaining_filters = [f for j, f in enumerate(fallback_filters) if j != i]
-                    
-                    logging.info(f"Trying fallback: removing {filter_name} filter")
-                    
-                    # Apply all filters except the current one
-                    for f_name, f_func, _, _, _ in remaining_filters:
-                        temp_meals = [m for m in temp_meals if f_func(m)]
-                        temp_meals = log_remaining(temp_meals, f"{f_name} (fallback)", get_value_func(), True)
-                        
-                        if not temp_meals:
-                            break
-                    
-                    if temp_meals:
-                        logging.warning(f"Found {len(temp_meals)} meals by removing {filter_name} filter")
-                        filtered_meals = temp_meals
-                        break
-            
-            # If we still have no meals, try with just the strict filters
-            if not filtered_meals:
-                logging.warning("No meals found with fallback approach. Trying with only strict filters...")
-                strict_meals = meals.copy()
-                strict_filters = [f for f in filters if f[3]]  # Only strict filters
-                
-                for filter_name, filter_func, get_value_func, _, _ in strict_filters:
-                    strict_meals = [m for m in strict_meals if filter_func(m)]
-                    strict_meals = log_remaining(strict_meals, f"{filter_name} (strict only)", get_value_func(), True)
-                    
-                    if not strict_meals:
-                        break
-                
-                if strict_meals:
-                    logging.warning(f"Found {len(strict_meals)} meals using only strict filters")
-                    filtered_meals = strict_meals
-            
-            # If we still have no meals, return an empty list with a helpful message
-            if not filtered_meals:
-                logging.error("No meals match the current filters, even after fallbacks. Please adjust your preferences.")
+                logging.error("No meals match the current filters. Please adjust your preferences.")
                 return []
 
             # Prepare final recommendations with serving sizes
@@ -731,7 +676,7 @@ class MealRecommendation4:
             ingredients = self.__class__._shared_cache['meal_ingredients'].get(meal_id, {})
             if not ingredients:
                 logging.warning(f"No ingredients found for meal {meal_id}")
-                return {"error": "Meal not found"}
+                return {"error": "No ingredients found"}
 
             nutritional_values = {
                 "calories": 0.0,
@@ -763,7 +708,8 @@ class MealRecommendation4:
                         continue
                     
                     try:
-                        nutritional_values[nutrient] += float(nutrition.get(nutrient, 0)) * ratio
+                        if nutrient in nutrition:
+                            nutritional_values[nutrient] += float(nutrition.get(nutrient, 0)) * ratio
                     except (ValueError, TypeError):
                         continue
                 
@@ -789,121 +735,120 @@ class MealRecommendation4:
             return "snack"
         elif calories < 300:
             return "breakfast"
-        elif calories > 500:
-            return "dinner"
         else:
             return "lunch"
 
+    # Class-level goal mappings
+    GOAL_MAPPINGS = {
+        "weight loss": [
+            "lose weight", "weight loss", "weight management",
+            "fat loss", "reduce body fat",
+            "bmi reduction", "reduce bmi",
+            "postpartum weight management", "postpartum",
+            "control chronic conditions", "chronic disease management",
+            "diabetes management", "hypertension management",
+            "detox", "cleanse", "detox and cleanse",
+            "improve metabolic health", "metabolic health",
+            "improved skin", "skin improvement",
+            "improve overall fitness",
+            "build sustainable eating habits"
+        ],
+        "muscle gain": [
+            "gain muscle", "build muscle", "muscle building",
+            "hypertrophy", "increase muscle mass",
+            "achieve specific body composition goals", "body recomposition",
+            "enhance athletic performance", "improve performance",
+            "sports nutrition", "strength training",
+            "recover from nutritional deficiencies", "nutrition recovery",
+            "protein intake", "increase protein",
+            "boost energy levels", "increase energy",
+            "improved sleep quality", "better sleep", "recovery sleep",
+            "satiety"
+        ],
+        "maintain weight": [
+            "maintain current weight", "weight maintenance",
+            "sustain current weight", "weight stability",
+            "build sustainable eating habits", "sustainable diet",
+            "healthy eating", "balanced nutrition",
+            "improve overall fitness", "general fitness",
+            "wellness", "holistic health",
+            "boost energy levels", "sustain energy",
+            "enhance metabolic health", "metabolic health",
+            "achieve a healthier bmi", "healthy bmi",
+            "manage stress through nutrition", "stress management",
+            "improved sleep quality", "better sleep",
+            "control chronic conditions", "chronic disease management",
+            "improved eye health", "eye health",
+            "general health", "overall health",
+            "reduce inflammation",
+            "improved skin"
+        ]
+    }
+    
     def _match_goal(self, meal: Dict) -> int:
         meal_goal = (meal.get("goal") or "").strip().lower()
         user_goal = (self.user_preferences.get("goals") or "").strip().lower() if self.user_preferences else None
         
         if not meal_goal or not user_goal:
             return 0
-
-        # Define comprehensive goal mappings with relationships and overlaps
-        GOAL_MAPPINGS = {
-            "weight loss": [
-                # Primary weight loss goals
-                "lose weight", "weight loss", "weight management",
-                "fat loss", "reduce body fat",
-                "bmi reduction", "reduce bmi",
-                
-                # Related health goals
-                "postpartum weight management", "postpartum",
-                "control chronic conditions", "chronic disease management",
-                "diabetes management", "hypertension management",
-                #"reduce inflammation", "reduce inflamation","reduced inflamation",  # Common typo #tmporarily commented out,wll re-enable manually after stakeholder meeting
-                "detox", "cleanse", "detox and cleanse",
-                #"satiety", "improve satiety", "prevent overeating", thisline is currently disabled as it caused issus, will reanalbe it later after refactoring
-                "improve metabolic health", "metabolic health",
-                "improved skin", "skin improvement",
-                
-                # Overlaps with other goals (context-dependent)
-                "improve overall fitness",  # When paired with calorie deficit
-                "build sustainable eating habits"  # When focused on weight management
-            ],
-            "muscle gain": [
-                # Primary muscle building goals
-                "gain muscle", "build muscle", "muscle building",
-                "hypertrophy", "increase muscle mass",
-                "achieve specific body composition goals", "body recomposition",
-                
-                # Performance and recovery
-                "enhance athletic performance", "improve performance",
-                "sports nutrition", "strength training",
-                "recover from nutritional deficiencies", "nutrition recovery",
-                "protein intake", "increase protein",
-                "boost energy levels", "increase energy",
-                "improved sleep quality", "better sleep", "recovery sleep",
-                "satiety",  # For supporting higher caloric intake
-                
-                # Overlaps with other goals
-                "improve overall fitness"  # When strength training is focus
-            ],
-            "maintain weight": [
-                # Primary maintenance goals
-                "maintain current weight", "weight maintenance",
-                "sustain current weight", "weight stability",
-                "build sustainable eating habits", "sustainable diet",
-                "healthy eating", "balanced nutrition",
-                
-                # Health and wellness
-                "improve overall fitness", "general fitness",
-                "wellness", "holistic health",
-                "boost energy levels", "sustain energy",
-                "enhance metabolic health", "metabolic health",
-                "achieve a healthier bmi", "healthy bmi",
-                "manage stress through nutrition", "stress management",
-                "improved sleep quality", "better sleep",
-                "control chronic conditions", "chronic disease management",
-                "improved eye health", "eye health",
-                "general health", "overall health",
-                "reduce inflammation",  # For balanced eating
-                "improved skin"  # As part of general wellness
-            ]
-        }
-
+            
         # Normalize goals for comparison
-        meal_goal = str(meal_goal).strip().lower()
+        meal_goals = [g.strip().lower() for g in str(meal_goal).split(',') if g.strip()]
         user_goal = str(user_goal).strip().lower()
         
-        # If either goal is empty, don't filter on it
-        if not meal_goal or not user_goal:
+        # If no valid meal goals or no user goal, don't filter on it
+        if not meal_goals or not user_goal:
             return 1
             
         # Check if user's goal has a mapping
-        if user_goal in GOAL_MAPPINGS:
-            goal_variations = GOAL_MAPPINGS[user_goal]
+        if user_goal in self.GOAL_MAPPINGS:
+            goal_variations = self.GOAL_MAPPINGS[user_goal]
             
-            # Check for exact matches first (most reliable)
-            if meal_goal in goal_variations:
-                return 1
-                
+            # Check if any of the meal's goals match the user's goal variations
+            for mg in meal_goals:
+                # Check for exact matches
+                if mg in goal_variations:
+                    return 1
+                    
+                # Check for partial matches in case of longer descriptions
+                if any(gv in mg for gv in goal_variations):
+                    return 1
+            
             # Handle conflicting terms based on goal type
             conflicting_terms = []
             
             # Define conflicts based on primary goal categories
             if 'loss' in user_goal or 'lose' in user_goal:
                 # For weight loss, avoid muscle gain related terms
-                conflicting_terms.extend(['gain muscle', 'bulk', 'hypertrophy', 'mass gain'])
+                conflicting_terms.extend(['gain muscle', 'bulk', 'hypertrophy', 'mass gain', 'weight gain'])
+                # Also check for any weight gain terms in the meal's goals
+                if any('gain' in mg and 'weight' in mg for mg in meal_goals):
+                    return 0
+                    
             elif 'gain' in user_goal and 'muscle' in user_goal:
                 # For muscle gain, avoid weight loss terms
-                conflicting_terms.extend(['lose weight', 'fat loss', 'weight loss', 'reduce'])
+                conflicting_terms.extend(['lose weight', 'fat loss', 'weight loss', 'reduce', 'weight reduction'])
             
-            # Check for conflicts
-            if any(conflict in meal_goal for conflict in conflicting_terms):
-                return 0
-                
-            # For maintenance, be more permissive but still check for strong conflicts
-            if 'maintain' in user_goal:
-                strong_conflicts = ['lose weight', 'weight loss', 'gain muscle', 'bulk']
-                if any(conflict in meal_goal for conflict in strong_conflicts):
+            # Check for conflicts in any of the meal's goals
+            for mg in meal_goals:
+                if any(conflict in mg for conflict in conflicting_terms):
+                    logging.debug(f"Excluding meal due to conflicting goal: {mg} for user goal: {user_goal}")
                     return 0
             
-            # Check for partial matches within variations
-            for variation in goal_variations:
-                # Split variations into words for more precise matching
+            # For maintenance, be more permissive but still check for strong conflicts
+            if 'maintain' in user_goal:
+                strong_conflicts = ['lose weight', 'weight loss', 'gain muscle', 'bulk', 'weight gain']
+                if any(any(conflict in mg for conflict in strong_conflicts) for mg in meal_goals):
+                    return 0
+                    
+        return 0
+            
+        # Check for partial matches within variations
+        for variation in goal_variations:
+            # Split variations into words for more precise matching
+            variation_words = set(word.strip() for word in variation.split() if len(word) > 2)
+            for mg in meal_goals:
+                meal_words = set(word.strip() for word in mg.split() if len(word) > 2)
                 variation_words = set(word.strip() for word in variation.split() if len(word) > 2)
                 meal_words = set(word.strip() for word in meal_goal.split() if len(word) > 2)
                 
@@ -1040,34 +985,59 @@ class MealRecommendation4:
             return 1
             
         # Get compatible diets for user's diet type
-        compatible_diets = self.DIETARY_PREFERENCE_MAPPINGS.get(user_diet, [user_diet])
-        
+        compatible_diets = self.DIETARY_PREFERENCE_MAPPINGS.get(user_diet, [])
+        if not compatible_diets:
+            compatible_diets = [user_diet]
+            
         # Create a clean string of all meal diets for easier checking
         meal_diets_str = ' '.join(meal_diets).lower()
         
         # For vegan/vegetarian, be very strict with diet types
-        if user_diet in ['vegan', 'vegetarian']:
-            # List of terms that would make a meal incompatible
+        if user_diet == 'vegan':
+            # List of terms that would make a meal incompatible for vegans
+            incompatible_terms = [
+                # Animal products
+                'meat', 'poultry', 'fish', 'seafood', 'animal', 'game', 'gelatin',
+                'rennet', 'lard', 'tallow', 'carmine', 'shellac', 'confectioner\'s glaze',
+                'omega-3', 'epa', 'dha', 'fish oil', 'cod liver oil', 'krill oil',
+                # Dairy and eggs
+                'dairy', 'milk', 'cheese', 'butter', 'yogurt', 'cream', 'eggs', 'egg',
+                'whey', 'casein', 'lactose', 'ghee', 'mayonnaise', 'custard', 'ice cream', 
+                'gelato', 'pudding', 'flan', 'custard', 'batter', 'meringue', 'albumen',
+                # Other animal products
+                'honey', 'royal jelly', 'propolis', 'beeswax', 'collagen', 'elastin',
+                'keratin', 'lactalbumin', 'lactoferrin', 'lactoglobulin', 'lactulose',
+                'lanolin', 'lecithin', 'oleic acid', 'pepsin', 'vitamin d3', 'cholecalciferol'
+            ]
+            
+            # Check for any non-vegan terms in the meal's diet info
+            for term in incompatible_terms:
+                if term in meal_diets_str:
+                    logging.warning(f"Excluding meal {meal.get('meal_id', 'unknown')} - diet type contains non-vegan term: {term}")
+                    return 0
+                    
+        elif user_diet == 'vegetarian':
+            # For vegetarians, exclude meat, poultry, fish, seafood, and their derivatives
             incompatible_terms = [
                 'meat', 'poultry', 'fish', 'seafood', 'animal', 'game', 'gelatin',
                 'rennet', 'lard', 'tallow', 'carmine', 'shellac', 'confectioner\'s glaze',
-                'omega-3', 'epa', 'dha', 'fish oil', 'cod liver oil', 'krill oil'
+                'fish oil', 'cod liver oil', 'krill oil', 'omega-3', 'epa', 'dha',
+                'anchovy', 'bacon', 'beef', 'bison', 'buffalo', 'calf', 'caribou',
+                'carp', 'chicken', 'clam', 'crab', 'crayfish', 'eel', 'elk', 'fowl',
+                'frog', 'goose', 'grouse', 'guinea fowl', 'haddock', 'halibut', 'ham',
+                'hare', 'herring', 'lamb', 'liver', 'lobster', 'mackerel', 'mussel',
+                'octopus', 'oyster', 'partridge', 'pheasant', 'pork', 'quail', 'rabbit',
+                'salmon', 'sardine', 'scallop', 'shrimp', 'snail', 'snake', 'squid',
+                'trout', 'tuna', 'turtle', 'veal', 'venison', 'wild boar', 'worcestershire sauce'
             ]
             
-            # Additional terms that are only incompatible for vegans
-            if user_diet == 'vegan':
-                incompatible_terms.extend([
-                    'dairy', 'milk', 'cheese', 'butter', 'yogurt', 'cream', 'eggs', 'honey',
-                    'whey', 'casein', 'lactose', 'ghee', 'royal jelly', 'propolis', 'beeswax'
-                ])
-            
-            # Check for any incompatible terms in the meal's diet info
+            # Check for any non-vegetarian terms in the meal's diet info
             for term in incompatible_terms:
                 if term in meal_diets_str:
-                    logging.warning(f"Excluding meal {meal.get('meal_id', 'unknown')} - diet type contains non-{user_diet} term: {term}")
+                    logging.warning(f"Excluding meal {meal.get('meal_id', 'unknown')} - diet type contains non-vegetarian term: {term}")
                     return 0
         
-        # Check if any of the meal's diet types are in the compatible diets
+        # For all diet types, check if any of the meal's diet types are in the compatible diets
         meal_matched = False
         for diet in meal_diets:
             # Check for direct match
@@ -1087,11 +1057,13 @@ class MealRecommendation4:
             return 0
             
         return 1
-                
-        # If we get here, no matches were found
-        return 0
 
     def _match_allergies(self, meal: Dict) -> int:
+        # Handle case where user_preferences is None
+        if self.user_preferences is None:
+            logging.warning("User preferences not found. Allowing meal by default.")
+            return 1
+            
         # Get meal's allergy information as a list, handling both string and list inputs
         meal_allergies = meal.get("allergies") or ""
         if isinstance(meal_allergies, str):
@@ -1155,44 +1127,6 @@ class MealRecommendation4:
             compatible_cuisines.update(self.CUISINE_PREFERENCE_MAPPINGS.get(pref.lower(), [pref.lower()]))
 
         return 1 if any(cuisine in meal_cuisine for cuisine in compatible_cuisines) else 0
-
-    def _match_disease(self, meal: Dict) -> int:
-        """
-        Check if a meal is suitable for the user's health conditions.
-        Returns 1 if the meal is suitable, 0 otherwise.
-        """
-        try:
-            # Get and clean the meal's disease management info
-            meal_disease = (meal.get("disease_management") or "").strip().lower()
-            if not meal_disease or meal_disease == "none":
-                return 1  # No disease restrictions on this meal
-                
-            # Get and clean user's health conditions
-            user_conditions = (self.user_metrics.get("health_conditions") or "").strip().lower()
-            if not user_conditions or user_conditions == "none":
-                return 1  # No health conditions to worry about
-                
-            # Split into individual conditions, handling various separators
-            user_conditions_list = []
-            for sep in [',', ';', ' and ', ' or ']:
-                if sep in user_conditions:
-                    user_conditions_list = [c.strip() for c in user_conditions.split(sep) if c.strip()]
-                    break
-            
-            if not user_conditions_list:
-                user_conditions_list = [user_conditions]
-                
-            # Check if any of the user's conditions are in the meal's disease management
-            for condition in user_conditions_list:
-                if condition and condition in meal_disease:
-                    logging.info(f"Meal {meal.get('meal_id')} excluded due to health condition: {condition}")
-                    return 0
-                    
-            return 1  # No conflicts found
-            
-        except Exception as e:
-            logging.error(f"Error in _match_disease for meal {meal.get('meal_id')}: {str(e)}")
-            return 1  # Default to allowing the meal if there's an error
 
 if __name__ == "__main__":
     logging.info("Starting meal recommendation service...")
