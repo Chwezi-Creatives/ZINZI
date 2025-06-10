@@ -1,3 +1,4 @@
+//cspell:disable
 import 'package:flutter/material.dart';
 import 'package:zinzi/produ_dash22.dart';
 // Ensure this path is correct

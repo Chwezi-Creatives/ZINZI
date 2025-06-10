@@ -1,3 +1,4 @@
+//cspell:disable
 // chef_net.dart (Code with Loading/Caching logic from Source File, Target UI/Nav retained)
 
 import 'package:flutter/material.dart';

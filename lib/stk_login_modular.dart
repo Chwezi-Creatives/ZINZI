@@ -1,3 +1,4 @@
+//cspell:disable
 import 'package:flutter/material.dart';
 import 'package:zinzi/stakeholderdash222.dart';// Ensure this points to the correct dashboard class
 import 'base_login_modular.dart';

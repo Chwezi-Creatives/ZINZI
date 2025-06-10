@@ -1,23 +1,22 @@
+//cspell:disable
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:zinzi/onboard.dart';
-import 'package:zinzi/signup_or_login.dart'; // Assuming this is your login/signup choice page
 import 'package:google_fonts/google_fonts.dart'; // For custom fonts
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:zinzi/onboard.dart';
+import 'package:zinzi/signup_or_login.dart'; // Assuming this is your login/signup choice page
 import 'package:zinzi/nutri_detail.dart' as nutrition_details;
 import 'package:zinzi/chef_net.dart';
-
 import 'package:zinzi/chef_dash8888.dart';
 import 'package:zinzi/produ_dash22.dart';
 import 'package:zinzi/transooter_dash_before_mapbox.dart';
 import 'package:zinzi/stakeholderdash222.dart';
 import 'package:zinzi/allmeals.dart';
 import 'package:zinzi/meal_detail.dart';
-import 'package:zinzi/cache_config.dart'; // Import CacheConfig
-import 'package:zinzi/user_cache.dart'; // Import UserCache
-import 'package:zinzi/orderhistory.dart'; // Import OrderHistoryScreen for preloading
-import 'package:zinzi/nutrition+.dart'; // Import NutritionPage for preloading
-import 'package:zinzi/services/location_service.dart'; // Import LocationService
+import 'package:zinzi/orderhistory.dart'; // For preloading
+import 'package:zinzi/nutrition+.dart'; // For preloading
+import 'package:zinzi/services/location_service.dart'; // For location services
 
 // --- Hardcoded Color Scheme (Shades of Teal and White/Off-White) ---
 const Color kColorPrimaryDark = Color(0xFF004D40); // Darkest Teal
@@ -51,70 +50,105 @@ class _SplashScreenState extends State<SplashScreen>
   late Animation<Offset> _slideAnimation;
   bool _isPreloading = false;
   late Widget _nextScreen; // Store the next screen for manual navigation
+  bool _showBanner = false;
+  bool _isTransitioning = false; // To prevent multiple transitions
 
   @override
   void initState() {
     super.initState();
 
-    // Initialize the animation controller
+    // Pre-cache the banner image
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      precacheImage(const AssetImage('assets/images/grodd2.jpg'), context);
+    });
+
+    // Initialize the main animation controller
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 1200), // Slightly faster for better feel
     );
 
     // Define the fade animation for the background/logo
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _controller,
-        curve: const Interval(0.0, 0.6, curve: Curves.easeIn),
+        curve: Curves.easeOutQuad, // Smoother curve for fade
       ),
     );
 
     // Define the slide animation for text and button (from bottom up)
     _slideAnimation = Tween<Offset>(
-      begin: const Offset(0.0, 0.5),
+      begin: const Offset(0.0, 0.4), // Start slightly higher for smoother feel
       end: Offset.zero,
     ).animate(
       CurvedAnimation(
         parent: _controller,
-        curve: const Interval(0.4, 1.0, curve: Curves.easeOutCubic),
+        curve: Curves.easeOutCubic,
       ),
     );
 
-    // Start the animation
-    _controller.forward();
-
-    // Start preloading and navigation logic
-    _preloadAndNavigate();
+    // Start the main animation with a small delay to ensure frame is ready
+    Future.delayed(const Duration(milliseconds: 50), () {
+      if (mounted) {
+        _controller.forward().then((_) {
+          if (mounted) {
+            setState(() {
+              _showBanner = true;
+            });
+            // Start preload after banner is fully visible
+            _preloadAndNavigate();
+          }
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
+    _controller.stop();
     _controller.dispose();
     super.dispose();
   }
 
-  // Custom method for navigation with slide transition (from right)
-  void _navigateWithSlideTransition(BuildContext context, Widget page) {
-    Navigator.of(context).pushReplacement(
+  // Custom method for navigation with scale and fade transition
+  Future<void> _navigateWithScaleTransition(BuildContext context, Widget page) async {
+    if (_isTransitioning) return;
+    _isTransitioning = true;
+    
+    // Ensure any ongoing animations complete
+    await _controller.animateTo(1.0, duration: const Duration(milliseconds: 100));
+    
+    if (!mounted) return;
+    
+    // Use a page route with optimized transition
+    await Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) => page,
+        transitionDuration: const Duration(milliseconds: 400),
+        reverseTransitionDuration: const Duration(milliseconds: 200),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          const begin = Offset(1.0, 0.0);
-          const end = Offset.zero;
-          final curve = Curves.easeInOutCubic;
-          var tween =
-              Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-          var offsetAnimation = animation.drive(tween);
-
-          return SlideTransition(
-            position: offsetAnimation,
-            child: FadeTransition(opacity: animation, child: child),
+          return FadeTransition(
+            opacity: Tween<double>(begin: 0.0, end: 1.0).animate(
+              CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeOutQuad,
+              ),
+            ),
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 0.98, end: 1.0).animate(
+                CurvedAnimation(
+                  parent: animation,
+                  curve: Curves.easeOutQuad,
+                ),
+              ),
+              child: child,
+            ),
           );
         },
-        transitionDuration: const Duration(milliseconds: 600),
       ),
     );
+    
+    _isTransitioning = false;
   }
 
   // Decide where to go after splash based on login state and preloading
@@ -224,9 +258,8 @@ class _SplashScreenState extends State<SplashScreen>
         _isPreloading = false;
         _nextScreen = nextScreen; // Store the next screen for manual navigation
       });
-      // Auto-navigation is disabled for banner testing
-      // Uncomment the line below to restore auto-navigation
-      // _navigateWithSlideTransition(context, nextScreen);
+      // Auto-navigation is now enabled
+      _navigateWithScaleTransition(context, nextScreen);
     }
     return;
   }
@@ -243,20 +276,28 @@ class _SplashScreenState extends State<SplashScreen>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Banner Image at the top
-          Positioned(
-            top: 0, // or 340, // or 170.0, // Added 170 pixels of space from the top
+          // Banner Image at the top with simple animation
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 800),
+            curve: Curves.easeOutQuart,
+            top: _showBanner ? 0 : -100, // Start above the screen
             left: 0,
             right: 0,
-            child: Opacity(
-            opacity: 0.08, //or 0.02, // or 1.0, // 100% opacity
             child: Image.asset(
-              'assets/images/sp.jpg',
+              'assets/images/grodd2.jpg',
               fit: BoxFit.cover,
-              height: MediaQuery.of(context).size.height * 1.0, //orMediaQuery.of(context).size.height * 0.2,  // or just plain pixels figure of 500, // Reduced height from 150px to 80px
+              height: MediaQuery.of(context).size.height * 0.1,
               width: MediaQuery.of(context).size.width,
+              errorBuilder: (context, error, stackTrace) {
+                debugPrint('Error loading grodd2.jpg: $error');
+                return Container(
+                  color: kColorPrimary.withOpacity(0.1),
+                  height: MediaQuery.of(context).size.height * 0.1,
+                  width: MediaQuery.of(context).size.width,
+                  child: const Center(child: Icon(Icons.image_not_supported)),
+                );
+              },
             ),
-          ),
           ),
           FadeTransition(
             opacity: _fadeAnimation,
@@ -321,7 +362,7 @@ class _SplashScreenState extends State<SplashScreen>
                           ElevatedButton(
                             onPressed: _isPreloading 
                                 ? null 
-                                : () => _navigateWithSlideTransition(context, _nextScreen),
+                                : () => _navigateWithScaleTransition(context, _nextScreen),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: kColorPrimary,
                               foregroundColor: kColorTextOnPrimary,

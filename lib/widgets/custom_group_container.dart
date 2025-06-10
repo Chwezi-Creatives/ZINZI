@@ -1,3 +1,4 @@
+//cspell:disable
 import 'package:flutter/material.dart';
 
 /// Use this to wrap any metrics group that should NOT be wrapped in an extra border.

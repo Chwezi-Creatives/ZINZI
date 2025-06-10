@@ -1,3 +1,4 @@
+//cspell:disable
 import 'package:flutter/material.dart';
 
 class WeightIndicator extends StatelessWidget {

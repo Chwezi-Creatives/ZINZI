@@ -1,3 +1,4 @@
+//cspell:disable
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'create_gig_screen.dart';

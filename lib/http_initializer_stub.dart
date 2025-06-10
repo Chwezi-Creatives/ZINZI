@@ -1,3 +1,4 @@
+//cspell:disable
 // lib/http_initializer_stub.dart
 import 'dart:typed_data'; // For Uint8List type signature consistency
 

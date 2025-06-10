@@ -1,17 +1,15 @@
+//cspell:disable
 // cspell:disable
 import 'dart:async';
 import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cached_network_image/cached_network_image.dart' as cn;
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:shimmer/shimmer.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi/cart.dart' as cart;
-
 import 'package:zinzi/app_drawer_unified.dart';
 import 'package:zinzi/meal_detail.dart' as meal_detail;
 import 'package:zinzi/user_cache.dart';
@@ -93,9 +91,9 @@ class _AllMealsScreenState extends State<AllMealsScreen>
     if (_mealsCache.isEmpty) return true;
     if (_mealsCacheTimestamp == null) return true;
 
-    // Consider cache invalid if older than 1 hour
+    // Consider cache invalid if older than 1 day
     final cacheAge = DateTime.now().difference(_mealsCacheTimestamp!);
-    return cacheAge.inHours >= 1;
+    return cacheAge.inDays >= 1;
   }
 
   /// Preload meals data if cache is invalid
@@ -180,22 +178,23 @@ class _AllMealsScreenState extends State<AllMealsScreen>
         _filterMeals('');
         if (mounted) {
           setState(() {
-            _isLoadingMeals =
-                false; // Assume not loading initially if cache is present
+            _isLoadingMeals = false; // Show cached data immediately
           });
         }
+
+        // Only fetch new data if cache is invalid
+        if (_AllMealsScreenState.isCacheInvalid) {
+          _fetchMealsAndPreprocess();
+        }
       } else {
-        // If no cache, show loading shimmer initially
+        // If no cache, show loading shimmer and fetch data
         if (mounted) {
           setState(() {
             _isLoadingMeals = true;
           });
         }
+        _fetchMealsAndPreprocess();
       }
-
-      // Always fetch new data in the background
-      // We don't await this fetch here so the UI can show cached data immediately
-      _fetchMealsAndPreprocess();
 
       _searchController.addListener(_onSearchChanged);
     })();

@@ -1,3 +1,4 @@
+//cspell:disable
 // Supplement Model
 class Supplement {
   final int supplementId;

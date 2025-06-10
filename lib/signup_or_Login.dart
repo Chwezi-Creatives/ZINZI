@@ -1,3 +1,4 @@
+//cspell:disable
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Import for system UI overlay style
 import 'dart:ui'; // For ImageFilter

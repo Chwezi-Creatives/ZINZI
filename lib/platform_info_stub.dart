@@ -1,3 +1,4 @@
+//cspell:disable
 // lib/platform_info_stub.dart
 
 // On web, these are not directly applicable in the same way.

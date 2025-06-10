@@ -1,3 +1,4 @@
+//cspell:disable
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io'; // For File handling
@@ -340,15 +341,25 @@ class ProducerProfileApiService {
     }
   }
 
-  static Future<bool> updateProducerProfileFields(int producerId, {required String name, String? phoneNumber, String? location}) async {
+  static Future<bool> updateProducerProfileFields(int producerId, {Map<String, dynamic>? changedFields}) async {
+    if (changedFields == null || changedFields.isEmpty) {
+      print("[ProducerProfileApiService] No fields to update");
+      return true; // No changes to make
+    }
+    
     final Uri uri = Uri.parse('$_apibaseurl/rr/producers/$producerId');
-    Map<String, dynamic> payload = {'name': name};
-    if (phoneNumber != null && phoneNumber.isNotEmpty) payload['phone_number'] = phoneNumber;
-    if (location != null && location.isNotEmpty) payload['location'] = location;
+    
+    // Filter out null values from the changed fields
+    final payload = Map<String, dynamic>.from(changedFields)
+      ..removeWhere((key, value) => value == null);
     
     print("[ProducerProfileApiService] Updating profile fields for $producerId at $uri. Payload: ${jsonEncode(payload)}");
     try {
-      final response = await http.patch(uri, headers: await _getWriteHeaders(), body: jsonEncode(payload));
+      final response = await http.patch(
+        uri, 
+        headers: await _getWriteHeaders(), 
+        body: jsonEncode(payload),
+      );
       return response.statusCode == 200 || response.statusCode == 204;
     } catch (e) {
       print("[ProducerProfileApiService] Exception updating profile fields: $e");
@@ -482,6 +493,7 @@ class _ProducerProfileTabState extends State<ProducerProfileTab> with AutomaticK
     }
   }
 
+
   Future<void> _fetchProducerProfileAndUpdate() async {
     try {
       final profile = await ProducerProfileApiService.fetchProducerProfile();
@@ -550,42 +562,79 @@ class _ProducerProfileTabState extends State<ProducerProfileTab> with AutomaticK
   Future<void> _saveProfileChanges() async {
     if (_profile == null || !mounted || !_isEditingProfile) return;
     if (!(_profileFormKey.currentState?.validate() ?? false)) {
-       _showErrorSnackBar('Please fix errors in the profile form.');
-       return;
+      _showErrorSnackBar('Please fix errors in the profile form.');
+      return;
     }
     _showLoadingSnackbar('Saving profile...');
     setState(() => _isUploadingProfileImage = true);
 
     try {
       String? finalImageUrl = _profile!.image;
+      
+      // Handle image upload if a new image was selected
       if (_profile!.localImageFile != null) {
-        final newImageUrl = await ProducerProfileApiService.updateProducerProfileImage(_profile!.producerId, _profile!.localImageFile!);
-        if (newImageUrl != null) finalImageUrl = newImageUrl;
-        else _showInfoSnackbar('Image upload failed. Old image retained.');
+        final newImageUrl = await ProducerProfileApiService.updateProducerProfileImage(
+          _profile!.producerId, 
+          _profile!.localImageFile!,
+        );
+        if (newImageUrl != null) {
+          finalImageUrl = newImageUrl;
+        } else {
+          _showInfoSnackbar('Image upload failed. Old image retained.');
+        }
       }
 
-      final String name = _profileNameController.text.trim();
-      final String? phone = _profilePhoneController.text.trim().isEmpty ? null : _profilePhoneController.text.trim();
-      final String? location = _profileLocationController.text.trim().isEmpty ? null : _profileLocationController.text.trim();
+      // Get current values from form fields
+      final String newName = _profileNameController.text.trim();
+      final String? newPhone = _profilePhoneController.text.trim().isEmpty 
+          ? null 
+          : _profilePhoneController.text.trim();
+      final String? newLocation = _profileLocationController.text.trim().isEmpty 
+          ? null 
+          : _profileLocationController.text.trim();
 
-      bool textUpdateSuccess = await ProducerProfileApiService.updateProducerProfileFields(
-        _profile!.producerId, name: name, phoneNumber: phone, location: location,
-      );
+      // Only include fields that have changed
+      final Map<String, dynamic> changedFields = {};
+      
+      if (newName != _profile!.name) {
+        changedFields['name'] = newName;
+      }
+      
+      if (newPhone != _profile!.phoneNumber) {
+        changedFields['phone_number'] = newPhone;
+      }
+      
+      if (newLocation != _profile!.location) {
+        changedFields['location'] = newLocation;
+      }
+
+      bool textUpdateSuccess = true;
+      
+      // Only make the API call if there are changes
+      if (changedFields.isNotEmpty) {
+        textUpdateSuccess = await ProducerProfileApiService.updateProducerProfileFields(
+          _profile!.producerId,
+          changedFields: changedFields,
+        );
+      }
 
       if (mounted) {
         setState(() => _isUploadingProfileImage = false);
         _dismissLoadingSnackbar();
+        
         if (textUpdateSuccess) {
+          // Update local state with new values
           setState(() {
             _profile = _profile!.copyWith(
-              name: name,
-              phoneNumber: phone ?? _profile!.phoneNumber,
-              location: location ?? _profile!.location,
+              name: newName,
+              phoneNumber: newPhone ?? _profile!.phoneNumber,
+              location: newLocation ?? _profile!.location,
               image: finalImageUrl,
               localImageFile: () => null,
             );
             _isEditingProfile = false;
           });
+          
           _showSuccessSnackbar('Profile updated.');
           await _initializeProducerProfile(forceRefresh: true);
         } else {
@@ -657,24 +706,93 @@ class _ProducerProfileTabState extends State<ProducerProfileTab> with AutomaticK
     if (!_isEditingProfile || !mounted) return;
     setState(() => _isLoadingLocation = true);
     try {
+      // Check if location services are enabled
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) throw Exception('Location services disabled.');
+      
+      // Check and request location permissions
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) throw Exception('Location permissions denied.');
       }
-      if (permission == LocationPermission.deniedForever) throw Exception('Location permissions permanently denied.');
-      Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high, timeLimit: const Duration(seconds: 15));
-      String displayAddress = "Lat: ${position.latitude.toStringAsFixed(4)}, Lon: ${position.longitude.toStringAsFixed(4)}";
-      try {
-        final apiUrl = 'https://geocode.maps.co/reverse?lat=${position.latitude}&lon=${position.longitude}';
-        final response = await http.get(Uri.parse(apiUrl)).timeout(const Duration(seconds: 10));
-        if (response.statusCode == 200) displayAddress = json.decode(response.body)['display_name'] ?? displayAddress;
-        else _showInfoSnackbar('Could not fetch readable address.');
-      } catch (e) {
-        _showInfoSnackbar('Could not fetch readable address.');
+      if (permission == LocationPermission.deniedForever) {
+        throw Exception('Location permissions permanently denied.');
       }
+      
+      // Get current position
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 15)
+      );
+      
+      // Prepare coordinates string
+      final coords = '(${position.latitude}, ${position.longitude})';
+      String displayAddress = coords; // Default to just coordinates
+      
+      try {
+        // Try to get human-readable address
+        final apiUrl = 'https://geocode.maps.co/reverse?lat=${position.latitude}&lon=${position.longitude}&format=json&addressdetails=1';
+        final response = await http.get(Uri.parse(apiUrl)).timeout(const Duration(seconds: 10));
+        
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          final address = data['address'] as Map<String, dynamic>?;
+          
+          if (address != null) {
+            // Build a clean address string from available components
+            final parts = <String>[];
+            
+            // Add specific address components in order of specificity
+            if (address['name'] != null && address['name'].toString().isNotEmpty) {
+              parts.add(address['name'].toString().trim());
+            }
+            if (address['road'] != null && address['road'].toString().isNotEmpty) {
+              parts.add(address['road'].toString().trim());
+            }
+            if (address['neighbourhood'] != null && address['neighbourhood'].toString().isNotEmpty) {
+              parts.add(address['neighbourhood'].toString().trim());
+            }
+            if (address['suburb'] != null && address['suburb'].toString().isNotEmpty) {
+              parts.add(address['suburb'].toString().trim());
+            }
+            if (address['city'] != null && address['city'].toString().isNotEmpty) {
+              parts.add(address['city'].toString().trim());
+            } else if (address['town'] != null && address['town'].toString().isNotEmpty) {
+              parts.add(address['town'].toString().trim());
+            } else if (address['village'] != null && address['village'].toString().isNotEmpty) {
+              parts.add(address['village'].toString().trim());
+            }
+            if (address['state'] != null && address['state'].toString().isNotEmpty) {
+              parts.add(address['state'].toString().trim());
+            }
+            if (address['country'] != null && address['country'].toString().isNotEmpty) {
+              parts.add(address['country'].toString().trim());
+            }
+            
+            // Join parts with comma and space, remove any double spaces
+            String addressString = parts.join(', ').replaceAll(RegExp(r'\s+'), ' ').trim();
+            
+            // If we have any address parts, use them with coordinates
+            if (addressString.isNotEmpty) {
+              displayAddress = '$addressString $coords';
+            } else {
+              // Fallback to display_name if address components are empty
+              displayAddress = '${data['display_name'] ?? ''} $coords'.trim();
+            }
+          } else {
+            // Fallback to display_name if address object is null
+            displayAddress = '${data['display_name'] ?? ''} $coords'.trim();
+          }
+        } else {
+          _showInfoSnackbar('Could not fetch readable address. Using coordinates only.');
+        }
+      } catch (e) {
+        debugPrint('Reverse geocoding failed: $e');
+        _showInfoSnackbar('Using coordinates only. Could not fetch readable address.');
+      }
+      
+      // Update the UI with the formatted address
       if (mounted) {
         setState(() => _profileLocationController.text = displayAddress);
         _showSuccessSnackbar('Location Acquired!');
@@ -875,8 +993,88 @@ class _ProducerProfileTabState extends State<ProducerProfileTab> with AutomaticK
             )),
           ])),
           const SizedBox(height: 24),
-          _buildEditableItem(_profileNameController, 'Producer Name *', Icons.person_outline_rounded, validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null),
-          _buildEditableItem(_profilePhoneController, 'Phone Number', Icons.phone_outlined, keyboardType: TextInputType.phone),
+          // Read-only email field
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(left: 8.0, bottom: 4.0),
+                  child: Text('Email', style: TextStyle(fontSize: 12, color: subtleText)),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.email_outlined, size: 20, color: Colors.grey.shade600),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          profile.email ?? 'No email provided',
+                          style: const TextStyle(fontSize: 14, color: Colors.grey),
+                        ),
+                      ),
+                      if (profile.isEmailVerified ?? false)
+                        const Icon(Icons.verified, size: 16, color: Colors.green)
+                      else
+                        const Icon(Icons.error_outline, size: 16, color: Colors.orange),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _buildEditableItem(_profileNameController, 'Producer Name *', Icons.person_outline_rounded, 
+              validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null),
+          // Read-only phone field
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(left: 8.0, bottom: 4.0),
+                  child: Text('Phone Number', style: TextStyle(fontSize: 12, color: subtleText)),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.phone_outlined, size: 20, color: Colors.grey.shade600),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          profile.phoneNumber?.isNotEmpty == true 
+                              ? profile.phoneNumber! 
+                              : 'No phone number provided',
+                          style: TextStyle(
+                            fontSize: 14, 
+                            color: profile.phoneNumber?.isNotEmpty == true 
+                                ? Colors.black87 
+                                : Colors.grey,
+                            fontStyle: profile.phoneNumber?.isNotEmpty == true 
+                                ? FontStyle.normal 
+                                : FontStyle.italic,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
           _buildEditableItem(_profileLocationController, 'Location / Service Area', Icons.location_on_outlined, maxLines: 2),
           Padding(padding: const EdgeInsets.only(top: 4.0, left: 40), child: TextButton.icon(
             onPressed: _isLoadingLocation ? null : _getCurrentLocation,

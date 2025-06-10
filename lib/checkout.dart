@@ -1,3 +1,4 @@
+//cspell:disable
 import 'dart:async';
 import 'package:zinzi/app_drawer_unified.dart';
 import 'package:flutter/material.dart';

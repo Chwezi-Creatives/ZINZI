@@ -1,3 +1,4 @@
+//cspell:disable
 class NotificationModel {
   final String id;
   final String type;

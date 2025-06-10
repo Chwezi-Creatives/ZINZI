@@ -1,7 +1,9 @@
+
+//cspell:disable
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
-import 'dart:async'; // Added import for TimeoutException
+import 'dart:async'; // Added import for TimeoutException and Timer
 import 'dart:convert';
 import 'dart:io'; // Required for File and image picking
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // For environment variables
@@ -112,6 +114,70 @@ bool isValidUrl(String? url) {
     return false;
   }
 }
+
+/// Robustly parses a location string to extract latitude and longitude.
+/// Handles formats like:
+/// - "lat, lng, address, components..." (e.g., "0.3423356, 32.5629039, 8HR7+W5F, Kawempe...")
+/// - "Some address (lat, lng)"
+/// - "(lat, lng)"
+/// - "lat, lng"
+LatLng? _parseLocationToLatLng(String? locationString) {
+  if (locationString == null || locationString.trim().isEmpty) {
+    return null;
+  }
+
+  // First, try to parse as "lat, lng, address, components..." format
+  final parts = locationString.split(',').map((s) => s.trim()).toList();
+  if (parts.length >= 2) {
+    final latStr = parts[0];
+    final lngStr = parts[1];
+    
+    // Check if first two parts are valid numbers
+    final lat = double.tryParse(latStr);
+    final lng = double.tryParse(lngStr);
+    
+    if (lat != null && lng != null) {
+      return LatLng(lat, lng);
+    }
+  }
+
+  // Try parenthesized coordinates, e.g., (1.23, 4.56)
+  final RegExp parenRegex = RegExp(r'\(\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*\)');
+  final parenMatch = parenRegex.firstMatch(locationString);
+
+  if (parenMatch != null && parenMatch.groupCount == 2) {
+    final latStr = parenMatch.group(1);
+    final lngStr = parenMatch.group(2);
+    if (latStr != null && lngStr != null) {
+      final lat = double.tryParse(latStr);
+      final lng = double.tryParse(lngStr);
+      if (lat != null && lng != null) {
+        return LatLng(lat, lng);
+      }
+    }
+  }
+
+  // Try to parse the whole string as "lat, lng"
+  final RegExp directRegex = RegExp(r'^\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*$');
+  final directMatch = directRegex.firstMatch(locationString.trim());
+
+  if (directMatch != null && directMatch.groupCount == 2) {
+    final latStr = directMatch.group(1);
+    final lngStr = directMatch.group(2);
+    if (latStr != null && lngStr != null) {
+      final lat = double.tryParse(latStr);
+      final lng = double.tryParse(lngStr);
+      if (lat != null && lng != null) {
+        return LatLng(lat, lng);
+      }
+    }
+  }
+
+  // If all parsing fails
+  print('Warning: Could not parse LatLng from location string: "$locationString"');
+  return null;
+}
+
 // --- End Helpers ---
 
 class TransporterProfile {
@@ -242,7 +308,7 @@ class Order {
   // User and restaurant contact information
   final String? userPhone;
   final String? restaurantPhone; // Added restaurant_phone field
-  
+
   // Helper method to safely get string from dynamic value
   static String? _getStringSafe(dynamic value) {
     if (value == null) return null;
@@ -282,8 +348,10 @@ class Order {
   static const STATUS_ASSIGNED = 'assigned'; // Match the example data
   static const STATUS_ACCEPTED = 'Accepted'; // Explicit accept by Rider
   static const STATUS_PICKED_UP = 'Picked Up'; // By Rider
-  static const STATUS_ON_THE_WAY = 'On The Way'; // Common alias for delivering - will be removed from timeline display logic
-  static const STATUS_VERIFICATION_NEEDED = 'verification needed'; // Potential status string
+  static const STATUS_ON_THE_WAY =
+      'On The Way'; // Common alias for delivering - will be removed from timeline display logic
+  static const STATUS_VERIFICATION_NEEDED =
+      'verification needed'; // Potential status string
   static const STATUS_DELIVERING = 'Delivering'; // Sometimes used
   static const STATUS_DELIVERED = 'Delivered'; // Rider confirms drop-off
   static const STATUS_COMPLETED =
@@ -354,11 +422,21 @@ class Order {
     return 'Pickup Location Not Specified';
   }
 
-  // Placeholder for estimated time/distance - needs calculation or API field
-  String get estimatedTime =>
-      orderType == 'meal' ? '25 min' : '35 min'; // Example
-  String get estimatedDistance =>
-      orderType == 'meal' ? '3.2 km' : '4.5 km'; // Example
+  // Distance in kilometers from the API
+  final double? distance;
+
+  // Estimated time based on distance
+  String get estimatedTime {
+    if (distance == null) return orderType == 'meal' ? '25 min' : '35 min';
+    // Rough estimate: 5 minutes per kilometer + 10 minutes buffer
+    final estimatedMinutes = (distance! * 5 + 10).round();
+    return '$estimatedMinutes min';
+  }
+
+  // Format distance with 1 decimal place and 'km' suffix
+  String get estimatedDistance => distance != null
+      ? '${distance!.toStringAsFixed(1)} km'
+      : orderType == 'meal' ? '3.2 km' : '4.5 km';
   // Placeholder for earnings - needs calculation or API field
   double get earnings => orderType == 'meal'
       ? 8.50
@@ -405,6 +483,7 @@ class Order {
     this.productName,
     this.userPhone,
     this.restaurantPhone, // Add restaurantPhone to constructor
+    this.distance, // Add distance field
   });
 
   factory Order.fromJson(Map<String, dynamic> json) {
@@ -462,6 +541,7 @@ class Order {
       productName: getStringSafe(json['product_name']), // Use safe getter
       userPhone: userPhone, // Add user_phone from JSON
       restaurantPhone: restaurantPhone, // Add restaurant_phone from JSON
+      distance: parseDoubleNullable(json['distance']), // Parse distance from API
     );
   }
 
@@ -559,7 +639,8 @@ class Order {
       gigDetails: gigDetails != null ? gigDetails() : this.gigDetails,
       productName: productName != null ? productName() : this.productName,
       userPhone: userPhone != null ? userPhone() : this.userPhone,
-      restaurantPhone: restaurantPhone != null ? restaurantPhone() : this.restaurantPhone,
+      restaurantPhone:
+          restaurantPhone != null ? restaurantPhone() : this.restaurantPhone,
     );
   }
 }
@@ -574,11 +655,12 @@ class Payment {
   final DateTime updatedAt;
   final String? status; // Added status field
   final String? orderType; // Made nullable and added as a field
-  
+
   // Computed properties for backward compatibility
   String get effectiveOrderType => orderType ?? 'delivery';
   String get disbursementTransactionStatus => status ?? 'Successful';
-  String get orderTransactionStatus => 'Completed'; // Assuming completed since it's a disbursement
+  String get orderTransactionStatus =>
+      'Completed'; // Assuming completed since it's a disbursement
 
   Payment({
     required this.id,
@@ -606,9 +688,10 @@ class Payment {
       updatedAt: parseDateSafe(json['updated_at']) ?? DateTime.now(),
     );
   }
-  
+
   // Original fromJson for backward compatibility
-  factory Payment.fromJson(Map<String, dynamic> json) => Payment.fromApiJson(json);
+  factory Payment.fromJson(Map<String, dynamic> json) =>
+      Payment.fromApiJson(json);
 }
 
 // ================================================
@@ -719,8 +802,7 @@ class TransporterApiService {
       }
     } catch (e) {
       print("Exception fetching transporter profile: $e");
-      throw Exception(
-          'Failed to load transporter profile: ${e.toString()}'); // Rethrow more cleanly
+      throw Exception('Failed to load transporter profile: ${e.toString()}');
     }
   }
 
@@ -964,14 +1046,18 @@ class TransporterApiService {
       }
 
       print("Sending PATCH request to update order status to 'picked up'...");
-      final response = await http.patch(
-        uri,
-        headers: _getWriteHeaders(requiresAuth: true),
-        body: jsonEncode({
-          'transporter_id': transporterIdInt, // Send transporter ID as int
-          'order_status': Order.STATUS_PICKED_UP // Update status to 'picked up' when order is accepted
-        }),
-      ).timeout(const Duration(seconds: 30)); // Add timeout for the request
+      final response = await http
+          .patch(
+            uri,
+            headers: _getWriteHeaders(requiresAuth: true),
+            body: jsonEncode({
+              'transporter_id':
+                  transporterIdInt, // Send transporter ID as int
+              'order_status': Order
+                  .STATUS_PICKED_UP // Update status to 'picked up' when order is accepted
+            }),
+          )
+          .timeout(const Duration(seconds: 30)); // Add timeout for the request
 
       print("Response status: ${response.statusCode}");
       print("Response body: ${response.body}");
@@ -980,25 +1066,32 @@ class TransporterApiService {
         // Success - check if response contains updated status
         try {
           final responseBody = json.decode(response.body);
-          if (responseBody is Map && responseBody.containsKey('order_status')) {
-            final updatedStatus = responseBody['order_status']?.toString().toLowerCase();
-            print("Order $orderId status updated successfully. New status: $updatedStatus");
+          if (responseBody is Map &&
+              responseBody.containsKey('order_status')) {
+            final updatedStatus =
+                responseBody['order_status']?.toString().toLowerCase();
+            print(
+                "Order $orderId status updated successfully. New status: $updatedStatus");
           } else {
             // No status in response, but still successful
-            print("Order $orderId update successful. No status returned in response.");
+            print(
+                "Order $orderId update successful. No status returned in response.");
           }
           return true;
         } catch (e) {
           // If we can't parse the response but got a success status code, still consider it a success
-          print("Order $orderId update successful. Could not parse response: $e");
+          print(
+              "Order $orderId update successful. Could not parse response: $e");
           return true;
         }
       } else {
-        print("Error accepting order: ${response.statusCode} ${response.body}");
+        print(
+            "Error accepting order: ${response.statusCode} ${response.body}");
         String errorMessage = 'Failed to accept order.';
         try {
           final errorBody = json.decode(response.body);
-          errorMessage = errorBody['message'] ?? errorBody['error'] ?? errorMessage;
+          errorMessage =
+              errorBody['message'] ?? errorBody['error'] ?? errorMessage;
         } catch (_) {}
         throw Exception(
             'Failed to accept order (Code: ${response.statusCode}) - $errorMessage');
@@ -1038,7 +1131,7 @@ class TransporterDashNew extends StatefulWidget {
       return;
     }
 
-    // --- Profile Cache ---
+    // --- Caching Keys ---
     const String profileKey = 'transporter_profile_cache_new_v2';
     const String profileTsKey = 'transporter_profile_cache_timestamp_new_v2';
     const String ordersKey = 'transporter_orders_cache';
@@ -1083,8 +1176,10 @@ class TransporterDashNew extends StatefulWidget {
     if (!ordersCacheValid) {
       try {
         // Only fetch transporter orders
-        final transporterOrders = await TransporterApiService.fetchAllTransporterOrders(transporterId);
-        
+        final transporterOrders =
+            await TransporterApiService.fetchAllTransporterOrders(
+                transporterId);
+
         // Serialize the orders
         final List<Map<String, dynamic>> serializedOrders =
             transporterOrders.map((order) => order.toJson()).toList();
@@ -1137,6 +1232,14 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   bool _isOnline =
       false; // Track online/offline status (initialized from profile)
 
+  // Refresh control
+  Timer? _refreshTimer;
+  DateTime? _lastFullRefresh;
+  DateTime? _lastOrdersRefresh;
+  DateTime? _lastPaymentsRefresh;
+  final Map<int, bool> _updatingOrderStatus = {}; // Track orders being updated
+  bool _isRefreshing = false; // Track if a refresh is in progress
+
   // State for Deliveries Screen tabs
   int _selectedDeliveryTab = 0; // 0: Active, 1: Available, 2: Completed
 
@@ -1166,6 +1269,13 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   bool _soundAlerts = true;
   bool _autoNavigate = true;
 
+  // Track when payments were last fetched
+  DateTime? _lastPaymentsFetchTime;
+
+  // --- NEW: Polling State Variables ---
+  Timer? _pollingTimer;
+  bool _isPolling = false; // To prevent concurrent poll executions
+
   @override
   void initState() {
     super.initState();
@@ -1188,6 +1298,9 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
 
   @override
   void dispose() {
+    // --- NEW: Stop polling timer on dispose to prevent memory leaks ---
+    _stopPolling();
+    // ---
     _nameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
@@ -1313,6 +1426,37 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           "Saved ${orders.length} orders to cache. Timestamp: $_ordersCacheTimestamp");
     } catch (e) {
       print("Error saving orders to cache: $e");
+    }
+  }
+
+  // Refresh payments data
+  Future<void> refreshPayments() async {
+    try {
+      print('Refreshing payments data...');
+      final paymentsResult =
+          await TransporterApiService.fetchTransporterPayments(
+                  widget.transporterId)
+              .timeout(const Duration(seconds: 15));
+
+      if (mounted) {
+        setStateIfMounted(() {
+          _payments = paymentsResult.cast<Payment>();
+          // Update cache timestamp to prevent immediate refetch
+          _lastPaymentsFetchTime = DateTime.now();
+        });
+        print('Successfully refreshed ${paymentsResult.length} payments');
+      }
+    } on TimeoutException {
+      print('Timeout while refreshing payments');
+      if (mounted) {
+        _showErrorSnackBar('Connection timeout. Earnings may be out of date.');
+      }
+    } catch (e) {
+      print('Error refreshing payments: $e');
+      if (mounted) {
+        _showErrorSnackBar('Failed to refresh earnings. Pull down to retry.');
+      }
+      rethrow; // Re-throw to allow callers to handle the error if needed
     }
   }
 
@@ -1442,7 +1586,6 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                 false; // Stop general loading too if profile fails initially
             _errorMessage = _profileFetchError; // Show error in main body
           });
-          // _showErrorSnackBar('Error loading profile: $error');
         } else {
           // Keep showing cached data, log error silently or show subtle indicator
           print(
@@ -1462,53 +1605,54 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     if (!mounted) return;
     // Reset states
     setStateIfMounted(() {
-      // Keep profile loading separate
-      _isLoading = true; // General loading for orders/payments
+      _isLoading = true;
       _errorMessage = null;
     });
 
-    // Trigger profile initialization/fetch (cache-first) - runs concurrently
-    _initializeTransporterProfile(); // Don't await this, let it run
+    // Initialize profile first to get the online status
+    await _initializeTransporterProfile();
 
     // 1. Load orders from cache if available
     bool loadedOrdersFromCache = await _loadOrdersCacheFromPrefs();
 
     // 2. Always fetch fresh data in background
     try {
-      // Fetch orders and payments
-      final ordersResult = await TransporterApiService.fetchAllTransporterOrders(widget.transporterId);
-      final paymentsResult = await TransporterApiService.fetchTransporterPayments(widget.transporterId);
+      final ordersResult =
+          await TransporterApiService.fetchAllTransporterOrders(
+              widget.transporterId);
+      final paymentsResult =
+          await TransporterApiService.fetchTransporterPayments(
+              widget.transporterId);
 
       if (mounted) {
-        // Convert to list of Orders
         final List<Order> allOrders = ordersResult.cast<Order>().toList();
-
         setStateIfMounted(() {
           _allOrders = allOrders;
           _payments = paymentsResult.cast<Payment>();
-          _isLoading = false; // Done loading general data
+          _isLoading = false;
           _errorMessage = null;
         });
 
-        // Save orders to cache for next time
         await _saveOrdersCacheToPrefs(allOrders);
+
+        // --- NEW: Start polling if user is online after initial data load ---
+        if (_isOnline) {
+          _startPolling();
+        }
       }
     } catch (e, stackTrace) {
       print(
-          "Error loading initial data (orders/payments/available): $e\n$stackTrace");
+          "Error loading initial data (orders/payments): $e\n$stackTrace");
       if (mounted && !loadedOrdersFromCache) {
-        // Only show error if we didn't load from cache
         setStateIfMounted(() {
           _errorMessage = "Failed to load data: ${e.toString()}";
           _isLoading = false;
-          // Don't clear profile if it loaded from cache
           if (_allOrders.isEmpty) {
             _allOrders = [];
             _payments = [];
           }
         });
       } else if (mounted) {
-        // If we loaded from cache, just turn off loading indicator
         setStateIfMounted(() {
           _isLoading = false;
         });
@@ -1518,7 +1662,6 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
 
   // Helper to update profile editing controllers
   void _updateProfileControllers(TransporterProfile profile) {
-    // Update controllers only if the text is different to avoid cursor jumps
     if (_nameController.text != profile.name)
       _nameController.text = profile.name;
     if (_emailController.text != profile.email)
@@ -1530,15 +1673,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     if (_licensePlateController.text != (profile.licensePlate ?? ''))
       _licensePlateController.text = profile.licensePlate ?? '';
 
-    // For Make, Model, Year, Color - these are tricky without API fields
-    // If they are editable but not fetched, initialize them only once or from prefs?
-    // For now, update them from profile if available, otherwise keep current text (or use placeholder)
-    // Assuming 'vehicleType' might contain combined info, or we use placeholders.
-    // Let's use placeholders based on the UI if not available in profile model directly.
-    // Update: Added vehicle fields to TransporterProfile model, assume they might be null.
     _vehicleMakeController.text =
-        getStringSafe(profile.toJson()['vehicle_make']) ??
-            "Honda"; // Use map access or add to model
+        getStringSafe(profile.toJson()['vehicle_make']) ?? "Honda";
     _vehicleModelController.text =
         getStringSafe(profile.toJson()['vehicle_model']) ?? "CBR300R";
     _vehicleYearController.text =
@@ -1546,6 +1682,132 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     _vehicleColorController.text =
         getStringSafe(profile.toJson()['vehicle_color']) ?? "Black";
   }
+
+  // --- NEW: Polling Methods for New Orders ---
+  void _startPolling() {
+    if (_pollingTimer?.isActive ?? false) return; // Already running
+    if (!mounted || !_isOnline) return; // Don't start if offline or unmounted
+
+    const pollInterval =
+        Duration(seconds: 6); // Check for new orders every 20 seconds
+    _pollingTimer = Timer.periodic(pollInterval, (timer) {
+      _pollForNewOrders();
+    });
+    print(
+        '[Polling] Started polling for new orders every ${pollInterval.inSeconds} seconds.');
+  }
+
+  void _stopPolling() {
+    if (_pollingTimer?.isActive ?? false) {
+      _pollingTimer!.cancel();
+      _pollingTimer = null;
+      print('[Polling] Stopped.');
+    }
+  }
+
+  Future<void> _pollForNewOrders() async {
+    // Guard against concurrent execution, or if user is offline/disposed
+    if (_isPolling || !mounted || !_isOnline) return;
+
+    setStateIfMounted(() => _isPolling = true);
+
+    try {
+      final List<Order> fetchedOrders =
+          await TransporterApiService.fetchAllTransporterOrders(
+              widget.transporterId);
+
+      if (!mounted) return; // Check again after await
+
+      // Get IDs of current "available" orders to detect new ones
+      final Set<int> currentAvailableOrderIds =
+          _getAvailableOrders().map((o) => o.orderId).toSet();
+
+      // Find new available orders from the fetched list
+      final List<Order> newAvailableOrders = fetchedOrders.where((order) {
+        final status = _normalizeStatus(order.orderStatus);
+        final isAvailable = status == _normalizeStatus(Order.STATUS_ASSIGNED) ||
+            status == _normalizeStatus(Order.STATUS_PENDING);
+        return isAvailable && !currentAvailableOrderIds.contains(order.orderId);
+      }).toList();
+
+      // Merge the full fetched list to keep all statuses up-to-date
+      final Map<int, Order> orderMap = {
+        for (var o in _allOrders) o.orderId: o
+      };
+      for (var fetchedOrder in fetchedOrders) {
+        orderMap[fetchedOrder.orderId] = fetchedOrder;
+      }
+      final updatedList = orderMap.values.toList();
+      updatedList.sort((a, b) => b.orderDate.compareTo(a.orderDate));
+
+      // Update state with the master list
+      setStateIfMounted(() {
+        _allOrders = updatedList;
+      });
+
+      // If new orders were found, notify the user and update the cache
+      if (newAvailableOrders.isNotEmpty) {
+        print(
+            '[Polling] Found ${newAvailableOrders.length} new available order(s).');
+        await _saveOrdersCacheToPrefs(updatedList); // Update cache
+        _showNewOrderNotification(newAvailableOrders.length);
+      }
+    } catch (e) {
+      // Fail silently to not bother the user with constant errors during polling
+      print('[Polling] Error fetching new orders: $e');
+    } finally {
+      if (mounted) {
+        setStateIfMounted(() => _isPolling = false);
+      }
+    }
+  }
+
+  void _showNewOrderNotification(int newOrderCount) {
+    if (!mounted) return;
+
+    final message = newOrderCount == 1
+        ? 'A new delivery is available!'
+        : '$newOrderCount new deliveries are available!';
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: TextStyle(color: _white)),
+        backgroundColor: _green, // Use green for positive notification
+        duration: Duration(seconds: 5),
+        action: SnackBarAction(
+          label: 'VIEW',
+          textColor: _accentTeal,
+          onPressed: () {
+            // Navigate to the available orders tab
+            setStateIfMounted(() {
+              _selectedDrawerIndex = 1;
+              _selectedDeliveryTab = 1;
+            });
+          },
+        ),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 15.0),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)),
+      ),
+    );
+
+    // Optional: Auto-navigate if preference is set
+    if (_autoNavigate) {
+      setStateIfMounted(() {
+        _selectedDrawerIndex = 1;
+        _selectedDeliveryTab = 1;
+      });
+    }
+
+    // Optional: Play sound if preference is set
+    if (_soundAlerts) {
+      // This is where you would add a sound playing library call
+      // e.g., audioPlayer.play(AssetSource('sounds/new_order_alert.mp3'));
+      print('[Polling] Sound alert would play here.');
+    }
+  }
+  // --- END: Polling Methods ---
 
   // --- UI Building ---
 
@@ -1567,7 +1829,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         iconTheme: IconThemeData(color: _darkTeal),
         actions: [
           // Show refresh indicator only when profile is loading in background
-          if (_isLoadingProfile && _transporterProfile != null)
+          if ((_isLoadingProfile && _transporterProfile != null) || _isPolling)
             Padding(
               padding: const EdgeInsets.only(right: 16.0),
               child: Center(
@@ -1652,7 +1914,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                       : null,
               child: (_transporterProfile?.profileImageUrl == null ||
                           _transporterProfile!.profileImageUrl!.isEmpty) &&
-                      _transporterProfile?.name.isNotEmpty == true // Added null check for name
+                      _transporterProfile?.name.isNotEmpty ==
+                          true // Added null check for name
                   ? Text(
                       _transporterProfile!.name[0].toUpperCase(),
                       style: TextStyle(
@@ -1766,8 +2029,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             Navigator.push(
                 context,
                 MaterialPageRoute(
-                    builder: (_) =>
-                        EarningsHistoryScreen(payments: _payments)));
+                    builder: (_) => EarningsHistoryScreen(payments: _payments)));
           } else {
             _showSnackBar("No earnings history available yet.", isError: true);
           }
@@ -1837,15 +2099,20 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
 
     if (confirm == true) {
       try {
+        // --- NEW: Stop polling on sign out ---
+        _stopPolling();
+        // ---
+
         // Get user ID before clearing prefs
         final prefs = await SharedPreferences.getInstance();
-        final userId = prefs.getString('transporter_user_id') ?? prefs.getString('user_id');
-        
+        final userId =
+            prefs.getString('transporter_user_id') ?? prefs.getString('user_id');
+
         // Clear user-specific caches
         if (userId != null) {
           await UserCache.clearUserData(userId);
         }
-        
+
         // Dynamically clear all user-related keys from SharedPreferences
         final keys = prefs.getKeys();
         final patterns = [RegExp(r'_id\b'), RegExp(r'_user_type\b')];
@@ -1859,7 +2126,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         await prefs.remove('transporter_user_id');
         await prefs.remove('user_id');
         await prefs.remove('user_type');
-        
+
         // Clear profile cache
         await UserCache.removeData(_profileCacheKey);
         await UserCache.removeData(_profileCacheTimestampKey);
@@ -2106,7 +2373,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         .where((p) =>
             p.createdAt.isAfter(todayStart) &&
             p.createdAt.isBefore(todayEnd) &&
-            p.disbursementTransactionStatus == 'Successful') // Using computed property
+            p.disbursementTransactionStatus ==
+                'Successful') // Using computed property
         .fold(0.0, (sum, p) => sum + p.amount);
 
     // Add earnings from orders completed today IF no corresponding payment exists
@@ -2119,7 +2387,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             p.createdAt.isBefore(todayEnd) &&
             p.disbursementTransactionStatus == 'Successful');
         if (!paymentExistsToday) {
-          total += order.earnings ?? 0; // Use calculated earnings with null safety
+          total +=
+              order.earnings; // Use calculated earnings with null safety
         }
       }
     }
@@ -2142,8 +2411,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             Navigator.push(
                 context,
                 MaterialPageRoute(
-                    builder: (_) =>
-                        EarningsHistoryScreen(payments: _payments)));
+                    builder: (_) => EarningsHistoryScreen(payments: _payments)));
           } else {
             _showSnackBar("No earnings history available yet.", isError: true);
           }
@@ -2167,7 +2435,9 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             ),
             SizedBox(height: 8),
             Text(
-              _isOnline ? 'You are receiving orders' : 'Start receiving orders',
+              _isOnline
+                  ? 'You are receiving new order alerts'
+                  : 'Start receiving orders',
               style: TextStyle(color: _grey, fontSize: 14),
             ),
             SizedBox(height: 16),
@@ -2224,6 +2494,15 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             _saveProfileCacheToPrefs(_transporterProfile!); // Update cache
           }
         });
+
+        // --- NEW: Start or stop polling based on status ---
+        if (targetStatus) {
+          _startPolling();
+        } else {
+          _stopPolling();
+        }
+        // ---
+
         _showSuccessSnackBar(
             targetStatus ? 'You are now Online!' : 'You are now Offline.');
       } else if (mounted) {
@@ -2352,12 +2631,12 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     String relativeTime = _getRelativeTime(order.orderDate);
 
     switch (order.orderStatus.toLowerCase()) {
-      case Order.STATUS_DELIVERED:
-      case Order.STATUS_COMPLETED:
+      case "delivered":
+      case "completed":
         statusIcon = Icons.check_circle;
         iconColor = _green;
         break;
-      case Order.STATUS_CANCELLED:
+      case "cancelled":
         statusIcon = Icons.cancel;
         iconColor = _red;
         break;
@@ -2426,12 +2705,12 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   String _getStatusText(String apiStatus) {
     // Handle empty status
     if (apiStatus.isEmpty) return 'Unknown';
-    
+
     // Normalize the input status by converting to lowercase and replacing underscores/hyphens with spaces
     String normalizeStatus(String status) {
       return status.toLowerCase().replaceAll(RegExp(r'[_-]'), ' ').trim();
     }
-    
+
     final normalizedStatus = normalizeStatus(apiStatus);
     final normalizedTargets = {
       normalizeStatus(Order.STATUS_PENDING): 'Pending',
@@ -2443,13 +2722,13 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
       normalizeStatus(Order.STATUS_COMPLETED): 'Completed',
       normalizeStatus(Order.STATUS_CANCELLED): 'Cancelled',
     };
-    
+
     // Try to find a matching status in our normalized map
     final matchedStatus = normalizedTargets[normalizedStatus];
     if (matchedStatus != null) {
       return matchedStatus;
     }
-    
+
     // For any other status, capitalize first letter
     return apiStatus[0].toUpperCase() + apiStatus.substring(1);
   }
@@ -2690,13 +2969,14 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   // Helper method to normalize status strings for comparison
   String _normalizeStatus(String status) {
     // First normalize the string (lowercase, remove underscores, trim)
-    final normalized = status.toLowerCase().replaceAll(RegExp(r'[_-]'), ' ').trim();
-    
+    final normalized =
+        status.toLowerCase().replaceAll(RegExp(r'[_-]'), ' ').trim();
+
     // Treat 'complete', 'completed', and 'delivered' as the same status
     if (normalized == 'complete' || normalized == 'delivered') {
       return 'completed';
     }
-    
+
     return normalized;
   }
 
@@ -2707,28 +2987,29 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   // Filter orders based on search query
   bool _matchesSearchQuery(Order order) {
     if (_searchQuery.isEmpty) return true;
-    
+
     final query = _searchQuery.toLowerCase();
-    
+
     // Search in order ID
     if (order.orderId.toString().contains(query)) return true;
-    
+
     // Search in product/meal name
     if ((order.productName?.toLowerCase() ?? '').contains(query) ||
         (order.mealName?.toLowerCase() ?? '').contains(query)) {
       return true;
     }
-    
+
     // Search in delivery address
-    if ((order.deliveryAddress.toLowerCase()).contains(query)) { // deliveryAddress is not nullable
+    if ((order.deliveryAddress.toLowerCase()).contains(query)) {
+      // deliveryAddress is not nullable
       return true;
     }
-    
+
     // Search in customer phone
     if (order.userPhone?.contains(query) ?? false) {
       return true;
     }
-    
+
     return false;
   }
 
@@ -2738,9 +3019,14 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     return _allOrders
         .where((o) {
           final status = _normalizeStatus(o.orderStatus);
-          final isActive = status == _normalizeStatus(Order.STATUS_PICKED_UP) || 
-                         status == _normalizeStatus(Order.STATUS_VERIFICATION_NEEDED) || // Added actual constant
-                         status == _normalizeStatus('verification needed'); // Keep string for robustness
+          final isActive =
+              status == _normalizeStatus(Order.STATUS_PICKED_UP) ||
+                  status ==
+                      _normalizeStatus(
+                          Order.STATUS_VERIFICATION_NEEDED) || // Added actual constant
+                  status ==
+                      _normalizeStatus(
+                          'verification needed'); // Keep string for robustness
           return isActive && _matchesSearchQuery(o);
         })
         .toList()
@@ -2752,8 +3038,9 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     return _allOrders
         .where((o) {
           final status = _normalizeStatus(o.orderStatus);
-          final isAvailable = status == _normalizeStatus(Order.STATUS_ASSIGNED) ||
-                           status == _normalizeStatus(Order.STATUS_PENDING);
+          final isAvailable =
+              status == _normalizeStatus(Order.STATUS_ASSIGNED) ||
+                  status == _normalizeStatus(Order.STATUS_PENDING);
           return isAvailable && _matchesSearchQuery(o);
         })
         .toList()
@@ -2763,7 +3050,11 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   List<Order> _getCompletedOrders() {
     // All these statuses will be normalized to 'completed' by _normalizeStatus
     return _allOrders
-        .where((o) => (_normalizeStatus(o.orderStatus) == 'completed' || _normalizeStatus(o.orderStatus) == _normalizeStatus(Order.STATUS_CANCELLED)) && _matchesSearchQuery(o))
+        .where((o) =>
+            (_normalizeStatus(o.orderStatus) == 'completed' ||
+                _normalizeStatus(o.orderStatus) ==
+                    _normalizeStatus(Order.STATUS_CANCELLED)) &&
+            _matchesSearchQuery(o))
         .toList()
       ..sort((a, b) => b.orderDate.compareTo(a.orderDate)); // Most recent first
   }
@@ -2781,24 +3072,46 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     }
   }
 
-  // *** START: Method Added for Navigation ***
-  Future<void> _launchGoogleMapsNavigation(LatLng destination) async {
-    // Construct the Google Maps URL
-    final url =
-        'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving';
+  Future<void> _launchGoogleMapsNavigation(LatLng destination, {Order? order}) async {
+    try {
+      // Build the base URL with required parameters
+      final baseUrl = 'https://www.google.com/maps/dir/?api=1';
+      
+      // Add origin parameter if we have an order with pickup or chef location
+      String originParam = '';
+      if (order != null) {
+        // Try pickup location first, then chef's location
+        String? locationString = order.pickupLocation ?? order.producerAddress;
+        if (locationString != null && locationString.isNotEmpty) {
+          final originLocation = _parseLocationToLatLng(locationString);
+          if (originLocation != null) {
+            originParam = '&origin=${originLocation.latitude},${originLocation.longitude}';
+          }
+        }
+      }
+      
+      // Build the complete URL with all parameters
+      final url = '$baseUrl$originParam&destination=${destination.latitude},${destination.longitude}&travelmode=driving&dir_action=navigate&hl=en';
 
-    // Check if the URL can be launched
-    if (await canLaunchUrl(Uri.parse(url))) { // Updated to canLaunchUrl
-      await launchUrl(Uri.parse(url)); // Updated to launchUrl
-    } else {
-      // Show an error message if Google Maps cannot be launched
-      _showErrorSnackBar('Could not launch Google Maps');
+      // Check if the URL can be launched
+      if (await canLaunchUrl(Uri.parse(url))) {
+        await launchUrl(Uri.parse(url));
+      } else {
+        // Fallback to basic URL without origin if the full URL fails
+        final fallbackUrl = '$baseUrl&destination=${destination.latitude},${destination.longitude}&travelmode=driving';
+        if (await canLaunchUrl(Uri.parse(fallbackUrl))) {
+          await launchUrl(Uri.parse(fallbackUrl));
+        } else {
+          _showErrorSnackBar('Could not launch Google Maps. Please install Google Maps app.');
+        }
+      }
+    } catch (e) {
+      print('Error launching Google Maps: $e');
+      _showErrorSnackBar('Failed to open navigation: ${e.toString()}');
     }
   }
-  // *** END: Method Added for Navigation ***
 
   // Order Card used in Deliveries List
-  // *** MODIFIED: Added Navigation Button ***
   Widget _buildOrderCard(Order order) {
     String status = order.orderStatus;
     bool isAvailable =
@@ -2852,8 +3165,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     } else {
       // Active Orders
       statusColor = _primaryTeal;
-      // statusText = 'Active: ${_getStatusText(status)}'; // More specific active status. Use _getStatusText directly.
-      statusText = _getStatusText(status); 
+      statusText = _getStatusText(status);
       actionButton = SizedBox(
           width: double.infinity,
           child: ElevatedButton(
@@ -2906,7 +3218,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             SizedBox(height: 16),
             if (actionButton != null) actionButton, // Action Button
 
-            // *** START: Navigation Button Added ***
+            // *** START: Navigation Button Added with new parsing logic ***
             // Only show navigation for active orders
             if (!isAvailable && !isCompleted) ...[
               SizedBox(height: 8),
@@ -2916,26 +3228,18 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                   icon: Icon(Icons.directions, size: 18),
                   label: Text('Navigate'),
                   onPressed: () {
-                    // Extract coordinates from delivery address if available
-                    // Assumes the address contains coordinates in format "lat,long,address"
-                    final addressParts = order.deliveryAddress.split(',');
-                    if (addressParts.length >= 2) {
-                      final lat = double.tryParse(addressParts[0].trim());
-                      final lng = double.tryParse(addressParts[1].trim());
-                      if (lat != null && lng != null) {
-                        print("Attempting to navigate to: Lat=$lat, Lng=$lng");
-                        _launchGoogleMapsNavigation(LatLng(lat, lng));
-                        return; // Exit after successful launch attempt
-                      } else {
-                        print(
-                            "Failed to parse lat/lng from: ${addressParts[0]}, ${addressParts[1]}");
-                      }
+                    // Use the robust parsing function
+                    final LatLng? destination =
+                        _parseLocationToLatLng(order.deliveryAddress);
+
+                    if (destination != null) {
+                      print(
+                          "Attempting to navigate to: Lat=${destination.latitude}, Lng=${destination.longitude}");
+                      _launchGoogleMapsNavigation(destination, order: order);
                     } else {
-                      print("Address parts length < 2: ${addressParts.length}");
+                      _showErrorSnackBar(
+                          'Navigation failed: Could not extract coordinates from the delivery address.');
                     }
-                    // If parsing fails or coordinates are not available
-                    _showErrorSnackBar(
-                        'Could not parse delivery location coordinates from address: "${order.deliveryAddress}"');
                   },
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _primaryTeal,
@@ -2950,7 +3254,6 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
       ),
     );
   }
-  // *** END MODIFIED _buildOrderCard ***
 
   Widget _buildAddressRow(IconData icon, String address) {
     // Same as provided
@@ -2992,16 +3295,41 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
   }
 
   void _navigateToOrderDetails(Order order) {
-    // Same as provided
     Navigator.push(
         context,
         MaterialPageRoute(
             builder: (_) => OrderDetailsScreen(
                   order: order,
                   transporterId: widget.transporterId,
-                  onStatusUpdate:
-                      _loadInitialData, // Pass callback to refresh data
+                  onStatusUpdate: () async {
+                    await _loadInitialData();
+                    // If order was just completed or delivered, refresh payments
+                    final updatedOrder = await _fetchOrderDetails(order.orderId);
+                    if (updatedOrder != null &&
+                        _isCompletedOrDelivered(updatedOrder.orderStatus)) {
+                      await refreshPayments();
+                    }
+                  },
                 )));
+  }
+
+  bool _isCompletedOrDelivered(String status) {
+    final normalized = status.toLowerCase();
+    return normalized == 'completed' || normalized == 'delivered';
+  }
+
+  Future<Order?> _fetchOrderDetails(int orderId) async {
+    try {
+      final orders = await TransporterApiService.fetchAllTransporterOrders(
+          widget.transporterId);
+      return orders.cast<Order?>().firstWhere(
+            (order) => order?.orderId == orderId,
+            orElse: () => null,
+          );
+    } catch (e) {
+      print('Error fetching order details: $e');
+      return null;
+    }
   }
 
   // Accept/Reject handlers (using API service)
@@ -3135,7 +3463,9 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                   backgroundColor: _lightTeal,
                   backgroundImage: _profileImageFile != null
                       ? FileImage(_profileImageFile!) as ImageProvider
-                      : (_transporterProfile?.profileImageUrl != null && _transporterProfile!.profileImageUrl!.isNotEmpty
+                      : (_transporterProfile?.profileImageUrl != null &&
+                              _transporterProfile!
+                                  .profileImageUrl!.isNotEmpty
                           ? CachedNetworkImageProvider(_transporterProfile!
                               .profileImageUrl!) // Use CachedNetworkImage
                           : null),
@@ -3146,7 +3476,9 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                     // Optionally display placeholder icon here if needed
                   },
                   child: (_profileImageFile == null &&
-                          (_transporterProfile?.profileImageUrl == null || _transporterProfile!.profileImageUrl!.isEmpty ))
+                          (_transporterProfile?.profileImageUrl == null ||
+                              _transporterProfile!
+                                  .profileImageUrl!.isEmpty))
                       ? Icon(Icons.person, size: 60, color: _primaryTeal)
                       : null,
                 ),
@@ -3304,7 +3636,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             _buildTextField(_emailController, 'Email', enabled: false),
             SizedBox(height: 16), // Email not editable
             _buildTextField(_phoneController, 'Phone Number',
-                keyboardType: TextInputType.phone),
+                enabled: false, keyboardType: TextInputType.phone),
             SizedBox(height: 16),
             _buildTextField(_addressController, 'Address'),
             SizedBox(height: 24),
@@ -3387,8 +3719,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         _showLoadingSnackbar(
             "Uploading image..."); // Show image upload snackbar
         try {
-          uploadedImageUrl = await TransporterApiService.uploadImageToImgur(
-              _profileImageFile!);
+          uploadedImageUrl =
+              await TransporterApiService.uploadImageToImgur(_profileImageFile!);
           if (uploadedImageUrl == null)
             throw Exception("Image upload returned null URL.");
           setState(() => _isUploadingProfileImage = false);
@@ -3413,7 +3745,8 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           'image': uploadedImageUrl,
       };
       // Clean data (remove unchanged fields - optional but good practice)
-      if (_transporterProfile != null) { // Added null check
+      if (_transporterProfile != null) {
+        // Added null check
         updateData.removeWhere(
             (key, value) => value == _transporterProfile!.toJson()[key]);
       }
@@ -3823,17 +4156,19 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     if (statusLower == Order.STATUS_ASSIGNED.toLowerCase()) return 'Assigned';
     if (statusLower == Order.STATUS_ACCEPTED.toLowerCase()) return 'Accepted';
     if (statusLower == Order.STATUS_PICKED_UP.toLowerCase()) return 'Picked Up';
-    if (statusLower == Order.STATUS_VERIFICATION_NEEDED.toLowerCase() || statusLower == "verification needed") return 'Verification Needed';
-    if (statusLower == Order.STATUS_ON_THE_WAY.toLowerCase() || statusLower == Order.STATUS_DELIVERING.toLowerCase()) return 'On The Way'; // Kept for completeness, but not in timeline
+    if (statusLower == Order.STATUS_VERIFICATION_NEEDED.toLowerCase() ||
+        statusLower == "verification needed") return 'Verification Needed';
+    if (statusLower == Order.STATUS_ON_THE_WAY.toLowerCase() ||
+        statusLower == Order.STATUS_DELIVERING.toLowerCase())
+      return 'On The Way'; // Kept for completeness, but not in timeline
     if (statusLower == Order.STATUS_DELIVERED.toLowerCase()) return 'Delivered';
     if (statusLower == Order.STATUS_COMPLETED.toLowerCase()) return 'Completed';
     if (statusLower == Order.STATUS_CANCELLED.toLowerCase()) return 'Cancelled';
-    
+
     return apiStatus.isNotEmpty
         ? apiStatus[0].toUpperCase() + apiStatus.substring(1)
         : 'Unknown';
   }
-
 
   late Order _currentOrder;
   final TextEditingController _verificationCodeController =
@@ -3851,22 +4186,29 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     // or if status is 'verification needed'.
     // The _isVerificationVisible flag controls the visibility of the code input card.
     // This should be true if the current status implies verification is the active step.
-    String normalizedCurrentStatus = _currentOrder.orderStatus.toLowerCase().replaceAll('_', ' ').trim();
-    _isVerificationVisible = (normalizedCurrentStatus == Order.STATUS_PICKED_UP.toLowerCase() && _nextStepIsVerification()) ||
-                             normalizedCurrentStatus == Order.STATUS_VERIFICATION_NEEDED.toLowerCase();
+    String normalizedCurrentStatus =
+        _currentOrder.orderStatus.toLowerCase().replaceAll('_', ' ').trim();
+    _isVerificationVisible = (normalizedCurrentStatus ==
+                Order.STATUS_PICKED_UP.toLowerCase() &&
+            _nextStepIsVerification()) ||
+        normalizedCurrentStatus == Order.STATUS_VERIFICATION_NEEDED.toLowerCase();
   }
-  
+
   @override
   void didUpdateWidget(OrderDetailsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     // Update local state when the widget is updated with new order data
-    if (widget.order.orderId != oldWidget.order.orderId || 
+    if (widget.order.orderId != oldWidget.order.orderId ||
         widget.order.orderStatus != oldWidget.order.orderStatus) {
       setState(() {
         _currentOrder = widget.order;
-        String normalizedCurrentStatus = _currentOrder.orderStatus.toLowerCase().replaceAll('_', ' ').trim();
-         _isVerificationVisible = (normalizedCurrentStatus == Order.STATUS_PICKED_UP.toLowerCase() && _nextStepIsVerification()) ||
-                             normalizedCurrentStatus == Order.STATUS_VERIFICATION_NEEDED.toLowerCase();
+        String normalizedCurrentStatus =
+            _currentOrder.orderStatus.toLowerCase().replaceAll('_', ' ').trim();
+        _isVerificationVisible = (normalizedCurrentStatus ==
+                    Order.STATUS_PICKED_UP.toLowerCase() &&
+                _nextStepIsVerification()) ||
+            normalizedCurrentStatus ==
+                Order.STATUS_VERIFICATION_NEEDED.toLowerCase();
       });
     }
   }
@@ -3927,18 +4269,16 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   }
   // --- End Snackbar Helpers ---
 
-  // *** START: Method Added for Navigation (Copied) ***
   Future<void> _launchGoogleMapsNavigation(LatLng destination) async {
     final url =
         'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving';
 
-    if (await canLaunchUrl(Uri.parse(url))) { // Updated to canLaunchUrl
-      await launchUrl(Uri.parse(url)); // Updated to launchUrl
+    if (await canLaunchUrl(Uri.parse(url))) {
+      await launchUrl(Uri.parse(url));
     } else {
       _showErrorSnackBar('Could not launch Google Maps');
     }
   }
-  // *** END: Method Added for Navigation ***
 
   // --- Status Logic (Adapting old constants) ---
   String _normalizeStatus(String status) {
@@ -3946,17 +4286,19 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   }
 
   String? _getNextStatus() {
-    String currentStatusNormalized = _normalizeStatus(_currentOrder.orderStatus);
-    
+    String currentStatusNormalized =
+        _normalizeStatus(_currentOrder.orderStatus);
+
     if (currentStatusNormalized == _normalizeStatus(Order.STATUS_ASSIGNED) ||
         currentStatusNormalized == _normalizeStatus(Order.STATUS_ACCEPTED)) {
       return Order.STATUS_PICKED_UP;
     }
     if (currentStatusNormalized == _normalizeStatus(Order.STATUS_PICKED_UP)) {
       // If picked up, next is verification needed (conceptually, or actual status update)
-      return Order.STATUS_VERIFICATION_NEEDED; 
+      return Order.STATUS_VERIFICATION_NEEDED;
     }
-    if (currentStatusNormalized == _normalizeStatus(Order.STATUS_VERIFICATION_NEEDED)) {
+    if (currentStatusNormalized ==
+        _normalizeStatus(Order.STATUS_VERIFICATION_NEEDED)) {
       return Order.STATUS_DELIVERED;
     }
     if (currentStatusNormalized == _normalizeStatus(Order.STATUS_DELIVERED)) {
@@ -3965,18 +4307,18 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     return null; // No action from completed, cancelled etc.
   }
 
-
   // This method determines if verification is the *immediate next conceptual step*
   // given the current state, for UI hints (like button text).
   bool _nextStepIsVerification() {
-      // Simplified: If current status is picked up, verification is next.
-      // Add more complex logic here if some order types don't need verification.
-      return _normalizeStatus(_currentOrder.orderStatus) == _normalizeStatus(Order.STATUS_PICKED_UP);
+    // Simplified: If current status is picked up, verification is next.
+    // Add more complex logic here if some order types don't need verification.
+    return _normalizeStatus(_currentOrder.orderStatus) ==
+        _normalizeStatus(Order.STATUS_PICKED_UP);
   }
 
-
   String _getCompleteButtonText() {
-    String currentStatusNormalized = _normalizeStatus(_currentOrder.orderStatus);
+    String currentStatusNormalized =
+        _normalizeStatus(_currentOrder.orderStatus);
 
     if (currentStatusNormalized == _normalizeStatus(Order.STATUS_ASSIGNED) ||
         currentStatusNormalized == _normalizeStatus(Order.STATUS_ACCEPTED)) {
@@ -3985,7 +4327,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     if (currentStatusNormalized == _normalizeStatus(Order.STATUS_PICKED_UP)) {
       return 'Proceed to Verification'; // Next step is verification
     }
-    if (currentStatusNormalized == _normalizeStatus(Order.STATUS_VERIFICATION_NEEDED)) {
+    if (currentStatusNormalized ==
+        _normalizeStatus(Order.STATUS_VERIFICATION_NEEDED)) {
       return 'Mark as Delivered'; // After verification, mark delivered
     }
     if (currentStatusNormalized == _normalizeStatus(Order.STATUS_DELIVERED)) {
@@ -3996,33 +4339,38 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
   bool _canCompleteDelivery() {
     // Can take action if there's a next status or if current status is verification needed (implying 'Verify' button)
-    return _getNextStatus() != null || _normalizeStatus(_currentOrder.orderStatus) == _normalizeStatus(Order.STATUS_VERIFICATION_NEEDED);
+    return _getNextStatus() != null ||
+        _normalizeStatus(_currentOrder.orderStatus) ==
+            _normalizeStatus(Order.STATUS_VERIFICATION_NEEDED);
   }
-
 
   // --- Actions ---
   Future<void> _handleStatusUpdate() async {
-    String currentStatusNormalized = _normalizeStatus(_currentOrder.orderStatus);
-    
+    String currentStatusNormalized =
+        _normalizeStatus(_currentOrder.orderStatus);
+
     if (currentStatusNormalized == _normalizeStatus(Order.STATUS_PICKED_UP)) {
       // If current is Picked Up, the action is to show/focus on verification
       setState(() {
         _isVerificationVisible = true;
       });
-      _performStatusUpdate(Order.STATUS_VERIFICATION_NEEDED); // Update status to 'verification needed'
+      _performStatusUpdate(Order
+          .STATUS_VERIFICATION_NEEDED); // Update status to 'verification needed'
       // _showSnackBar("Please enter verification code.", isError: false); // Or rely on verification card becoming visible
       return;
     }
 
     String? nextStatus = _getNextStatus();
     if (nextStatus == null) {
-      print("No further status update available for ${_currentOrder.orderStatus}");
-      _showSnackBar("Order is already ${_getDetailedStatusText(_currentOrder.orderStatus)}.", isError: false);
+      print(
+          "No further status update available for ${_currentOrder.orderStatus}");
+      _showSnackBar(
+          "Order is already ${_getDetailedStatusText(_currentOrder.orderStatus)}.",
+          isError: false);
       return;
     }
     _performStatusUpdate(nextStatus);
   }
-
 
   Future<void> _handleVerifyCode() async {
     String code = _verificationCodeController.text.trim();
@@ -4044,16 +4392,18 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
       final apiBaseUrl =
           dotenv.env['API_BASE_URL-intranet'] ?? 'https://api.example.com';
-      
+
       // API expects 'completed' status when verifying with code
       final response = await http
           .patch(
             Uri.parse('$apiBaseUrl/rr/orders/${_currentOrder.orderId}/status'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({
-              'transporter_id': userId, // Ensure this is the correct key for your API
+              'transporter_id':
+                  userId, // Ensure this is the correct key for your API
               'completion_code': code,
-              'order_status': Order.STATUS_COMPLETED // API might expect 'completed' upon successful verification
+              'order_status': Order
+                  .STATUS_COMPLETED // API might expect 'completed' upon successful verification
             }),
           )
           .timeout(Duration(seconds: 15));
@@ -4064,43 +4414,54 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         final responseData = jsonDecode(response.body);
         // Assuming success means the status is now 'completed' or 'delivered' via backend logic
         // For UI, we'll transition to 'delivered' if verification was the step, then to 'completed'
-        
+
         // Fetch the latest order details to get the true new status from backend
-        final updatedOrderFromServer = await _fetchLatestOrderDetails(_currentOrder.orderId);
+        final updatedOrderFromServer =
+            await _fetchLatestOrderDetails(_currentOrder.orderId);
 
         if (mounted) {
           setState(() {
-             if (updatedOrderFromServer != null) {
+            if (updatedOrderFromServer != null) {
               _currentOrder = updatedOrderFromServer;
             } else {
               // Fallback: if verification was successful, assume next logical step is delivered or completed
-              _currentOrder = _currentOrder.copyWith(orderStatus: Order.STATUS_DELIVERED);
+              _currentOrder =
+                  _currentOrder.copyWith(orderStatus: Order.STATUS_DELIVERED);
             }
             _isVerificationVisible = false; // Hide verification card
           });
-           _showSuccessSnackBar('Verification successful! Order marked as delivered/completed.');
+          _showSuccessSnackBar(
+              'Verification successful! Order delivered/completed.');
           _verificationCodeController.clear();
           await widget.onStatusUpdate(); // Refresh parent
         }
-
       } else {
         // If verification fails, fetch the latest order status to update UI correctly
-        final updatedOrder = await _fetchLatestOrderDetails(_currentOrder.orderId);
+        final updatedOrder =
+            await _fetchLatestOrderDetails(_currentOrder.orderId);
         if (updatedOrder != null && mounted) {
           setState(() {
             _currentOrder = updatedOrder;
             // Re-evaluate if verification card should be visible based on potentially unchanged status
-            String normalizedCurrentStatus = _currentOrder.orderStatus.toLowerCase().replaceAll('_', ' ').trim();
-            _isVerificationVisible = (normalizedCurrentStatus == Order.STATUS_PICKED_UP.toLowerCase() && _nextStepIsVerification()) ||
-                                      normalizedCurrentStatus == Order.STATUS_VERIFICATION_NEEDED.toLowerCase();
+            String normalizedCurrentStatus = _currentOrder.orderStatus
+                .toLowerCase()
+                .replaceAll('_', ' ')
+                .trim();
+            _isVerificationVisible = (normalizedCurrentStatus ==
+                        Order.STATUS_PICKED_UP.toLowerCase() &&
+                    _nextStepIsVerification()) ||
+                normalizedCurrentStatus ==
+                    Order.STATUS_VERIFICATION_NEEDED.toLowerCase();
           });
         }
-        
+
         try {
           final errorData = jsonDecode(response.body);
-          throw Exception(errorData['message'] ?? 'Verification failed. API Code: ${response.statusCode}');
+          throw Exception(errorData['message'] ??
+              'Verification failed. API Code: ${response.statusCode}');
         } catch (_) {
-          throw Exception('API Error: ${response.statusCode}. ${response.body}');
+          throw Exception(
+              'API Error: ${response.statusCode}. ${response.body}');
         }
       }
     } catch (e) {
@@ -4111,7 +4472,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             'Verification failed: ${e.toString().replaceAll('Exception: ', '')}');
       }
     } finally {
-       if (mounted) setState(() => _isUpdatingStatus = false);
+      if (mounted) setState(() => _isUpdatingStatus = false);
     }
   }
 
@@ -4121,47 +4482,109 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       final prefs = await SharedPreferences.getInstance();
       final apiBaseUrl =
           dotenv.env['API_BASE_URL-intranet'] ?? 'https://api.example.com';
-      
+
       print('Fetching latest order details for order $orderId...');
-      final response = await http.get(
-        Uri.parse('$apiBaseUrl/rr/orders/$orderId'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json', // Added Accept header
-          'Cache-Control': 'no-cache, no-store, must-revalidate', // Aggressive caching prevention
-          'Pragma': 'no-cache', 
-          'Expires': '0',
-        },
-      ).timeout(Duration(seconds: 10));
+      final response = await http
+          .get(
+            Uri.parse('$apiBaseUrl/rr/orders?order_id=$orderId'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json', // Added Accept header
+              'Cache-Control':
+                  'no-cache, no-store, must-revalidate', // Aggressive caching prevention
+              'Pragma': 'no-cache',
+              'Expires': '0',
+            },
+          )
+          .timeout(Duration(seconds: 10));
 
       print('Order details response: ${response.statusCode}');
-      
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         // Adjust based on your API response structure for a single order
         // Assuming the order data is directly in the response or under a 'data' key
         Map<String, dynamic>? orderData;
-        if (data is Map<String, dynamic> && data.containsKey('data') && data['data'] is Map<String, dynamic>) {
-            orderData = data['data'] as Map<String, dynamic>;
-        } else if (data is Map<String, dynamic> && data.containsKey('order_id')) { // If the root is the order object
-            orderData = data;
+        if (data is Map<String, dynamic> &&
+            data.containsKey('data') &&
+            data['data'] is Map<String, dynamic>) {
+          orderData = data['data'] as Map<String, dynamic>;
+        } else if (data is Map<String, dynamic> &&
+            data.containsKey('order_id')) {
+          // If the root is the order object
+          orderData = data;
         }
-        
+
         if (orderData != null) {
           final updatedOrder = Order.fromJson(orderData);
           print('Fetched updated order status: ${updatedOrder.orderStatus}');
           return updatedOrder;
         } else {
-           print('Invalid response format for single order: ${response.body}');
+          print('Invalid response format for single order: ${response.body}');
         }
-
       } else {
-        print('Failed to fetch order details: ${response.statusCode} ${response.body}');
+        print(
+            'Failed to fetch order details: ${response.statusCode} ${response.body}');
       }
       return null;
     } catch (e) {
       print('Error fetching order details: $e');
       return null;
+    }
+  }
+
+  // Helper to check if status is completed or delivered
+  bool _isCompletedOrDelivered(String status) {
+    if (status.isEmpty) return false;
+    final normalizedStatus = _normalizeStatus(status);
+    final normalizedCompleted = _normalizeStatus(Order.STATUS_COMPLETED);
+    final normalizedDelivered = _normalizeStatus(Order.STATUS_DELIVERED);
+
+    return normalizedStatus == normalizedCompleted ||
+        normalizedStatus == normalizedDelivered;
+  }
+
+  // Method to trigger earnings refresh with a delay to account for backend processing
+  void _triggerEarningsRefresh() async {
+    try {
+      // Add a delay to allow backend to process the order status update
+      // This helps ensure the payment data is ready when we fetch it
+      const delayDuration = Duration(seconds: 10);
+      print(
+          'Waiting $delayDuration before refreshing earnings to allow backend processing...');
+      await Future.delayed(delayDuration);
+
+      if (!mounted) return;
+
+      // Show a loading indicator that we're about to refresh
+      _showLoadingSnackbar('Updating earnings data...');
+
+      // First try to use the callback from the parent
+      if (widget.onStatusUpdate != null) {
+        await widget.onStatusUpdate();
+      }
+
+      // Also try to find parent state as a fallback
+      final parentState =
+          context.findAncestorStateOfType<_TransporterDashNewState>();
+      if (parentState != null && parentState.mounted) {
+        await parentState.refreshPayments();
+        if (mounted) {
+          _dismissLoadingSnackbar();
+          _showSnackBar('Earnings updated', isError: false);
+        }
+        print('Earnings refresh completed after order status change');
+      } else {
+        _dismissLoadingSnackbar();
+        print('Parent state not found or not mounted, using callback only');
+      }
+    } catch (e) {
+      _dismissLoadingSnackbar();
+      print('Error triggering earnings refresh: $e');
+      if (mounted) {
+        _showErrorSnackBar(
+            'Earnings will update shortly. Pull down to refresh if needed.');
+      }
     }
   }
 
@@ -4173,6 +4596,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       _showLoadingSnackbar(
           "Updating status to ${_getDetailedStatusText(newStatus)}...");
     }
+
+    // Store the previous status before updating
+    final previousStatus = _currentOrder.orderStatus;
     setState(() => _isUpdatingStatus = true);
 
     try {
@@ -4182,13 +4608,19 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
       if (success && mounted) {
         // First, fetch the latest order details from the server
-        final updatedOrder = await _fetchLatestOrderDetails(_currentOrder.orderId);
-        
+        final updatedOrder =
+            await _fetchLatestOrderDetails(_currentOrder.orderId);
+
         // Show success message
         _showSuccessSnackBar(isVerification
             ? 'Delivery verified and completed!'
             : 'Order status updated to ${_getDetailedStatusText(newStatus)}!');
-            
+
+        // Check if this was a transition to completed/delivered
+        final wasJustCompletedOrDelivered =
+            !_isCompletedOrDelivered(previousStatus) &&
+                _isCompletedOrDelivered(newStatus);
+
         // Update local state with the latest order data
         setState(() {
           if (updatedOrder != null) {
@@ -4199,14 +4631,24 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             _currentOrder = _currentOrder.copyWith(orderStatus: newStatus);
           }
           // Re-evaluate verification card visibility based on the new status
-          String normalizedCurrentStatus = _currentOrder.orderStatus.toLowerCase().replaceAll('_', ' ').trim();
-          _isVerificationVisible = (normalizedCurrentStatus == Order.STATUS_PICKED_UP.toLowerCase() && _nextStepIsVerification()) ||
-                                   normalizedCurrentStatus == Order.STATUS_VERIFICATION_NEEDED.toLowerCase();
+          String normalizedCurrentStatus = _currentOrder.orderStatus
+              .toLowerCase()
+              .replaceAll('_', ' ')
+              .trim();
+          _isVerificationVisible = (normalizedCurrentStatus ==
+                      Order.STATUS_PICKED_UP.toLowerCase() &&
+                  _nextStepIsVerification()) ||
+              normalizedCurrentStatus ==
+                  Order.STATUS_VERIFICATION_NEEDED.toLowerCase();
         });
-        
+
         // Refresh the order list in the parent widget
         await widget.onStatusUpdate();
-        
+
+        // If this was a transition to completed/delivered, trigger earnings refresh
+        if (wasJustCompletedOrDelivered && mounted) {
+          _triggerEarningsRefresh();
+        }
       } else if (mounted) {
         throw Exception(
             "Update status API failed silently or component unmounted.");
@@ -4235,13 +4677,13 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       statusColor = _green;
     } else if (statusNormalized == _normalizeStatus(Order.STATUS_CANCELLED)) {
       statusColor = _red;
-    } else if (statusNormalized == _normalizeStatus(Order.STATUS_VERIFICATION_NEEDED)) {
-      statusColor = Colors.orange.shade700; // Distinct color for verification needed
-    }
-    else {
+    } else if (statusNormalized ==
+        _normalizeStatus(Order.STATUS_VERIFICATION_NEEDED)) {
+      statusColor =
+          Colors.orange.shade700; // Distinct color for verification needed
+    } else {
       statusColor = _primaryTeal;
     }
-
 
     return Scaffold(
       backgroundColor: _white,
@@ -4277,9 +4719,43 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           _buildMapPlaceholder(), SizedBox(height: 16),
           _buildOrderDetailsCard(), SizedBox(height: 16),
           _buildStatusTimelineCard(),
-          SizedBox(height: 16), 
+          SizedBox(height: 16),
+
+          // Duplicate Directions to Delivery button - shown only for 'picked up' orders
+          if (statusNormalized == _normalizeStatus(Order.STATUS_PICKED_UP)) ...[
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: Icon(Icons.directions, size: 18),
+                label: Text('Directions to Delivery Location'),
+                onPressed: () {
+                  final LatLng? destination =
+                      _parseLocationToLatLng(_currentOrder.deliveryAddress);
+                  if (destination != null) {
+                    print(
+                        "Attempting to navigate to: Lat=${destination.latitude}, Lng=${destination.longitude}");
+                    setState(() {
+                      _navigationTriggered = true;
+                    });
+                    _launchGoogleMapsNavigation(destination);
+                  } else {
+                    _showErrorSnackBar(
+                        'Navigation failed: Could not extract coordinates from the delivery address.');
+                  }
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _primaryTeal,
+                  side: BorderSide(color: _lightTeal),
+                ),
+              ),
+            ),
+            SizedBox(height: 16),
+          ],
+
           // Show verification card conditionally
-          if (_isVerificationVisible && statusNormalized != _normalizeStatus(Order.STATUS_DELIVERED) && statusNormalized != _normalizeStatus(Order.STATUS_COMPLETED) ) ...[
+          if (_isVerificationVisible &&
+              statusNormalized != _normalizeStatus(Order.STATUS_DELIVERED) &&
+              statusNormalized != _normalizeStatus(Order.STATUS_COMPLETED)) ...[
             _buildDeliveryVerificationCard(),
             SizedBox(height: 16),
           ],
@@ -4330,7 +4806,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                   },
                                   body: jsonEncode({
                                     idKey: idToSend,
-                                    'order_status': 'completed', // Or 'verification_needed_arrived'
+                                    'order_status':
+                                        'completed', // Or 'verification_needed_arrived'
                                   }),
                                 )
                                 .timeout(const Duration(seconds: 15));
@@ -4341,7 +4818,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                       context, _currentOrder);
                               if (verified) {
                                 // After verification, update status to completed
-                                 await _performStatusUpdate(Order.STATUS_COMPLETED, isVerification: true);
+                                await _performStatusUpdate(
+                                    Order.STATUS_COMPLETED,
+                                    isVerification: true);
                               } else {
                                 _showErrorSnackBar(
                                     'Verification failed or cancelled.');
@@ -4409,8 +4888,13 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                 child: ElevatedButton(
                   onPressed: _isUpdatingStatus
                       ? null
-                      : (statusNormalized == _normalizeStatus(Order.STATUS_VERIFICATION_NEEDED) || (_isVerificationVisible && statusNormalized == _normalizeStatus(Order.STATUS_PICKED_UP))
-                          ? _handleVerifyCode  // If verification card is visible and status is picked_up OR status is verification_needed
+                      : (statusNormalized ==
+                                  _normalizeStatus(
+                                      Order.STATUS_VERIFICATION_NEEDED) ||
+                              (_isVerificationVisible &&
+                                  statusNormalized ==
+                                      _normalizeStatus(Order.STATUS_PICKED_UP))
+                          ? _handleVerifyCode // If verification card is visible and status is picked_up OR status is verification_needed
                           : _handleStatusUpdate),
                   child: _isUpdatingStatus
                       ? SizedBox(
@@ -4444,21 +4928,18 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       child: Center(
         child: GestureDetector(
           onTap: () {
-            setState(() {
-              _navigationTriggered = true;
-            });
             // Replicate the navigation logic from the Navigate button
-            final addressParts = _currentOrder.deliveryAddress.split(',');
-            if (addressParts.length >= 2) {
-              final lat = double.tryParse(addressParts[0].trim());
-              final lng = double.tryParse(addressParts[1].trim());
-              if (lat != null && lng != null) {
-                _launchGoogleMapsNavigation(LatLng(lat, lng));
-                return;
-              }
+            final LatLng? destination =
+                _parseLocationToLatLng(_currentOrder.deliveryAddress);
+            if (destination != null) {
+              setState(() {
+                _navigationTriggered = true;
+              });
+              _launchGoogleMapsNavigation(destination);
+            } else {
+              _showErrorSnackBar(
+                  'Navigation failed: Could not extract coordinates from the delivery address.');
             }
-            _showErrorSnackBar(
-                'Could not parse delivery location coordinates from address: "${_currentOrder.deliveryAddress}"');
           },
           child: Image.asset(
             'assets/images/go.png',
@@ -4470,128 +4951,131 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     );
   }
 
-  // *** MODIFIED: Added Navigation Button ***
   Widget _buildOrderDetailsCard() {
     // Get restaurant phone number or show placeholder if not available
     final restaurantPhone = _currentOrder.restaurantPhone;
-    final hasValidRestaurantPhone = restaurantPhone != null && restaurantPhone.isNotEmpty && restaurantPhone != 'null';
-    final displayRestaurantPhone = hasValidRestaurantPhone ? restaurantPhone : 'Phone number not available';
-    
+    final hasValidRestaurantPhone =
+        restaurantPhone != null && restaurantPhone.isNotEmpty && restaurantPhone != 'null';
+    final displayRestaurantPhone = hasValidRestaurantPhone
+        ? restaurantPhone
+        : 'Phone number not available';
+
     // Get customer phone number or show 'Not available' if not found
     final customerPhone = _currentOrder.userPhone;
-    final hasValidCustomerPhone = customerPhone != null && customerPhone.isNotEmpty && customerPhone != 'null';
-    final displayCustomerPhone = hasValidCustomerPhone ? customerPhone : 'Phone number not available';
+    final hasValidCustomerPhone =
+        customerPhone != null && customerPhone.isNotEmpty && customerPhone != 'null';
+    final displayCustomerPhone =
+        hasValidCustomerPhone ? customerPhone : 'Phone number not available';
     return Card(
         elevation: 1,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Padding(
             padding: EdgeInsets.all(16.0),
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Order Details',
-                  style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: _darkTeal)),
-              SizedBox(height: 16),
-              _buildDetailRow(
-                  Icons.storefront,
-                  _currentOrder.chefName ??
-                      _currentOrder.producerName ??
-                      'Pickup Location',
-                  isTitle: true),
-              _buildDetailRow(null, _currentOrder.pickupAddress,
-                  isAddress: true),
-              hasValidRestaurantPhone
-                  ? _buildDetailRow(
-                      Icons.phone_outlined, 
-                      restaurantPhone,
-                      isPhone: true,
-                    )
-                  : _buildDetailRow(
-                      Icons.phone_disabled_outlined,
-                      displayRestaurantPhone,
-                    ),
-              Divider(height: 24, color: _lightTeal),
-              _buildDetailRow(Icons.person_outline, 'Customer',
-                  isTitle: true), // Added Customer Title
-              _buildDetailRow(Icons.location_on_outlined, 'Delivery Address',
-                  isTitle: false), // Changed to non-title
-              _buildDetailRow(null, _currentOrder.simplifiedDeliveryAddress,
-                  isAddress: true),
-              hasValidCustomerPhone
-                  ? _buildDetailRow(
-                      Icons.phone_outlined, 
-                      customerPhone, // Known to be non-null here
-                      isPhone: true,
-                    )
-                  : _buildDetailRow(
-                      Icons.phone_disabled_outlined,
-                      displayCustomerPhone,
-                    ),
-              Divider(height: 24, color: _lightTeal),
-              Text('Order Items:',
-                  style:
-                      TextStyle(fontWeight: FontWeight.w600, color: _darkTeal)),
-              SizedBox(height: 8),
-              ..._currentOrder.orderItems
-                  .map((item) => Padding(
-                      padding: const EdgeInsets.only(left: 8.0, bottom: 4.0),
-                      child:
-                          Text('• $item', style: TextStyle(color: _darkTeal))))
-                  .toList(),
-              if (_currentOrder.notes != null &&
-                  _currentOrder.notes!.isNotEmpty &&
-                  _currentOrder.notes!.toLowerCase() !=
-                      'no special instructions') ...[
-                SizedBox(height: 16),
-                _buildDetailRow(Icons.notes_outlined, 'Notes:', isTitle: true),
-                _buildDetailRow(null, _currentOrder.notes!,
-                    isAddress: true), // Display notes
-              ],
-              SizedBox(height: 16),
-              _buildOrderInfoRow(_currentOrder), // Reuses helper
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Order Details',
+                      style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: _darkTeal)),
+                  SizedBox(height: 16),
+                  _buildDetailRow(
+                      Icons.storefront,
+                      _currentOrder.chefName ??
+                          _currentOrder.producerName ??
+                          'Pickup Location',
+                      isTitle: true),
+                  _buildDetailRow(null, _currentOrder.pickupAddress,
+                      isAddress: true),
+                  hasValidRestaurantPhone
+                      ? _buildDetailRow(
+                          Icons.phone_outlined,
+                          restaurantPhone,
+                          isPhone: true,
+                        )
+                      : _buildDetailRow(
+                          Icons.phone_disabled_outlined,
+                          displayRestaurantPhone,
+                        ),
+                  Divider(height: 24, color: _lightTeal),
+                  _buildDetailRow(Icons.person_outline, 'Customer',
+                      isTitle: true), // Added Customer Title
+                  _buildDetailRow(Icons.location_on_outlined, 'Delivery Address',
+                      isTitle: false), // Changed to non-title
+                  _buildDetailRow(null, _currentOrder.simplifiedDeliveryAddress,
+                      isAddress: true),
+                  hasValidCustomerPhone
+                      ? _buildDetailRow(
+                          Icons.phone_outlined,
+                          customerPhone!, // Known to be non-null here
+                          isPhone: true,
+                        )
+                      : _buildDetailRow(
+                          Icons.phone_disabled_outlined,
+                          displayCustomerPhone,
+                        ),
+                  Divider(height: 24, color: _lightTeal),
+                  Text('Order Items:',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w600, color: _darkTeal)),
+                  SizedBox(height: 8),
+                  ..._currentOrder.orderItems
+                      .map((item) => Padding(
+                          padding:
+                              const EdgeInsets.only(left: 8.0, bottom: 4.0),
+                          child: Text('• $item',
+                              style: TextStyle(color: _darkTeal))))
+                      .toList(),
+                  if (_currentOrder.notes != null &&
+                      _currentOrder.notes!.isNotEmpty &&
+                      _currentOrder.notes!.toLowerCase() !=
+                          'no special instructions') ...[
+                    SizedBox(height: 16),
+                    _buildDetailRow(Icons.notes_outlined, 'Notes:',
+                        isTitle: true),
+                    _buildDetailRow(null, _currentOrder.notes!,
+                        isAddress: true), // Display notes
+                  ],
+                  SizedBox(height: 16),
+                  _buildOrderInfoRow(_currentOrder), // Reuses helper
 
-              // *** START: Navigation Button Added ***
-              SizedBox(height: 16), // Space before button
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  icon: Icon(Icons.directions, size: 18),
-                  label: Text('Directions to Delivery Location'),
-                  onPressed: () {
-                    final addressParts =
-                        _currentOrder.deliveryAddress.split(',');
-                    if (addressParts.length >= 2) {
-                      final lat = double.tryParse(addressParts[0].trim());
-                      final lng = double.tryParse(addressParts[1].trim());
-                      if (lat != null && lng != null) {
-                        print("Attempting to navigate to: Lat=$lat, Lng=$lng");
-                        setState(() {
-                          _navigationTriggered = true;
-                        });
-                        _launchGoogleMapsNavigation(LatLng(lat, lng));
-                        return; // Exit after successful launch attempt
-                      } else {
-                        print(
-                            "Failed to parse lat/lng from: ${addressParts[0]}, ${addressParts[1]}");
-                      }
-                    } else {
-                      print("Address parts length < 2: ${addressParts.length}");
-                    }
-                    _showErrorSnackBar(
-                        'Could not parse delivery location coordinates from address: "${_currentOrder.deliveryAddress}"');
-                  },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: _primaryTeal,
-                    side: BorderSide(color: _lightTeal),
-                  ),
-                ),
-              ),
-              // *** END: Navigation Button Added ***
-            ])));
+                  // *** START: Navigation Button Added with new parsing logic ***
+                  if (!['completed', 'delivered', 'cancelled', 'rejected']
+                      .contains(_currentOrder.orderStatus.toLowerCase())) ...[
+                    SizedBox(height: 16), // Space before button
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        icon: Icon(Icons.directions, size: 18),
+                        label: Text('Directions to Delivery Location'),
+                        onPressed: () {
+                          // Use the robust parsing function
+                          final LatLng? destination = _parseLocationToLatLng(
+                              _currentOrder.deliveryAddress);
+
+                          if (destination != null) {
+                            print(
+                                "Attempting to navigate to: Lat=${destination.latitude}, Lng=${destination.longitude}");
+                            setState(() {
+                              _navigationTriggered = true;
+                            });
+                            _launchGoogleMapsNavigation(destination);
+                          } else {
+                            _showErrorSnackBar(
+                                'Navigation failed: Could not extract coordinates from the delivery address.');
+                          }
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: _primaryTeal,
+                          side: BorderSide(color: _lightTeal),
+                        ),
+                      ),
+                    ),
+                  ],
+                  // *** END: Navigation Button ***
+                ])));
   }
-  // *** END MODIFIED _buildOrderDetailsCard ***
 
   Widget _buildDetailRow(IconData? icon, String text,
       {bool isTitle = false, bool isAddress = false, bool isPhone = false}) {
@@ -4619,7 +5103,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                       text,
                       style: TextStyle(
                         fontSize: isTitle ? 15 : 14,
-                        fontWeight: isTitle ? FontWeight.w600 : FontWeight.normal,
+                        fontWeight:
+                            isTitle ? FontWeight.w600 : FontWeight.normal,
                         color: _primaryTeal, // Make phone numbers stand out
                         decoration: TextDecoration.underline,
                         height: 1.3,
@@ -4630,7 +5115,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                     text,
                     style: TextStyle(
                       fontSize: isTitle ? 15 : 14,
-                      fontWeight: isTitle ? FontWeight.w600 : FontWeight.normal,
+                      fontWeight:
+                          isTitle ? FontWeight.w600 : FontWeight.normal,
                       color: isTitle
                           ? _darkTeal
                           : (isAddress ? _darkTeal : _grey),
@@ -4663,15 +5149,16 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: Colors.grey.shade300, width: 0.5)),
         child: Text(text,
-            style:
-                TextStyle(fontSize: 12, color: color, fontWeight: fontWeight)));
+            style: TextStyle(
+                fontSize: 12, color: color, fontWeight: fontWeight)));
   }
 
   // MODIFIED Status Timeline Card
   Widget _buildStatusTimelineCard() {
     const String verificationNeededStatusNormalized = "verification needed";
 
-    String currentNormalizedStatus = _normalizeStatus(_currentOrder.orderStatus);
+    String currentNormalizedStatus =
+        _normalizeStatus(_currentOrder.orderStatus);
 
     // Determine if each step in the timeline is met or passed
     bool isAcceptedMet = [
@@ -4695,20 +5182,23 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       _normalizeStatus(Order.STATUS_DELIVERED),
       _normalizeStatus(Order.STATUS_COMPLETED)
     ].contains(currentNormalizedStatus);
-    
+
     bool isDeliveredMet = [
       _normalizeStatus(Order.STATUS_DELIVERED),
       _normalizeStatus(Order.STATUS_COMPLETED)
     ].contains(currentNormalizedStatus);
 
     // Subtitles for each step
-    String acceptedSubtitle = isAcceptedMet ? "You accepted this order" : "Pending acceptance";
-    String pickedUpSubtitle = isPickedUpMet ? "You picked up the order" : "Pending pickup";
-    
+    String acceptedSubtitle =
+        isAcceptedMet ? "You accepted this order" : "Pending acceptance";
+    String pickedUpSubtitle =
+        isPickedUpMet ? "You picked up the order" : "Pending pickup";
+
     String verificationSubtitle;
     if (isVerificationStepMet) {
       verificationSubtitle = "Verification successful";
-    } else if (currentNormalizedStatus == _normalizeStatus(Order.STATUS_PICKED_UP)) {
+    } else if (currentNormalizedStatus ==
+        _normalizeStatus(Order.STATUS_PICKED_UP)) {
       verificationSubtitle = "Awaiting verification code";
     } else {
       verificationSubtitle = "Pending verification";
@@ -4743,26 +5233,30 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               isAcceptedMet,
             ),
             _buildStatusItem(
-              'Order Picked Up', 
-              pickedUpSubtitle, 
+              'Order Picked Up',
+              pickedUpSubtitle,
               isPickedUpMet,
             ),
             _buildStatusItem(
               'Verification Needed',
               verificationSubtitle,
               isVerificationStepMet,
-              // 'needsVerification' (orange clock icon) is shown if this step is PENDING 
+              // 'needsVerification' (orange clock icon) is shown if this step is PENDING
               // AND current status is 'picked_up' (meaning verification is the next logical action).
-              needsVerification: currentNormalizedStatus == _normalizeStatus(Order.STATUS_PICKED_UP) && !isVerificationStepMet,
+              needsVerification: currentNormalizedStatus ==
+                      _normalizeStatus(Order.STATUS_PICKED_UP) &&
+                  !isVerificationStepMet,
             ),
             _buildStatusItem(
-              'Delivered', 
+              'Delivered',
               deliveredSubtitle,
               isDeliveredMet,
               isLast: true,
               // 'needsVerification' (orange clock icon) for Delivered step is if current status IS 'verification_needed'
               // (meaning delivery is the next logical action after code verification).
-              needsVerification: currentNormalizedStatus == verificationNeededStatusNormalized && !isDeliveredMet,
+              needsVerification:
+                  currentNormalizedStatus == verificationNeededStatusNormalized &&
+                      !isDeliveredMet,
             ),
           ],
         ),
@@ -4779,17 +5273,20 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     if (isCompleted) {
       iconData = Icons.check_circle;
       iconColor = _green;
-    } else if (needsVerification) { // This step is pending AND needs verification action
+    } else if (needsVerification) {
+      // This step is pending AND needs verification action
       iconData = Icons.access_time;
       iconColor = Colors.orange.shade700;
-    } else { // This step is pending and does not currently require verification action
+    } else {
+      // This step is pending and does not currently require verification action
       iconData = Icons.radio_button_unchecked;
       iconColor = _grey;
     }
-    
-    Color textColor = isCompleted ? _darkTeal : _grey;
-    Color subtitleColor = isCompleted ? _grey : (needsVerification ? Colors.orange.shade700 : _grey);
 
+    Color textColor = isCompleted ? _darkTeal : _grey;
+    Color subtitleColor = isCompleted
+        ? _grey
+        : (needsVerification ? Colors.orange.shade700 : _grey);
 
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Column(children: [
@@ -4798,7 +5295,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           Container(
               width: 1,
               height: 30,
-              color: isCompleted ? _green : Colors.grey.shade300, // Line color reflects completion of current step
+              color: isCompleted
+                  ? _green
+                  : Colors.grey.shade300, // Line color reflects completion of current step
               margin: EdgeInsets.symmetric(vertical: 4))
       ]),
       SizedBox(width: 12),
@@ -4814,13 +5313,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                             fontWeight: FontWeight.w600,
                             color: textColor)),
                     Text(subtitle,
-                        style: TextStyle(
-                            fontSize: 13,
-                            color: subtitleColor)) 
+                        style: TextStyle(fontSize: 13, color: subtitleColor))
                   ]))),
     ]);
   }
-
 
   // Builds the verification input card
   Widget _buildDeliveryVerificationCard() {
@@ -4830,50 +5326,53 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Padding(
             padding: EdgeInsets.all(16.0),
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Delivery Verification',
-                  style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: _darkTeal)),
-              SizedBox(height: 8),
-              Text('After delivering the order, Ask the customer for their 6-digit verification code.',
-                  style: TextStyle(color: _grey, fontSize: 14)),
-              SizedBox(height: 16),
-              TextField(
-                // Verification Code Input
-                controller: _verificationCodeController,
-                keyboardType: TextInputType.number,
-                maxLength: 6,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 8,
-                    color: _darkTeal), // Increase size/spacing
-                decoration: InputDecoration(
-                    hintText: '______',
-                    hintStyle: TextStyle(
-                        color: Colors.grey.shade400,
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Delivery Verification',
+                      style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: _darkTeal)),
+                  SizedBox(height: 8),
+                  Text(
+                      'After delivering the order, Ask the customer for their 6-digit verification code.',
+                      style: TextStyle(color: _grey, fontSize: 14)),
+                  SizedBox(height: 16),
+                  TextField(
+                    // Verification Code Input
+                    controller: _verificationCodeController,
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
                         fontSize: 24,
-                        letterSpacing: 8),
-                    counterText: "",
-                    filled: true,
-                    fillColor: _lightGrey,
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8.0),
-                        borderSide: BorderSide.none),
-                    focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8.0),
-                        borderSide: BorderSide(color: _primaryTeal)),
-                    contentPadding: EdgeInsets.symmetric(vertical: 14)),
-              ),
-              SizedBox(height: 8),
-              Text('Customer received code via SMS/Email.',
-                  style: TextStyle(color: _grey, fontSize: 11)),
-              // Verify button moved outside this card
-            ])));
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 8,
+                        color: _darkTeal), // Increase size/spacing
+                    decoration: InputDecoration(
+                        hintText: '______',
+                        hintStyle: TextStyle(
+                            color: Colors.grey.shade400,
+                            fontSize: 24,
+                            letterSpacing: 8),
+                        counterText: "",
+                        filled: true,
+                        fillColor: _lightGrey,
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8.0),
+                            borderSide: BorderSide.none),
+                        focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8.0),
+                            borderSide: BorderSide(color: _primaryTeal)),
+                        contentPadding:
+                            EdgeInsets.symmetric(vertical: 14)),
+                  ),
+                  SizedBox(height: 8),
+                  Text('Customer received code via SMS/Email.',
+                      style: TextStyle(color: _grey, fontSize: 11)),
+                  // Verify button moved outside this card
+                ])));
   }
 } // End OrderDetailsScreen
 
@@ -4922,7 +5421,8 @@ class EarningsHistoryScreen extends StatelessWidget {
                 List<Payment> dailyPayments = groupedPayments[date]!;
                 // Calculate daily total for successful payments using the computed property
                 double dailyTotal = dailyPayments
-                    .where((p) => p.disbursementTransactionStatus == 'Successful')
+                    .where(
+                        (p) => p.disbursementTransactionStatus == 'Successful')
                     .fold(0.0, (sum, p) => sum + p.amount);
                 String formattedDate =
                     DateFormat('EEEE, MMM d, yyyy').format(date);
@@ -4955,7 +5455,8 @@ class EarningsHistoryScreen extends StatelessWidget {
                                     ]),
                                 Divider(height: 20, color: _lightTeal),
                                 ...dailyPayments
-                                    .map((payment) => _buildPaymentItem(payment))
+                                    .map((payment) =>
+                                        _buildPaymentItem(payment))
                                     .toList(),
                               ]))),
                 );
@@ -4967,12 +5468,12 @@ class EarningsHistoryScreen extends StatelessWidget {
     Color statusColor;
     IconData statusIcon;
     String statusText = payment.disbursementTransactionStatus;
-    
+
     // Handle null or empty status
     if (statusText.isEmpty) {
       statusText = 'Pending';
     }
-    
+
     // Determine status color and icon
     switch (statusText.toLowerCase()) {
       case 'successful':
@@ -5002,7 +5503,8 @@ class EarningsHistoryScreen extends StatelessWidget {
       default:
         statusColor = _grey;
         statusIcon = Icons.help_outline;
-        statusText = statusText[0].toUpperCase() + statusText.substring(1).toLowerCase();
+        statusText =
+            statusText[0].toUpperCase() + statusText.substring(1).toLowerCase();
     }
     return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8.0),

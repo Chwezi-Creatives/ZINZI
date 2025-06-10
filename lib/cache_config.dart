@@ -1,3 +1,4 @@
+//cspell:disable
 class CacheConfig {
   static const Duration metricsCacheDuration = Duration(days: 2);
   static const Duration preferencesCacheDuration = Duration(days: 2);

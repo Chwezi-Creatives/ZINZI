@@ -1,3 +1,4 @@
+//cspell:disable
 import 'package:flutter/material.dart';
 
 /// A custom route observer that notifies when a route is pushed or popped.

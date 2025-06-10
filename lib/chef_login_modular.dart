@@ -1,3 +1,4 @@
+//cspell:disable
 import 'package:flutter/material.dart';
 import 'package:zinzi/base_login_modular.dart';
 import 'package:shared_preferences/shared_preferences.dart';

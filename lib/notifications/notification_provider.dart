@@ -1,3 +1,4 @@
+//cspell:disable
 import 'package:flutter/foundation.dart';
 import 'notification_model.dart';
 

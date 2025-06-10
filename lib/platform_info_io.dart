@@ -1,3 +1,4 @@
+//cspell:disable
 // lib/platform_info_io.dart
 import 'dart:io' as io;
 

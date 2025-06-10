@@ -1,3 +1,4 @@
+//cspell:disable
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math'; // For max(), min()

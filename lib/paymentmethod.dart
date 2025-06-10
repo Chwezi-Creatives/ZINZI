@@ -1,3 +1,4 @@
+//cspell:disable
 /*import 'package:flutter/material.dart';
 import 'package:zinzi/momo2.dart';
 import 'package:zinzi/paymom.dart';

@@ -1,3 +1,4 @@
+//cspell:disable
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'notification_provider.dart';

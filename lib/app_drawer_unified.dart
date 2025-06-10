@@ -1,3 +1,4 @@
+//cspell:disable
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -7,13 +8,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/services.dart';
-import 'package:provider/provider.dart';
 import 'package:zinzi/blogview.dart';
 import 'package:zinzi/wellness_communities_screen.dart';
 import 'package:zinzi/cart.dart' as cart;
 import 'package:zinzi/profile.dart';
-import 'package:zinzi/chef_dash8888.dart';
-import 'package:zinzi/produ_dash22.dart';
 import 'package:zinzi/chef_profile.dart' show ChefProfileApp;
 import 'package:zinzi/producer_profile.dart' show ProducerProfileApp;
 import 'package:zinzi/profile.dart' show ProfilePage;

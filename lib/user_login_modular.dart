@@ -1,3 +1,4 @@
+//cspell:disable
 import 'package:flutter/material.dart';
 import 'package:zinzi/base_login_modular.dart';
 import 'package:zinzi/dashboard_page.dart'; // Ensure this is the correct import for the User Dashboard

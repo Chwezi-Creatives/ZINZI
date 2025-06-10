@@ -1,3 +1,4 @@
+//cspell:disable
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert'; // For json.encode
@@ -366,7 +367,7 @@ class _ChefSignUpPageBetterNewState extends State<ChefSignUpPageBetterNew> {
         locationController.text = (displayAddress.isNotEmpty &&
                 !displayAddress.startsWith("Lat:"))
             ? "$displayAddress ($coords)"
-            : "Location Acquired ($coords)"; // Fallback if address failed or wasn't found
+            : coords; // Just send coordinates if reverse geocoding fails
         _isFetchingLocation = false;
       });
       _showSnackBar('Location acquired successfully!', isError: false);

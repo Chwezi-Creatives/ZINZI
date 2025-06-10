@@ -1,3 +1,4 @@
+//cspell:disable
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert'; // For jsonDecode, jsonEncode
@@ -183,6 +184,7 @@ class ChefProfile {
     this.localImageFile,
   });
 
+  // ========== FIXED SECTION ==========
   factory ChefProfile.fromMockJson(Map<String, dynamic> json) {
     String? _joinListSafe(dynamic listData) {
       if (listData is List) {
@@ -210,6 +212,12 @@ class ChefProfile {
 
     int _parseIntSafe(dynamic value) {
       return _parseIntNullable(value) ?? 0;
+    }
+
+    bool _parseBoolSafe(dynamic value) {
+      if (value is bool) return value;
+      if (value == null) return false;
+      return (value.toString().toLowerCase() == 'true' || value == 1);
     }
 
     bool _isValidUrl(String? url) {
@@ -241,20 +249,15 @@ class ChefProfile {
       sampleMenu: _getStringSafe(json['samplemenu']),
       specialties: _joinListSafe(json['specialties']),
       teamSize: _getStringSafe(json['teamsize']),
-      isActive: json['is_active'] is bool
-          ? json['is_active']
-          : (json['is_active']?.toString().toLowerCase() == 'true' ||
-              json['is_active'] == 1),
-      isEmailVerified: json['is_email_verified'] is bool
-          ? json['is_email_verified']
-          : (json['is_email_verified']?.toString().toLowerCase() == 'true' ||
-              json['is_email_verified'] == 1),
+      isActive: _parseBoolSafe(json['is_active']),
+      isEmailVerified: _parseBoolSafe(json['is_email_verified']), // Correctly parsed and passed here
       equipment: _joinListSafe(json['equipment']),
       pricing: json['pricing'] is Map<String, dynamic>
           ? Map<String, dynamic>.from(json['pricing'])
           : null,
     );
   }
+  // ========== END OF FIXED SECTION ==========
 
   Map<String, dynamic> toJsonForUpdate() {
     return {
@@ -296,9 +299,10 @@ class ChefProfile {
       'specialties': specialties,
       'teamsize': teamSize,
       'is_active': isActive,
+      'is_email_verified': isEmailVerified,
       'equipment': equipment,
       'pricing': pricing,
-    }..removeWhere((key, value) => value == null);
+    }..removeWhere((key, value) => value == null && key != 'is_email_verified');
   }
 }
 

@@ -1,3 +1,4 @@
+//cspell:disable
 import 'package:flutter/material.dart';
 
 mixin NotificationListenerMixin<T extends StatefulWidget> on State<T> {

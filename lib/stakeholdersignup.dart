@@ -1,3 +1,4 @@
+//cspell:disable
 import 'dart:async';
 
 import 'package:flutter/material.dart';

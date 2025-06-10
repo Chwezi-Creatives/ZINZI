@@ -1,3 +1,4 @@
+//cspell:disable
 // This is a stub implementation for flutter_local_notifications on web platform
 // It provides empty implementations of the required classes to avoid build errors
 

@@ -1,3 +1,4 @@
+//cspell:disable
 // cspell:disable
 import 'dart:convert';
 import 'dart:async'; // For Timer
@@ -13,7 +14,6 @@ import 'package:shimmer/shimmer.dart';
 import 'package:google_fonts/google_fonts.dart'; // Import Google Fonts
 import 'package:flutter/material.dart' show precacheImage, ScrollController, NetworkImage;
 import 'package:zinzi/app_drawer_unified.dart';
-import 'package:zinzi/user_cache.dart'; // Import UserCache
 import 'package:zinzi/utils/image_utils.dart'; // Import ImageUtils
 // Import CacheConfig
 
@@ -44,9 +44,10 @@ final apiBaseUrl = dotenv.env['API_BASE_URL'] ??
 class OnlymealsScreen extends StatefulWidget {
   const OnlymealsScreen({super.key}); // Use super parameters
 
-  // Public static cache loader for splash screen
-  static Future<void> loadMealsCacheFromPrefs() =>
-      _OnlymealsScreenState.loadMealsCacheFromPrefs();
+  // No cache loading for meals - always fetch fresh from API
+  static Future<void> loadMealsCacheFromPrefs() async {
+    // No-op as we're not caching meal data
+  }
 
   @override
   _OnlymealsScreenState createState() => _OnlymealsScreenState();
@@ -54,41 +55,8 @@ class OnlymealsScreen extends StatefulWidget {
 
 class _OnlymealsScreenState extends State<OnlymealsScreen>
     with SingleTickerProviderStateMixin {
-  // --- Caching ---
+  // No meal data caching - always fetch fresh from API
   List<Map<String, dynamic>> _meals = [];
-  static List<Map<String, dynamic>> _mealsCache = [];
-  static DateTime? _mealsCacheTimestamp;
-
-  static const String _mealsCacheKey = 'only_meals_cache';
-  static const String _mealsCacheTimestampKey = 'only_meals_cache_timestamp';
-
-  // Load cache from SharedPreferences (persistent storage)
-  static Future<void> loadMealsCacheFromPrefs() async {
-    final cachedData = await UserCache.getData(_mealsCacheKey);
-    final timestampData = await UserCache.getData(_mealsCacheTimestampKey);
-
-    if (cachedData != null && timestampData != null) {
-      try {
-        print('[Onlymeals] Cache hit: Loaded meals from cache');
-        _mealsCache = List<Map<String, dynamic>>.from(cachedData);
-        _mealsCacheTimestamp = DateTime.parse(timestampData);
-      } catch (_) {
-        _mealsCache = [];
-        _mealsCacheTimestamp = null;
-      }
-    } else {
-      _mealsCache = [];
-      _mealsCacheTimestamp = null;
-    }
-  }
-
-  // Save cache to SharedPreferences
-  static Future<void> saveMealsCacheToPrefs(
-      List<Map<String, dynamic>> meals) async {
-    await UserCache.saveData(_mealsCacheKey, meals);
-    await UserCache.saveData(
-        _mealsCacheTimestampKey, DateTime.now().toIso8601String());
-  }
 
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -195,10 +163,7 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
       // Update the local state with fresh data
       _Onlymeals = meals;
       
-      // Update cache in background
-      _updateCache(meals);
-      
-      // Update UI
+      // No caching - just update UI
       _buildMealLookupMap();
       _filterMeals('');
       
@@ -210,9 +175,7 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
       print('Error fetching meals: $e');
       if (!mounted) return;
       
-      // Try to load from cache if available
-      await _loadFromCacheIfAvailable();
-      
+      // No fallback to cache - just show error
       setState(() {
         _isLoadingMeals = false;
         if (_Onlymeals.isEmpty) {
@@ -230,29 +193,7 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
     );
   }
 
-  // Helper method to update cache
-  Future<void> _updateCache(List<Map<String, dynamic>> meals) async {
-    _OnlymealsScreenState._mealsCache = List<Map<String, dynamic>>.from(meals);
-    _OnlymealsScreenState._mealsCacheTimestamp = DateTime.now();
-    
-    // Persist to UserCache
-    await UserCache.saveData(_mealsCacheKey, _OnlymealsScreenState._mealsCache);
-    await UserCache.saveData(
-      _mealsCacheTimestampKey,
-      _OnlymealsScreenState._mealsCacheTimestamp!.toIso8601String(),
-    );
-  }
-  
-  // Helper method to load from cache if available
-  Future<void> _loadFromCacheIfAvailable() async {
-    await OnlymealsScreen.loadMealsCacheFromPrefs();
-    
-    if (_OnlymealsScreenState._mealsCache.isNotEmpty) {
-      _Onlymeals = List<Map<String, dynamic>>.from(_OnlymealsScreenState._mealsCache);
-      _buildMealLookupMap();
-      _filterMeals('');
-    }
-  }
+  // No caching methods needed - always fetch fresh data
 
   Future<List<Map<String, dynamic>>> _fetchMeals(int userId) async {
     try {
@@ -329,7 +270,7 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
     try {
       final response = await http.get(Uri.parse(url), headers: {
         'Content-Type': 'application/json'
-      }).timeout(const Duration(seconds: 10));
+      }).timeout(const Duration(seconds: 20));
 
       if (mounted) {
         // Check mounted before setState

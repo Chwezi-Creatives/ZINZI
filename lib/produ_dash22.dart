@@ -1,11 +1,13 @@
 
+//cspell:disable
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show SocketException;
 
 // Payment model is used in this file
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // For FilteringTextInputFormatter & SystemUiOverlayStyle
+// import 'package:flutter/services.dart'; // No longer needed after form removal
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 // import 'package:geolocator/geolocator.dart'; // Moved to producer_profile.dart
 import 'package:http/http.dart' as http;
@@ -360,7 +362,7 @@ class ProducerEarningsHistoryScreen extends StatelessWidget {
           
           // Calculate daily total for successful payments
           final dailyTotal = dailyPayments
-              .where((p) => p.status?.toLowerCase() == 'completed')
+              .where((p) => p.status.toLowerCase() == 'successful')
               .fold(0.0, (sum, p) => sum + p.amount);
 
           return Card(
@@ -413,7 +415,7 @@ class ProducerEarningsHistoryScreen extends StatelessWidget {
 
   Widget _buildPaymentItem(ProducerPayment payment) {
     // Determine status color and icon
-    final status = payment.status?.toLowerCase() ?? 'pending';
+    final status = payment.status.toLowerCase();
     final statusColor = _getStatusColor(status);
     final statusIcon = _getStatusIcon(status);
     final statusText = _getStatusText(status);
@@ -519,6 +521,7 @@ class ProducerEarningsHistoryScreen extends StatelessWidget {
     switch (status) {
       case 'completed':
       case 'success':
+      case 'successful':
         return Icons.check_circle;
       case 'pending':
         return Icons.pending;
@@ -587,7 +590,7 @@ class ProducerApiService {
   
   static Future<int?> _getProducerIdInt() async {
     final prefs = await SharedPreferences.getInstance();
-    return _parseInt(prefs.getString('producer_id')) ?? prefs.getInt('producer_id');
+    return _parseIntNullable(prefs.getString('producer_id')) ?? prefs.getInt('producer_id');
   }
 
   static dynamic _handleApiResponse(dynamic responseBody) {
@@ -771,7 +774,7 @@ class ProducerApiService {
       final url = '$baseUrl/rr/disbursements/producer?producer_id=$producerId';
       print('[ProducerDash] Fetching payments from: $url');
       
-      final headers = await _getReadHeaders(requiresAuth: false);
+      final headers = await _getReadHeaders(requiresAuth: true); // Auth is likely needed
       final response = await http.get(
         Uri.parse(url),
         headers: headers,
@@ -891,80 +894,9 @@ class ProducerApiService {
     }
   }
 
-  static Future<Product?> addProduce(Map<String, dynamic> produceData) async {
-    final Uri uri = Uri.parse('$_apibaseurl/rr/produce');
-    print("[ProducerDash] Adding new produce item at $uri");
-    try {
-      final payload = {
-        'produce_name': _getStringSafe(produceData['produce_name']),
-        'calories': _parseIntNullable(produceData['calories']),
-        'proteins': _parseDoubleNullable(produceData['proteins']),
-        'carbohydrates': _parseDoubleNullable(produceData['carbohydrates']),
-        'fats': _parseDoubleNullable(produceData['fats']),
-        'unit_grams': _parseIntNullable(produceData['unit_grams']),
-        'source': _getStringSafe(produceData['source']),
-      };
-      payload.removeWhere((key, value) => value == null || (value is String && value.isEmpty));
-      if (payload['produce_name'] == null || (payload['produce_name'] as String).isEmpty) {
-        print("[ProducerDash] Error adding produce: Produce name is required.");
-        return null;
-      }
-      print("[ProducerDash] Add produce payload: ${jsonEncode(payload)}");
-      final response = await http.post(uri, headers: await _getWriteHeaders(), body: jsonEncode(payload));
-      if (response.statusCode == 201) {
-        final dynamic createdProduceData = _handleApiResponse(response.body);
-        if (createdProduceData is Map<String, dynamic>) return Product.fromJson(createdProduceData);
-        else { print("[ProducerDash] Add produce succeeded but couldn't parse response body: ${response.body}"); return null; }
-      } else {
-        print("[ProducerDash] Error adding produce: ${response.statusCode} ${response.body}");
-        return null;
-      }
-    } catch (e) {
-      print("[ProducerDash] Exception adding produce: $e");
-      return null;
-    }
-  }
-
-  static Future<bool> updateProduce(String produceId, Map<String, dynamic> produceData) async {
-    if (produceId.isEmpty) { print("[ProducerDash] Error updating produce: Invalid Produce ID."); return false; }
-    final Uri uri = Uri.parse('$_apibaseurl/rr/uproduce?produce_id=$produceId');
-    print("[ProducerDash] Updating produce item $produceId at $uri");
-    try {
-      final payload = {
-        'produce_name': _getStringSafe(produceData['produce_name']),
-        'calories': _parseIntNullable(produceData['calories']),
-        'proteins': _parseDoubleNullable(produceData['proteins']),
-        'carbohydrates': _parseDoubleNullable(produceData['carbohydrates']),
-        'fats': _parseDoubleNullable(produceData['fats']),
-        'unit_grams': _parseIntNullable(produceData['unit_grams']),
-        'source': _getStringSafe(produceData['source']),
-      };
-      payload.removeWhere((key, value) => value == null || (value is String && value.isEmpty));
-      if (payload['produce_name'] == null || (payload['produce_name'] as String).trim().isEmpty) {
-        print("[ProducerDash] Error updating produce: Produce name cannot be empty.");
-        return false;
-      }
-      print("[ProducerDash] Update produce payload: ${jsonEncode(payload)}");
-      final response = await http.put(uri, headers: await _getWriteHeaders(), body: jsonEncode(payload));
-      return response.statusCode == 200 || response.statusCode == 204;
-    } catch (e) {
-      print("[ProducerDash] Exception updating produce $produceId: $e");
-      return false;
-    }
-  }
-
-  static Future<bool> deleteProduce(String produceId) async {
-    if (produceId.isEmpty) { print("[ProducerDash] Error deleting produce: Invalid Produce ID."); return false; }
-    final Uri uri = Uri.parse('$_apibaseurl/rr/uproduce?produce_id=$produceId');
-    print("[ProducerDash] Deleting produce item $produceId at $uri");
-    try {
-      final response = await http.delete(uri, headers: await _getWriteHeaders());
-      return response.statusCode == 200 || response.statusCode == 204;
-    } catch (e) {
-      print("[ProducerDash] Exception deleting produce $produceId: $e");
-      return false;
-    }
-  }
+  // --- REMOVED METHODS because for now we dont need them---
+  // addProduce, updateProduce, and deleteProduce have been removed.
+  // --- END REMOVED METHODS ---
 }
 
 // --- Main Widget State ---
@@ -1026,34 +958,19 @@ class ProducerDash22 extends StatefulWidget {
 
 class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProviderStateMixin, WidgetsBindingObserver, RouteAware {
   int _currentIndex = 0; // Default to Orders tab (index 0 after profile removal)
-  // Profile related state variables removed
-  List<Order> _orders = [];
-  List<Product> _produce = []; 
+  final List<Order> _orders = [];
+  final Map<int, String> _previousOrderStatuses = {}; // Track previous order statuses
+  final List<Product> _produce = []; 
   bool _isLoading = true; 
-  // _isLoadingProfile, _profileFetchError removed
-  bool _isLoadingOrders = false;
-  bool _isLoadingProduce = false;
+  bool _isLoadingOrders = true;
+  bool _isLoadingProduce = true;
   String _error = ''; 
+  String _selectedStatusFilter = 'All'; // State for the selected order status filter
 
   Set<String> _selectedProduceIds = {};
   Map<String, int> _produceQuantities = {};
   final Map<int, bool> _expandedOrders = {}; // Track expanded state for each order
-
-  // Profile Editing State variables removed
-
-  String? _editingProduceId;
-  TextEditingController? _produceNameController;
-  TextEditingController? _produceCaloriesController;
-  TextEditingController? _produceProteinsController;
-  TextEditingController? _produceCarbsController;
-  TextEditingController? _produceFatsController;
-  TextEditingController? _produceUnitGramsController;
-  TextEditingController? _produceSourceController;
-
-  // _profileCache, _profileCacheTimestamp removed
-
-  final GlobalKey<FormState> _produceFormKey = GlobalKey<FormState>();
-  // _profileFormKey removed
+  final GlobalKey<RefreshIndicatorState> _refreshIndicatorKey = GlobalKey<RefreshIndicatorState>();
 
   Timer? _pollingTimer;
   bool _isRefreshing = false; 
@@ -1061,14 +978,13 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
 
   late final NotificationProvider notificationProvider;
 
-  // Temp variable to store producer ID for stock updates, as _profile is removed.
+  // Temp variable to store producer ID for stock updates.
   int? _currentProducerId;
   
   // State for earnings tab
   List<ProducerPayment> _payments = [];
   bool _isLoadingPayments = false;
   bool _hasPaymentError = false;
-  // _error variable is already declared above
   
   // Fetch payments for the producer
   Future<void> _fetchPayments() async {
@@ -1142,7 +1058,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
-    // Profile text controllers removed
     notificationProvider = Provider.of<NotificationProvider>(context, listen: false);
     WidgetsBinding.instance.addObserver(this);
     _fetchAllData();
@@ -1190,8 +1105,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
   @override
   void dispose() {
     _pollingTimer?.cancel();
-    // Profile controllers removed
-    _disposeProduceEditControllers();
     notificationProvider.removeListener(_handleNotificationRefresh);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -1239,7 +1152,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     if (_currentIndex != 0 || !_isRouteActive) return; // Orders tab is now index 0
     _pollingTimer?.cancel();
     _pollingTimer = Timer.periodic(const Duration(seconds: 6), (timer) {
-      if (mounted && _currentIndex == 0 && _isRouteActive && !_isRefreshing && _editingProduceId == null) {
+      if (mounted && _currentIndex == 0 && _isRouteActive && !_isRefreshing) {
         print("[ProducerDash] Polling for new orders...");
         _fetchOrdersAndProduce(forceRefresh: false);
       } else if (!_isRouteActive || _currentIndex != 0) {
@@ -1249,50 +1162,96 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     print("[ProducerDash] Started polling for orders");
   }
 
-  void _disposeProduceEditControllers() {
-    _produceNameController?.dispose(); _produceCaloriesController?.dispose();
-    _produceProteinsController?.dispose(); _produceCarbsController?.dispose();
-    _produceFatsController?.dispose(); _produceUnitGramsController?.dispose();
-    _produceSourceController?.dispose();
-    _produceNameController = null; _produceCaloriesController = null;
-    _produceProteinsController = null; _produceCarbsController = null;
-    _produceFatsController = null; _produceUnitGramsController = null;
-    _produceSourceController = null;
-  }
-
   Future<void> _fetchAllData({bool forceRefresh = false}) async {
     if (!mounted || _isRefreshing) return;
     setState(() { _isLoading = true; _isRefreshing = true; _error = ''; });
-    if (forceRefresh) _cancelAllEdits();
 
     try {
-      // Fetch producer ID for stock updates
-      _currentProducerId = await ProducerApiService._getProducerIdInt(); 
-      // _initializeProducerProfile removed
+      _currentProducerId = await ProducerApiService._getProducerIdInt();
+      if (_currentProducerId == null) throw Exception('Producer ID not found');
 
-      await _fetchOrdersAndProduce(forceRefresh: forceRefresh);
-      if (mounted) {
-        // Sync stock selection after data is loaded
-        // This requires _profile to be loaded. Since profile is separate,
-        // stock syncing logic might need adjustment or be tied to when stock tab is active
-        // For now, it might not work as expected without profile directly available.
-        // Decision: Stock syncing will be implicitly handled by fetching profile in its own tab.
-        // This dashboard will manage its own produce list and selections,
-        // but the actual "current stock" on the profile object is managed in producer_profile.dart.
-        // If a producer updates stock here, it should still reflect on the profile, which means API should handle merging.
-      }
+      // Fetch orders, produce, and sync stock in parallel
+      await Future.wait([
+        _fetchOrdersAndProduce(forceRefresh: forceRefresh),
+        _syncStockFromProfile(),
+      ]);
+      
     } catch (e, stackTrace) {
       debugPrint("[ProducerDash] Error fetching all data: $e\n$stackTrace");
       if (mounted) {
         setState(() {
           _error = 'Failed to load data. Please check connection.';
-          _orders = []; _produce = []; _selectedProduceIds.clear(); _produceQuantities.clear();
+          _orders.clear();
+          _produce.clear();
+          _selectedProduceIds.clear();
+          _produceQuantities.clear();
         });
       }
     } finally {
       if (mounted) setState(() { _isLoading = false; _isRefreshing = false; });
     }
   }
+  
+  // --- FIXED: Fetch producer profile and sync stock selection ---
+  Future<void> _syncStockFromProfile() async {
+    if (_currentProducerId == null) {
+      debugPrint("[ProducerDash] Cannot sync stock: Producer ID is null.");
+      return;
+    }
+    
+    debugPrint("[ProducerDash] Syncing stock state from server for producer $_currentProducerId...");
+
+    try {
+      final uri = Uri.parse('${ProducerApiService._apibaseurl}/rr/rproducers/$_currentProducerId');
+      final response = await http.get(
+        uri,
+        headers: await ProducerApiService._getReadHeaders(requiresAuth: true),
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> responseBody = json.decode(response.body);
+        // Be defensive: check for a 'data' wrapper
+        final Map<String, dynamic> profileData = responseBody.containsKey('data') 
+            ? responseBody['data'] 
+            : responseBody;
+            
+        final List<dynamic>? stockList = profileData['stock'] as List<dynamic>?;
+
+        final Set<String> serverSelectedIds = {};
+        final Map<String, int> serverQuantities = {};
+
+        if (stockList != null && stockList.isNotEmpty) {
+          debugPrint("[ProducerDash] Found ${stockList.length} stock items in server profile.");
+          for (var stockItem in stockList) {
+            final String? produceId = stockItem['produce_id']?.toString();
+            if (produceId != null && produceId.isNotEmpty) {
+              serverSelectedIds.add(produceId);
+              serverQuantities[produceId] = _parseIntNullable(stockItem['quantity']) ?? 1;
+            }
+          }
+        } else {
+          debugPrint("[ProducerDash] No stock data found in server profile.");
+        }
+
+        // Directly set the state from the server data. This is the source of truth.
+        setState(() {
+          _selectedProduceIds = serverSelectedIds;
+          _produceQuantities = serverQuantities;
+        });
+        debugPrint("[ProducerDash] Stock state synchronized. Selected IDs: ${_selectedProduceIds.length}");
+
+      } else {
+        debugPrint("[ProducerDash] Failed to fetch profile for stock sync: ${response.statusCode} - ${response.body}");
+        _showErrorSnackBar('Could not sync current stock status.');
+      }
+    } catch (e, stackTrace) {
+      debugPrint("[ProducerDash] Error syncing stock from profile: $e\n$stackTrace");
+      if (mounted) _showErrorSnackBar('Error syncing stock status.');
+    }
+  }
+
 
   Future<void> _fetchOrdersAndProduce({bool forceRefresh = false}) async {
     print('[ProducerDash][DEBUG] Starting _fetchOrdersAndProduce. Force refresh: $forceRefresh');
@@ -1369,12 +1328,14 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
           print('[ProducerDash][CACHE] Updating UI with cached data');
           setState(() {
             if (ordersCacheValid && cachedOrdersData != null) { 
-              _orders = cachedOrdersData!; 
+              _orders.clear();
+              _orders.addAll(cachedOrdersData!);
               _sortOrders(); 
               print('[ProducerDash][CACHE] Updated ${_orders.length} orders in UI');
             }
             if (produceCacheValid && cachedProduceData != null) { 
-              _produce = cachedProduceData!; 
+              _produce.clear();
+              _produce.addAll(cachedProduceData!);
               _produce.sort((a,b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase()));
               print('[ProducerDash][CACHE] Updated ${_produce.length} products in UI');
             }
@@ -1406,8 +1367,10 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
         print('[ProducerDash][API] Fetched ${fetchedOrders.length} orders and ${fetchedProduce.length} products');
         
         setState(() {
-          _orders = fetchedOrders; 
-          _produce = fetchedProduce;
+          _orders.clear();
+          _orders.addAll(fetchedOrders);
+          _produce.clear();
+          _produce.addAll(fetchedProduce);
           _sortOrders(); 
           _produce.sort((a,b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase()));
           _isLoadingOrders = false; 
@@ -1454,27 +1417,25 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     }
   }
 
-  // _initializeProducerProfile, _fetchProducerProfileAndUpdate, _loadProfileCacheFromPrefs, _saveProfileCacheToPrefs, _updateControllersFromProfile removed
-
   void _sortOrders() {
+    // Update previous statuses when sorting
+    for (var order in _orders) {
+      _previousOrderStatuses[order.orderId] = order.orderStatus;
+    }
     _orders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
   }
-
-  void _syncSelectionFromProfile() {
-    // This method relied on _profile. Since _profile is gone from this file,
-    // this specific sync logic needs to be re-evaluated.
-    // For now, the selected IDs and quantities will be managed locally based on user interaction in the stock tab.
-    // The actual "truth" of the stock is on the server and reflected in the producer_profile.dart.
-    // When this dashboard updates stock, it calls the API.
-    // When producer_profile.dart loads, it fetches the latest stock from the API.
-    print("[ProducerDash] Stock sync from profile is now managed within producer_profile.dart.");
-    // If we still need to initialize _selectedProduceIds and _produceQuantities from *some* source on init,
-    // it would need to be from a dedicated API call or local cache if profile data isn't directly here.
-    // OR, if we want to retain the old stock values from a previous session on this dashboard itself:
-    // _loadStockSelectionFromCache(); // A new method to load _selectedProduceIds and _produceQuantities from UserCache.
-    // This is outside the scope of "just removing profile", so I'll leave it as is for now.
+  
+  // Check if an order status has changed to completed/delivered and refresh earnings if needed
+  void _checkAndRefreshEarningsOnStatusChange(int orderId, String newStatus) {
+    final previousStatus = _previousOrderStatuses[orderId];
+    final isNewlyCompleted = (newStatus == Order.STATUS_COMPLETED || newStatus == Order.STATUS_DELIVERED) &&
+        previousStatus != newStatus;
+    
+    if (isNewlyCompleted) {
+      print('[ProducerDash] Order $orderId status changed to $newStatus, refreshing earnings...');
+      _fetchPayments();
+    }
   }
-
 
   Future<void> _updateSimpleOrderStatus(Order order, String newStatus) async {
     print('[ProducerDash][DEBUG] Starting order status update. Order ID: ${order.orderId}, New Status: $newStatus');
@@ -1484,13 +1445,23 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
       return;
     }
     
-    if (mounted) ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    if (mounted) {
+      ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    }
     final originalStatus = _orders[orderIndex].orderStatus;
     final originalRiderId = _orders[orderIndex].assignedRiderId;
     final originalRiderName = _orders[orderIndex].assignedRiderName;
     
     print('[ProducerDash][DEBUG] Current status: $originalStatus, Will update to: $newStatus');
     
+    // Update previous status if not set
+    if (!_previousOrderStatuses.containsKey(order.orderId)) {
+      _previousOrderStatuses[order.orderId] = order.orderStatus;
+    }
+
+    // Check if we need to refresh earnings due to status change
+    _checkAndRefreshEarningsOnStatusChange(order.orderId, newStatus);
+
     // Update UI optimistically
     setState(() {
       _orders[orderIndex].orderStatus = newStatus;
@@ -1704,215 +1675,62 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     return index;
   }
 
-  // Profile edit handlers removed.
-
-  void _handleAddProduce() {
-    if (_editingProduceId != null || !mounted /*|| _isEditingProfile*/) return; // _isEditingProfile check removed
-    debugPrint('Add Produce Action Triggered');
-    final newId = 'TEMP_${DateTime.now().millisecondsSinceEpoch}';
-    final newProduct = Product(produceId: newId, produceName: '');
-    _initializeProduceEditControllers(newProduct); 
-    setState(() {
-      _produce.add(newProduct); 
-      _produce.sort((a,b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase()));
-      _editingProduceId = newId; 
-    });
-    _showInfoSnackbar('Fill in details for the new produce item.');
-  }
-
-  void _handleEditProduce(Product product) {
-    if (!mounted /*|| _isEditingProfile*/) return; // _isEditingProfile check removed
-    debugPrint('Edit Produce Action Triggered for ID: ${product.produceId}');
-    _cancelAllEdits(exceptProduceId: product.produceId); 
-    _initializeProduceEditControllers(product); 
-    setState(() => _editingProduceId = product.produceId); 
-  }
-
-  void _initializeProduceEditControllers(Product product) {
-    _produceNameController = TextEditingController(text: product.produceName);
-    _produceCaloriesController = TextEditingController(text: product.calories?.toString() ?? '');
-    _produceProteinsController = TextEditingController(text: product.proteins?.toStringAsFixed(1) ?? '');
-    _produceCarbsController = TextEditingController(text: product.carbohydrates?.toStringAsFixed(1) ?? '');
-    _produceFatsController = TextEditingController(text: product.fats?.toStringAsFixed(1) ?? '');
-    _produceUnitGramsController = TextEditingController(text: product.unitGrams?.toString() ?? '');
-    _produceSourceController = TextEditingController(text: product.source ?? '');
-  }
-
-  Future<void> _saveProduceChanges() async {
-    if (_editingProduceId == null || !mounted) return;
-    if (_produceFormKey.currentState?.validate() ?? false) {
-      final String idToSave = _editingProduceId!;
-      final int index = _produce.indexWhere((p) => p.produceId == idToSave);
-      if (index == -1) { _cancelProduceEdit(); return; }
-      final bool isNewItem = idToSave.startsWith('TEMP_');
-      Map<String, dynamic> payload = {
-        'produce_name': _produceNameController?.text.trim(), 'calories': _produceCaloriesController?.text.trim(),
-        'proteins': _produceProteinsController?.text.trim(), 'carbohydrates': _produceCarbsController?.text.trim(),
-        'fats': _produceFatsController?.text.trim(), 'unit_grams': _produceUnitGramsController?.text.trim(),
-        'source': _produceSourceController?.text.trim(),
-      };
-      debugPrint('Saving Produce Changes for ID: $idToSave (New: $isNewItem)');
-      _showLoadingSnackbar('Saving produce...');
-      try {
-        if (isNewItem) {
-          Product? addedProduct = await ProducerApiService.addProduce(payload);
-          _dismissLoadingSnackbar();
-          if (mounted) {
-            if (addedProduct != null) {
-              setState(() {
-                _produce.removeAt(index); _produce.add(addedProduct);
-                _produce.sort((a,b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase()));
-                _editingProduceId = null; _disposeProduceEditControllers();
-              });
-              _showSuccessSnackbar('Added "${addedProduct.produceName}".');
-            } else {
-              _showErrorSnackBar('Failed to add produce.');
-              setState(() { _produce.removeAt(index); _editingProduceId = null; _disposeProduceEditControllers(); });
-            }
-          }
-        } else {
-          bool success = await ProducerApiService.updateProduce(idToSave, payload);
-          _dismissLoadingSnackbar();
-          if (mounted) {
-            if (success) {
-              final updatedProduct = _produce[index].copyWith(
-                produceName: payload['produce_name'], calories: () => _parseIntNullable(payload['calories']),
-                proteins: () => _parseDoubleNullable(payload['proteins']), carbohydrates: () => _parseDoubleNullable(payload['carbohydrates']),
-                fats: () => _parseDoubleNullable(payload['fats']), unitGrams: () => _parseIntNullable(payload['unit_grams']),
-                source: () => payload['source'],
-              );
-              setState(() {
-                _produce[index] = updatedProduct;
-                _produce.sort((a,b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase()));
-                _editingProduceId = null; _disposeProduceEditControllers();
-              });
-              _showSuccessSnackbar('Updated "${updatedProduct.produceName}".');
-            } else {
-              _showErrorSnackBar('Failed to update "${payload['produce_name'] ?? 'produce'}".');
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint("Error saving produce via API: $e");
-        _dismissLoadingSnackbar();
-        if (mounted) {
-          _showErrorSnackBar('An error occurred saving produce: $e');
-          if (isNewItem) {
-            setState(() { _produce.removeAt(index); _editingProduceId = null; _disposeProduceEditControllers(); });
-          }
-        }
-      }
-    } else {
-      debugPrint('Produce form validation failed.');
-      _showSnackbar('Please fix errors in the produce form.', isError: true);
-    }
-  }
-
-  void _cancelProduceEdit() {
-    if (!mounted) return;
-    debugPrint('Cancel Produce Edit Action Triggered');
-    final String? idToCancel = _editingProduceId;
-    setState(() {
-      _editingProduceId = null; _disposeProduceEditControllers(); 
-      if (idToCancel != null && idToCancel.startsWith('TEMP_')) {
-        _produce.removeWhere((p) => p.produceId == idToCancel);
-        debugPrint("Removed temporary new produce item on cancel.");
-      }
-    });
-  }
-
-  // Fix method name typo and ensure it's used
-  void _handleProductDelete(Product product) async { 
-    if (!mounted || (_editingProduceId != null && _editingProduceId != product.produceId)) return;
-    debugPrint('Delete Produce Action Triggered for ID: ${product.produceId}');
-    if (product.produceId.startsWith('TEMP_')) { _cancelProduceEdit(); return; }
-    showDialog(context: context, builder: (BuildContext ctx) => AlertDialog(
-      backgroundColor: whiteColor.withOpacity(0.95), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
-      title: const Row(children: [Icon(Icons.warning_amber_rounded, color: errorColor), SizedBox(width: 10), Text('Confirm Deletion')]),
-      content: Text('Permanently delete "${product.produceName}" from the system?\nThis also removes it from your stock. This cannot be undone.', style: const TextStyle(color: subtleText)),
-      actions: <Widget>[
-        TextButton(style: TextButton.styleFrom(foregroundColor: subtleText), child: const Text('Cancel'), onPressed: () => Navigator.of(ctx).pop()),
-        ElevatedButton.icon(
-          icon: const Icon(Icons.delete_forever_outlined, size: 16), label: const Text('Delete'),
-          style: ElevatedButton.styleFrom(backgroundColor: destructiveButtonBackground, foregroundColor: destructiveButtonForeground, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-          onPressed: () { Navigator.of(ctx).pop(); _performDeleteProduce(product); },
-        ),
-      ],
-    ));
-  }
-
-  Future<void> _performDeleteProduce(Product product) async {
-    _showLoadingSnackbar('Deleting "${product.produceName}"...');
-    try {
-      bool success = await ProducerApiService.deleteProduce(product.produceId);
-      _dismissLoadingSnackbar();
-      if (mounted) {
-        if (success) {
-          final deletedName = product.produceName;
-          setState(() {
-            _produce.removeWhere((p) => p.produceId == product.produceId);
-            _selectedProduceIds.remove(product.produceId); _produceQuantities.remove(product.produceId);
-            if (_editingProduceId == product.produceId) { _editingProduceId = null; _disposeProduceEditControllers(); }
-          });
-          _showSuccessSnackbar('Deleted "$deletedName".');
-        } else {
-          _showErrorSnackBar('Failed to delete "${product.produceName}".');
-        }
-      }
-    } catch (e) {
-      debugPrint("Error deleting produce via API: $e");
-      _dismissLoadingSnackbar();
-      if (mounted) _showErrorSnackBar('An error occurred deleting: $e');
-    }
-  }
+  // --- REMOVED METHODS ---
+  // All methods for adding, editing, deleting, and managing the form for produce items have been removed.
+  // This includes: _handleAddProduce, _handleEditProduce, _saveProduceChanges, _cancelProduceEdit, _handleProductDelete,
+  // _performDeleteProduce, _initializeProduceEditControllers, _disposeProduceEditControllers, and _cancelAllEdits.
+  // --- END REMOVED METHODS ---
 
   Future<void> _updateProducerStock() async {
-    if (_currentProducerId == null) { // Check _currentProducerId instead of _profile
+    if (!mounted) return;
+  
+    if (_currentProducerId == null) {
       _showErrorSnackBar('Producer ID not loaded. Cannot update stock.');
       return;
     }
-    final stockList = _selectedProduceIds.map((id) {
-      final quantity = _produceQuantities[id];
-      if (quantity != null && quantity >= 0) return {'produce_id': id, 'quantity': quantity};
-      return null;
-    }).whereType<Map<String, dynamic>>().toList();
-    _showLoadingSnackbar('Updating stock...');
+  
+    // Create stock list with both name and produce_id
+    final List<Map<String, dynamic>> stockList = _selectedProduceIds.map<Map<String, dynamic>?>((String id) {
+      try {
+        final product = _produce.firstWhere((p) => p.produceId == id);
+        final quantity = _produceQuantities[id] ?? 1; // Default to 1 if not set
+        return <String, dynamic>{
+          'Name': product.produceName,  // Add the produce name
+          'produce_id': id,
+          'quantity': quantity,
+        };
+      } catch (e) {
+        return null;
+      }
+    }).where((item) => item != null).map((item) => item!).toList();
+  
+    if (stockList.isEmpty) {
+      if (mounted) _showErrorSnackBar('No valid stock items selected.');
+      return;
+    }
+  
+    if (mounted) _showLoadingSnackbar('Updating stock...');
+  
     try {
-      bool success = await ProducerApiService.updateProducerStock(_currentProducerId!, stockList); // Use _currentProducerId
+      bool success = await ProducerApiService.updateProducerStock(_currentProducerId!, stockList);
+    
+      if (!mounted) return;
       _dismissLoadingSnackbar();
-      if (mounted) {
-        if (success) {
-          _showSuccessSnackbar('Stock updated successfully.');
-          // Refreshing the local produce/orders list. Profile refresh is handled by its own tab.
-          await _fetchOrdersAndProduce(forceRefresh: true); 
-        } else {
-          _showErrorSnackBar('Failed to update stock. Please try again.');
-        }
+    
+      if (success) {
+        _showSuccessSnackbar('Stock updated successfully.');
+        // Refresh data to confirm sync
+        await _syncStockFromProfile();
+      } else {
+        _showErrorSnackBar('Failed to update stock. Please try again.');
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('Error in _updateProducerStock: $e\n$stackTrace');
+      if (!mounted) return;
       _dismissLoadingSnackbar();
-      if (mounted) _showErrorSnackBar('Error connecting to server: $e');
-      print("Exception updating stock: $e");
-    }
+      _showErrorSnackBar('Error: ${e.toString()}');
+    }  
   }
-
-  void _cancelAllEdits({String? exceptProduceId}) {
-    if (!mounted) return;
-    bool didCancel = false;
-    // _isEditingProfile check removed
-    if (_editingProduceId != null && _editingProduceId != exceptProduceId) {
-      final idToCancel = _editingProduceId;
-      _editingProduceId = null; _disposeProduceEditControllers();
-      if (idToCancel != null && idToCancel.startsWith('TEMP_')) {
-        _produce.removeWhere((p) => p.produceId == idToCancel);
-        debugPrint("Removed temporary produce item due to action/switch.");
-      }
-      didCancel = true;
-    }
-    if (didCancel) { setState(() {}); debugPrint("Cancelled active edits due to action/switch."); }
-  }
-
-  // _getCurrentLocation moved to producer_profile.dart
 
   void _showSnackbar(String message, {bool isError = false, int durationSeconds = 3}) {
     if (!mounted) return;
@@ -1967,7 +1785,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
 
   @override
   Widget build(BuildContext context) {
-    // AppBar avatar logic removed as _profile is no longer here.
     return Scaffold(
       drawer: drawer.AppDrawer(invokedBy: 'producer_dashboard'),
       backgroundColor: Colors.grey[100], 
@@ -1995,7 +1812,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
         currentIndex: _currentIndex,
         onTap: (index) {
           if (index != _currentIndex && mounted) {
-            _cancelAllEdits(); 
             setState(() => _currentIndex = index);
             _onTabChanged(index); 
           }
@@ -2010,14 +1826,10 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
           _buildBottomNavItem(Icons.inventory_2_outlined, Icons.inventory_2, 'Stock', 2),
         ],
       ),
-      floatingActionButton: _buildFloatingActionButton(),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
   BottomNavigationBarItem _buildBottomNavItem(IconData icon, IconData activeIcon, String label, int index) {
-    // Adjust index mapping if necessary due to profile tab removal. 
-    // The `index` parameter here refers to the new, 0-based index of the remaining tabs.
     bool isSelected = _currentIndex == index;
     return BottomNavigationBarItem(
       icon: _buildNavItemIcon(isSelected ? activeIcon : icon, isSelected), label: label,
@@ -2031,51 +1843,20 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
 
   String _getAppBarTitle() {
     switch (_currentIndex) {
-      // Case 0 for Profile removed
-      case 0: return 'Manage Orders'; // Was index 1
+      case 0: return 'Manage Orders';
       case 1: return 'Earnings';
-      case 2: // Was index 2
-        return _editingProduceId != null
-            ? (_editingProduceId!.startsWith("TEMP_") ? 'Add Produce Item' : 'Edit Produce Item')
-            : 'Manage Stock & Produce';
+      case 2: return 'Manage Stock';
       default: return 'Producer Dashboard';
     }
   }
 
-  Widget? _buildFloatingActionButton() {
-    if (/*_isEditingProfile ||*/ _editingProduceId != null) return null; // _isEditingProfile check removed
-
-    switch (_currentIndex) {
-      // Case 0 for Profile FAB removed
-      case 0: return null; // Orders Tab (was index 1)
-      case 1: return null; // Earnings Tab
-      case 2: // Produce/Stock Tab (was index 2)
-        if (_selectedProduceIds.isNotEmpty) {
-          return FloatingActionButton.extended(
-            onPressed: _updateProducerStock, tooltip: 'Update Stock Levels',
-            icon: const Icon(Icons.update), label: const Text("Update Stock"),
-            backgroundColor: darkTeal, foregroundColor: textOnTeal, heroTag: 'fab_stock_update',
-          );
-        } else {
-          return FloatingActionButton(
-            onPressed: _handleAddProduce, tooltip: 'Add New Produce Item',
-            backgroundColor: primaryTeal, foregroundColor: textOnTeal,
-            child: const Icon(Icons.add), heroTag: 'fab_produce_add',
-          );
-        }
-      default: return null;
-    }
-  }
-
   Widget _buildBodyContent() {
-    if (_isLoading && /*_profile == null &&*/ _orders.isEmpty && _produce.isEmpty && _error.isEmpty /*&& _profileFetchError.isEmpty*/) {
-      // _profile and _profileFetchError checks removed
+    if (_isLoading && _orders.isEmpty && _produce.isEmpty && _error.isEmpty) {
       return const Center(child: CircularProgressIndicator(color: primaryTeal));
     }
-    if (_error.isNotEmpty /*&& _profile == null*/) { // _profile check removed
+    if (_error.isNotEmpty) {
       return _buildErrorView();
     }
-    // _profileFetchError check removed
 
     return IndexedStack(
       index: _currentIndex,
@@ -2093,7 +1874,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
       print('[EarningsTab] Triggering initial payments fetch');
       WidgetsBinding.instance.addPostFrameCallback((_) {
         print('[EarningsTab] Post-frame callback: fetching payments');
-        _fetchPayments();
+        if (mounted) _fetchPayments();
       });
     } else {
       print('[EarningsTab] Not fetching payments - ' 
@@ -2215,12 +1996,15 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
           ),
           const SizedBox(height: 16),
           // All Earnings History
-          Text(
-            'Payment History',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: textOnWhite,
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 8.0),
+            child: Text(
+              'Payment History',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: textOnWhite,
+              ),
             ),
           ),
           const SizedBox(height: 12),
@@ -2315,7 +2099,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
             ElevatedButton.icon(
               icon: const Icon(Icons.refresh, size: 16),
               label: const Text('Refresh'),
-              onPressed: () => _fetchPayments(),
+              onPressed: () => _currentIndex == 1 ? _fetchPayments() : _fetchAllData(forceRefresh: true),
               style: ElevatedButton.styleFrom(
                 backgroundColor: primaryTeal,
                 foregroundColor: textOnTeal,
@@ -2350,36 +2134,110 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     )));
   }
 
-  // _buildProfileTab, _buildProfileErrorView, _buildProfileDisplayView, _buildProfileEditView, 
-  // _buildProfileSectionCard, _buildDetailItem (profile version), _buildEditableItem (profile version) removed.
+  Widget _buildFilterChips() {
+    const List<String> statusOptions = [
+      'All', 'Pending', 'Accepted', 'Assigned', 'Picked Up', 'Verification Needed',
+      'Completed', 'Delivered', 'Cancelled', 'Ready for Pickup', 
+      'Out for Delivery'
+    ];
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: statusOptions.map((status) {
+          final isSelected = _selectedStatusFilter == status;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: ChoiceChip(
+              label: Text(status),
+              selected: isSelected,
+              onSelected: (selected) {
+                if (selected) {
+                  setState(() {
+                    _selectedStatusFilter = status;
+                  });
+                }
+              },
+              backgroundColor: Colors.white,
+              selectedColor: faintLightTeal,
+              labelStyle: TextStyle(
+                fontSize: 13,
+                color: isSelected ? darkTeal : subtleText,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20.0),
+                side: BorderSide(
+                  color: isSelected ? primaryTeal.withOpacity(0.7) : Colors.grey.shade300,
+                  width: 1,
+                ),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0),
+              showCheckmark: false,
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
 
   Widget _buildOrdersTab() {
     if (_isLoadingOrders && _orders.isEmpty) {
       return const Center(child: CircularProgressIndicator(color: primaryTeal));
     }
-    if (_error.isNotEmpty /*&& _profileFetchError.isEmpty*/ && _orders.isEmpty) { // _profileFetchError check removed
+    if (_error.isNotEmpty && _orders.isEmpty) {
       return _buildErrorView();
     }
+
+    final List<Order> filteredOrders;
+    if (_selectedStatusFilter == 'All') {
+      filteredOrders = _orders;
+    } else if (_selectedStatusFilter == 'Delivered' || _selectedStatusFilter == 'Completed') {
+      // Show both 'Delivered' and 'Completed' orders for either filter
+      filteredOrders = _orders
+          .where((order) =>
+              order.orderStatus.toLowerCase() == 'delivered' ||
+              order.orderStatus.toLowerCase() == 'completed')
+          .toList();
+    } else {
+      // Standard filtering for other statuses
+      filteredOrders = _orders
+          .where((order) =>
+              order.orderStatus.toLowerCase() == _selectedStatusFilter.toLowerCase())
+          .toList();
+    }
+
     return RefreshIndicator(
-      onRefresh: () => _fetchAllData(forceRefresh: true), color: primaryTeal,
+      onRefresh: () => _fetchAllData(forceRefresh: true),
+      color: primaryTeal,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 80.0), physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 80.0),
+        physics: const AlwaysScrollableScrollPhysics(),
         children: [
-          if (_orders.isNotEmpty) _buildOrdersListSection()
-          else if (!_isLoadingOrders && _error.isEmpty) 
-            _buildEmptyState('No Orders Yet', 'New customer orders will appear here.', icon: Icons.receipt_long_outlined)
-          else if (_error.isNotEmpty && _orders.isEmpty) _buildErrorView()
+          _buildFilterChips(),
+          const SizedBox(height: 16.0),
+          if (filteredOrders.isNotEmpty)
+            _buildOrdersListSection(filteredOrders)
+          else if (!_isLoadingOrders && _error.isEmpty)
+            _buildEmptyState(
+                'No Orders Found', 
+                'No orders match the filter "$_selectedStatusFilter".',
+                icon: Icons.filter_alt_off_outlined)
+          else if (_error.isNotEmpty && filteredOrders.isEmpty)
+            _buildErrorView()
         ],
       ),
     );
   }
 
-  Widget _buildOrdersListSection() {
+  Widget _buildOrdersListSection(List<Order> ordersToDisplay) {
     return ListView.builder(
-      shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), itemCount: _orders.length,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: ordersToDisplay.length,
       itemBuilder: (context, index) => Padding(
-        padding: EdgeInsets.only(bottom: (index == _orders.length - 1) ? 0 : 12.0),
-        child: _buildOrderItem(_orders[index]),
+        padding: EdgeInsets.only(bottom: (index == ordersToDisplay.length - 1) ? 0 : 12.0),
+        child: _buildOrderItem(ordersToDisplay[index]),
       ),
     );
   }
@@ -2535,16 +2393,46 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
   Widget _buildOrderActions(Order order) {
     List<Widget> buttons = [];
     String status = order.orderStatus;
-    bool canCancel = ![Order.STATUS_DELIVERED.toLowerCase(), Order.STATUS_COMPLETED.toLowerCase(), Order.STATUS_CANCELLED.toLowerCase(), Order.STATUS_OUT_FOR_DELIVERY.toLowerCase(), Order.STATUS_DISPATCHED.toLowerCase()].contains(status.toLowerCase());
-    if (canCancel) buttons.add(_actionButton('Cancel', () => _showRejectConfirmation(order), isDestructive: true));
+    bool canCancel = ![
+      Order.STATUS_DELIVERED.toLowerCase(), 
+      Order.STATUS_COMPLETED.toLowerCase(), 
+      Order.STATUS_CANCELLED.toLowerCase(), 
+      Order.STATUS_OUT_FOR_DELIVERY.toLowerCase(), 
+      Order.STATUS_DISPATCHED.toLowerCase(),
+      'picked up',
+      'verification needed'
+    ].contains(status.toLowerCase());
+    
+    if (canCancel) {
+      buttons.add(_actionButton('Cancel', () => _showRejectConfirmation(order), isDestructive: true));
+    } else if (status.toLowerCase() == 'verification needed') {
+      buttons.add(Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8.0), 
+        child: Text("Needs verification from rider or user", style: TextStyle(fontSize: 12, color: Colors.teal[700], fontWeight: FontWeight.w500))
+      ));
+    }
 
     switch (status.toLowerCase()) {
-      case 'pending': buttons.add(_actionButton('Accept', () => _updateSimpleOrderStatus(order, 'accepted'))); break;
-      case 'accepted': case 'preparing': buttons.add(_actionButton('Ready / Assign', () => _handleReadyForShipping(order), isPrimary: true)); break;
+      case 'pending': 
+        buttons.add(_actionButton('Accept', () => _updateSimpleOrderStatus(order, 'accepted'))); 
+        break;
+      case 'accepted': 
+      case 'preparing': 
+        buttons.add(_actionButton('Ready / Assign', () => _handleReadyForShipping(order), isPrimary: true)); 
+        break;
       case 'ready for pickup': 
-        buttons.add(const Padding(padding: EdgeInsets.symmetric(vertical: 8.0), child: Text("Waiting for rider...", style: TextStyle(fontSize: 12, color: subtleText, fontStyle: FontStyle.italic))));
-        buttons.add(_actionButton('Assign Specific', () => _handleReadyForShipping(order))); break;
-      case 'assigned': buttons.add(Padding(padding: const EdgeInsets.symmetric(vertical: 8.0), child: Text("Rider Assigned", style: TextStyle(fontSize: 12, color: assignedColor, fontWeight: FontWeight.w500)))); break;
+        buttons.add(const Padding(
+          padding: EdgeInsets.symmetric(vertical: 8.0), 
+          child: Text("Waiting for rider...", style: TextStyle(fontSize: 12, color: subtleText, fontStyle: FontStyle.italic))
+        ));
+        buttons.add(_actionButton('Assign Specific', () => _handleReadyForShipping(order))); 
+        break;
+      case 'assigned': 
+        buttons.add(Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0), 
+          child: Text("Rider Assigned", style: TextStyle(fontSize: 12, color: assignedColor, fontWeight: FontWeight.w500))
+        )); 
+        break;
     }
     if (buttons.isEmpty) return const SizedBox.shrink();
     return Wrap(spacing: 8.0, runSpacing: 8.0, alignment: WrapAlignment.end, children: buttons);
@@ -2561,157 +2449,142 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     );
   }
 
+  // --- FIXED: Refactored Produce Tab with Persistent Button ---
   Widget _buildProduceTab() {
     if (_isLoadingProduce && _produce.isEmpty) {
       return const Center(child: CircularProgressIndicator(color: primaryTeal));
     }
-    if (_error.isNotEmpty /*&& _profileFetchError.isEmpty*/ && _produce.isEmpty) { // _profileFetchError check removed
+    if (_error.isNotEmpty && _produce.isEmpty) {
       return _buildErrorView();
     }
-    return RefreshIndicator(
-      onRefresh: () => _fetchAllData(forceRefresh: true), color: primaryTeal,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 80.0), physics: const AlwaysScrollableScrollPhysics(),
-        children: [
-          if (_editingProduceId != null) _buildProduceEditSection() else _buildStockSelectionSection(),
-          if (_editingProduceId != null) const SizedBox(height: 100),
-        ],
-      ),
+    
+    // Use a Stack to layer the scrollable list and the persistent button
+    return Stack(
+      children: [
+        RefreshIndicator(
+          key: _refreshIndicatorKey,
+          onRefresh: () => _fetchAllData(forceRefresh: true),
+          color: primaryTeal,
+          child: ListView(
+            // Add padding at the bottom to ensure the last item is not hidden by the button
+            padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 100.0),
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [
+              _buildStockSelectionSection(),
+            ],
+          ),
+        ),
+        
+        // The persistent button at the bottom, only visible if stock is selected
+        if (_selectedProduceIds.isNotEmpty)
+          Positioned(
+            bottom: 16,
+            left: 16,
+            right: 16,
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _updateProducerStock,
+                icon: const Icon(Icons.update, size: 20),
+                label: const Text('UPDATE STOCK', style: TextStyle(letterSpacing: 0.5, fontWeight: FontWeight.bold)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primaryTeal,
+                  foregroundColor: textOnTeal,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 4,
+                  shadowColor: Colors.black.withOpacity(0.5),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
   Widget _buildStockSelectionSection() {
     if (_produce.isEmpty && !_isLoadingProduce && _error.isEmpty) {
-      return _buildEmptyState('No Produce Items Found', 'Tap the (+) button below to add the first produce item.', icon: Icons.eco_outlined);
+      return _buildEmptyState('No Produce Items Found', 'No produce items available to manage stock.', icon: Icons.eco_outlined);
     }
     if (_error.isNotEmpty && _produce.isEmpty) return _buildErrorView();
     return _buildProduceListForStock();
   }
 
-  Widget _buildProduceEditSection() {
-    if (_editingProduceId == null) return const SizedBox.shrink();
-    final productToEdit = _produce.firstWhere((p) => p.produceId == _editingProduceId, orElse: () {
-      print("Error: Product with ID $_editingProduceId not found for editing.");
-      WidgetsBinding.instance.addPostFrameCallback((_) => _cancelProduceEdit());
-      return Product(produceId: 'invalid', produceName: 'Error');
-    });
-    if (productToEdit.produceId == 'invalid') return const SizedBox.shrink();
-    return _buildProduceEditForm(productToEdit);
-  }
-
+  // --- FIXED: This widget now ONLY builds the list, not the button ---
   Widget _buildProduceListForStock() {
     final availableProduce = _produce.where((p) => !p.produceId.startsWith('TEMP_')).toList();
     if (availableProduce.isEmpty && !_isLoadingProduce && _error.isEmpty) {
-      return _buildEmptyState("No Produce Items Defined", "Add produce items using the (+) button first.", icon: Icons.inventory_2_outlined);
+      return _buildEmptyState("No Produce Items", "No produce items available to manage stock.", icon: Icons.inventory_2_outlined);
     }
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Padding(padding: const EdgeInsets.only(bottom: 12.0), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        const Text("Select Available Stock", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: darkTeal)),
-        if (_selectedProduceIds.isNotEmpty) TextButton(onPressed: () => setState(() { _selectedProduceIds.clear(); _produceQuantities.clear(); }), child: const Text("Clear All", style: TextStyle(fontSize: 12, color: subtleText))),
-      ])),
-      Card(
-        elevation: 1.5, color: whiteColor.withOpacity(0.9), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)),
-        child: Padding(padding: const EdgeInsets.symmetric(vertical: 8.0), child: ListView.builder(
-          shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), itemCount: availableProduce.length,
-          itemBuilder: (context, index) {
-            final product = availableProduce[index]; final bool isSelected = _selectedProduceIds.contains(product.produceId);
-            return Column(children: [
-              CheckboxListTile(
-                title: Text(product.produceName, style: const TextStyle(fontSize: 14, color: textOnWhite)),
-                subtitle: product.unitGrams != null ? Text("${product.calories ?? '-'} kcal / ${product.unitGrams}g", style: const TextStyle(fontSize: 11, color: subtleText)) : null,
-                value: isSelected,
-                onChanged: (bool? selected) => setState(() {
-                  if (selected == true) { _selectedProduceIds.add(product.produceId); _produceQuantities.putIfAbsent(product.produceId, () => 1); }
-                  else { _selectedProduceIds.remove(product.produceId); _produceQuantities.remove(product.produceId); }
-                }),
-                controlAffinity: ListTileControlAffinity.leading, dense: true, activeColor: primaryTeal,
-                secondary: IconButton(icon: Icon(Icons.edit_note_outlined, size: 20, color: subtleText), tooltip: 'Edit Produce Item Details', onPressed: () => _handleEditProduce(product)),
-              ),
-              if (isSelected) Padding(padding: const EdgeInsets.only(left: 56.0, right: 16.0, bottom: 12.0), child: Row(children: [
-                const Text("Quantity:", style: TextStyle(fontSize: 13, color: subtleText)), const SizedBox(width: 12),
-                SizedBox(width: 80, height: 40, child: TextFormField(
-                  key: ValueKey(product.produceId), initialValue: _produceQuantities[product.produceId]?.toString() ?? '1',
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 10), border: OutlineInputBorder(), hintText: "0", hintStyle: TextStyle(fontSize: 13)),
-                  style: const TextStyle(fontSize: 14, color: textOnWhite), inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  onChanged: (val) => setState(() { final parsed = int.tryParse(val) ?? 0; _produceQuantities[product.produceId] = parsed >= 0 ? parsed : 0; }),
-                  validator: (v) => (v == null || v.isEmpty || (int.tryParse(v) ?? -1) < 0) ? 'Invalid' : null,
-                  autovalidateMode: AutovalidateMode.onUserInteraction,
-                )),
-                const Spacer(),
-              ])),
-              if (index < availableProduce.length - 1) Divider(height: 1, thickness: 0.5, indent: 16, endIndent: 16, color: dividerColor.withOpacity(0.5)),
-            ]);
-          },
-        )),
-      ),
-    ]);
-  }
-
-  Widget _buildProduceEditForm(Product product) {
-    final bool isNewItem = product.produceId.startsWith('TEMP_');
-    return Card(
-      elevation: 3.0, color: whiteColor.withOpacity(0.98),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0), side: const BorderSide(color: primaryTeal, width: 1.5)),
-      margin: const EdgeInsets.only(bottom: 16.0),
-      child: Padding(padding: const EdgeInsets.all(16.0), child: Form(key: _produceFormKey, child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(isNewItem ? 'Add New Produce Item' : 'Edit "${product.produceName}"', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: darkTeal)),
-          const SizedBox(height: 16),
-          TextFormField(controller: _produceNameController, decoration: _inputDecoration('Produce Name *'), style: const TextStyle(fontSize: 14, color: textOnWhite), validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null, autovalidateMode: AutovalidateMode.onUserInteraction),
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(child: TextFormField(controller: _produceCaloriesController, decoration: _inputDecoration('Calories (kcal)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], validator: _validateOptionalNumber, autovalidateMode: AutovalidateMode.onUserInteraction)),
-            const SizedBox(width: 10),
-            Expanded(child: TextFormField(controller: _produceUnitGramsController, decoration: _inputDecoration('Unit (g)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], validator: _validateOptionalNumber, autovalidateMode: AutovalidateMode.onUserInteraction)),
-          ]),
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(child: TextFormField(controller: _produceProteinsController, decoration: _inputDecoration('Proteins (g)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: const TextInputType.numberWithOptions(decimal: true), inputFormatters: [_decimalInputFormatter(1)], validator: _validateOptionalNumber, autovalidateMode: AutovalidateMode.onUserInteraction)),
-            const SizedBox(width: 10),
-            Expanded(child: TextFormField(controller: _produceCarbsController, decoration: _inputDecoration('Carbs (g)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: const TextInputType.numberWithOptions(decimal: true), inputFormatters: [_decimalInputFormatter(1)], validator: _validateOptionalNumber, autovalidateMode: AutovalidateMode.onUserInteraction)),
-            const SizedBox(width: 10),
-            Expanded(child: TextFormField(controller: _produceFatsController, decoration: _inputDecoration('Fats (g)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: const TextInputType.numberWithOptions(decimal: true), inputFormatters: [_decimalInputFormatter(1)], validator: _validateOptionalNumber, autovalidateMode: AutovalidateMode.onUserInteraction)),
-          ]),
-          const SizedBox(height: 12),
-          TextFormField(controller: _produceSourceController, decoration: _inputDecoration('Source URL (optional)'), style: const TextStyle(fontSize: 14, color: textOnWhite), keyboardType: TextInputType.url, maxLines: 1, validator: (v) => (v != null && v.isNotEmpty && (Uri.tryParse(v) == null || !Uri.tryParse(v)!.isAbsolute)) ? 'Invalid URL' : null, autovalidateMode: AutovalidateMode.onUserInteraction),
-          const SizedBox(height: 20),
-          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-            const Spacer(),
-            TextButton(onPressed: _cancelProduceEdit, child: const Text('Cancel', style: TextStyle(color: subtleText)), style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8))),
-            const SizedBox(width: 12),
-            ElevatedButton.icon(icon: const Icon(Icons.save_outlined, size: 18), label: Text(isNewItem ? 'Add Item' : 'Save Changes'), style: ElevatedButton.styleFrom(backgroundColor: primaryTeal, foregroundColor: textOnTeal, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))), onPressed: _saveProduceChanges),
-          ]),
-        ],
-      ))),
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(bottom: 12.0, left: 8.0, right: 8.0),
+          child: Text("Toggle Items in Stock", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: darkTeal)),
+        ),
+        Card(
+          elevation: 1.5,
+          color: whiteColor.withOpacity(0.9),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)),
+          child: ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: availableProduce.length,
+            itemBuilder: (context, index) {
+              final product = availableProduce[index];
+              final bool isInStock = _selectedProduceIds.contains(product.produceId);
+              
+              return Column(
+                children: [
+                  SwitchListTile(
+                    title: Text(
+                      product.produceName,
+                      style: const TextStyle(fontSize: 14, color: textOnWhite, fontWeight: FontWeight.w500),
+                    ),
+                    subtitle: Text(
+                      isInStock ? 'In Stock (Qty: ${_produceQuantities[product.produceId] ?? 1})' : 'Out of Stock',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isInStock ? Colors.green.shade700 : subtleText,
+                      ),
+                    ),
+                    value: isInStock,
+                    onChanged: (bool value) {
+                      setState(() {
+                        if (value) {
+                          _selectedProduceIds.add(product.produceId);
+                          _produceQuantities[product.produceId] = 1; // Default quantity of 1 on toggle
+                        } else {
+                          _selectedProduceIds.remove(product.produceId);
+                          _produceQuantities.remove(product.produceId);
+                        }
+                      });
+                    },
+                    activeColor: primaryTeal,
+                    dense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  ),
+                  if (index < availableProduce.length - 1)
+                    Divider(
+                      height: 1,
+                      thickness: 0.5,
+                      indent: 16,
+                      endIndent: 16,
+                      color: dividerColor.withOpacity(0.5),
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+        // The update button is no longer here.
+      ],
     );
   }
-
-  InputDecoration _inputDecoration(String label) {
-    return InputDecoration(
-      labelText: label, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0)),
-      contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10), isDense: true,
-      labelStyle: const TextStyle(color: subtleText, fontSize: 13), floatingLabelStyle: const TextStyle(color: primaryTeal),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0), borderSide: const BorderSide(color: primaryTeal, width: 1.5)),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0), borderSide: BorderSide(color: dividerColor.withOpacity(0.8))),
-      errorStyle: const TextStyle(fontSize: 11, color: errorColor),
-    );
-  }
-
-  String? _validateOptionalNumber(String? value) {
-    if (value != null && value.isNotEmpty) {
-      if (double.tryParse(value) == null) return 'Invalid #';
-      if (double.parse(value) < 0) return '>= 0';
-    }
-    return null;
-  }
-
-  TextInputFormatter _decimalInputFormatter(int decimalPlaces) {
-    String dp = decimalPlaces > 0 ? '{0,$decimalPlaces}' : '';
-    return FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d' + dp));
-  }
-
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {

@@ -1,3 +1,4 @@
+//cspell:disable
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Keep for other potential uses like clipboard
 import 'package:http/http.dart' as http;

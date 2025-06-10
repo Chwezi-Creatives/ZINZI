@@ -1,4 +1,4 @@
-
+//cspell:disable
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -902,11 +902,12 @@ class ChefDash88new extends StatelessWidget {
             unselectedLabelStyle: TextStyle(fontWeight: FontWeight.w500),
           ),
           cardTheme: CardTheme(
-            elevation: 1.5,
+            elevation: 0, // Set elevation to 0 for a flat look
             margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: Colors.teal.shade50, width: 0.5),
+              // Add a thin, teal border
+              side: const BorderSide(color: lightTeal, width: 1.0),
             ),
             color: cardBackgroundColor,
           ),
@@ -1228,7 +1229,7 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen>
           tabs: const [
             Tab(icon: Icon(Icons.receipt_long_outlined), text: 'Orders'),
             Tab(icon: Icon(Icons.work_outline_rounded), text: 'Gigs'),
-            Tab(icon: Icon(Icons.restaurant_menu_outlined), text: 'Menu'),
+            Tab(icon: Icon(Icons.restaurant_menu_outlined), text: 'Menu/Stock'),
             Tab(icon: Icon(Icons.attach_money_outlined), text: 'Earnings'),
           ],
         ),
@@ -1280,14 +1281,15 @@ class _OrdersTabState extends State<OrdersTab>
     'All',
     statusPending,
     statusAccepted,
+    statusAssigned,
+    'Picked Up',
+    statusVerificationNeeded,
+    statusDelivered,
+    statusCompleted,
+    statusCancelled,
     statusPreparing,
     statusReadyForPickup,
-    statusAssigned,
     statusOutForDelivery,
-    statusDelivered,
-    statusCancelled,
-    statusVerificationNeeded,
-    statusCompleted,
   ];
 
   Timer? _ordersPollingTimer;
@@ -1330,13 +1332,22 @@ class _OrdersTabState extends State<OrdersTab>
 
   @override
   void dispose() {
-    final route = ModalRoute.of(context);
-    if (route != null) {
-      RouteObserver<PageRoute>? routeObserver =
-          context.findAncestorStateOfType<_ChefDashboardScreenState>()?._routeObserver;
-      routeObserver?.unsubscribe(this);
-    }
+    // Cancel any active polling timers
     _ordersPollingTimer?.cancel();
+    _ordersPollingTimer = null;
+    
+    // Unsubscribe from route observer
+    final route = ModalRoute.of(context);
+    if (route != null && context.mounted) {
+      final routeObserver = context.findAncestorStateOfType<_ChefDashboardScreenState>()?._routeObserver;
+      if (routeObserver != null) {
+        routeObserver.unsubscribe(this);
+      }
+    }
+    
+    // Clear any pending operations
+    _isRouteActive = false;
+    
     super.dispose();
   }
 
@@ -2205,13 +2216,17 @@ class _OrdersTabState extends State<OrdersTab>
     final canReject = currentStatus != statusDelivered.toLowerCase() &&
         currentStatus != statusCompleted.toLowerCase() &&
         currentStatus != statusCancelled.toLowerCase() &&
-        currentStatus != statusOutForDelivery.toLowerCase();
-    final canMarkDelivered = (currentStatus ==
-                statusOutForDelivery.toLowerCase() ||
+        currentStatus != statusOutForDelivery.toLowerCase() &&
+        currentStatus != statusAssigned.toLowerCase() &&
+        currentStatus != 'picked up' &&
+        order.assignedRiderId == null;
+    final canMarkDelivered = (currentStatus == statusOutForDelivery.toLowerCase() ||
             currentStatus == statusAssigned.toLowerCase() ||
             currentStatus == statusReadyForPickup.toLowerCase()) &&
         currentStatus != statusDelivered.toLowerCase() &&
-        currentStatus != statusCompleted.toLowerCase();
+        currentStatus != statusCompleted.toLowerCase() &&
+        order.orderStatus.toLowerCase() != statusDelivered.toLowerCase() &&
+        order.orderStatus.toLowerCase() != statusCompleted.toLowerCase();
     final canMarkCompleted = (currentStatus == statusDelivered.toLowerCase() ||
             currentStatus == statusOutForDelivery.toLowerCase()) &&
         currentStatus != statusCompleted.toLowerCase();
@@ -2242,7 +2257,7 @@ class _OrdersTabState extends State<OrdersTab>
             if (canMarkDelivered)
               TextButton.icon(
                   icon: const Icon(Icons.check_circle_rounded, size: 18),
-                  label: const Text('Mark Delivered'),
+                  label: const Text('Mark Complete / Delivered'),
                   style:
                       TextButton.styleFrom(foregroundColor: Colors.green.shade700),
                   onPressed: () =>
@@ -2250,7 +2265,7 @@ class _OrdersTabState extends State<OrdersTab>
             if (canMarkCompleted)
               TextButton.icon(
                   icon: const Icon(Icons.assignment_turned_in_outlined, size: 18),
-                  label: const Text('Mark Completed'),
+                  label: const Text('Mark Completed / Delivered'),
                   style: TextButton.styleFrom(
                       foregroundColor: Colors.blue.shade700),
                   onPressed: () =>
@@ -2258,7 +2273,7 @@ class _OrdersTabState extends State<OrdersTab>
             if (canReject)
               TextButton.icon(
                   icon: const Icon(Icons.cancel_outlined, size: 18),
-                  label: const Text('Reject'),
+                  label: const Text('Cancel'),
                   style: TextButton.styleFrom(foregroundColor: colorScheme.error),
                   onPressed: () => _showRejectConfirmation(
                       context, order, updateSimpleStatus)),
@@ -2282,7 +2297,7 @@ class _OrdersTabState extends State<OrdersTab>
                     child: const Text("Cancel"),
                     onPressed: () => Navigator.of(dialogContext).pop()),
                 TextButton(
-                    child: Text("Reject Order",
+                    child: Text("Cancel Order",
                         style:
                             TextStyle(color: Theme.of(context).colorScheme.error)),
                     onPressed: () {
@@ -2593,13 +2608,14 @@ class _RiderSelectionDialogState extends State<_RiderSelectionDialog> {
 
         return Card(
           margin: const EdgeInsets.symmetric(vertical: 4),
-          elevation: isAvailable ? 0.5 : 0.5,
+          elevation: 0, // Flat style
           color: tileColor,
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8.0),
-              side: isAvailable
-                  ? BorderSide.none
-                  : BorderSide(color: Colors.grey.shade300)),
+              // Apply border consistently
+              side: BorderSide(
+                  color: isAvailable ? lightTeal : Colors.grey.shade300,
+                  width: 1.0)),
           child: ListTile(
             leading: CircleAvatar(
                 backgroundColor: iconColor.withOpacity(0.1),
@@ -2685,13 +2701,22 @@ class _GigsTabState extends State<GigsTab>
 
   @override
   void dispose() {
-    final route = ModalRoute.of(context);
-    if (route != null) {
-      RouteObserver<PageRoute>? routeObserver =
-          context.findAncestorStateOfType<_ChefDashboardScreenState>()?._routeObserver;
-      routeObserver?.unsubscribe(this);
-    }
+    // Cancel any active polling timers
     _gigsPollingTimer?.cancel();
+    _gigsPollingTimer = null;
+    
+    // Unsubscribe from route observer
+    final route = ModalRoute.of(context);
+    if (route != null && context.mounted) {
+      final routeObserver = context.findAncestorStateOfType<_ChefDashboardScreenState>()?._routeObserver;
+      if (routeObserver != null) {
+        routeObserver.unsubscribe(this);
+      }
+    }
+    
+    // Clear any pending operations
+    _isRouteActive = false;
+    
     super.dispose();
   }
 
@@ -3979,11 +4004,12 @@ class _EarningsTabState extends State<EarningsTab>
                   const SizedBox(height: 24),
                   // Main Card for Earnings History
                   Card(
-                    elevation: 2,
+                    elevation: 0, // Flat style
                     margin: EdgeInsets.zero,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(color: Colors.grey.shade200),
+                      // Use consistent thin teal border
+                      side: const BorderSide(color: lightTeal, width: 1.0),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,

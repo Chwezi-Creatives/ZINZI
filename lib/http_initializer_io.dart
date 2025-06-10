@@ -1,3 +1,4 @@
+//cspell:disable
 // lib/http_initializer_io.dart
 import 'dart:io';
 import 'dart:typed_data'; // For Uint8List

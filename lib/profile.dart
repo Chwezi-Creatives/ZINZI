@@ -1,3 +1,4 @@
+//cspell:disable
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'widgets/custom_group_container.dart';
@@ -235,11 +236,13 @@ class _ProfilePageState extends State<ProfilePage>
   ];
   String? _selectedDietType;
   final List<String> _dietTypeOptions = [
-    'Vegan',
+    
+    'Vegetarian',
     'Keto',
     'Paleo',
     'Mediterranean',
-    'Omnivore'
+    'Omnivore',
+    'Vegan',
   ];
   String? _selectedFoodRestriction;
   final List<String> _foodRestrictionsOptions = [
@@ -2250,17 +2253,87 @@ class _ProfilePageState extends State<ProfilePage>
                 label: 'Name',
                 icon: Icons.person_outline,
               ),
-              _buildTextField(
-                controller: _userDetailsEmailController,
-                label: 'Email',
-                icon: Icons.email_outlined,
-                keyboardType: TextInputType.emailAddress,
+              // Display email as read-only in edit mode
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12.0, left: 8.0, right: 8.0, top: 4.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Email',
+                      style: GoogleFonts.poppins(
+                        color: kColorTextSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 12.0),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: kColorBorder),
+                        borderRadius: BorderRadius.circular(8.0),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.email_outlined, color: kColorTextSecondary, size: 20),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              _userDetailsEmailController.text.isNotEmpty 
+                                  ? _userDetailsEmailController.text 
+                                  : 'N/A',
+                              style: GoogleFonts.poppins(
+                                color: kColorTextPrimary,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              _buildTextField(
-                controller: _userDetailsPhoneController,
-                label: 'Phone',
-                icon: Icons.phone_outlined,
-                keyboardType: TextInputType.phone,
+              // Display phone as read-only in edit mode
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12.0, left: 8.0, right: 8.0, top: 4.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Phone',
+                      style: GoogleFonts.poppins(
+                        color: kColorTextSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 12.0),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: kColorBorder),
+                        borderRadius: BorderRadius.circular(8.0),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.phone_outlined, color: kColorTextSecondary, size: 20),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              _userDetailsPhoneController.text.isNotEmpty 
+                                  ? _userDetailsPhoneController.text 
+                                  : 'N/A',
+                              style: GoogleFonts.poppins(
+                                color: kColorTextPrimary,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
               _buildLocationField(), // Special field for location editing
             ]

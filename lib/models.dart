@@ -1,3 +1,4 @@
+//cspell:disable
 
 // models.dart
 import 'package:intl/intl.dart';
