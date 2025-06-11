@@ -892,8 +892,8 @@ class MealRecommendation4:
         # Get user's diet preference (if any)
         user_diet = (self.user_preferences.get("diet_type") or "").strip().lower() if self.user_preferences else ""
         
-        # If no user diet preference, don't filter on diet
-        if not user_diet:
+        # If no user diet preference, or if diet is 'omnivore' or 'all', don't filter on diet
+        if not user_diet or user_diet in ['omnivore', 'all']:
             return 1
             
         # Get meal's diet preferences as a list, handling both string and list inputs
@@ -1037,31 +1037,52 @@ class MealRecommendation4:
                     logging.warning(f"Excluding meal {meal.get('meal_id', 'unknown')} - diet type contains non-vegetarian term: {term}")
                     return 0
         
-        # For all diet types, check if any of the meal's diet types are in the compatible diets
-        meal_matched = False
-        for diet in meal_diets:
-            # Check for direct match
-            if diet in compatible_diets:
-                meal_matched = True
-                break
-                
-            # Check for partial matches (case-insensitive)
-            if any(diet in cd.lower() or cd.lower() in diet for cd in compatible_diets):
-                meal_matched = True
-                break
-        
-        # If no match found, log why the meal was excluded
-        if not meal_matched:
-            logging.info(f"Excluding meal {meal.get('meal_id', 'unknown')} - diet type '{', '.join(meal_diets)}' "
-                        f"does not match user's {user_diet} diet")
-            return 0
+        # For omnivore (including 'all' which was normalized to 'omnivore'), 
+        # accept any meal that doesn't explicitly conflict with the diet
+        if user_diet in ['omnivore', 'all']:
+            # Only exclude meals that are explicitly marked as incompatible with omnivore diet
+            non_omnivore_terms = [
+                'vegan', 'vegetarian', 'keto', 'paleo', 'mediterranean',
+                'dairy-free', 'gluten-free', 'nut-free', 'soy-free', 'lactose-free'
+            ]
             
-        return 1
+            # Check if the meal is explicitly marked with any non-omnivore diet
+            if any(term in meal_diets_str for term in non_omnivore_terms):
+                logging.info(f"Excluding meal {meal.get('meal_id', 'unknown')} - marked as incompatible with omnivore diet")
+                return 0
+            return 1
+        else:
+            # For other diet types, use the existing matching logic
+            meal_matched = False
+            for diet in meal_diets:
+                # Check for direct match
+                if diet in compatible_diets:
+                    meal_matched = True
+                    break
+                    
+                # Check for partial matches (case-insensitive)
+                if any(diet in cd.lower() or cd.lower() in diet for cd in compatible_diets):
+                    meal_matched = True
+                    break
+            
+            # If no match found, log why the meal was excluded
+            if not meal_matched:
+                logging.info(f"Excluding meal {meal.get('meal_id', 'unknown')} - diet type '{', '.join(meal_diets)}' "
+                            f"does not match user's {user_diet} diet")
+                return 0
+                
+            return 1
 
     def _match_allergies(self, meal: Dict) -> int:
-        # Handle case where user_preferences is None
-        if self.user_preferences is None:
-            logging.warning("User preferences not found. Allowing meal by default.")
+        # Handle case where user_preferences is None or food_restrictions is None/empty
+        if not self.user_preferences or not self.user_preferences.get("food_restrictions"):
+            return 1  # No restrictions specified, allow all meals
+            
+        # Get user's food restrictions (allergies)
+        user_restrictions = [r.strip().lower() for r in self.user_preferences["food_restrictions"] if r and str(r).strip()]
+        
+        # If no valid user restrictions, allow the meal
+        if not user_restrictions:
             return 1
             
         # Get meal's allergy information as a list, handling both string and list inputs
@@ -1071,15 +1092,8 @@ class MealRecommendation4:
         else:
             meal_allergies = [str(a).strip().lower() for a in meal_allergies if a and str(a).strip()]
         
-        # Get user's food restrictions (allergies)
-        user_restrictions = [r.strip().lower() for r in (self.user_preferences.get("food_restrictions") or [])]
-        
-        # If no user restrictions, allow the meal
-        if not user_restrictions:
-            return 1
-            
-        # If meal has no allergy info, be safe and filter it out
-        if not meal_allergies:
+        # If meal has no allergy info, be safe and filter it out if there are any restrictions
+        if not meal_allergies and user_restrictions:
             logging.warning(f"Meal {meal.get('meal_id', 'unknown')} has no allergy information. Filtering out for safety.")
             return 0
             
@@ -1093,6 +1107,10 @@ class MealRecommendation4:
         
         # Check each user restriction against the meal's allergies
         for restriction in user_restrictions:
+            # Skip empty or invalid restrictions
+            if not restriction:
+                continue
+                
             # Get the allergies to exclude based on the restriction
             allergies_to_exclude = ALLERGY_MAPPING.get(restriction.lower(), [])
             
@@ -1114,11 +1132,29 @@ class MealRecommendation4:
         return 1
 
     def _match_cuisine(self, meal: Dict) -> int:
-        """Enhanced cuisine matching using robust mappings"""
-        meal_cuisine = (meal.get("cuisine_preferences") or "").strip().lower()
-        user_cuisines = self.user_preferences.get("cuisine_preferences", []) if self.user_preferences else []
+        """
+        Enhanced cuisine matching using robust mappings.
+        Returns 1 (include) if:
+        - No user cuisine preferences are specified (empty list, None, or empty string)
+        - The meal's cuisine matches any of the user's cuisine preferences
+        """
+        # Handle case where user_preferences is None or cuisine_preferences is None/empty
+        if not self.user_preferences or not self.user_preferences.get("cuisine_preferences"):
+            return 1  # No cuisine preferences specified, allow all meals
+            
+        # Get user's cuisine preferences, filtering out any empty or invalid values
+        user_cuisines = [c.strip().lower() for c in self.user_preferences["cuisine_preferences"] 
+                        if c and str(c).strip()]
         
-        if not meal_cuisine or not user_cuisines:
+        # If no valid user cuisine preferences, allow all meals
+        if not user_cuisines:
+            return 1
+            
+        # Get meal's cuisine information
+        meal_cuisine = (meal.get("cuisine_preferences") or "").strip().lower()
+        
+        # If meal has no cuisine specified, filter it out (be conservative)
+        if not meal_cuisine:
             return 0
 
         # Get all compatible cuisines for user preferences
