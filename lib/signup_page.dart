@@ -530,7 +530,9 @@ class _UserSignUpPageState extends State<UserSignUpPage>
                                   trimmedValue.isEmpty) {
                                 return "Enter your password";
                               }
-                              // Add more password validation if needed
+                              if (trimmedValue.length < 6) {
+                                return "Password must be at least 6 characters long";
+                              }
                               return null;
                             },
                             onChanged:

@@ -4,12 +4,13 @@ import 'package:flutter/material.dart';
 class ProducerSelectorBottomSheet extends StatefulWidget {
   final List<Map<String, dynamic>> producers;
   final void Function(Map<String, dynamic>) onSelected;
+  final VoidCallback onRefresh;
 
   ProducerSelectorBottomSheet({
-    required List<Map<String, dynamic>> producers,
-    required void Function(Map<String, dynamic>) onSelected,
-  })  : producers = producers,
-        onSelected = onSelected;
+    required this.producers,
+    required this.onSelected,
+    required this.onRefresh,
+  });
 
   @override
   State<ProducerSelectorBottomSheet> createState() => ProducerSelectorBottomSheetState();
@@ -36,9 +37,22 @@ class ProducerSelectorBottomSheetState extends State<ProducerSelectorBottomSheet
             child: TextField(
               decoration: InputDecoration(
                 hintText: 'Search producers...',
-                prefixIcon: Icon(Icons.search),
+                prefixIcon: Icon(Icons.search, color: Colors.teal),
+                suffixIcon: IconButton(
+                  icon: Icon(Icons.refresh, color: Colors.teal),
+                  onPressed: widget.onRefresh,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: Colors.teal, width: 2.0),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: Colors.teal),
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: Colors.teal),
                 ),
               ),
               onChanged: (value) {
@@ -73,9 +87,25 @@ class ProducerSelectorBottomSheetState extends State<ProducerSelectorBottomSheet
                           title: Row(
                             children: [
                               Expanded(
-                                child: Text(
-                                  producer['name'] ?? 'Producer',
-                                  style: TextStyle(fontWeight: FontWeight.w500),
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      '${producer['name'] ?? 'Producer'}',
+                                      style: TextStyle(fontWeight: FontWeight.w500),
+                                    ),
+                                    if (producer['_distance_km'] != null)
+                                      Padding(
+                                        padding: const EdgeInsets.only(left: 8.0),
+                                        child: Text(
+                                          '${producer['_distance_km'].toStringAsFixed(1)} km',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey[600],
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
                               if (isEmailVerified != null)

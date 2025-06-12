@@ -14,6 +14,7 @@ import 'package:zinzi/notifications/notification_widget.dart';
 import 'package:zinzi/transooter_dash_before_mapbox.dart' show Payment;
 import 'package:zinzi/chef_verification_helper.dart';
 import 'package:zinzi/utils/image_utils.dart';
+import 'package:zinzi/utils/location_utils.dart';
 
 // --- Consistent Color Palette ---
 const Color primaryTeal = Color(0xFF00796B); // Teal 700
@@ -269,12 +270,14 @@ class Rider {
   final String name;
   final String status;
   final bool isActive;
+  final double? distanceKm; // Distance in kilometers, null if not available
 
   Rider({
     required this.id,
     required this.name,
     required this.status,
     required this.isActive,
+    this.distanceKm,
   });
 
   factory Rider.fromJson(Map<String, dynamic> json) {
@@ -293,10 +296,21 @@ class Rider {
     bool _parseBoolSafe(dynamic value) {
       if (value == null) return false;
       if (value is bool) return value;
-      if (value is String) return value.toLowerCase() == 'true';
+      if (value is String) return value.toLowerCase() == 'true' || value == '1';
       if (value is int) return value == 1;
       return false;
     }
+
+    double? _parseDoubleNullable(dynamic value) {
+      if (value == null) return null;
+      if (value is double) return value;
+      if (value is int) return value.toDouble();
+      if (value is String) return double.tryParse(value);
+      return null;
+    }
+
+    // Parse distance if available (can be from _distance_km or distance_km)
+    final distanceKm = _parseDoubleNullable(json['_distance_km'] ?? json['distance_km']);
 
     return Rider(
       id: _parseIntNullable(
@@ -307,12 +321,12 @@ class Rider {
           'Unnamed Rider',
       status: _getStringSafe(json['status']) ?? 'unknown',
       isActive: _parseBoolSafe(json['is_active']),
+      distanceKm: distanceKm,
     );
   }
 }
 
 class ApiService {
-  final String _baseUrl = _apibaseurl;
   static String get _staticBaseUrl => _apibaseurl;
 
   ApiService();
@@ -327,7 +341,6 @@ class ApiService {
     }
   }
 
-  // Fetches chef profile, primarily to get the current 'stock'
   static Future<Map<String, dynamic>> fetchChefProfile() async {
     final chefId = await _getChefId();
     if (chefId == null) {
@@ -358,19 +371,18 @@ class ApiService {
     }
   }
 
-  // Sends a PATCH request to update the chef's stock
   static Future<bool> updateChefStock(Map<String, dynamic> updateData) async {
     final chefId = await _getChefId();
     if (chefId == null) {
       throw Exception("Chef ID not found. Cannot update stock.");
     }
-    
+
     final Uri uri = Uri.parse('$_staticBaseUrl/rr/chefs/$chefId');
     final headers = {
       'Content-Type': 'application/json; charset=UTF-8',
       'Accept': 'application/json',
     };
-    
+
     print("[API] Updating chef stock for chef $chefId at $uri");
     print("[API] Payload: ${jsonEncode(updateData)}");
 
@@ -430,7 +442,7 @@ class ApiService {
     if (chefId == null || chefId.isEmpty) {
       throw Exception('Chef ID not found. Please log in again.');
     }
-    final Uri uri = Uri.parse('$_baseUrl/rr/orders?chef_id=$chefId');
+    final Uri uri = Uri.parse('$_staticBaseUrl/rr/orders?chef_id=$chefId');
     print("Fetching orders from: $uri");
 
     try {
@@ -631,222 +643,108 @@ class ApiService {
         return false;
       }
     } catch (e) {
-      print("Exception assigning order: $e");
+      print("Exception in assignOrderToRider: $e");
       return false;
     }
   }
 
-  Future<List<Rider>> fetchAvailableRiders() async {
-    final Uri uri = Uri.parse('$_baseUrl/rr/transporters');
-    print("Fetching available riders from: $uri");
+  // **** START FIX: Converted rider caching to be static ****
+  static final Map<String, List<Rider>> _ridersCache = {};
+  static final Map<String, DateTime> _ridersCacheTimestamps = {};
+  static const Duration _cacheDuration = Duration(minutes: 5);
+
+  static String _getRidersCacheKey(String? location) {
+    return 'riders_${location ?? 'no_location'}';
+  }
+
+  static void clearRidersCache() {
+    _ridersCache.clear();
+    _ridersCacheTimestamps.clear();
+    debugPrint('🟠 [chef_dash8888] Cleared all static riders cache');
+  }
+
+  static Future<List<Rider>> fetchAvailableRiders() async {
+    // Get geo-fenced location if available (synchronously)
+    final String? geoFencedLocation = getGeoFencedLocationParam(); // FIX: Removed await
+    final cacheKey = _getRidersCacheKey(geoFencedLocation);
+
+    // Check in-memory static cache first
+    final now = DateTime.now();
+    final lastFetched = _ridersCacheTimestamps[cacheKey];
+
+    if (lastFetched != null && now.difference(lastFetched) < _cacheDuration) {
+      final cachedRiders = _ridersCache[cacheKey];
+      if (cachedRiders != null && cachedRiders.isNotEmpty) {
+        debugPrint('🟢 [chef_dash8888] Using cached riders for location: ${geoFencedLocation ?? 'no_location'} (${cachedRiders.length} items)');
+        return List.from(cachedRiders);
+      }
+    }
+
+    // If no valid cache, fetch from API
+    debugPrint('🟠 [chef_dash8888] Fetching fresh riders data for location: ${geoFencedLocation ?? 'no_location'}');
+
+    final uri = Uri.parse('$_staticBaseUrl/rr/transporters').replace(
+      queryParameters: geoFencedLocation != null
+          ? {'geo_fenced_location': geoFencedLocation}
+          : null,
+    );
+
+    debugPrint('🟠 [chef_dash8888] === HTTP REQUEST ===');
+    debugPrint('🟠 [chef_dash8888] URL: ${uri.toString()}');
+    debugPrint('🟠 [chef_dash8888] Method: GET');
+    debugPrint('🟠 [chef_dash8888] Query Parameters: ${uri.queryParameters}');
+
     try {
       final response = await http.get(uri).timeout(const Duration(seconds: 20));
+
       if (response.statusCode == 200) {
         final dynamic rawData = json.decode(response.body);
         final dynamic riderList = _handleApiResponse(rawData);
 
         if (riderList is List) {
-          if (riderList.isEmpty) return [];
-          return riderList
+          final riders = riderList
               .map((jsonItem) {
                 if (jsonItem is Map<String, dynamic>) {
                   return Rider.fromJson(jsonItem);
-                } else {
-                  print(
-                      "API Warning: Skipping non-map item in riders list: $jsonItem");
-                  return null;
                 }
+                return null;
               })
               .whereType<Rider>()
               .toList();
+
+          _ridersCache[cacheKey] = List.from(riders);
+          _ridersCacheTimestamps[cacheKey] = now;
+          debugPrint('🟢 [chef_dash8888] Cached ${riders.length} riders for location: ${geoFencedLocation ?? 'no_location'}');
+
+          return riders;
         } else {
-          print(
-              "Riders API response format unexpected. Got: ${riderList?.runtimeType}");
-          if (riderList == null || (riderList is Map && riderList.isEmpty))
-            return [];
-          throw Exception(
-              'Failed to parse riders: Unexpected API response format');
+          debugPrint('🔴 [chef_dash8888] Unexpected API response format for riders');
+          throw Exception('Failed to parse riders: Unexpected API response format');
         }
       } else {
-        print("Error fetching riders: ${response.statusCode} ${response.body}");
-        throw Exception(
-            'Failed to load riders (Status code: ${response.statusCode})');
+        debugPrint('🔴 [chef_dash8888] Error fetching riders: ${response.statusCode}');
+        throw Exception('Failed to load riders (Status code: ${response.statusCode})');
       }
     } on TimeoutException {
-      print("Timeout fetching riders.");
-      throw Exception('Failed to load riders: Request timed out.');
+      debugPrint('🟠 [chef_dash8888] Timeout while fetching riders');
+      final cachedRiders = _ridersCache[cacheKey];
+      if (cachedRiders != null && cachedRiders.isNotEmpty) {
+        debugPrint('🟠 [chef_dash8888] Using expired cache due to timeout');
+        return List.from(cachedRiders);
+      }
+      throw Exception('Failed to load riders: Request timed out');
     } catch (e) {
-      print("Exception fetching riders: $e");
+      debugPrint('🔴 [chef_dash8888] Exception fetching riders: $e');
+      final cachedRiders = _ridersCache[cacheKey];
+      if (cachedRiders != null && cachedRiders.isNotEmpty) {
+        debugPrint('🟠 [chef_dash8888] Using expired cache due to error');
+        return List.from(cachedRiders);
+      }
       if (e is Exception) rethrow;
       throw Exception('Failed to load riders: $e');
     }
   }
-
-  static Future<List<dynamic>?> fetchChefsStatic() async {
-    final url = '$_staticBaseUrl/rr/rchefs';
-    try {
-      final response = await http.get(Uri.parse(url), headers: {
-        'Accept': 'application/json',
-      }).timeout(const Duration(seconds: 25));
-
-      if (response.statusCode == 200) {
-        final dynamic rawData = json.decode(response.body);
-        final dynamic chefsList = _handleApiResponse(rawData);
-        if (chefsList is List) return chefsList;
-        if (chefsList == null || (chefsList is Map && chefsList.isEmpty))
-          return [];
-        print(
-            'Static fetchChefs: Unexpected response format after handling: ${chefsList?.runtimeType}');
-        return null;
-      } else {
-        print(
-            'Static fetchChefs: Failed to load chefs. Status code: ${response.statusCode}.');
-        return null;
-      }
-    } on TimeoutException {
-      print('Static fetchChefs: Request timed out.');
-      return null;
-    } catch (e) {
-      print('Static fetchChefs: Error fetching chefs: $e');
-      return null;
-    }
-  }
-
-  static Future<List<dynamic>?> fetchProducersStatic() async {
-    final url = '$_staticBaseUrl/rr/rproducers';
-    try {
-      final response = await http.get(Uri.parse(url), headers: {
-        'Accept': 'application/json',
-      }).timeout(const Duration(seconds: 25));
-
-      if (response.statusCode == 200) {
-        final dynamic rawData = json.decode(response.body);
-        final dynamic producerList = _handleApiResponse(rawData);
-        if (producerList is List) return producerList;
-        if (producerList == null ||
-            (producerList is Map && producerList.isEmpty)) return [];
-        print(
-            'Static fetchProducers: Unexpected response format after handling: ${producerList?.runtimeType}');
-        return null;
-      } else {
-        print(
-            'Static fetchProducers: Failed to load producers. Status code: ${response.statusCode}.');
-        return null;
-      }
-    } on TimeoutException {
-      print('Static fetchProducers: Request timed out.');
-      return null;
-    } catch (e) {
-      print('Static fetchProducers: Error fetching producers: $e');
-      return null;
-    }
-  }
-}
-
-// --- MISSING WIDGET RESTORED HERE ---
-class CachedImageWithShimmer extends StatelessWidget {
-  final String? imageUrl;
-  final double width;
-  final double height;
-  final BoxFit fit;
-  final double borderRadius;
-  final IconData errorIcon;
-  final double iconSize;
-  final String? errorText;
-
-  const CachedImageWithShimmer({
-    super.key,
-    this.imageUrl,
-    required this.width,
-    required this.height,
-    this.fit = BoxFit.cover,
-    this.borderRadius = 8.0,
-    this.errorIcon = Icons.image_not_supported_outlined,
-    this.iconSize = 35,
-    this.errorText,
-  });
-
-  String? _getDirectImageLink(String? url) {
-    if (url == null || url.isEmpty) {
-      return null;
-    }
-    return ImageUtils.processImageUrl(url);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final shimmerBase = Theme.of(context).brightness == Brightness.light
-        ? Colors.grey.shade300
-        : Colors.grey.shade700;
-    final shimmerHighlight = Theme.of(context).brightness == Brightness.light
-        ? Colors.grey.shade100
-        : Colors.grey.shade500;
-
-    Widget imageWidget;
-    final String? processedUrl = _getDirectImageLink(imageUrl);
-    if (processedUrl == null || processedUrl.isEmpty) {
-      imageWidget = _buildErrorWidget(context, shimmerBase, shimmerHighlight);
-    } else {
-      imageWidget = CachedNetworkImage(
-          imageUrl: processedUrl,
-          width: width,
-          height: height,
-          fit: fit,
-          placeholder: (context, url) => Shimmer.fromColors(
-                baseColor: shimmerBase,
-                highlightColor: shimmerHighlight,
-                child: Container(
-                  width: width,
-                  height: height,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
-                    borderRadius: BorderRadius.circular(borderRadius),
-                  ),
-                ),
-              ),
-          errorWidget: (context, url, error) {
-            print("CachedNetworkImage Error: Failed to load $url - $error");
-            return _buildErrorWidget(context, shimmerBase, shimmerHighlight);
-          });
-    }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(borderRadius),
-      child: imageWidget,
-    );
-  }
-
-  Widget _buildErrorWidget(
-      BuildContext context, Color baseColor, Color highlightColor) {
-    final textTheme = Theme.of(context).textTheme;
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: baseColor.withOpacity(0.2),
-        borderRadius: BorderRadius.circular(borderRadius),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(errorIcon, color: Colors.grey.shade500, size: iconSize),
-          if (errorText != null) ...[
-            const SizedBox(height: 4),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4.0),
-              child: Text(
-                errorText!,
-                style: textTheme.bodySmall
-                    ?.copyWith(color: Colors.grey.shade600),
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            )
-          ]
-        ],
-      ),
-    );
-  }
+  // **** END FIX ****
 }
 
 class ChefDash88new extends StatelessWidget {
@@ -1060,12 +958,111 @@ class ChefDash88new extends StatelessWidget {
   }
 }
 
-// ... (Rest of the code is unchanged from the version with the stock management UI)
-// ... ChefDashboardScreen, OrdersTab, GigsTab, EarningsTab etc. ...
+class CachedImageWithShimmer extends StatelessWidget {
+  final String? imageUrl;
+  final double width;
+  final double height;
+  final BoxFit fit;
+  final double borderRadius;
+  final IconData errorIcon;
+  final double iconSize;
+  final String? errorText;
 
-// ... (This code is exactly as provided in the previous "full code" response)
-// Make sure to include the modified ProductsTab from that same response.
-// --- START of previous full code (from ChefDashboardScreen down) ---
+  const CachedImageWithShimmer({
+    super.key,
+    this.imageUrl,
+    required this.width,
+    required this.height,
+    this.fit = BoxFit.cover,
+    this.borderRadius = 8.0,
+    this.errorIcon = Icons.image_not_supported_outlined,
+    this.iconSize = 35,
+    this.errorText,
+  });
+
+  String? _getDirectImageLink(String? url) {
+    if (url == null || url.isEmpty) {
+      return null;
+    }
+    return ImageUtils.processImageUrl(url);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shimmerBase = Theme.of(context).brightness == Brightness.light
+        ? Colors.grey.shade300
+        : Colors.grey.shade700;
+    final shimmerHighlight = Theme.of(context).brightness == Brightness.light
+        ? Colors.grey.shade100
+        : Colors.grey.shade500;
+
+    Widget imageWidget;
+    final String? processedUrl = _getDirectImageLink(imageUrl);
+    if (processedUrl == null || processedUrl.isEmpty) {
+      imageWidget = _buildErrorWidget(context, shimmerBase, shimmerHighlight);
+    } else {
+      imageWidget = CachedNetworkImage(
+          imageUrl: processedUrl,
+          width: width,
+          height: height,
+          fit: fit,
+          placeholder: (context, url) => Shimmer.fromColors(
+                baseColor: shimmerBase,
+                highlightColor: shimmerHighlight,
+                child: Container(
+                  width: width,
+                  height: height,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(borderRadius),
+                  ),
+                ),
+              ),
+          errorWidget: (context, url, error) {
+            print("CachedNetworkImage Error: Failed to load $url - $error");
+            return _buildErrorWidget(context, shimmerBase, shimmerHighlight);
+          });
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(borderRadius),
+      child: imageWidget,
+    );
+  }
+
+  Widget _buildErrorWidget(
+      BuildContext context, Color baseColor, Color highlightColor) {
+    final textTheme = Theme.of(context).textTheme;
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: baseColor.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(borderRadius),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(errorIcon, color: Colors.grey.shade500, size: iconSize),
+          if (errorText != null) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4.0),
+              child: Text(
+                errorText!,
+                style: textTheme.bodySmall
+                    ?.copyWith(color: Colors.grey.shade600),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            )
+          ]
+        ],
+      ),
+    );
+  }
+}
+
 class ChefDashboardScreen extends StatefulWidget {
   const ChefDashboardScreen({super.key});
   @override
@@ -1074,7 +1071,6 @@ class ChefDashboardScreen extends StatefulWidget {
 
 class _ChefDashboardScreenState extends State<ChefDashboardScreen>
     with TickerProviderStateMixin {
-  // Add route observer for tracking page visibility
   final RouteObserver<PageRoute> _routeObserver = RouteObserver<PageRoute>();
   late TabController _tabController;
   late AnimationController _refreshIconController;
@@ -1191,8 +1187,10 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen>
     } catch (e) {
       print("Error during refresh propagation: $e");
     } finally {
-      _refreshIconController.reset();
-      if (mounted) setState(() => _isRefreshing = false);
+      if (mounted) {
+        _refreshIconController.reset();
+        setState(() => _isRefreshing = false);
+      }
     }
   }
 
@@ -1246,7 +1244,6 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen>
     );
   }
 }
-
 
 class OrdersTab extends StatefulWidget {
   const OrdersTab({super.key});
@@ -1327,27 +1324,23 @@ class _OrdersTabState extends State<OrdersTab>
   @override
   void initState() {
     super.initState();
+    _isRouteActive = true;
     _startOrdersPolling();
   }
 
   @override
   void dispose() {
-    // Cancel any active polling timers
     _ordersPollingTimer?.cancel();
     _ordersPollingTimer = null;
-    
-    // Unsubscribe from route observer
+    _isRouteActive = false;
+
     final route = ModalRoute.of(context);
-    if (route != null && context.mounted) {
+    if (route != null && mounted) {
       final routeObserver = context.findAncestorStateOfType<_ChefDashboardScreenState>()?._routeObserver;
       if (routeObserver != null) {
         routeObserver.unsubscribe(this);
       }
     }
-    
-    // Clear any pending operations
-    _isRouteActive = false;
-    
     super.dispose();
   }
 
@@ -1399,7 +1392,7 @@ class _OrdersTabState extends State<OrdersTab>
 
   Future<void> _loadOrders() async {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    if (context.mounted) ScaffoldMessenger.of(context).removeCurrentSnackBar();
     setState(() {
       _isLoadingOrders = true;
       _allFetchedOrders = [];
@@ -1444,7 +1437,7 @@ class _OrdersTabState extends State<OrdersTab>
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) =>
-          _RiderSelectionDialog(apiService: ApiService(), orderId: order.orderId),
+          _RiderSelectionDialog(orderId: order.orderId),
     );
     if (!mounted || result == null) {
       if (result == null) print('Rider assignment cancelled or dialog closed.');
@@ -1526,7 +1519,7 @@ class _OrdersTabState extends State<OrdersTab>
     try {
       bool success = await ApiService.assignOrderToRider(
           order.orderId, rider.id, statusAssigned);
-      _dismissLoadingSnackbar();
+      if(mounted) _dismissLoadingSnackbar();
       if (mounted) {
         if (success) {
           _showSuccessSnackbar(
@@ -1548,7 +1541,7 @@ class _OrdersTabState extends State<OrdersTab>
         }
       }
     } catch (e) {
-      _dismissLoadingSnackbar();
+      if(mounted) _dismissLoadingSnackbar();
       if (mounted) {
         _showErrorSnackbar('An error occurred assigning rider.');
         setState(() {
@@ -1587,7 +1580,7 @@ class _OrdersTabState extends State<OrdersTab>
     try {
       bool success =
           await ApiService.updateOrderStatus(order.orderId, statusReadyForPickup);
-      _dismissLoadingSnackbar();
+      if(mounted) _dismissLoadingSnackbar();
       if (mounted) {
         if (success) {
           _showSuccessSnackbar(
@@ -1604,7 +1597,7 @@ class _OrdersTabState extends State<OrdersTab>
         }
       }
     } catch (e) {
-      _dismissLoadingSnackbar();
+      if(mounted) _dismissLoadingSnackbar();
       if (mounted) {
         _showErrorSnackbar('Error updating order status.');
         setState(() {
@@ -1641,14 +1634,13 @@ class _OrdersTabState extends State<OrdersTab>
     try {
       bool success =
           await ApiService.updateOrderStatus(order.orderId, newStatus);
-      _dismissLoadingSnackbar();
+      if(mounted) _dismissLoadingSnackbar();
       if (mounted) {
         if (!success) {
           setState(() {
             _mealOrders[orderIndex].orderStatus = originalStatus;
             if (allIndex != -1)
               _allFetchedOrders[allIndex].orderStatus = originalStatus;
-            // Potentially revert rider info if applicable
           });
           _showErrorSnackbar(
               'Failed to update order ${order.orderId} status.');
@@ -1660,7 +1652,7 @@ class _OrdersTabState extends State<OrdersTab>
         }
       }
     } catch (e) {
-      _dismissLoadingSnackbar();
+      if(mounted) _dismissLoadingSnackbar();
       if (mounted) {
         setState(() {
           _mealOrders[orderIndex].orderStatus = originalStatus;
@@ -1680,16 +1672,16 @@ class _OrdersTabState extends State<OrdersTab>
       final chefIdString = await ApiService._getChefId();
       final chefId = int.tryParse(chefIdString ?? '');
       if (chefId == null) {
-        setState(() => _loadingOrderIds.remove(orderId));
+        if(mounted) setState(() => _loadingOrderIds.remove(orderId));
         _showErrorSnackbar('Chef ID not found.');
         return;
       }
       await ApiService.updateOrderStatus(orderId, targetStatus, chefId: chefId);
-      setState(() => _loadingOrderIds.remove(orderId));
-      _showCompletionCodeVerificationDialog(context, order, targetStatus);
+      if(mounted) setState(() => _loadingOrderIds.remove(orderId));
+      if(mounted) _showCompletionCodeVerificationDialog(context, order, targetStatus);
     } catch (e) {
-      setState(() => _loadingOrderIds.remove(orderId));
-      _showErrorSnackbar('Error updating order status: ${e.toString()}');
+      if(mounted) setState(() => _loadingOrderIds.remove(orderId));
+      if(mounted) _showErrorSnackbar('Error updating order status: ${e.toString()}');
     }
   }
 
@@ -1702,7 +1694,11 @@ class _OrdersTabState extends State<OrdersTab>
         return _CompletionCodeDialog(
           order: order,
           targetStatus: targetStatus,
-          onSuccess: () {},
+          onSuccess: () {
+            if (mounted) {
+              _loadOrders();
+            }
+          },
           onError: (String errorMessage) {
             if (mounted) {
               _showErrorSnackbar(errorMessage);
@@ -2395,14 +2391,13 @@ class _CompletionCodeDialog extends StatefulWidget {
   final VoidCallback dismissLoadingCallback;
 
   const _CompletionCodeDialog({
-    Key? key,
     required this.order,
     required this.targetStatus,
     required this.onSuccess,
     required this.onError,
     required this.showLoadingCallback,
     required this.dismissLoadingCallback,
-  }) : super(key: key);
+  });
 
   @override
   _CompletionCodeDialogState createState() => _CompletionCodeDialogState();
@@ -2421,9 +2416,11 @@ class _CompletionCodeDialogState extends State<_CompletionCodeDialog> {
   }
 
   void _setError(String message) {
-    setState(() {
-      _errorMessage = message;
-    });
+    if(mounted) {
+      setState(() {
+        _errorMessage = message;
+      });
+    }
   }
 
   @override
@@ -2470,7 +2467,7 @@ class _CompletionCodeDialogState extends State<_CompletionCodeDialog> {
   }
 
   Future<void> _submitCode() async {
-    if (_formKey.currentState!.validate()) {
+    if (_formKey.currentState?.validate() ?? false) {
       final codeToSubmit = _completionCodeController.text;
       widget.showLoadingCallback('Submitting code...');
 
@@ -2478,15 +2475,13 @@ class _CompletionCodeDialogState extends State<_CompletionCodeDialog> {
         bool success = await ApiService.updateOrderStatus(
             widget.order.orderId, widget.targetStatus,
             completionCode: codeToSubmit);
-        widget.dismissLoadingCallback();
-        if (mounted) {
-          if (success) {
+        if(mounted) widget.dismissLoadingCallback();
+        if (mounted && success) {
             Navigator.of(context).pop();
             widget.onSuccess();
-          }
         }
       } catch (e) {
-        widget.dismissLoadingCallback();
+        if(mounted) widget.dismissLoadingCallback();
         if (mounted) {
           _setError(e.toString());
         }
@@ -2496,10 +2491,9 @@ class _CompletionCodeDialogState extends State<_CompletionCodeDialog> {
 }
 
 class _RiderSelectionDialog extends StatefulWidget {
-  final ApiService apiService;
   final int orderId;
   const _RiderSelectionDialog(
-      {required this.apiService, required this.orderId, Key? key})
+      {required this.orderId, Key? key})
       : super(key: key);
   @override
   _RiderSelectionDialogState createState() => _RiderSelectionDialogState();
@@ -2517,30 +2511,42 @@ class _RiderSelectionDialogState extends State<_RiderSelectionDialog> {
   }
 
   Future<void> _fetchRiders() async {
-    if (mounted)
-      setState(() {
-        _isLoading = true;
-        _errorMessage = null;
-      });
+    if (!mounted) return;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
     try {
-      final riders = await widget.apiService.fetchAvailableRiders();
-      if (mounted) {
-        riders.sort((a, b) {
-          if (a.isActive && !b.isActive) return -1;
-          if (!a.isActive && b.isActive) return 1;
-          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-        });
-        setState(() {
-          _allRiders = riders;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted)
-        setState(() {
-          _errorMessage = "Error fetching riders: ${e.toString()}";
-          _isLoading = false;
-        });
+      final riders = await ApiService.fetchAvailableRiders();
+      if (!mounted) return;
+
+      riders.sort((a, b) {
+        if (a.isActive && !b.isActive) return -1;
+        if (!a.isActive && b.isActive) return 1;
+        // Sort by distance if available, otherwise by name
+        if (a.distanceKm != null && b.distanceKm != null) {
+          return a.distanceKm!.compareTo(b.distanceKm!);
+        }
+        if (a.distanceKm != null && b.distanceKm == null) return -1;
+        if (a.distanceKm == null && b.distanceKm != null) return 1;
+        
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      });
+
+      setState(() {
+        _allRiders = riders;
+        _isLoading = false;
+      });
+    } catch (e, stackTrace) {
+      debugPrint('Error fetching riders: $e\n$stackTrace');
+      if (!mounted) return;
+
+      setState(() {
+        _errorMessage = "Error fetching riders: ${e.toString().split(':').last.trim()}";
+        _isLoading = false;
+      });
     }
   }
 
@@ -2612,19 +2618,39 @@ class _RiderSelectionDialogState extends State<_RiderSelectionDialog> {
           color: tileColor,
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8.0),
-              // Apply border consistently
               side: BorderSide(
-                  color: isAvailable ? lightTeal : Colors.grey.shade300,
-                  width: 1.0)),
+                  color: isAvailable ? lightTeal.withOpacity(0.5) : Colors.grey.shade300,
+                  width: 0.5)),
           child: ListTile(
             leading: CircleAvatar(
                 backgroundColor: iconColor.withOpacity(0.1),
                 child: Icon(Icons.two_wheeler, color: iconColor, size: 20)),
-            title: Text(rider.name,
-                style: TextStyle(
-                    color: textColor,
-                    fontWeight:
-                        isAvailable ? FontWeight.normal : FontWeight.w300)),
+            title: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    rider.name,
+                    style: TextStyle(
+                      color: textColor,
+                      fontWeight: isAvailable ? FontWeight.normal : FontWeight.w300
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (rider.distanceKm != null)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 6.0),
+                    child: Text(
+                      '(${rider.distanceKm!.toStringAsFixed(2)} km)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: textColor.withOpacity(0.8),
+                        fontWeight: FontWeight.normal,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
             subtitle: Text(isAvailable ? 'Status: Active' : 'Status: Inactive',
                 style: TextStyle(color: textColor.withOpacity(0.7))),
             trailing: isAvailable
@@ -2678,13 +2704,13 @@ class _GigsTabState extends State<GigsTab>
   @override
   void initState() {
     super.initState();
+    _isRouteActive = true;
     _startGigsPolling();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Subscribe to route changes
     final route = ModalRoute.of(context);
     if (route != null) {
       RouteObserver<PageRoute>? routeObserver =
@@ -2692,7 +2718,6 @@ class _GigsTabState extends State<GigsTab>
       routeObserver?.subscribe(this, route as PageRoute);
     }
 
-    // Load orders if not already loaded
     if (!_didLoadGigs) {
       _didLoadGigs = true;
       _loadOrders();
@@ -2701,21 +2726,17 @@ class _GigsTabState extends State<GigsTab>
 
   @override
   void dispose() {
-    // Cancel any active polling timers
     _gigsPollingTimer?.cancel();
     _gigsPollingTimer = null;
+    _isRouteActive = false;
     
-    // Unsubscribe from route observer
     final route = ModalRoute.of(context);
-    if (route != null && context.mounted) {
+    if (route != null && mounted) {
       final routeObserver = context.findAncestorStateOfType<_ChefDashboardScreenState>()?._routeObserver;
       if (routeObserver != null) {
         routeObserver.unsubscribe(this);
       }
     }
-    
-    // Clear any pending operations
-    _isRouteActive = false;
     
     super.dispose();
   }
@@ -2806,28 +2827,34 @@ class _GigsTabState extends State<GigsTab>
 
   Future<void> _loadOrders() async {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).removeCurrentSnackBar();
-    setState(() {
-      _isLoadingGigs = true;
-      _errorMessage = null;
-      _allFetchedOrders = [];
-      _gigOrders = [];
-      _ordersFuture = ApiService().fetchOrders();
-    });
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    }
+    if (mounted) {
+      setState(() {
+        _isLoadingGigs = true;
+        _errorMessage = null;
+        _allFetchedOrders = [];
+        _gigOrders = [];
+      });
+    }
     try {
+      _ordersFuture = ApiService().fetchOrders();
       final fetchedOrders = await _ordersFuture!;
       if (mounted) {
-        _allFetchedOrders = fetchedOrders;
-        _gigOrders = _allFetchedOrders
-            .where((o) => o.orderType?.toLowerCase() == 'gig')
-            .toList();
-        _gigOrders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
-        setState(() => _isLoadingGigs = false);
-      }
-    } catch (e, stackTrace) {
-      if (mounted) {
-        _errorMessage = "Failed to load gigs: ${e.toString()}";
         setState(() {
+          _allFetchedOrders = fetchedOrders;
+          _gigOrders = _allFetchedOrders
+              .where((o) => o.orderType?.toLowerCase() == 'gig')
+              .toList();
+          _gigOrders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
+          _isLoadingGigs = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = "Failed to load gigs: ${e.toString()}";
           _isLoadingGigs = false;
           _allFetchedOrders = [];
           _gigOrders = [];
@@ -2842,7 +2869,7 @@ class _GigsTabState extends State<GigsTab>
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) =>
-          _RiderSelectionDialog(apiService: ApiService(), orderId: order.orderId),
+          _RiderSelectionDialog(orderId: order.orderId),
     );
     if (!mounted || result == null) {
       if (result == null) print('Staff assignment cancelled for Gig.');
@@ -2923,7 +2950,7 @@ class _GigsTabState extends State<GigsTab>
     try {
       bool success = await ApiService.assignOrderToRider(
           order.orderId, rider.id, statusAssigned);
-      _dismissLoadingSnackbar();
+      if(mounted) _dismissLoadingSnackbar();
       if (mounted) {
         if (success) {
           _showSuccessSnackbar(
@@ -2936,16 +2963,25 @@ class _GigsTabState extends State<GigsTab>
             _gigOrders[orderIndex].assignedRiderId = originalRiderId;
             _gigOrders[orderIndex].assignedRiderName = originalRiderName;
             if (allIndex != -1) {
-              /* revert _allFetchedOrders too */
+              _allFetchedOrders[allIndex].orderStatus = originalStatus;
+              _allFetchedOrders[allIndex].assignedRiderId = originalRiderId;
+              _allFetchedOrders[allIndex].assignedRiderName = originalRiderName;
             }
           });
         }
       }
     } catch (e) {
-      _dismissLoadingSnackbar();
+      if(mounted) _dismissLoadingSnackbar();
       if (mounted) {
         setState(() {
-          /* Revert */
+          _gigOrders[orderIndex].orderStatus = originalStatus;
+          _gigOrders[orderIndex].assignedRiderId = originalRiderId;
+          _gigOrders[orderIndex].assignedRiderName = originalRiderName;
+          if (allIndex != -1) {
+            _allFetchedOrders[allIndex].orderStatus = originalStatus;
+            _allFetchedOrders[allIndex].assignedRiderId = originalRiderId;
+            _allFetchedOrders[allIndex].assignedRiderName = originalRiderName;
+          }
         });
         _showErrorSnackbar('Error assigning staff.');
       }
@@ -2963,14 +2999,16 @@ class _GigsTabState extends State<GigsTab>
       _gigOrders[orderIndex].assignedRiderId = null;
       _gigOrders[orderIndex].assignedRiderName = null;
       if (allIndex != -1) {
-        /* update _allFetchedOrders */
+        _allFetchedOrders[allIndex].orderStatus = statusReadyForPickup;
+        _allFetchedOrders[allIndex].assignedRiderId = null;
+        _allFetchedOrders[allIndex].assignedRiderName = null;
       }
     });
     _showLoadingSnackbar("Marking Gig as Ready...");
     try {
       bool success =
           await ApiService.updateOrderStatus(order.orderId, statusReadyForPickup);
-      _dismissLoadingSnackbar();
+      if(mounted) _dismissLoadingSnackbar();
       if (mounted) {
         if (success) {
           _showSuccessSnackbar("Gig ${order.orderId} marked as Ready.");
@@ -2978,16 +3016,22 @@ class _GigsTabState extends State<GigsTab>
         } else {
           _showErrorSnackbar('Failed to mark Gig Ready.');
           setState(() {
-            /* Revert */
+            _gigOrders[orderIndex].orderStatus = originalStatus;
+            if (allIndex != -1) {
+              _allFetchedOrders[allIndex].orderStatus = originalStatus;
+            }
           });
         }
       }
     } catch (e) {
-      _dismissLoadingSnackbar();
+      if(mounted) _dismissLoadingSnackbar();
       if (mounted) {
         _showErrorSnackbar('Error marking Gig Ready.');
         setState(() {
-          /* Revert */
+          _gigOrders[orderIndex].orderStatus = originalStatus;
+          if (allIndex != -1) {
+            _allFetchedOrders[allIndex].orderStatus = originalStatus;
+          }
         });
       }
     }
@@ -3018,7 +3062,7 @@ class _GigsTabState extends State<GigsTab>
     try {
       bool success =
           await ApiService.updateOrderStatus(order.orderId, newStatus);
-      _dismissLoadingSnackbar();
+      if(mounted) _dismissLoadingSnackbar();
       if (mounted) {
         if (success) {
           _showSuccessSnackbar('Gig ${order.orderId} status updated.');
@@ -3027,15 +3071,21 @@ class _GigsTabState extends State<GigsTab>
         } else {
           _showErrorSnackbar('Failed to update Gig status.');
           setState(() {
-            /* Revert */
+            _gigOrders[orderIndex].orderStatus = originalStatus;
+            if (allIndex != -1) {
+              _allFetchedOrders[allIndex].orderStatus = originalStatus;
+            }
           });
         }
       }
     } catch (e) {
-      _dismissLoadingSnackbar();
+      if(mounted) _dismissLoadingSnackbar();
       if (mounted) {
         setState(() {
-          /* Revert */
+          _gigOrders[orderIndex].orderStatus = originalStatus;
+          if (allIndex != -1) {
+            _allFetchedOrders[allIndex].orderStatus = originalStatus;
+          }
         });
         _showErrorSnackbar('Error updating Gig status: ${e.toString()}');
       }
@@ -3062,7 +3112,6 @@ class _GigsTabState extends State<GigsTab>
       if (success) {
         if (!mounted) return;
         _showSuccessSnackbar('Gig #$orderId marked as $targetStatus.');
-        // Refresh to reflect changes
         _loadOrders();
       } else {
         if (!mounted) return;
@@ -3085,16 +3134,16 @@ class _GigsTabState extends State<GigsTab>
       final chefIdString = await ApiService._getChefId();
       final chefId = int.tryParse(chefIdString ?? '');
       if (chefId == null) {
-        setState(() => _loadingOrderIds.remove(orderId));
+        if(mounted) setState(() => _loadingOrderIds.remove(orderId));
         _showErrorSnackbar('Chef ID not found.');
         return;
       }
       await ApiService.updateOrderStatus(orderId, targetStatus, chefId: chefId);
-      setState(() => _loadingOrderIds.remove(orderId));
-      _showCompletionCodeVerificationDialog(context, order, targetStatus);
+      if(mounted) setState(() => _loadingOrderIds.remove(orderId));
+      if(mounted) _showCompletionCodeVerificationDialog(context, order, targetStatus);
     } catch (e) {
-      setState(() => _loadingOrderIds.remove(orderId));
-      _showErrorSnackbar('Error updating order status: ${e.toString()}');
+      if(mounted) setState(() => _loadingOrderIds.remove(orderId));
+      if(mounted) _showErrorSnackbar('Error updating order status: ${e.toString()}');
     }
   }
 
@@ -3110,8 +3159,7 @@ class _GigsTabState extends State<GigsTab>
           order: order,
           targetStatus: targetStatus,
           onSuccess: () {
-            // Refresh gigs list to show updated status
-            _loadOrders();
+            if(mounted) _loadOrders();
           },
           onError: (String errorMessage) {
             // Error is shown inline in dialog
@@ -3173,7 +3221,6 @@ class _GigsTabState extends State<GigsTab>
   }
 
   void _showOrderNextStepDialog(String newStatus) {
-    /* ... Same as OrdersTab, but messages adjusted for Gigs ... */
     if (!mounted) return;
     String title = "Gig Status Updated";
     String message = "Gig status changed to $newStatus.";
@@ -3229,7 +3276,6 @@ class _GigsTabState extends State<GigsTab>
   }
 
   Widget _buildOrdersShimmer() {
-    /* ... Same as OrdersTab ... */
     final shimmerBase = Theme.of(context).brightness == Brightness.light
         ? Colors.grey.shade300
         : Colors.grey.shade700;
@@ -3283,7 +3329,6 @@ class _GigsTabState extends State<GigsTab>
   }
 
   Widget _buildErrorState(String errorMsg) {
-    /* ... Same as OrdersTab ... */
     return Center(
         child: Padding(
             padding: const EdgeInsets.all(24.0),
@@ -3318,7 +3363,6 @@ class _GigsTabState extends State<GigsTab>
   }
 
   Widget _buildEmptyState(String message) {
-    /* ... Same as OrdersTab, maybe different icon ... */
     return Center(
         child: Padding(
             padding: const EdgeInsets.all(24.0),
@@ -3430,7 +3474,7 @@ class _GigsTabState extends State<GigsTab>
         onExpansionChanged: (isExpanding) async {
           if (isExpanding && isVerificationPending) {
             try {
-              setState(() => _isVerificationProcessActive = true);
+              if(mounted) setState(() => _isVerificationProcessActive = true);
               final bool verified =
                   await ChefVerificationHelper.showVerificationDialog(
                       context, order);
@@ -3450,6 +3494,7 @@ class _GigsTabState extends State<GigsTab>
           }
         },
         children: [
+          const Divider(height: 1),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18.0, vertical: 8.0),
             child:
@@ -3485,8 +3530,8 @@ class _GigsTabState extends State<GigsTab>
     final isPending = currentStatus == statusPending.toLowerCase();
     final isAccepted = currentStatus == statusAccepted.toLowerCase();
     final isInProgress = currentStatus == statusPreparing.toLowerCase() ||
-        currentStatus ==
-            statusOutForDelivery.toLowerCase(); // 'Shipped' could also be here
+        currentStatus == statusShipped.toLowerCase() ||
+        currentStatus == statusOutForDelivery.toLowerCase();
     final isCompleted = currentStatus == statusCompleted.toLowerCase() ||
         currentStatus == statusDelivered.toLowerCase();
     final needsVerification =
@@ -3509,14 +3554,12 @@ class _GigsTabState extends State<GigsTab>
               ),
             if (isAccepted)
               TextButton.icon(
-                // Change to 'Start Gig' or 'Prepare'
                 icon: const Icon(Icons.play_circle_outline, size: 18),
                 label:
-                    const Text('Start Prep'), // Or "Start Gig" if applicable
+                    const Text('Start Prep'),
                 style: TextButton.styleFrom(
                     foregroundColor: Colors.orange.shade700),
-                onPressed: () => _updateGigStatus(order,
-                    statusPreparing), // Or statusShipped/OutForDelivery
+                onPressed: () => _updateGigStatus(order, statusPreparing),
               ),
             if (needsVerification)
               TextButton.icon(
@@ -3525,7 +3568,7 @@ class _GigsTabState extends State<GigsTab>
                 style: TextButton.styleFrom(foregroundColor: kColorWarning),
                 onPressed: () async {
                   try {
-                    setState(() => _isVerificationProcessActive = true);
+                    if(mounted) setState(() => _isVerificationProcessActive = true);
                     final bool verified =
                         await ChefVerificationHelper.showVerificationDialog(
                             context, order);
@@ -3546,9 +3589,7 @@ class _GigsTabState extends State<GigsTab>
                   }
                 },
               ),
-            if ((isInProgress || currentStatus == statusShipped.toLowerCase()) &&
-                !isCompleted &&
-                !needsVerification) // If gig is in progress/shipped
+            if (isInProgress && !isCompleted && !needsVerification)
               TextButton.icon(
                 icon: const Icon(Icons.assignment_turned_in_outlined, size: 18),
                 label: const Text('Mark Completed'),
@@ -3556,7 +3597,6 @@ class _GigsTabState extends State<GigsTab>
                     foregroundColor: Colors.blue.shade700),
                 onPressed: () => _initiateCompletionFlow(order, statusCompleted),
               ),
-            // Consider adding reject/cancel if business logic allows
           ]),
     );
   }
@@ -3673,7 +3713,7 @@ class ChefEarningsHistoryScreen extends StatelessWidget {
       groupedPayments.putIfAbsent(dateKey, () => []).add(payment);
     }
     List<DateTime> sortedDates = groupedPayments.keys.toList()
-      ..sort((a, b) => b.compareTo(a)); // Sort newest date first
+      ..sort((a, b) => b.compareTo(a));
 
     return ListView.builder(
       itemCount: sortedDates.length,
@@ -3733,12 +3773,10 @@ class ChefEarningsHistoryScreen extends StatelessWidget {
     IconData statusIcon;
     String statusText = payment.disbursementTransactionStatus;
 
-    // Handle null or empty status
     if (statusText.isEmpty) {
       statusText = 'Pending';
     }
 
-    // Determine status color and icon
     switch (statusText.toLowerCase()) {
       case 'successful':
       case 'completed':
@@ -3869,7 +3907,6 @@ class _EarningsTabState extends State<EarningsTab>
     _fetchPayments();
   }
 
-  // Make this method public to allow refresh from parent
   Future<void> refreshEarningsTab() async {
     await _fetchPayments();
   }
@@ -3902,6 +3939,7 @@ class _EarningsTabState extends State<EarningsTab>
         } else {
           setState(() {
             _error = 'Invalid payment data format';
+            _payments = [];
           });
         }
       } else {
@@ -3974,6 +4012,7 @@ class _EarningsTabState extends State<EarningsTab>
           onRefresh: _fetchPayments,
           color: primaryTeal,
           child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.all(16.0),
             child: ConstrainedBox(
               constraints: BoxConstraints(
@@ -3983,7 +4022,6 @@ class _EarningsTabState extends State<EarningsTab>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Summary Cards
                   Row(
                     children: [
                       _buildStatCard(
@@ -4002,34 +4040,25 @@ class _EarningsTabState extends State<EarningsTab>
                     ],
                   ),
                   const SizedBox(height: 24),
-                  // Main Card for Earnings History
                   Card(
-                    elevation: 0, // Flat style
+                    elevation: 0,
                     margin: EdgeInsets.zero,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
-                      // Use consistent thin teal border
                       side: const BorderSide(color: lightTeal, width: 1.0),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Earnings History Header
                         Container(
                           width: double.infinity,
                           padding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 14),
-                          decoration: BoxDecoration(
-                            color: const Color(
-                                0xFFE0F2F1), // Light teal background
-                            borderRadius: const BorderRadius.only(
+                          decoration: const BoxDecoration(
+                            color: lighterTeal,
+                            borderRadius: BorderRadius.only(
                               topLeft: Radius.circular(12),
                               topRight: Radius.circular(12),
-                            ),
-                            border: Border.all(
-                              color: const Color(
-                                  0xFFB2DFDB), // Slightly darker teal border
-                              width: 1.0,
                             ),
                           ),
                           child: const Text(
@@ -4041,11 +4070,6 @@ class _EarningsTabState extends State<EarningsTab>
                             ),
                           ),
                         ),
-                        const Divider(
-                            height: 1,
-                            thickness: 0.5,
-                            color: Color(0xFFF0F0F0)),
-                        // Earnings Content
                         ConstrainedBox(
                           constraints: BoxConstraints(
                             minHeight: 200,
@@ -4062,7 +4086,6 @@ class _EarningsTabState extends State<EarningsTab>
                       ],
                     ),
                   ),
-                  // Add some bottom padding to ensure content isn't cut off
                   const SizedBox(height: 24),
                 ],
               ),
@@ -4190,10 +4213,6 @@ class _ProductsTabState extends State<ProductsTab>
     });
 
     try {
-      print('=== Starting _loadData ===');
-      
-      // Fetch master list of all meals and chef's current stock in parallel
-      print('Fetching products and chef profile...');
       final results = await Future.wait([
         ApiService.fetchProducts(),
         ApiService.fetchChefProfile(),
@@ -4203,73 +4222,31 @@ class _ProductsTabState extends State<ProductsTab>
 
       final allProducts = results[0] as List<MealProduct>;
       final chefProfileResponse = results[1] as Map<String, dynamic>;
-      
-      print('=== Received Chef Profile Response ===');
-      print('Response keys: ${chefProfileResponse.keys.toList()}');
-      
-      // Check if we have a data field in the response
-      final chefData = chefProfileResponse['data'];
-      print('Chef data type: ${chefData?.runtimeType}');
-      
+
       List<dynamic>? currentStock;
-      
-      if (chefData is Map) {
-        print('Chef data keys: ${chefData.keys.toList()}');
-        currentStock = chefData['stock'] as List<dynamic>?;
-        print('Stock data from response: $currentStock');
-      }
-      
-      print('=== Products Data ===');
-      print('Total products: ${allProducts.length}');
-      print('Current stock type: ${currentStock?.runtimeType}');
-      
-      if (currentStock != null) {
-        print('Current stock items count: ${currentStock.length}');
-        if (currentStock.isNotEmpty) {
-          print('First stock item: ${currentStock.first}');
-          print('First stock item type: ${currentStock.first.runtimeType}');
-        }
+      final dynamic chefData = chefProfileResponse['data'];
+
+      if (chefData is Map && chefData.containsKey('stock') && chefData['stock'] is List) {
+        currentStock = chefData['stock'] as List<dynamic>;
+      } else if (chefProfileResponse.containsKey('stock') && chefProfileResponse['stock'] is List) {
+        currentStock = chefProfileResponse['stock'] as List<dynamic>;
       }
 
-      // Clear previous selections
       _inStockMealIds.clear();
-      print('\n=== Processing Stock Items ===');
 
-      // Populate current "in stock" list from chef profile
-      if (currentStock != null && currentStock is List) {
-        for (var i = 0; i < currentStock.length; i++) {
-          final item = currentStock[i];
-          print('\nProcessing stock item $i: $item');
-          
+      if (currentStock != null) {
+        for (final item in currentStock) {
           if (item is Map) {
-            print('Item $i is a Map with keys: ${item.keys.toList()}');
-            
-            // Case-insensitive lookup for meal_id
             final mealIdKey = item.keys.firstWhere(
               (key) => key.toString().toLowerCase() == 'meal_id',
-              orElse: () => 'meal_id',
+              orElse: () => '', 
             );
-            
-            print('Found meal_id key: "$mealIdKey" (type: ${mealIdKey.runtimeType})');
-            print('Value for $mealIdKey: ${item[mealIdKey]} (type: ${item[mealIdKey]?.runtimeType})');
-            
-            if (item[mealIdKey] != null) {
-              final mealId = item[mealIdKey].toString();
-              print('Adding to _inStockMealIds: $mealId');
-              _inStockMealIds.add(mealId);
-            } else {
-              print('Skipping item $i: meal_id is null');
+            if (mealIdKey.isNotEmpty && item[mealIdKey] != null) {
+              _inStockMealIds.add(item[mealIdKey].toString());
             }
-          } else {
-            print('Skipping item $i: Not a Map (${item.runtimeType})');
           }
         }
-      } else {
-        print('No stock items found or invalid format');
       }
-      
-      print('\n=== Current _inStockMealIds ===');
-      print(_inStockMealIds);
 
       _products = allProducts;
       _products.sort((a, b) => a.mealName.compareTo(b.mealName));
@@ -4293,44 +4270,27 @@ class _ProductsTabState extends State<ProductsTab>
 
     setState(() => _isUpdatingStock = true);
     
-    // Show loading indicator
     final scaffoldMessenger = ScaffoldMessenger.of(context);
     scaffoldMessenger.removeCurrentSnackBar();
     scaffoldMessenger.showSnackBar(const SnackBar(
       content: Text('Updating stock...'),
       backgroundColor: Colors.blueGrey,
-      duration: Duration(seconds: 5),
+      duration: Duration(seconds: 10),
     ));
 
     try {
-      // Create the stock update payload in the expected format
-      final List<Map<String, dynamic>> stockItems = [];
-      
-      // Add all selected meals to stock
-      for (String mealId in _inStockMealIds) {
+      final List<Map<String, dynamic>> stockItems = _inStockMealIds.map((mealId) {
         final meal = _products.firstWhere((p) => p.mealId == mealId);
-        // Create a new map with explicit types to ensure proper JSON serialization
-        final Map<String, dynamic> stockItem = {
-          'Name': meal.mealName.toString(),  // Ensure it's a string
-          'meal_id': meal.mealId.toString(),  // Ensure it's a string
-          'price': meal.price is int ? meal.price.toDouble() : meal.price,  // Ensure it's a double
-          'image': meal.imageLink.toString(),  // Ensure it's a string
-          'quantity': 1.0,  // Explicitly use double
+        return {
+          'Name': meal.mealName.toString(),
+          'meal_id': meal.mealId.toString(),
+          'price': meal.price,
+          'image': meal.imageLink.toString(),
+          'quantity': 1.0,
         };
-        print('Adding stock item: ${jsonEncode(stockItem)}');
-        stockItems.add(stockItem);
-      }
+      }).toList();
       
-      // Log the stock items for debugging
-      print('Stock items to update: ${stockItems.map((item) => '${item['Name']} (${item['meal_id']})').join(', ')}');
-
-      // Create the update payload with stock items
       final Map<String, dynamic> updateData = {'stock': stockItems};
-
-      // Log the payload for debugging
-      final encodedPayload = jsonEncode(updateData);
-      print('Sending stock update: $encodedPayload');
-
       final success = await ApiService.updateChefStock(updateData);
 
       if (mounted) {
@@ -4349,7 +4309,6 @@ class _ProductsTabState extends State<ProductsTab>
       if (mounted) {
         scaffoldMessenger.removeCurrentSnackBar();
         _showErrorSnackbar('Error updating stock: ${e.toString()}');
-        print('Error updating stock: $e');
       }
     } finally {
       if (mounted) {
@@ -4362,13 +4321,11 @@ class _ProductsTabState extends State<ProductsTab>
   Widget build(BuildContext context) {
     super.build(context);
     return Scaffold(
-      // We remove the FloatingActionButton
       body: Column(
         children: [
           Expanded(
             child: _buildBody(),
           ),
-          // Add a persistent "Update Stock" button at the bottom
           _buildUpdateStockButton(),
         ],
       ),
@@ -4461,7 +4418,6 @@ class _ProductsTabState extends State<ProductsTab>
               ),
             ),
             const SizedBox(width: 8),
-            // The main interactive element is now the Switch
             Switch(
               value: isSelected,
               onChanged: (bool value) {
@@ -4483,7 +4439,7 @@ class _ProductsTabState extends State<ProductsTab>
 
   Widget _buildUpdateStockButton() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12).copyWith(bottom: MediaQuery.of(context).padding.bottom + 12),
       width: double.infinity,
       decoration: BoxDecoration(
         color: Theme.of(context).scaffoldBackgroundColor,
@@ -4545,19 +4501,18 @@ class _ProductsTabState extends State<ProductsTab>
                 Container(
                     width: 80,
                     height: 80,
-                    color: Colors.white,
-                    child: const SizedBox()),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8.0)
+                    )),
                 const SizedBox(width: 16),
                 Expanded(
                     child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(height: 18, width: 200, color: Colors.white),
-                    const SizedBox(height: 8),
-                    Container(height: 14, width: 250, color: Colors.white),
-                    const SizedBox(height: 4),
-                    Container(height: 14, width: 150, color: Colors.white),
-                    const SizedBox(height: 8),
+                    Container(height: 18, width: 200, color: Colors.white, margin: const EdgeInsets.only(bottom: 8)),
+                    Container(height: 14, width: 250, color: Colors.white, margin: const EdgeInsets.only(bottom: 4)),
+                    Container(height: 14, width: 150, color: Colors.white, margin: const EdgeInsets.only(bottom: 8)),
                     Container(height: 16, width: 80, color: Colors.white),
                   ],
                 )),

@@ -20,7 +20,7 @@ import 'package:zinzi/app_drawer_unified.dart' as drawer;
 import 'package:zinzi/notifications/notification_provider.dart';
 import 'package:zinzi/user_cache.dart'; 
 import 'package:zinzi/utils/route_observer.dart';
-
+import 'package:zinzi/utils/location_utils.dart';
 
 // --- UI Constants ---
 const Color primaryTeal = Color(0xFF00796B); 
@@ -561,9 +561,16 @@ class Rider {
   final int id;
   final String name;
   final String status; 
-  final bool isActive; 
+  final bool isActive;
+  final double? distanceKm; // Distance in kilometers, null if not available
 
-  Rider({ required this.id, required this.name, required this.status, required this.isActive });
+  Rider({ 
+    required this.id, 
+    required this.name, 
+    required this.status, 
+    required this.isActive,
+    this.distanceKm,
+  });
 
   factory Rider.fromJson(Map<String, dynamic> json) {
     final riderId = _parseIntNullable(json['rider_id'] ?? json['transporter_id'] ?? json['id']);
@@ -571,10 +578,16 @@ class Rider {
     if (riderId == null || riderId == 0) {
       print("[ProducerDash] Warning: Rider ID is missing or invalid in JSON: $json");
     }
+    
+    // Parse distance if available (can be from _distance_km or distance_km)
+    final distanceKm = _parseDoubleNullable(json['_distance_km'] ?? json['distance_km']);
+    
     return Rider(
-      id: riderId ?? 0, name: riderName ?? 'Unnamed Rider',
+      id: riderId ?? 0, 
+      name: riderName ?? 'Unnamed Rider',
       status: _getStringSafe(json['status']) ?? 'unknown',
       isActive: _parseBoolSafe(json['is_active']),
+      distanceKm: distanceKm,
     );
   }
 }
@@ -733,29 +746,100 @@ class ProducerApiService {
     }
   }
 
+  // In-memory cache for riders with location-based keys
+  static final Map<String, List<Rider>> _ridersCache = {};
+  static final Map<String, DateTime> _ridersCacheTimestamps = {};
+  static const Duration _cacheDuration = Duration(minutes: 5);
+  
+  static String _getRidersCacheKey(String? geoFencedLocation) {
+    return 'riders_${geoFencedLocation ?? 'no_location'}';
+  }
+
   static Future<List<Rider>> fetchAvailableRiders() async {
-    final Uri uri = Uri.parse('$_apibaseurl/rr/transporters');
-    print("[ProducerDash] Fetching available riders from: $uri");
+    // Get geo-fenced location if available
+    final String? geoFencedLocation = await getGeoFencedLocationParam();
+    final String cacheKey = _getRidersCacheKey(geoFencedLocation);
+    final now = DateTime.now();
+    
+    // Check if we have a valid cache entry
+    final lastFetched = _ridersCacheTimestamps[cacheKey];
+    if (lastFetched != null && now.difference(lastFetched) < _cacheDuration) {
+      final cachedRiders = _ridersCache[cacheKey];
+      if (cachedRiders != null && cachedRiders.isNotEmpty) {
+        debugPrint('🚀 [produ_dash22] Using cached riders for location: ${geoFencedLocation ?? 'no location'}');
+        return List.from(cachedRiders);
+      }
+    }
+
+    // Prepare API request
+    final Map<String, String> queryParams = {
+      if (geoFencedLocation != null) 'geo_fenced_location': geoFencedLocation
+    };
+
+    final uri = Uri.parse('$_apibaseurl/rr/transporters').replace(
+      queryParameters: queryParams,
+    );
+    
+    debugPrint('🔴 [produ_dash22] === HTTP REQUEST ===');
+    debugPrint('🔴 [produ_dash22] URL: ${uri.toString()}');
+    debugPrint('🔴 [produ_dash22] Method: GET');
+    debugPrint('🔴 [produ_dash22] Query Parameters: ${uri.queryParameters}');
+    
     try {
-      final response = await http.get(uri, headers: await _getReadHeaders(requiresAuth: true));
+      final response = await http.get(
+        uri, 
+        headers: await _getReadHeaders(requiresAuth: true)
+      ).timeout(const Duration(seconds: 10));
+      
+      debugPrint('🟢 [produ_dash22] Response status: ${response.statusCode}');
+      
       if (response.statusCode == 200) {
         final dynamic handledData = _handleApiResponse(response.body);
         if (handledData is List) {
           final List<Rider> riders = handledData.map<Rider?>((jsonItem) {
-            try { return Rider.fromJson(jsonItem); }
-            catch (e) { print("[ProducerDash] Skipping invalid rider item: $jsonItem - Error: $e"); return null; }
+            try { 
+              return Rider.fromJson(jsonItem); 
+            } catch (e) { 
+              debugPrint('⚠️ [produ_dash22] Skipping invalid rider item: $e');
+              return null; 
+            }
           }).whereType<Rider>().toList();
-          print("[ProducerDash] Fetched ${riders.length} riders.");
+          
+          // Update cache
+          _ridersCache[cacheKey] = List.from(riders);
+          _ridersCacheTimestamps[cacheKey] = now;
+          
+          debugPrint('✅ [produ_dash22] Fetched ${riders.length} riders for location: ${geoFencedLocation ?? 'no location'}');
           return riders;
         } else {
-          print("[ProducerDash] Riders API response format unexpected: Expected List, got ${handledData?.runtimeType}. Body: ${response.body}");
-          throw Exception('API response for riders was not a list. Body: ${response.body}');
+          debugPrint('❌ [produ_dash22] Unexpected API response format. Expected List, got ${handledData?.runtimeType}');
+          throw Exception('API response for riders was not a list');
         }
       } else {
-        throw Exception('Failed to load riders (Status code: ${response.statusCode}). Body: ${response.body}');
+        // On API error, return cached data if available (even if expired)
+        final cachedRiders = _ridersCache[cacheKey];
+        if (cachedRiders != null && cachedRiders.isNotEmpty) {
+          debugPrint('⚠️ [produ_dash22] API error (${response.statusCode}), using cached riders');
+          return List.from(cachedRiders);
+        }
+        throw Exception('Failed to load riders (Status: ${response.statusCode})');
       }
+    } on TimeoutException {
+      // On timeout, return cached data if available
+      final cachedRiders = _ridersCache[cacheKey];
+      if (cachedRiders != null && cachedRiders.isNotEmpty) {
+        debugPrint('⚠️ [produ_dash22] Request timed out, using cached riders');
+        return List.from(cachedRiders);
+      }
+      rethrow;
     } catch (e, stack) {
-      print("[ProducerDash] Exception fetching riders: $e\n$stack");
+      debugPrint('❌ [produ_dash22] Exception fetching riders: $e\n$stack');
+      // If we have any cached data, return it as fallback
+      final cachedRiders = _ridersCache[cacheKey] ?? [];
+      if (cachedRiders.isNotEmpty) {
+        debugPrint('⚠️ [produ_dash22] Using cached riders after error');
+        return List.from(cachedRiders);
+      }
       rethrow;
     }
   }
@@ -2686,8 +2770,26 @@ class _RiderSelectionDialogState extends State<_RiderSelectionDialog> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0), side: isAvailable ? BorderSide.none : BorderSide(color: Colors.grey.shade300)),
           child: ListTile(
             leading: CircleAvatar(backgroundColor: iconColor.withOpacity(0.1), child: Icon(Icons.two_wheeler, color: iconColor, size: 20)),
-            title: Text(rider.name, style: TextStyle(color: textColor, fontWeight: isAvailable ? FontWeight.normal : FontWeight.w300)),
-            subtitle: Text(isAvailable ? 'Status: Active (${rider.status})' : 'Status: Inactive (${rider.status})', style: TextStyle(color: textColor.withOpacity(0.7), fontSize: 11)),
+            title: Row(
+              children: [
+                Text(rider.name, style: TextStyle(color: textColor, fontWeight: isAvailable ? FontWeight.normal : FontWeight.w300)),
+                if (rider.distanceKm != null) ...[
+                  const SizedBox(width: 4),
+                  Text(
+                    '(${rider.distanceKm!.toStringAsFixed(1)} km)',
+                    style: TextStyle(
+                      color: textColor.withOpacity(0.7),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w400,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            subtitle: Text(
+              isAvailable ? 'Status: Active (${rider.status})' : 'Status: Inactive (${rider.status})',
+              style: TextStyle(color: textColor.withOpacity(0.7), fontSize: 11),
+            ),
             trailing: isAvailable ? const Icon(Icons.chevron_right) : const Icon(Icons.block, color: Colors.grey, size: 18),
             onTap: () => Navigator.of(context).pop(rider), dense: true,
           ),

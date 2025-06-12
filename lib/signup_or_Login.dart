@@ -60,6 +60,9 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage>
   String? selectedRole = "User"; // Initialize with "User" as default
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
+  // --- New state variable for the top banner animation ---
+  bool _showBanner = false;
+
   // --- Initialization and Disposal ---
   @override
   void initState() {
@@ -95,12 +98,12 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage>
     // Mascot animation
     _mascotController = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 3), // Slower float
+      duration: const Duration(seconds: 1), // Slower float
     )..repeat(reverse: true);
 
     _mascotFloat = Tween<Offset>(
-      begin: const Offset(0, -0.05), // Subtler float
-      end: const Offset(0, 0.05),
+      begin: const Offset(0, -0.09), // Subtler float
+      end: const Offset(0, 0.09),
     ).animate(
         CurvedAnimation(parent: _mascotController, curve: Curves.easeInOut));
 
@@ -109,6 +112,19 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage>
       if (mounted) {
         _entryAnimationController.forward();
       }
+    });
+
+    // --- Logic to trigger the banner animation ---
+    // Use addPostFrameCallback to ensure the widget is built before animating
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // A small delay makes the animation sequence feel more natural
+      Future.delayed(const Duration(milliseconds: 200), () {
+        if (mounted) {
+          setState(() {
+            _showBanner = true;
+          });
+        }
+      });
     });
   }
 
@@ -221,61 +237,89 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage>
     ));
 
     return Scaffold(
-      // No AppBar needed, extend body behind status bar handled by SafeArea
-      body: Container(
-        // Use a simpler, cleaner gradient
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [lighterTeal, lightTeal], // Subtle transition
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: SafeArea(
-          // Ensures content is below status bar
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24.0), // Consistent padding
-              // Add ConstrainedBox to limit the width of the content column
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                    maxWidth: 500), // Set a max width (adjust as needed)
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // Optional Mascot
-                      SlideTransition(
-                        position: _mascotFloat,
-                        child: Image.asset(
-                          "assets/images/acc.png", // Ensure this path is correct
-                          height: 70, // Slightly smaller
-                        ),
-                      ),
-                      const SizedBox(height: 20), // Increased spacing
-
-                      // Animated Card
-                      SlideTransition(
-                        position: _slideAnimationCard,
-                        child: _buildRoleSelectionCard(),
-                      ),
-                      const SizedBox(height: 35), // Increased spacing
-
-                      // Animated Buttons
-                      FadeTransition(
-                        opacity:
-                            _fadeAnimationContent, // Fade buttons in with content
-                        child: _buildActionButtons(),
-                      ),
-                      const SizedBox(height: 20), // Bottom padding
-                    ],
-                  ),
-                ), // Close Form
-              ), // Close ConstrainedBox
+      // The body is now a Stack to layer the background, banner, and content.
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 1. The Background Gradient
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [lighterTeal, lightTeal], // Subtle transition
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
             ),
           ),
-        ),
+          // 2. The Animated Top Banner (Copied from splash.dart)
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 800),
+            curve: Curves.easeOutQuart,
+            top: _showBanner ? 0 : -100,
+            left: 0,
+            right: 0,
+            child: Image.asset(
+              'assets/images/grodd2.jpg',
+              fit: BoxFit.cover,
+              height: MediaQuery.of(context).size.height * 0.1,
+              width: MediaQuery.of(context).size.width,
+              errorBuilder: (context, error, stackTrace) {
+                // Use a local color constant for consistency
+                return Container(
+                  color: primaryTeal.withOpacity(0.1),
+                  height: MediaQuery.of(context).size.height * 0.1,
+                  width: MediaQuery.of(context).size.width,
+                  child: const Center(child: Icon(Icons.image_not_supported)),
+                );
+              },
+            ),
+          ),
+          // 3. The Main Page Content
+          SafeArea(
+            // Ensures content is below status bar and banner
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24.0), // Consistent padding
+                // Add ConstrainedBox to limit the width of the content column
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                      maxWidth: 500), // Set a max width (adjust as needed)
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        // Optional Mascot
+                        SlideTransition(
+                          position: _mascotFloat,
+                          child: Image.asset(
+                            "assets/images/acc.png", // Ensure this path is correct
+                            height: 70, // Slightly smaller
+                          ),
+                        ),
+                        const SizedBox(height: 20), // Increased spacing
+
+                        // Animated Card
+                        SlideTransition(
+                          position: _slideAnimationCard,
+                          child: _buildRoleSelectionCard(),
+                        ),
+                        const SizedBox(height: 35), // Increased spacing
+
+                        // Animated Buttons
+                        FadeTransition(
+                          opacity: _fadeAnimationContent,
+                          child: _buildActionButtons(),
+                        ),
+                        const SizedBox(height: 20), // Bottom padding
+                      ],
+                    ),
+                  ), // Close Form
+                ), // Close ConstrainedBox
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -284,37 +328,23 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage>
 
   /// Builds the main card for role selection with glassmorphism effect.
   Widget _buildRoleSelectionCard() {
-    // Removed tablet check and cardWidth, width is now controlled by parent ConstrainedBox
-    // final isTablet = MediaQuery.of(context).size.width > 600;
-    // final cardWidth = isTablet ? 500.0 : null; // Let it expand on mobile
-
     return ClipRRect(
       // Clip the BackdropFilter effect
       borderRadius: BorderRadius.circular(25.0), // Softer corners
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8), // More subtle blur
         child: Container(
-          // width: cardWidth, // Removed width property
           padding: const EdgeInsets.symmetric(
               horizontal: 24.0, vertical: 30.0), // Generous padding
           decoration: BoxDecoration(
-            // Removed color, border, and boxShadow to blend with background
             color: Colors.transparent, // Explicitly set to transparent
             borderRadius: BorderRadius.circular(25.0),
-            // border: Border.all(color: whiteColor.withOpacity(0.2), width: 1.0), // Subtle border - REMOVED
-            // boxShadow: [ // Soft shadow for depth - REMOVED
-            //    BoxShadow(
-            //      color: Colors.black.withOpacity(0.08),
-            //      blurRadius: 20,
-            //      spreadRadius: -5,
-            //      offset: const Offset(0, 5),
-            //    ),
-            // ]
           ),
           child: FadeTransition(
             opacity: _fadeAnimationContent, // Fade content inside the card
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center, // <<< MODIFIED
               children: [
                 // Title Text
                 Text(
@@ -354,41 +384,33 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage>
       validator: (value) => value == null ? 'Please select a role' : null,
       // Improved styling
       decoration: InputDecoration(
-        // labelText: 'I am a...', // Removed labelText
-        // labelStyle: const TextStyle(color: primaryTeal), // Removed labelStyle
         hintText: 'Select Your Role', // Keep hint text as placeholder
         hintStyle: TextStyle(color: subtleTextColor.withOpacity(0.8)),
         prefixIcon:
             const Icon(Icons.person_outline, color: primaryTeal, size: 22),
         filled: false, // Set to false to make it transparent
-        // fillColor: whiteColor.withOpacity(0.8), // Removed fill color
         contentPadding: const EdgeInsets.symmetric(
             vertical: 16.0, horizontal: 16.0), // Comfortable padding
         // Use UnderlineInputBorder for a minimalist look
         border: UnderlineInputBorder(
-          // Default border (usually not visible)
           borderSide: BorderSide(color: subtleTextColor.withOpacity(0.5)),
         ),
         enabledBorder: UnderlineInputBorder(
-          // Border when enabled but not focused
           borderSide: BorderSide(color: subtleTextColor.withOpacity(0.5)),
         ),
         focusedBorder: const UnderlineInputBorder(
-          // Border when focused
           borderSide:
               BorderSide(color: primaryTeal, width: 2.0), // Thicker highlight
         ),
         errorBorder: const UnderlineInputBorder(
-          // Border when there's an error
           borderSide: BorderSide(color: errorColor, width: 1.0),
         ),
         focusedErrorBorder: const UnderlineInputBorder(
-          // Border when focused with an error
           borderSide: BorderSide(
               color: errorColor, width: 2.0), // Thicker error highlight
         ),
       ),
-      isExpanded: true,
+      // isExpanded: true, // <<< MODIFIED: This line was removed
       icon: const Icon(Icons.keyboard_arrow_down_rounded,
           color: primaryTeal), // Rounded icon
       dropdownColor: lighterTeal, // Match background theme slightly
@@ -420,14 +442,11 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage>
         }),
       ],
       onChanged: (String? newValue) {
-        // Prevent setting state if the disabled header (null value) is somehow passed
         if (newValue != null) {
           setState(() {
             selectedRole = newValue;
           });
         }
-        // Alternatively, handle the null case explicitly if needed,
-        // but `enabled: false` should prevent selection.
       },
     );
   }
@@ -446,8 +465,6 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage>
       elevation: 3,
       textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
     );
-
-    // Removed outlinedButtonStyle as it's no longer needed for the primary layout
 
     return Column(
       children: [
@@ -485,7 +502,6 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage>
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.bold, // Make it stand out slightly
-                  // decoration: TextDecoration.underline, // Optional: Add underline
                 ),
               ),
             ),

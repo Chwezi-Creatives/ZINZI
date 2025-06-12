@@ -3,15 +3,12 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:zinzi/allmeals.dart'; // Assuming this screen exists
 import 'package:zinzi/utils/overlay_utils.dart'; // Add this import
 import 'package:zinzi/app_drawer_unified.dart'
     as drawer; // Import unified AppDrawer with prefix
 // **** IMPORT THE UPDATED CART ****
 import 'package:zinzi/cart.dart'; // Imports the SHARED cart (with new methods) & favorites
 // **** END IMPORT ****
-import 'package:zinzi/checkout.dart'; // Assuming this screen exists
-import 'package:zinzi/useranalytics.dart'; // Assuming this screen exists if needed
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'dart:async';
@@ -21,6 +18,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi/user_cache.dart'; // Import UserCache
 import 'package:zinzi/cache_config.dart'; // Import CacheConfig
 import 'package:zinzi/utils/image_utils.dart'; // Import ImageUtils
+import 'package:zinzi/utils/location_utils.dart'; // Import location utilities
 import 'package:intl/intl.dart';
 
 // Assuming dotenv is initialized elsewhere in your main.dart or similar
@@ -67,81 +65,101 @@ class MealDetailScreen extends StatefulWidget {
   MealDetailScreen({required this.meal});
 
   // --- Caching ---
-  static List<dynamic> _chefsCache = [];
-  static DateTime? _chefsCacheTimestamp;
-  static List<dynamic> _producersCache = [];
-  static DateTime? _producersCacheTimestamp;
+  static final Map<String, List<dynamic>> _chefsCache = {};
+  static final Map<String, DateTime> _chefsCacheTimestamps = {};
+  static final Map<String, List<dynamic>> _producersCache = {};
+  static final Map<String, DateTime> _producersCacheTimestamps = {};
 
-  static const String _chefsCacheKey = 'chefs_list_cache';
-  static const String _chefsCacheTimestampKey = 'chefs_list_cache_timestamp';
-  static const String _producersCacheKey = 'producers_list_cache';
-  static const String _producersCacheTimestampKey =
-      'producers_list_cache_timestamp';
+  static String _getChefsCacheKey(String? location) => 'chefs_list_cache_${location ?? 'no_location'}';
+  static String _getProducersCacheKey(String? location) => 'producers_list_cache_${location ?? 'no_location'}';
 
-  // Load chef cache from UserCache
-  static Future<void> loadChefsCacheFromUserCache() async {
-    final cachedData = await UserCache.getData(_chefsCacheKey);
-    final timestampData = await UserCache.getData(_chefsCacheTimestampKey);
+  // Load chef cache from UserCache for a specific location
+  static Future<void> loadChefsCacheFromUserCache(String? location) async {
+    final locationKey = location ?? 'no_location';
+    final cacheKey = _getChefsCacheKey(location);
+    final timestampKey = '${cacheKey}_timestamp';
+
+    final cachedData = await UserCache.getData(cacheKey);
+    final timestampData = await UserCache.getData(timestampKey);
 
     if (cachedData != null && timestampData != null) {
       try {
-        print('[MealDetail] Cache hit: Loaded chefs from cache');
-        _chefsCache = List<dynamic>.from(cachedData);
-        _chefsCacheTimestamp = DateTime.parse(timestampData);
-      } catch (_) {
-        _chefsCache = [];
-        _chefsCacheTimestamp = null;
+        print('[MealDetail] Cache hit: Loaded chefs from cache for location: $locationKey');
+        _chefsCache[locationKey] = List<dynamic>.from(cachedData);
+        _chefsCacheTimestamps[locationKey] = DateTime.parse(timestampData);
+      } catch (e) {
+        print('[MealDetail] Error loading chefs cache: $e');
+        _chefsCache.remove(locationKey);
+        _chefsCacheTimestamps.remove(locationKey);
       }
     } else {
-      _chefsCache = [];
-      _chefsCacheTimestamp = null;
+      _chefsCache.remove(locationKey);
+      _chefsCacheTimestamps.remove(locationKey);
     }
   }
 
-  // Save chef cache to UserCache
-  static Future<void> saveChefsCacheToUserCache(List<dynamic> chefs) async {
-    await UserCache.saveData(_chefsCacheKey, chefs);
-    await UserCache.saveData(
-        _chefsCacheTimestampKey, DateTime.now().toIso8601String());
+  // Save chef cache to UserCache for a specific location
+  static Future<void> saveChefsCacheToUserCache(List<dynamic> chefs, String? location) async {
+    final locationKey = location ?? 'no_location';
+    final cacheKey = _getChefsCacheKey(location);
+    final timestampKey = '${cacheKey}_timestamp';
+
+    _chefsCache[locationKey] = List.from(chefs);
+    _chefsCacheTimestamps[locationKey] = DateTime.now();
+
+    await UserCache.saveData(cacheKey, chefs);
+    await UserCache.saveData(timestampKey, DateTime.now().toIso8601String());
+
+    print('[MealDetail] Saved chefs cache for location: $locationKey (${chefs.length} items)');
   }
 
-  // Load producer cache from UserCache
-  static Future<void> loadProducersCacheFromUserCache() async {
-    final cachedData = await UserCache.getData(_producersCacheKey);
-    final timestampData = await UserCache.getData(_producersCacheTimestampKey);
+  // Load producer cache from UserCache for a specific location
+  static Future<void> loadProducersCacheFromUserCache(String? location) async {
+    final locationKey = location ?? 'no_location';
+    final cacheKey = _getProducersCacheKey(location);
+    final timestampKey = '${cacheKey}_timestamp';
+
+    final cachedData = await UserCache.getData(cacheKey);
+    final timestampData = await UserCache.getData(timestampKey);
 
     if (cachedData != null && timestampData != null) {
       try {
-        print('[MealDetail Cache] Raw producers data from UserCache.getData: $cachedData');
-        _producersCache = List<dynamic>.from(cachedData);
-        _producersCacheTimestamp = DateTime.parse(timestampData);
-        if (_producersCache.isNotEmpty) {
-          print('[MealDetail Cache] First producer in _producersCache after UserCache load: ${_producersCache.first}');
-          // Specifically log is_email_verified for the first cached item if it exists
-          final firstProducerCached = _producersCache.first as Map<String, dynamic>;
-          print('[MealDetail Cache] is_email_verified for first cached producer: ${firstProducerCached['is_email_verified']} (Type: ${firstProducerCached['is_email_verified']?.runtimeType})');
+        print('[MealDetail Cache] Raw producers data from UserCache.getData for location $locationKey');
+        _producersCache[locationKey] = List<dynamic>.from(cachedData);
+        _producersCacheTimestamps[locationKey] = DateTime.parse(timestampData);
+
+        if (_producersCache[locationKey]?.isNotEmpty ?? false) {
+          print('[MealDetail Cache] First producer in _producersCache for location $locationKey');
+          final firstProducerCached = _producersCache[locationKey]!.first as Map<String, dynamic>;
+          print('[MealDetail Cache] is_email_verified for first cached producer: ${firstProducerCached['is_email_verified']}');
         } else {
-          print('[MealDetail Cache] _producersCache is empty after loading from UserCache.');
+          print('[MealDetail Cache] _producersCache is empty for location $locationKey');
         }
-        print('[MealDetail] Cache hit: Loaded producers from cache (MealDetailScreen._producersCache updated).');
       } catch (e, s) {
         print('[MealDetail Cache] Error processing data from UserCache for producers: $e');
         print('[MealDetail Cache] Stacktrace: $s');
-        _producersCache = [];
-        _producersCacheTimestamp = null;
+        _producersCache.remove(locationKey);
+        _producersCacheTimestamps.remove(locationKey);
       }
     } else {
-      _producersCache = [];
-      _producersCacheTimestamp = null;
+      _producersCache.remove(locationKey);
+      _producersCacheTimestamps.remove(locationKey);
     }
   }
 
-  // Save producer cache to UserCache
-  static Future<void> saveProducersCacheToUserCache(
-      List<dynamic> producers) async {
-    await UserCache.saveData(_producersCacheKey, producers);
-    await UserCache.saveData(
-        _producersCacheTimestampKey, DateTime.now().toIso8601String());
+  // Save producer cache to UserCache for a specific location
+  static Future<void> saveProducersCacheToUserCache(List<dynamic> producers, String? location) async {
+    final locationKey = location ?? 'no_location';
+    final cacheKey = _getProducersCacheKey(location);
+    final timestampKey = '${cacheKey}_timestamp';
+
+    _producersCache[locationKey] = List.from(producers);
+    _producersCacheTimestamps[locationKey] = DateTime.now();
+
+    await UserCache.saveData(cacheKey, producers);
+    await UserCache.saveData(timestampKey, DateTime.now().toIso8601String());
+
+    print('[MealDetail] Saved producers cache for location: $locationKey (${producers.length} items)');
   }
 
   @override
@@ -153,7 +171,6 @@ class _MealDetailScreenState extends State<MealDetailScreen>
   bool _ingredientsExpanded = false;
   bool isFavorite = false;
   bool isChefSelected = true; // Default view to 'Cooked' (Chefs)
-  // bool _isInCart = false; // Replaced by isInCart
   bool _isBulkOrder = false;
   DateTime? _planStartDate;
   DateTime? _planEndDate;
@@ -361,46 +378,60 @@ class _MealDetailScreenState extends State<MealDetailScreen>
   Future<void> _loadData({bool forceRefresh = false}) async {
     if (!mounted) return;
 
-    // Load caches from persistent storage immediately
-    await MealDetailScreen.loadChefsCacheFromUserCache();
-    await MealDetailScreen.loadProducersCacheFromUserCache();
+    // Get current location for cache keys
+    final locationParam = getGeoFencedLocationParam();
+    final locationKey = locationParam ?? 'no_location';
+
+    // Load caches from persistent storage for current location
+    await MealDetailScreen.loadChefsCacheFromUserCache(locationParam);
+    await MealDetailScreen.loadProducersCacheFromUserCache(locationParam);
 
     final now = DateTime.now();
-    bool chefsCacheValid = MealDetailScreen._chefsCache.isNotEmpty &&
-        MealDetailScreen._chefsCacheTimestamp != null &&
-        now.difference(MealDetailScreen._chefsCacheTimestamp!) <
-            CacheConfig.chefProducerDetailCacheDuration;
-    bool producersCacheValid = MealDetailScreen._producersCache.isNotEmpty &&
-        MealDetailScreen._producersCacheTimestamp != null &&
-        now.difference(MealDetailScreen._producersCacheTimestamp!) <
-            CacheConfig.chefProducerDetailCacheDuration;
+    // **** START CHANGE ****
+    // Use a 5-minute duration for staleness check as requested.
+    const staleDuration = Duration(minutes: 5);
+    bool chefsCacheValid = MealDetailScreen._chefsCache[locationKey]?.isNotEmpty ?? false &&
+        MealDetailScreen._chefsCacheTimestamps[locationKey] != null &&
+        now.difference(MealDetailScreen._chefsCacheTimestamps[locationKey]!) < staleDuration;
+
+    bool producersCacheValid = MealDetailScreen._producersCache[locationKey]?.isNotEmpty ?? false &&
+        MealDetailScreen._producersCacheTimestamps[locationKey] != null &&
+        now.difference(MealDetailScreen._producersCacheTimestamps[locationKey]!) < staleDuration;
+    // **** END CHANGE ****
 
     // Always display cached data immediately if available
-    if (mounted) {
-      setState(() {
-        if (MealDetailScreen._chefsCache.isNotEmpty) {
-          chefs = MealDetailScreen._chefsCache;
-          // Only set loading false if cache is valid or not forcing refresh
-          if (chefsCacheValid && !forceRefresh) isLoadingChefs = false;
-        } else {
-          isLoadingChefs = true; // No cache, definitely loading
-        }
-        if (MealDetailScreen._producersCache.isNotEmpty) {
-          producers = MealDetailScreen._producersCache; // Assigning from static cache to state variable
-          // Log the state variable 'producers' immediately after assignment
-          if (producers.isNotEmpty) {
-            final firstProducerInState = producers.first as Map<String, dynamic>;
-            print('[MealDetail _loadData setState] First producer in STATE now: ${producers.first}');
-            print('[MealDetail _loadData setState] is_email_verified for first producer in STATE: ${firstProducerInState['is_email_verified']} (Type: ${firstProducerInState['is_email_verified']?.runtimeType})');
+    if ((MealDetailScreen._chefsCache[locationKey]?.isNotEmpty ?? false) ||
+        (MealDetailScreen._producersCache[locationKey]?.isNotEmpty ?? false)) {
+      if (mounted) {
+        setState(() {
+          // Handle chefs cache
+          final cachedChefs = MealDetailScreen._chefsCache[locationKey];
+          if (cachedChefs != null && cachedChefs.isNotEmpty) {
+            chefs = List.from(cachedChefs);
+            // Only set loading false if cache is valid or not forcing refresh
+            if (chefsCacheValid && !forceRefresh) isLoadingChefs = false;
           } else {
-            print('[MealDetail _loadData setState] producers state variable is empty after assignment from static cache.');
+            chefs = [];
           }
-          // End of added log
-          if (producersCacheValid && !forceRefresh) isLoadingProducers = false;
-        } else {
-          isLoadingProducers = true; // No cache, definitely loading
-        }
-      });
+
+          // Handle producers cache
+          final cachedProducers = MealDetailScreen._producersCache[locationKey];
+          if (cachedProducers != null && cachedProducers.isNotEmpty) {
+            producers = List.from(cachedProducers);
+            // Log the state variable 'producers' immediately after assignment
+            if (producers.isNotEmpty) {
+              final firstProducerInState = producers.first as Map<String, dynamic>;
+              print('[MealDetail] First producer in state after cache load: $firstProducerInState');
+            } else {
+              print('[MealDetail] Producers list is empty after cache load.');
+            }
+            // Only set loading false if cache is valid or not forcing refresh
+            if (producersCacheValid && !forceRefresh) isLoadingProducers = false;
+          } else {
+            producers = [];
+          }
+        });
+      }
     }
 
     // Fetch new data in the background if cache is invalid or force refresh
@@ -408,7 +439,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
     if (forceRefresh || !chefsCacheValid) {
       print("Fetching chefs (Cache invalid/empty or forced refresh)");
        if(mounted) setState(() => isLoadingChefs = true); // Show loading before fetch starts
-      fetchFutures.add(fetchChefsWithRetry());
+      fetchFutures.add(fetchChefs());
     }
 
     if (forceRefresh || !producersCacheValid) {
@@ -426,23 +457,19 @@ class _MealDetailScreenState extends State<MealDetailScreen>
           if (mounted) {
                showCustomSnackBar(context, "Error fetching data. Please try refreshing.", isError: true);
           }
-      } finally {
-           // Ensure loading spinners are off after fetches attempt, even if failed
-            if (mounted) {
-                setState(() {
-                    isLoadingChefs = false;
-                    isLoadingProducers = false;
-                });
-            }
       }
-    } else {
-       // If no fetches were needed, ensure loading is off
-       if (mounted) {
-            setState(() {
-                isLoadingChefs = false;
-                isLoadingProducers = false;
-            });
-       }
+    }
+    // Final check to ensure loading spinners are off if no fetch was needed
+    // The fetch functions will handle this, but this is a good final check
+    if(mounted) {
+      // Small delay to allow fetch functions' finally blocks to execute
+      await Future.delayed(const Duration(milliseconds: 50));
+      if(isLoadingChefs || isLoadingProducers) {
+        setState(() {
+          isLoadingChefs = false;
+          isLoadingProducers = false;
+        });
+      }
     }
   }
 
@@ -459,13 +486,14 @@ class _MealDetailScreenState extends State<MealDetailScreen>
     }
     try {
         await _loadData(forceRefresh: true);
-        showCustomSnackBar(context, 'Data refreshed!');
+        if(mounted) showCustomSnackBar(context, 'Data refreshed!');
     } catch (e) {
         print("Error during manual refresh: $e");
-        showCustomSnackBar(context, 'Refresh failed. Check connection.', isError: true);
+        if(mounted) showCustomSnackBar(context, 'Refresh failed. Check connection.', isError: true);
     } finally {
          _stopRefreshAnimation();
-         // Ensure loading states are turned off even if fetch failed but component still mounted
+         // The individual fetch functions will turn off their flags.
+         // This is a final safeguard.
          if(mounted) {
              setState(() {
                  isLoadingChefs = false;
@@ -475,23 +503,35 @@ class _MealDetailScreenState extends State<MealDetailScreen>
     }
   }
 
-
-  // --- Fetch Chefs Logic ---
+  // --- Fetch Chefs Logic (Simplified & Robust) ---
   Future<void> fetchChefs() async {
     if (_isFetchingChefs || !mounted) return;
 
-    if (mounted) setState(() => _isFetchingChefs = true);
-    // Keep isLoadingChefs true if already set by _loadData or _handleRefresh
+    if (mounted) {
+      setState(() {
+        _isFetchingChefs = true;
+        if (!isLoadingChefs) isLoadingChefs = true;
+      });
+    }
 
-    final url = '$apibaseurl/rr/rchefs';
+    final locationParam = getGeoFencedLocationParam();
+    final locationKey = locationParam ?? 'no_location';
+    final uri = Uri.parse('$apibaseurl/rr/rchefs').replace(
+      queryParameters: {
+        if (locationParam != null) 'geo_fenced_location': locationParam,
+      },
+    );
+
     try {
-      final response = await http.get(Uri.parse(url), headers: {
-        'Accept': 'application/json',
-      }).timeout(Duration(seconds: 25));
+      final response = await http.get(uri, headers: {'Accept': 'application/json'})
+          .timeout(const Duration(seconds: 25));
+
       if (!mounted) return;
 
       List<dynamic> chefsList = [];
+      bool fetchSucceeded = false;
       if (response.statusCode == 200) {
+        fetchSucceeded = true;
         final responseData = json.decode(response.body);
         if (responseData is List) {
           chefsList = responseData.asMap().entries.map((entry) => _mapChefData(entry.value, entry.key)).toList();
@@ -502,40 +542,41 @@ class _MealDetailScreenState extends State<MealDetailScreen>
         }
 
         if (mounted) {
-            setState(() {
-                chefs = chefsList; // Update with fetched data (could be empty)
-                // isLoadingChefs = false; // Handled in finally or _loadData
-            });
-            // Update cache only if data is not empty? Or update with empty list? Let's update.
-             MealDetailScreen._chefsCache = chefsList;
-             MealDetailScreen._chefsCacheTimestamp = DateTime.now();
-             await MealDetailScreen.saveChefsCacheToUserCache(chefsList);
+          setState(() {
+            chefs = chefsList;
+          });
+          await MealDetailScreen.saveChefsCacheToUserCache(chefsList, locationParam);
+          print('[MealDetail] Updated chefs cache for location: $locationKey (${chefsList.length} items)');
         }
-
       } else {
         print('Failed to load chefs. Status code: ${response.statusCode}.');
-        if (mounted && chefs.isEmpty) { // Only show error if no cache was displayed
-          showCustomSnackBar(context, 'Failed to load chefs. Please try again.', isError: true);
-        }
-         // isLoadingChefs = false; // Handled in finally
+      }
+
+      // If the fetch failed and we have no chefs to show, use the static fallback list.
+      if (!fetchSucceeded && mounted && chefs.isEmpty) {
+        print('Fetch failed for chefs. Using default list.');
+        setState(() {
+          chefs = ChefData.chefs;
+        });
+        showCustomSnackBar(context, 'Failed to load chefs. Showing defaults.', isError: true);
       }
     } on TimeoutException {
       print('Chef fetch timed out.');
       if (mounted && chefs.isEmpty) {
-        showCustomSnackBar(context, 'Chef request timed out.', isError: true);
+        setState(() => chefs = ChefData.chefs);
+        showCustomSnackBar(context, 'Chef request timed out. Showing defaults.', isError: true);
       }
-       // isLoadingChefs = false; // Handled in finally
     } on Exception catch (e) {
       print('Error fetching chefs: $e');
       if (mounted && chefs.isEmpty) {
-        showCustomSnackBar(context, 'Unable to load chefs. An error occurred.', isError: true);
+        setState(() => chefs = ChefData.chefs);
+        showCustomSnackBar(context, 'Unable to load chefs. Showing defaults.', isError: true);
       }
-       // isLoadingChefs = false; // Handled in finally
     } finally {
       if (mounted) {
         setState(() {
-            _isFetchingChefs = false;
-            // isLoadingChefs = false; // Turn off loading indicator here
+          _isFetchingChefs = false;
+          isLoadingChefs = false; // Ensure loading indicator is always turned off.
         });
       }
     }
@@ -559,6 +600,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
         'location': fallbackChef['location'] ?? 'Unknown Location',
         'chefid': fallbackChef['chefid'] ?? index,
         'is_email_verified': fallbackChef['is_email_verified'], // Added for fallback
+        '_distance_km': null, // Explicitly null for fallback
       };
     }
     // Ensure 'is_email_verified' is correctly parsed as bool or null
@@ -579,7 +621,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
         isVerified = false;
       }
     }
-  
+
     return {
       'image': chef['image'] ?? 'assets/images/placeholderchef.jpeg',
       'name': chef['name'] ?? 'Unknown Chef',
@@ -588,45 +630,8 @@ class _MealDetailScreenState extends State<MealDetailScreen>
       'location': chef['location'] ?? 'Unknown Location',
       'chefid': chef['chefid'] ?? index,
       'is_email_verified': isVerified, // Added field from API
+      '_distance_km': chef['_distance_km'], // Add the distance field
     };
-  }
-
-  // --- Fetch Chefs with Retry Logic ---
-  Future<void> fetchChefsWithRetry({int retryCount = 2}) async {
-    for (int i = 0; i < retryCount; i++) {
-      await fetchChefs();
-      // Check if fetch was successful OR cache is now valid
-      final bool cacheValid = MealDetailScreen._chefsCache.isNotEmpty &&
-          MealDetailScreen._chefsCacheTimestamp != null &&
-          DateTime.now().difference(MealDetailScreen._chefsCacheTimestamp!) < CacheConfig.chefProducerDetailCacheDuration;
-
-      if (mounted && (chefs.isNotEmpty || cacheValid)) {
-        // If we have data (from fetch or valid cache), ensure loading is off and exit
-         if (isLoadingChefs) setState(() => isLoadingChefs = false);
-        return;
-      }
-
-      if (mounted) {
-        print('Retry ${i + 1} for fetchChefs...');
-        if (i < retryCount - 1) await Future.delayed(Duration(seconds: 1 * (i + 1)));
-      } else {
-        break; // Stop retrying if widget is disposed
-      }
-    }
-
-    // After all retries
-    if (mounted && chefs.isEmpty) {
-      print('Final retry failed for fetchChefs. Using default list.');
-      setState(() {
-        chefs = ChefData.chefs; // Use static fallback
-        isLoadingChefs = false; // Ensure loading is off
-        _isFetchingChefs = false;
-      });
-       showCustomSnackBar(context, 'Failed to load chefs. Showing defaults.', isError: true);
-    } else if (mounted && isLoadingChefs) {
-       // If retries ended but cache might be valid now, still ensure loading is off
-        setState(() => isLoadingChefs = false);
-    }
   }
 
   // --- Fetch Producers Logic ---
@@ -634,10 +639,33 @@ class _MealDetailScreenState extends State<MealDetailScreen>
     print('=== Starting fetchProducers ===');
     if (_isFetchingProducers || !mounted) return;
 
-    if(mounted) setState(() => _isFetchingProducers = true);
-    // Keep isLoadingProducers true if already set
+    if(mounted) {
+      setState(() {
+        _isFetchingProducers = true;
+        // Ensure loading state is on
+        if (!isLoadingProducers) isLoadingProducers = true;
+      });
+    }
 
-    final url = '$apibaseurl/rr/rproducers';
+    final locationParam = getGeoFencedLocationParam();
+    final locationKey = locationParam ?? 'no_location';
+    final uri = Uri.parse('$apibaseurl/rr/rproducers').replace(
+      queryParameters: {
+        if (locationParam != null) 'geo_fenced_location': locationParam,
+      },
+    );
+    final url = uri.toString();
+
+    debugPrint('🟢 [fetchProducers] === HTTP REQUEST ===');
+    debugPrint('🟢 [fetchProducers] URL: ${uri.toString()}');
+    debugPrint('🟢 [fetchProducers] Method: GET');
+    debugPrint('🟢 [fetchProducers] Headers: ${{
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    }}');
+    debugPrint('🟢 [fetchProducers] Query Parameters: ${uri.queryParameters}');
+    debugPrint('🟢 [fetchProducers] Full URL with query: $url');
+
     try {
       final response = await http.get(Uri.parse(url), headers: {
         'Accept': 'application/json',
@@ -696,12 +724,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
           print('[MealDetail] Producers: Unexpected response format (not List or Map): ${responseData.runtimeType}');
         }
 
-        print('Raw producer data: $producerRawList'); // Debug print
-        
-        print('Raw producer data from API: $producerRawList');
         final mappedProducers = producerRawList.map((item) {
-          // Determine the actual producer data map
-          // It might be the item itself, or nested under a 'data' key
           Map<String, dynamic> producerData;
           if (item is Map<String, dynamic> && item['data'] is Map<String, dynamic>) {
             producerData = item['data'] as Map<String, dynamic>;
@@ -711,7 +734,6 @@ class _MealDetailScreenState extends State<MealDetailScreen>
             print('[MealDetail] Producer item is a direct map. Using item directly.');
           } else {
             print('[MealDetail] Warning: Expected producer item to be a Map, got ${item.runtimeType}. Skipping.');
-            // Provide a default structure for invalid items to prevent crashes downstream
             return {'producer_id': DateTime.now().millisecondsSinceEpoch + producerRawList.indexOf(item), 'name': 'Invalid Data Structure', 'image': 'assets/images/producerHolder.png', 'Location': 'N/A', 'Rating': 0.0, 'is_email_verified': null};
           }
 
@@ -725,36 +747,19 @@ class _MealDetailScreenState extends State<MealDetailScreen>
           final location = producerData['location']?.toString().trim() ?? ''; // Assuming 'location' is the key
           final rating = _parsePrice(producerData['rating'] ?? producerData['Rating']); // Check for 'rating' or 'Rating'
           final id = producerData['producer_id'] ?? DateTime.now().millisecondsSinceEpoch + producerRawList.indexOf(item);
-          
-          // Handle is_email_verified field
+
           dynamic rawVerified = producerData['is_email_verified'];
           print('[MealDetail] Producer "${name}": Raw "is_email_verified" value is "$rawVerified", type is ${rawVerified.runtimeType}');
           bool? isVerified;
           if (rawVerified is bool) {
             isVerified = rawVerified;
-            print('[MealDetail] Producer "${name}": Parsed as bool. isVerified = $isVerified');
           } else if (rawVerified is String) {
             String lowerCaseString = rawVerified.toLowerCase();
-            print('[MealDetail] Producer "${name}": Raw value is String "$rawVerified". Lowercase: "$lowerCaseString"');
-            if (lowerCaseString == 'true') {
-              isVerified = true;
-            } else if (lowerCaseString == 'false') {
-              isVerified = false;
-            }
-            print('[MealDetail] Producer "${name}": After string parsing. isVerified = $isVerified');
+            isVerified = lowerCaseString == 'true';
           } else if (rawVerified is int) {
-            print('[MealDetail] Producer "${name}": Raw value is int "$rawVerified".');
-            if (rawVerified == 1) {
-              isVerified = true;
-            } else if (rawVerified == 0) {
-              isVerified = false;
-            }
-            print('[MealDetail] Producer "${name}": After int parsing. isVerified = $isVerified');
-          } else {
-            print('[MealDetail] Producer "${name}": "is_email_verified" is not bool, String, or int. Type: ${rawVerified.runtimeType}. Value: "$rawVerified"');
+            isVerified = rawVerified == 1;
           }
-          print('[MealDetail] Producer "${name}": Final isVerified before mapping: $isVerified');
-          
+
           final mappedProducer = {
             'producer_id': id,
             'name': name.isEmpty ? 'Unknown Producer' : name,
@@ -762,21 +767,18 @@ class _MealDetailScreenState extends State<MealDetailScreen>
             'Location': location.isEmpty ? 'Unknown Location' : location,
             'Rating': rating,
             'is_email_verified': isVerified,
+            '_distance_km': producerData['_distance_km'], // Add the distance field
           };
           print('Mapped producer data: $mappedProducer');
-          print('Producer verification status: is_email_verified = $isVerified');
-          print('Producer data details: name = $name, image = $image, location = $location, rating = $rating');
           return mappedProducer;
         }).toList();
 
         if (mounted) {
             setState(() {
                 producers = mappedProducers;
-                // isLoadingProducers = false; // Handled in finally
             });
-            MealDetailScreen._producersCache = mappedProducers;
-            MealDetailScreen._producersCacheTimestamp = DateTime.now();
-            await MealDetailScreen.saveProducersCacheToUserCache(mappedProducers);
+            await MealDetailScreen.saveProducersCacheToUserCache(mappedProducers, locationParam);
+            print('[MealDetail] Updated producers cache for location: $locationKey (${mappedProducers.length} items)');
         }
 
       } else {
@@ -784,25 +786,23 @@ class _MealDetailScreenState extends State<MealDetailScreen>
          if (mounted && producers.isEmpty) {
             showCustomSnackBar(context, 'Failed to load producers. Please try again.', isError: true);
         }
-         // isLoadingProducers = false; // Handled in finally
       }
     } on TimeoutException {
       print('Producer fetch timed out.');
       if (mounted && producers.isEmpty) {
         showCustomSnackBar(context, 'Producer request timed out.', isError: true);
       }
-       // isLoadingProducers = false; // Handled in finally
-    } catch (e) {
+    } catch (e, s) {
       print('Error fetching producers: $e');
+      print('Stacktrace: $s');
       if (mounted && producers.isEmpty) {
         showCustomSnackBar(context, 'Unable to load producers. An error occurred.', isError: true);
       }
-       // isLoadingProducers = false; // Handled in finally
     } finally {
       if (mounted) {
         setState(() {
-             _isFetchingProducers = false;
-            // isLoadingProducers = false; // Turn off loading indicator here
+            _isFetchingProducers = false;
+            isLoadingProducers = false;
         });
       }
     }
@@ -834,8 +834,8 @@ class _MealDetailScreenState extends State<MealDetailScreen>
     final prefs = await SharedPreferences.getInstance();
     final currentUserId = prefs.getString('user_id');
     final currentUserType = prefs.getString('user_type')?.toLowerCase();
-    
-    if (currentUserType == 'chef' && 
+
+    if (currentUserType == 'chef' &&
         chef['chefid']?.toString() == currentUserId) {
       debugPrint('Chef cannot order from themselves');
       if (mounted) {
@@ -903,9 +903,9 @@ class _MealDetailScreenState extends State<MealDetailScreen>
     final prefs = await SharedPreferences.getInstance();
     final currentUserId = prefs.getString('user_id');
     final currentUserType = prefs.getString('user_type')?.toLowerCase();
-    
-    if (currentUserType == 'producer' && 
-        (producer['producer_id']?.toString() == currentUserId || 
+
+    if (currentUserType == 'producer' &&
+        (producer['producer_id']?.toString() == currentUserId ||
          producer['id']?.toString() == currentUserId)) {
       debugPrint('Producer cannot order from themselves');
       if (mounted) {
@@ -1149,12 +1149,12 @@ class _MealDetailScreenState extends State<MealDetailScreen>
     if (imageUrl == null || imageUrl.isEmpty) {
       return 'assets/images/cover.png'; // Default if null or empty
     }
-    
+
     // Handle local assets
     if (imageUrl.startsWith('assets/')) {
       return imageUrl;
     }
-    
+
     // Use the centralized ImageUtils to process the URL
     return ImageUtils.processImageUrl(imageUrl);
   }
@@ -1203,7 +1203,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
             AnimatedBuilder(
               animation: _refreshIconController,
               builder: (context, child) {
-                final isLoading = _isFetchingChefs || _isFetchingProducers;
+                final isLoading = isLoadingChefs || isLoadingProducers;
                 if (isLoading && !_refreshIconController.isAnimating) {
                     _refreshIconController.repeat();
                 } else if (!isLoading && _refreshIconController.isAnimating) {
@@ -1282,7 +1282,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
             child: SingleChildScrollView(
               physics:
                   const AlwaysScrollableScrollPhysics(), // Ensure scroll even when content fits
-              padding: EdgeInsets.all(_horizontalPadding.toDouble()),
+              padding: EdgeInsets.all(_horizontalPadding),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -2146,16 +2146,29 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                         ),
                       IconButton(
                         icon: Icon(Icons.refresh, color: kColorPrimary),
-                         tooltip: 'Refresh Chefs',
-                        onPressed: () {
-                          setModalState(() {
-                            isLoadingChefs = true; // Show loading in modal
-                            _chefSearchQuery = ''; // Clear search on refresh
-                            _chefSearchController.clear();
-                          });
-                           // Call fetch and let parent state handle rebuild
-                          fetchChefsWithRetry();
-                        },
+                        tooltip: 'Refresh Chefs',
+                        // **** START FIX: Use async/await to refresh modal state correctly ****
+                        onPressed: (isLoadingChefs || _isFetchingChefs)
+                            ? null
+                            : () async {
+                                // Clear search query in the modal state
+                                _chefSearchController.clear();
+                                setModalState(() {
+                                  _chefSearchQuery = '';
+                                });
+
+                                // Await the fetch operation. The fetchChefs function will call the
+                                // main setState() to update data and loading status.
+                                await fetchChefs();
+
+                                // After the fetch is complete, the parent state is updated.
+                                // Now, we MUST call setModalState to force this modal to rebuild
+                                // and display the new data.
+                                if (mounted) {
+                                  setModalState(() {});
+                                }
+                              },
+                        // **** END FIX ****
                       ),
                     ],
                   ),
@@ -2276,45 +2289,84 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // **** START CHANGE ****
+                        // This Row provides the desired layout:
+                        // [Name + Distance] on the left, [Icon] on the extreme right.
                         Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(chefName,
-                              style: GoogleFonts.poppins(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                  color: kColorPrimaryDark)), // Darker text
-                          if (chef['is_email_verified'] != null) // Check if the flag exists
-                            Padding(
-                              padding: const EdgeInsets.only(left: 8.0),
-                              child: Icon(
-                                Icons.verified,
-                                color: chef['is_email_verified'] == true ? Colors.green : Colors.grey,
-                                size: 16.0,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            // This flexible group keeps the name and distance together
+                            // and allows the name to shrink/wrap if it's too long.
+                            Flexible(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.baseline,
+                                textBaseline: TextBaseline.alphabetic,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      chefName,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold,
+                                        color: kColorPrimaryDark,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  if (chef['_distance_km'] != null)
+                                    Padding(
+                                      padding: const EdgeInsets.only(left: 8.0),
+                                      child: Text(
+                                        '${(chef['_distance_km'] is num ? (chef['_distance_km'] as num) : 0).toStringAsFixed(1)} km',
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 12,
+                                          color: kColorTextSecondary,
+                                          fontStyle: FontStyle.italic,
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
-                        ],
-                      ),
-                      SizedBox(height: 3),
+                            // Spacer takes all available horizontal space, pushing the icon to the right.
+                            const Spacer(),
+                            // The verification icon, now guaranteed to be on the far right.
+                            if (chef['is_email_verified'] != null)
+                              Tooltip(
+                                message: chef['is_email_verified'] == true ? 'Verified' : 'Not Verified',
+                                child: Icon(
+                                  Icons.verified,
+                                  color: chef['is_email_verified'] == true ? kColorSuccess : Colors.grey,
+                                  size: 16.0,
+                                ),
+                              ),
+                          ],
+                        ),
+                        // **** END CHANGE ****
+                        SizedBox(height: 3),
                         Row(
-                            children: List.generate(
-                                5,
-                                (i) => Icon(
-                                    i < chefRating.round()
-                                        ? Icons.star_rounded // Use rounded star
-                                        : Icons.star_border_rounded, // Use rounded border star
-                                    color: Colors.amber[600], // Use Amber for stars
-                                    size: 15))),
-                        SizedBox(height: 4), // Increased spacing
+                          children: List.generate(
+                            5,
+                            (i) => Icon(
+                              i < chefRating.round()
+                                  ? Icons.star_rounded
+                                  : Icons.star_border_rounded,
+                              color: Colors.amber[600],
+                              size: 15,
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 4),
                         Row(
                           children: [
                             Icon(Icons.location_on_outlined,
-                                color: kColorTextSecondary, size: 13), // Secondary color icon
+                                color: kColorTextSecondary, size: 13),
                             SizedBox(width: 4),
                             Expanded(
                                 child: Text(getShortLocation(chefLocation),
                                     style: GoogleFonts.poppins(
-                                        fontSize: 12, color: kColorTextSecondary), // Secondary color text
+                                        fontSize: 12, color: kColorTextSecondary),
                                     overflow: TextOverflow.ellipsis)),
                           ],
                         ),
@@ -2325,7 +2377,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                     Padding(
                       padding: const EdgeInsets.only(left: 8.0),
                       child: Icon(Icons.check_circle,
-                          color: kColorSuccess, size: 28), // Use success color
+                          color: kColorSuccess, size: 28),
                     ),
                 ],
               ),
@@ -2436,15 +2488,26 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                         ),
                       IconButton(
                         icon: Icon(Icons.refresh, color: kColorPrimary),
-                         tooltip: 'Refresh Producers',
-                        onPressed: () {
-                          setModalState(() {
-                            isLoadingProducers = true; // Use correct loading var
-                            _producerSearchQuery = ''; // Clear search
-                            _producerSearchController.clear();
-                          });
-                          fetchProducers(); // Call correct fetch function
-                        },
+                        tooltip: 'Refresh Producers',
+                        // **** START FIX: Use async/await to refresh modal state correctly ****
+                        onPressed: (isLoadingProducers || _isFetchingProducers)
+                            ? null
+                            : () async {
+                                // Clear search query in the modal state
+                                _producerSearchController.clear();
+                                setModalState(() {
+                                  _producerSearchQuery = '';
+                                });
+
+                                // Await the fetch operation.
+                                await fetchProducers();
+
+                                // After the fetch is complete, force the modal to rebuild.
+                                if (mounted) {
+                                  setModalState(() {});
+                                }
+                              },
+                        // **** END FIX ****
                       ),
                     ],
                   ),
@@ -2493,13 +2556,6 @@ class _MealDetailScreenState extends State<MealDetailScreen>
 
   // Helper method to build the producer list with provided data
   Widget _buildProducerListWithData(List<dynamic> producersToDisplay) {
-    // ----- START FIX -----
-    print('=== Building producer list with ${producersToDisplay.length} items ===');
-    producersToDisplay.forEach((producer) {
-      // This print helps confirm if 'is_email_verified' is present and its value
-      print('Producer in list: ${producer['name']}, is_email_verified: ${producer['is_email_verified']}');
-    });
-    // ----- END FIX -----
      return ListView.builder(
        key: ValueKey('producer_list_${producersToDisplay.length}'), // Add key
       itemCount: producersToDisplay.length,
@@ -2572,47 +2628,80 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // ----- START FIX: Add verification icon for producer -----
+                        // **** START CHANGE ****
+                        // This Row provides the desired layout:
+                        // [Name + Distance] on the left, [Icon] on the extreme right.
                         Row(
-                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            Text(producerName,
-                                style: GoogleFonts.poppins(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold,
-                                    color: kColorPrimaryDark)),
-                            if (producer['is_email_verified'] != null) // Check if the flag exists
-                              Padding(
-                                padding: const EdgeInsets.only(left: 8.0),
+                            // This flexible group keeps the name and distance together.
+                            Flexible(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.baseline,
+                                textBaseline: TextBaseline.alphabetic,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      producerName,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold,
+                                        color: kColorPrimaryDark,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  if (producer['_distance_km'] != null)
+                                    Padding(
+                                      padding: const EdgeInsets.only(left: 8.0),
+                                      child: Text(
+                                        '${(producer['_distance_km'] is num ? (producer['_distance_km'] as num) : 0).toStringAsFixed(1)} km',
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 12,
+                                          color: kColorTextSecondary,
+                                          fontStyle: FontStyle.italic,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            // Spacer takes all available horizontal space.
+                            const Spacer(),
+                            // The verification icon, now on the far right.
+                            if (producer['is_email_verified'] != null)
+                              Tooltip(
+                                message: producer['is_email_verified'] == true ? 'Verified' : 'Not Verified',
                                 child: Icon(
                                   Icons.verified,
-                                  color: producer['is_email_verified'] == true ? Colors.green : Colors.grey,
+                                  color: producer['is_email_verified'] == true ? kColorSuccess : Colors.grey,
                                   size: 16.0,
                                 ),
                               ),
                           ],
                         ),
-                        // ----- END FIX -----
+                        // **** END CHANGE ****
                         SizedBox(height: 3),
                         Row(
                             children: List.generate(
                                 5,
                                 (i) => Icon(
                                     i < producerRating.round()
-                                        ? Icons.star_rounded // Use rounded star
-                                        : Icons.star_border_rounded, // Use rounded border star
-                                    color: Colors.amber[600], // Use Amber for stars
+                                        ? Icons.star_rounded
+                                        : Icons.star_border_rounded,
+                                    color: Colors.amber[600],
                                     size: 15))),
-                        SizedBox(height: 4), // Increased spacing
+                        SizedBox(height: 4),
                         Row(
                           children: [
                             Icon(Icons.location_on_outlined,
-                                color: kColorTextSecondary, size: 13), // Secondary color icon
+                                color: kColorTextSecondary, size: 13),
                             SizedBox(width: 4),
                             Expanded(
                                 child: Text(getShortLocation(producerLocation),
                                     style: GoogleFonts.poppins(
-                                        fontSize: 12, color: kColorTextSecondary), // Secondary color text
+                                        fontSize: 12, color: kColorTextSecondary),
                                     overflow: TextOverflow.ellipsis)),
                           ],
                         ),
@@ -2623,7 +2712,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                     Padding(
                       padding: const EdgeInsets.only(left: 8.0),
                       child: Icon(Icons.check_circle,
-                          color: kColorSuccess, size: 28), // Use success color
+                          color: kColorSuccess, size: 28),
                     ),
                 ],
               ),
@@ -2642,7 +2731,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
        if (!isInCart) {
          return Padding(
             padding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-            child: Text("Please select 'Cooked' or 'Fresh' above to choose a provider.", style: GoogleFonts.poppins(color: kColorTextSecondary, fontSize: 13)),
+            child: Text("Please select 'Cooked' or 'Fresh' above to choose a provider.", style: GoogleFonts.poppins(color: kColorTextSecondary, fontSize: 13, fontStyle: FontStyle.italic)),
          );
        }
       return SizedBox.shrink(); // Hide if nothing selected or already in cart
@@ -2652,7 +2741,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
     final data = isChef ? selectedChef! : selectedProducer!;
 
      // --- Safety Checks ---
-    if (data == null || data is! Map<String, dynamic>) {
+    if (data is! Map<String, dynamic>) {
          print("Warning: Invalid selectedChef/selectedProducer data: $data");
          // Clear invalid selection
          if (mounted) {
@@ -3129,7 +3218,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                   padding: const EdgeInsets.only(top: 12.0),
                   child: Text(
                      "Select 'Cooked' or 'Fresh' above to add the plan to cart.",
-                     style: GoogleFonts.poppins(color: kColorError, fontSize: 13)
+                     style: GoogleFonts.poppins(color: kColorError, fontSize: 13, fontStyle: FontStyle.italic)
                   ),
                  ),
             ],

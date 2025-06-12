@@ -37,10 +37,7 @@ class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  @override
-  _SplashScreenState createState() {
-    return _SplashScreenState();
-  }
+  _SplashScreenState createState() => _SplashScreenState();
 }
 
 class _SplashScreenState extends State<SplashScreen>
@@ -57,6 +54,8 @@ class _SplashScreenState extends State<SplashScreen>
   void initState() {
     super.initState();
 
+    _nextScreen = SignUpOrLoginPage(); // Default fallback screen
+
     // Pre-cache the banner image
     WidgetsBinding.instance.addPostFrameCallback((_) {
       precacheImage(const AssetImage('assets/images/grodd2.jpg'), context);
@@ -65,20 +64,20 @@ class _SplashScreenState extends State<SplashScreen>
     // Initialize the main animation controller
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1200), // Slightly faster for better feel
+      duration: const Duration(milliseconds: 1200),
     );
 
     // Define the fade animation for the background/logo
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _controller,
-        curve: Curves.easeOutQuad, // Smoother curve for fade
+        curve: Curves.easeOutQuad,
       ),
     );
 
     // Define the slide animation for text and button (from bottom up)
     _slideAnimation = Tween<Offset>(
-      begin: const Offset(0.0, 0.4), // Start slightly higher for smoother feel
+      begin: const Offset(0.0, 0.4),
       end: Offset.zero,
     ).animate(
       CurvedAnimation(
@@ -105,22 +104,22 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   void dispose() {
-    _controller.stop();
     _controller.dispose();
     super.dispose();
   }
 
   // Custom method for navigation with scale and fade transition
   Future<void> _navigateWithScaleTransition(BuildContext context, Widget page) async {
-    if (_isTransitioning) return;
+    if (_isTransitioning || !mounted) return;
     _isTransitioning = true;
-    
-    // Ensure any ongoing animations complete
+
     await _controller.animateTo(1.0, duration: const Duration(milliseconds: 100));
-    
-    if (!mounted) return;
-    
-    // Use a page route with optimized transition
+
+    if (!mounted) {
+      _isTransitioning = false;
+      return;
+    }
+
     await Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) => page,
@@ -147,7 +146,7 @@ class _SplashScreenState extends State<SplashScreen>
         },
       ),
     );
-    
+
     _isTransitioning = false;
   }
 
@@ -156,7 +155,6 @@ class _SplashScreenState extends State<SplashScreen>
     if (mounted) setState(() => _isPreloading = true);
     final prefs = await SharedPreferences.getInstance();
 
-    // Efficiently fetch user_id (int or String)
     int? userId;
     final rawUserId = prefs.get('user_id');
     if (rawUserId is int) {
@@ -165,51 +163,42 @@ class _SplashScreenState extends State<SplashScreen>
       userId = int.tryParse(rawUserId);
     }
 
-    // Efficiently fetch user_type
     String? userType = prefs.getString('user_type');
-    // Normalize userType for case and whitespace
     final normalizedUserType = userType?.trim().toLowerCase();
 
-    // Debug log for splash extraction
-    debugPrint('[SPLASH] rawUserId: '
-        '[36m'
-        '[1m'
-        '[0m' + rawUserId.toString() +
-        ', userType: ' + (userType ?? 'null') +
-        ', normalizedUserType: ' + (normalizedUserType ?? 'null'));
+    debugPrint('[SPLASH] rawUserId: $rawUserId, userType: ${userType ?? 'null'}, normalizedUserType: ${normalizedUserType ?? 'null'}');
 
-    // Decide next screen based on login state and user type
-    Widget nextScreen;
+    Widget determinedNextScreen;
     if (userId != null && normalizedUserType != null && normalizedUserType.isNotEmpty) {
       switch (normalizedUserType) {
         case 'chef':
-          nextScreen = ChefDash88new();
+          determinedNextScreen = ChefDash88new();
           break;
         case 'producer':
-          nextScreen = ProducerDash22();
+          determinedNextScreen = ProducerDash22();
           break;
         case 'transporter':
-          nextScreen = TransporterDashNew(transporterId: userId.toString());
+          determinedNextScreen = TransporterDashNew(transporterId: userId.toString());
           break;
         case 'stakeholder':
-          nextScreen = stakeholderdas2222();
+          determinedNextScreen = stakeholderdas2222();
           break;
         case 'user':
-          nextScreen = LandingPage();
+          determinedNextScreen = LandingPage();
           break;
         default:
-          nextScreen = AllMealsScreen();
+          determinedNextScreen = AllMealsScreen();
           break;
       }
     } else {
-      nextScreen = SignUpOrLoginPage();
+      determinedNextScreen = SignUpOrLoginPage();
     }
 
-      // Parallelized preload/caching logic for fastest splash
+    // **** START FIX: Provide null for location-aware cache methods ****
+    // Parallelized preload/caching logic for fastest splash
     final preloadFutures = <Future>[
       OrderHistoryScreen.preloadCacheForSplash(),
       ProducerDash22.preloadCacheForSplash(),
-      // Preload meals data if cache is invalid
       AllMealsScreen.preloadMealsIfNeeded().then((refreshed) {
         if (refreshed) {
           debugPrint('[SPLASH] Successfully refreshed meals cache');
@@ -219,49 +208,52 @@ class _SplashScreenState extends State<SplashScreen>
       }).catchError((e) {
         debugPrint('[SPLASH] Error preloading meals: $e');
       }),
-      MealDetailScreen.loadChefsCacheFromUserCache(),
-      MealDetailScreen.loadProducersCacheFromUserCache(),
+      // FIX: Provide null to location-aware caching methods
+      MealDetailScreen.loadChefsCacheFromUserCache(null),
+      MealDetailScreen.loadProducersCacheFromUserCache(null),
+      // FIX: Provide null to location-aware caching method
       nutrition_details.Nutri_DetailPage.preloadProducersCacheForSplash(),
       ChooseChefNetwork.preloadCacheForSplash(),
       NutritionPage.preloadCachesForSplash().catchError((e) {
         debugPrint('[SPLASH] Error preloading Nutrition+ data: $e');
       }),
-      // Add non-blocking location fetching
       LocationService.instance.fetchAndSetCurrentLocation().then((_) {
         debugPrint('[SPLASH] Initial location fetch attempt completed (non-blocking).');
         if (LocationService.instance.currentPosition != null) {
           debugPrint('[SPLASH] Location fetched: ${LocationService.instance.currentPosition}');
           if (LocationService.instance.currentAddress != null) {
             debugPrint('[SPLASH] Address fetched: ${LocationService.instance.currentAddress}');
-          } else {
-            debugPrint('[SPLASH] Address not fetched or geocoding failed for initial fetch.');
           }
         } else {
-          debugPrint('[SPLASH] Initial location fetch failed or permission denied. Error: ${LocationService.instance.error}');
+          debugPrint('[SPLASH] Initial location fetch failed or permission denied.');
         }
       }).catchError((e) {
         debugPrint('[SPLASH] Error during initial location fetch: $e');
       }),
     ];
-    
-    // Add transporter-specific preloading if needed
+    // **** END FIX ****
+
     if (userType == 'transporter' && userId != null) {
       preloadFutures.add(TransporterDashNew.preloadCacheForSplash(userId.toString()));
     }
+    
+    // Await all futures but catch individual errors so one failure doesn't stop others
     await Future.wait(preloadFutures.map((f) => f.catchError((e) {
-      debugPrint('Preload error: \$e');
+      debugPrint('A non-critical preload task failed: $e');
+      return Future.value(); // Return a completed future to continue
     })));
-    await Future.delayed(const Duration(milliseconds: 0));
+
+    // A small delay to ensure UI updates smoothly
+    await Future.delayed(const Duration(milliseconds: 100));
 
     if (mounted) {
       setState(() {
         _isPreloading = false;
-        _nextScreen = nextScreen; // Store the next screen for manual navigation
+        _nextScreen = determinedNextScreen;
       });
-      // Auto-navigation is now enabled
-      _navigateWithScaleTransition(context, nextScreen);
+      // Automatically navigate after preloading is complete
+      _navigateWithScaleTransition(context, _nextScreen);
     }
-    return;
   }
 
   @override
@@ -276,11 +268,10 @@ class _SplashScreenState extends State<SplashScreen>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Banner Image at the top with simple animation
           AnimatedPositioned(
             duration: const Duration(milliseconds: 800),
             curve: Curves.easeOutQuart,
-            top: _showBanner ? 0 : -100, // Start above the screen
+            top: _showBanner ? 0 : -100,
             left: 0,
             right: 0,
             child: Image.asset(
@@ -360,8 +351,8 @@ class _SplashScreenState extends State<SplashScreen>
                           ),
                           const SizedBox(height: 50),
                           ElevatedButton(
-                            onPressed: _isPreloading 
-                                ? null 
+                            onPressed: _isPreloading
+                                ? null
                                 : () => _navigateWithScaleTransition(context, _nextScreen),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: kColorPrimary,
@@ -374,12 +365,19 @@ class _SplashScreenState extends State<SplashScreen>
                               elevation: 3,
                               shadowColor: kColorPrimary.withOpacity(0.3),
                             ),
-                            child: Text(
-                              _isPreloading ? "Loading..." : "Get Started",
-                              style: GoogleFonts.poppins(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: 0.8,
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 300),
+                              transitionBuilder: (Widget child, Animation<double> animation) {
+                                return FadeTransition(opacity: animation, child: child);
+                              },
+                              child: Text(
+                                _isPreloading ? "LOADING..." : "GET STARTED",
+                                key: ValueKey<bool>(_isPreloading),
+                                style: GoogleFonts.poppins(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.8,
+                                ),
                               ),
                             ),
                           ),

@@ -10,6 +10,7 @@ import 'cart.dart' as cart;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi/utils/overlay_utils.dart';
+import 'package:zinzi/utils/location_utils.dart';
 import 'producer_selector_bottom_sheet.dart';
 
 const Color primaryColor = Color(0xFF0B5345); // Dark teal
@@ -103,10 +104,9 @@ class _Nutri_DetailPageState extends State<Nutri_DetailPage>
 
   // Check if cache exists and is valid, preload if needed
   Future<void> _checkCacheAndPreloadIfNeeded() async {
-    final String cacheKey =
-        'producers_for_item_${widget.item.productIdKey}_${widget.item.productIdValue}';
-    final String cacheTsKey =
-        'producers_for_item_ts_${widget.item.productIdKey}_${widget.item.productIdValue}';
+    final locationParamValue = getGeoFencedLocationParam() ?? 'no_location';
+    final String cacheKey = 'all_producers_loc:$locationParamValue';
+    final String cacheTsKey = '${cacheKey}_ts';
     
     try {
       final cachedData = await UserCache.getData(cacheKey);
@@ -225,54 +225,65 @@ class _Nutri_DetailPageState extends State<Nutri_DetailPage>
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
       builder: (context) {
-        if (_cachedProducers == null || _cachedProducers!.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.error_outline, size: 48, color: Colors.grey),
-                SizedBox(height: 16),
-                Text('No producers available'),
-                SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _refreshProducersWithAnimation();
-                  },
-                  child: Text('Refresh'),
-                ),
-              ],
-            ),
-          );
-        }
-        return ProducerSelectorBottomSheet(
-          producers: _cachedProducers!,
-          onSelected: (producer) async {
-            // Check if current user is a producer trying to order from themselves
-            if (currentUserType == 'producer' && 
-                (producer['producer_id']?.toString() == currentUserId || 
-                 producer['id']?.toString() == currentUserId)) {
-              debugPrint('Producer cannot order from themselves');
-              if (mounted) {
-                OverlayUtils.showErrorOverlay(
-                  context: context,
-                  message: 'You cannot order from yourself',
-                );
-              }
-              return;
-            }
-            
-            if (mounted) {
-              setState(() {
-                selectedProducer = producer;
-              });
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Producer selected: ${producer['name'] ?? ''}'),
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter modalSetState) {
+            if (_cachedProducers == null || _cachedProducers!.isEmpty) {
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.error_outline, size: 48, color: Colors.grey),
+                    SizedBox(height: 16),
+                    Text('No producers available'),
+                    SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _refreshProducersWithAnimation();
+                      },
+                      child: Text('Refresh'),
+                    ),
+                  ],
                 ),
               );
             }
+            return ProducerSelectorBottomSheet(
+              producers: _cachedProducers!,
+              onSelected: (producer) async {
+                // Check if current user is a producer trying to order from themselves
+                if (currentUserType == 'producer' && 
+                    (producer['producer_id']?.toString() == currentUserId || 
+                     producer['id']?.toString() == currentUserId)) {
+                  debugPrint('Producer cannot order from themselves');
+                  if (mounted) {
+                    OverlayUtils.showErrorOverlay(
+                      context: context,
+                      message: 'You cannot order from yourself',
+                    );
+                  }
+                  return;
+                }
+                
+                if (mounted) {
+                  setState(() {
+                    selectedProducer = producer;
+                  });
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Producer selected: ${producer['name'] ?? ''}'),
+                    ),
+                  );
+                }
+              },
+              onRefresh: () async {
+                await _refreshProducersWithAnimation();
+                if (mounted) {
+                  // Rebuild the bottom sheet's content with the newly fetched data
+                  modalSetState(() {});
+                }
+              },
+            );
           },
         );
       },
@@ -281,32 +292,54 @@ class _Nutri_DetailPageState extends State<Nutri_DetailPage>
 
   Future<List<Map<String, dynamic>>> _fetchProducersForItem(
       {bool forceRefresh = false}) async {
-    final String cacheKey =
-        'producers_for_item_${widget.item.productIdKey}_${widget.item.productIdValue}';
-    final String cacheTsKey =
-        'producers_for_item_ts_${widget.item.productIdKey}_${widget.item.productIdValue}';
     try {
-      // Check cache first unless forced refresh
+      // Get location parameter for cache key
+      final locationParamValue = getGeoFencedLocationParam() ?? 'no_location';
+      // Remove product ID from cache key to make it global
+      final cacheKey = 'all_producers_loc:$locationParamValue';
+      final cacheTsKey = '${cacheKey}_ts';
+
+      // Check cache first if not forcing refresh
       if (!forceRefresh) {
         final cachedData = await UserCache.getData(cacheKey);
         final cachedTs = await UserCache.getData(cacheTsKey);
-        final now = DateTime.now();
-        if (cachedData != null && cachedTs != null) {
-          final cacheTime = DateTime.tryParse(cachedTs.toString());
-          if (cacheTime != null &&
-              now.difference(cacheTime) <
-                  CacheConfig.chefProducerDetailCacheDuration) {
+
+        if (cachedData != null &&
+            cachedTs != null &&
+            DateTime.now().difference(DateTime.parse(cachedTs)) < Duration(minutes: 5)) {
+          if (mounted) {
             print(
-                '[NutriDetail] Loaded producers from cache for ${widget.item.productIdKey}:${widget.item.productIdValue}');
+                '[NutriDetail] Loaded producers from cache for location: $locationParamValue');
             return List<Map<String, dynamic>>.from(cachedData);
           }
+        } else if (cachedData != null) {
+          print('[NutriDetail] Cache expired for $cacheKey');
         }
       }
       
       // Fetch from API if not in cache or cache expired
       final String baseUrl =
           dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
-      final response = await http.get(Uri.parse('$baseUrl/rr/rproducers'));
+      
+      // Get location parameter if available
+      final locationParam = getGeoFencedLocationParam();
+      final uri = Uri.parse('$baseUrl/rr/rproducers').replace(
+        queryParameters: {
+          if (locationParam != null) 'geo_fenced_location': locationParam,
+        },
+      );
+      final url = uri.toString();
+      
+      debugPrint(' [nutri_detail] === HTTP REQUEST ===');
+      debugPrint(' [nutri_detail] URL: ${uri.toString()}');
+      debugPrint(' [nutri_detail] Method: GET');
+      debugPrint(' [nutri_detail] Headers: ${{
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      }}');
+      debugPrint(' [nutri_detail] Query Parameters: ${uri.queryParameters}');
+      debugPrint(' [nutri_detail] Full URL with query: $url');
+      final response = await http.get(uri);
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         List<Map<String, dynamic>> producersList;

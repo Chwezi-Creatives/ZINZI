@@ -45,10 +45,10 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	
+	<!-- Existing Permissions -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>[Zinzi needs location to show you a map]</string>
-
-	<!-- FCM and notification permissions START -->
+	<string>Zinzi needs location to show you a map</string>
 	<key>FirebaseAppDelegateProxyEnabled</key>
 	<false/>
 	<key>UIBackgroundModes</key>
@@ -60,7 +60,18 @@
 	<string>This app uses notifications to keep you updated on your orders and activity.</string>
 	<key>NSUserNotificationAlertUsageDescription</key>
 	<string>This app uses notifications to keep you updated on your orders and activity.</string>
-	<!-- FCM and notification permissions END -->
 
+	<!-- ✅ ADDED REQUIRED USAGE DESCRIPTIONS -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Zinzi may use the microphone to record audio input voice commands when talking to sensei.</string>
+
+	<key>NSCameraUsageDescription</key>
+	<string>Zinzi needs the camera to allow users to take or upload profile pictures or images.</string>
+
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Zinzi may use basic text to speech to eable yo chat with sensei.</string>
+
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Zinzi may use your location to improve suggestions and experiences even when the app is in the background.</string>
 </dict>
 </plist>

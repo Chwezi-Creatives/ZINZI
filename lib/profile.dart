@@ -238,11 +238,9 @@ class _ProfilePageState extends State<ProfilePage>
   final List<String> _dietTypeOptions = [
     
     'Vegetarian',
-    'Keto',
-    'Paleo',
-    'Mediterranean',
     'Omnivore',
     'Vegan',
+    'All'
   ];
   String? _selectedFoodRestriction;
   final List<String> _foodRestrictionsOptions = [
@@ -1530,9 +1528,6 @@ class _ProfilePageState extends State<ProfilePage>
   // --- Build Method ---
   @override
   Widget build(BuildContext context) {
-    bool isEditingAnySection =
-        _isEditingUserDetails || _isEditingMetrics || _isEditingPreferences;
-
     // Show main shimmer if _isLoading is true AND (userDetails is empty AND no fetchError has occurred yet)
     // This prevents shimmer from showing if there's an error message to display or if some data is already loaded.
     bool showOverallShimmer =
@@ -1551,36 +1546,23 @@ class _ProfilePageState extends State<ProfilePage>
         elevation: 1.0,
         centerTitle: true,
         actions: [
-          if (isEditingAnySection) ...[
-            IconButton(
-              icon: const Icon(Icons.cancel_outlined),
-              tooltip: 'Cancel Changes',
-              onPressed: _cancelEdit,
-            ),
-            IconButton(
-              icon: const Icon(Icons.save_alt_outlined),
-              tooltip: 'Save Changes',
-              onPressed: _saveEditedData,
-            ),
-          ] else ...[
-            AnimatedBuilder(
-              animation: _refreshIconController,
-              builder: (context, child) {
-                bool isFetchingAnyData = _isLoadingUserDetails ||
-                    _isLoadingMetrics ||
-                    _isLoadingPreferences ||
-                    _refreshIconController.isAnimating;
-                return IconButton(
-                  icon: RotationTransition(
-                    turns: _refreshIconController,
-                    child: const Icon(Icons.refresh),
-                  ),
-                  tooltip: isFetchingAnyData ? 'Refreshing...' : 'Refresh',
-                  onPressed: isFetchingAnyData ? null : _fetchData,
-                );
-              },
-            ),
-          ],
+          AnimatedBuilder(
+            animation: _refreshIconController,
+            builder: (context, child) {
+              bool isFetchingAnyData = _isLoadingUserDetails ||
+                  _isLoadingMetrics ||
+                  _isLoadingPreferences ||
+                  _refreshIconController.isAnimating;
+              return IconButton(
+                icon: RotationTransition(
+                  turns: _refreshIconController,
+                  child: const Icon(Icons.refresh),
+                ),
+                tooltip: isFetchingAnyData ? 'Refreshing...' : 'Refresh',
+                onPressed: isFetchingAnyData ? null : _fetchData,
+              );
+            },
+          ),
         ],
       ),
       drawer: const AppDrawer(),
@@ -1959,6 +1941,47 @@ class _ProfilePageState extends State<ProfilePage>
             ),
             const Divider(color: kColorDivider, thickness: 1, height: 24),
             _buildGroupedInfoRows(children, isEditing),
+            if (isEditing) ...[
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: _cancelEdit,
+                    style: TextButton.styleFrom(
+                      foregroundColor: kColorTextSecondary,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    ),
+                    child: Text(
+                      'CANCEL',
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _saveEditedData,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: kColorPrimary,
+                      foregroundColor: kColorTextOnPrimary,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                    child: Text(
+                      'SAVE CHANGES',
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -2902,20 +2925,22 @@ class _ProfilePageState extends State<ProfilePage>
   }
 
   Widget _buildLogoutButton() {
+    return const SizedBox.shrink();
+    /* Removed logout button as per request
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16.0),
       child: TextButton.icon(
         icon: Icon(Icons.logout, color: Colors.red.shade700),
         label: Text("Don't Logout",
-            style:
-                GoogleFonts.poppins(color: Colors.red.shade700, fontSize: 16)),
+            style: GoogleFonts.poppins(color: Colors.red.shade700, fontSize: 16)),
         onPressed: _logout,
         style: TextButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 12),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8))),
       ),
     );
+    */
   }
 
   // --- Info Row Widget (Handles Display/Edit for Simple Fields) ---

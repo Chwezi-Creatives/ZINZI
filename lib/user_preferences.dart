@@ -45,10 +45,9 @@ class _UserPreferencesPageState extends State<UserPreferencesPage>
     'Maintain Weight'
   ];
   final List<String> _dietTypeOptions = [
+    'All',
+    'Vegeterian',
     'Vegan',
-    'Keto',
-    'Paleo',
-    'Mediterranean',
     'Omnivore'
   ];
   final List<String> _foodRestrictionsOptions = [
