@@ -49,6 +49,9 @@ from services.notification_service import NotificationService
 from services.momo_service import MomoService
 from services.disbursement_service import disbursement_service
 
+# Import LocationService for geofencing
+from location_service import LocationService
+
 # Initialize MoMo service
 momo_service = MomoService()
 
@@ -3466,36 +3469,61 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
             
         return None
     
-    async def _add_distances_to_orders(self, conn: asyncpg.Connection, orders: List[Dict[str, Any]]) -> None:
+    async def _add_distances_to_orders(self, conn: asyncpg.Connection, orders: List[Dict[str, Any]], batch_size: int = 10) -> None:
         """
         Add distance field to each order by calculating haversine distance
-        between pickup location and delivery address.
+        between pickup location and delivery address using parallel processing.
+        
+        Args:
+            conn: Database connection
+            orders: List of order dictionaries to process
+            batch_size: Number of orders to process concurrently
         """
-        for order in orders:
+        async def process_order(order: Dict[str, Any]) -> None:
+            """Process a single order to calculate and add distance."""
             try:
                 # Get pickup location (prefer chef_address, fall back to pickup_location)
                 pickup_loc = order.get('chef_address') or order.get('pickup_location')
                 delivery_loc = order.get('delivery_address')
                 
+                # Skip if either location is missing
+                if not pickup_loc or not delivery_loc:
+                    order['distance'] = None
+                    return
+                
                 # Extract coordinates from addresses
                 pickup_coords = self._extract_coordinates(pickup_loc)
                 delivery_coords = self._extract_coordinates(delivery_loc)
                 
-                # Calculate distance if we have both sets of coordinates
-                if pickup_coords and delivery_coords:
-                    # Run sync haversine in thread pool to avoid blocking
-                    distance_km = await asyncio.get_event_loop().run_in_executor(
-                        None,  # Use default ThreadPoolExecutor
-                        lambda: self.haversine(pickup_coords, delivery_coords)
-                    )
-                    order['distance'] = round(distance_km, 2)  # Round to 2 decimal places
-                else:
+                if not pickup_coords or not delivery_coords:
                     order['distance'] = None
-                    logger.warning(f"Could not calculate distance for order {order.get('order_id')}: "
+                    logger.warning(f"Could not extract coordinates for order {order.get('order_id')}: "
                                  f"pickup_coords={pickup_coords is not None}, delivery_coords={delivery_coords is not None}")
+                    return
+                
+                # Calculate distance in thread pool
+                loop = asyncio.get_event_loop()
+                distance_km = await loop.run_in_executor(
+                    None,  # Use default ThreadPoolExecutor
+                    lambda: self.haversine(pickup_coords, delivery_coords)
+                )
+                order['distance'] = round(distance_km, 2)  # Round to 2 decimal places
+                
             except Exception as e:
                 order['distance'] = None
                 logger.error(f"Error calculating distance for order {order.get('order_id')}: {str(e)}", exc_info=True)
+        
+        # Process orders in batches to balance concurrency and memory usage
+        for i in range(0, len(orders), batch_size):
+            batch = orders[i:i + batch_size]
+            # Process current batch concurrently
+            await asyncio.gather(*[
+                process_order(order) for order in batch
+            ], return_exceptions=True)
+            
+            # Small sleep between batches to prevent resource exhaustion
+            if i + batch_size < len(orders):
+                await asyncio.sleep(0.1)
     
     async def update_order_status(self, conn: asyncpg.Connection, order_id: int, new_status: str, transporter_id: Optional[int] = None, completion_code: Optional[str] = None, restaurant_phone: Optional[str] = None) -> Dict[str, Any]:
         try:
@@ -4701,8 +4729,22 @@ async def login_chef_endpoint(login_data: dict = Body(...), conn: asyncpg.Connec
     return await chefs_crud.login_chef(conn, identifier, password) # Pass conn
 
 @app.get('/rr/rchefs')
-async def list_all_chefs_endpoint(conn: asyncpg.Connection = Depends(get_db)):
-    data = await chefs_crud.list_chefs(conn, chef_id=None) # Pass conn
+async def list_all_chefs_endpoint(
+    geo_fenced_location: Optional[str] = Query(None, description="Optional location to filter chefs by proximity (e.g., '1.2921, 36.8219' or 'Nairobi, Kenya')"),
+    radius_km: Optional[float] = Query(None, description="Optional. Maximum distance in kilometers for geofencing. Uses GEO_RADIUS from .env or 5.0km if not provided"),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    data = await chefs_crud.list_chefs(conn, chef_id=None)  # Pass conn
+    
+    # Apply geofencing if location is provided
+    if geo_fenced_location:
+        data = await LocationService.geo_fence_entities(
+            entities=data,
+            user_location=geo_fenced_location,
+            location_field='location',  # Field in chef data that contains location string
+            radius_km=radius_km  # Pass the optional radius_km parameter
+        )
+        
     return {'message': 'Chefs retrieved.', 'data': data}
 
 @app.get('/rr/rchefs/{chef_id}')
@@ -4847,8 +4889,22 @@ async def login_producer_endpoint(login_data: dict = Body(...), conn: asyncpg.Co
     return await producers_crud.login_producer(conn, identifier, password) # Pass conn
 
 @app.get('/rr/rproducers')
-async def list_all_producers_endpoint(conn: asyncpg.Connection = Depends(get_db)):
-    data = await producers_crud.list_producers(conn, producer_id=None) # Pass conn
+async def list_all_producers_endpoint(
+    geo_fenced_location: Optional[str] = Query(None, description="Optional location to filter producers by proximity (e.g., '1.2921, 36.8219' or 'Nairobi, Kenya')"),
+    radius_km: Optional[float] = Query(None, description="Optional. Maximum distance in kilometers for geofencing. Uses GEO_RADIUS from .env or 5.0km if not provided"),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    data = await producers_crud.list_producers(conn, producer_id=None)  # Pass conn
+    
+    # Apply geofencing if location is provided
+    if geo_fenced_location:
+        data = await LocationService.geo_fence_entities(
+            entities=data,
+            user_location=geo_fenced_location,
+            location_field='location',  # Field in producer data that contains location string
+            radius_km=radius_km  # Pass the optional radius_km parameter
+        )
+        
     return {'message': 'Producers retrieved.', 'data': data}
 
 @app.get('/rr/rproducers/{producer_id}')
@@ -4894,8 +4950,22 @@ async def login_transporter_endpoint(login_data: dict = Body(...), conn: asyncpg
     return await transporters_crud.login_transporter(conn, identifier, password) # Pass conn
 
 @app.get('/rr/transporters')
-async def list_all_transporters_endpoint(conn: asyncpg.Connection = Depends(get_db)):
-    data = await transporters_crud.list_transporters(conn, transporter_id=None) # Pass conn
+async def list_all_transporters_endpoint(
+    geo_fenced_location: Optional[str] = Query(None, description="Optional location to filter transporters by proximity (e.g., '1.2921, 36.8219' or 'Nairobi, Kenya')"),
+    radius_km: Optional[float] = Query(None, description="Optional. Maximum distance in kilometers for geofencing. Uses GEO_RADIUS from .env or 5.0km if not provided"),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    data = await transporters_crud.list_transporters(conn, transporter_id=None)  # Pass conn
+    
+    # Apply geofencing if location is provided
+    if geo_fenced_location:
+        data = await LocationService.geo_fence_entities(
+            entities=data,
+            user_location=geo_fenced_location,
+            location_field='location',  # Field in transporter data that contains location string
+            radius_km=radius_km  # Pass the optional radius_km parameter
+        )
+        
     return {'message': 'Transporters retrieved.', 'data': data}
 
 @app.get('/rr/transporters/{transporter_id}')
