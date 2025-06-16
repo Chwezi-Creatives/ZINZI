@@ -9,7 +9,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:shimmer/shimmer.dart';
-import 'package:zinzi/cart.dart' as cart;
+import 'package:zinzi/onlymeals.dart';
 import 'package:zinzi/app_drawer_unified.dart';
 import 'package:zinzi/meal_detail.dart' as meal_detail;
 import 'package:zinzi/user_cache.dart';
@@ -628,16 +628,44 @@ class _AllMealsScreenState extends State<AllMealsScreen>
               );
             },
           ),
-          IconButton(
-            tooltip: "Shopping Cart",
-            icon: const Icon(Icons.shopping_cart_outlined), // Outlined icon
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (context) => cart.ShoppingCartScreen()),
-              );
-            },
+          Builder(
+            builder: (context) => IconButton(
+              tooltip: "Recommended Meals",
+              padding: const EdgeInsets.all(8.0),
+              icon: Image.asset(
+                'assets/images/rec_trans-picsay.png',
+                width: 27,
+                height: 27,
+                color: Colors.white,
+                colorBlendMode: BlendMode.srcIn,
+              ),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  PageRouteBuilder(
+                    pageBuilder: (context, animation, secondaryAnimation) => const OnlymealsScreen(),
+                    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                      const begin = Offset(1.0, 0.0);
+                      const end = Offset.zero;
+                      const curve = Curves.easeInOutCubic;
+                      
+                      var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+                      var offsetAnimation = animation.drive(tween);
+                      
+                      return FadeTransition(
+                        opacity: animation,
+                        child: SlideTransition(
+                          position: offsetAnimation,
+                          child: child,
+                        ),
+                      );
+                    },
+                    transitionDuration: const Duration(milliseconds: 500),
+                    reverseTransitionDuration: const Duration(milliseconds: 300),
+                  ),
+                );
+              },
+            ),
           ),
         ],
       ),

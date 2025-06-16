@@ -1,10 +1,8 @@
 //cspell:disable
 import 'package:flutter/material.dart';
 import 'package:zinzi/base_login_modular.dart';
-import 'package:zinzi/dashboard_page.dart'; // Ensure this is the correct import for the User Dashboard
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi/onboard.dart';
-import 'package:zinzi/profile.dart';
 import 'notifications/fcm_service.dart';
 
 class UserLoginPageModular extends StatelessWidget {
