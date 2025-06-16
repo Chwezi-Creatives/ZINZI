@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:zinzi/screens/password_recovery_screen.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'];
 
@@ -229,13 +230,25 @@ class _LoginPageModularState extends State<LoginPageModular>
                             ),
                             const SizedBox(height: 8),
                             Opacity(
-                              opacity: 0.001,
+                              opacity: 1.0, // Make the Forgot Password link visible
                               child: TextButton(
                                 onPressed: () {
-                                  // hidden but functional
-                                  debugPrint('Forgot password tapped');
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => PasswordRecoveryScreen(
+                                        userType: widget.expectedUserType,
+                                      ),
+                                    ),
+                                  );
                                 },
-                                child: const Text('Forgot password?'),
+                                child: Text(
+                                  'Forgot password?',
+                                  style: TextStyle(
+                                    color: Colors.teal[700],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
                               ),
                             ),
                             const SizedBox(height: 40),

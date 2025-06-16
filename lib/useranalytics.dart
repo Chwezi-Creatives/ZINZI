@@ -881,6 +881,13 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard> with Ti
         backgroundColor: kColorPrimaryDark,
         foregroundColor: kColorTextOnPrimary,
         elevation: 1.0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.white),
+            onPressed: () => _fetchData(),
+            tooltip: 'Refresh Data',
+          ),
+        ],
       ),
       // <<< CHANGE: onRefresh now calls the unified fetch method.
       body: RefreshIndicator(

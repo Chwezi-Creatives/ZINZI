@@ -20,6 +20,7 @@ import 'package:zinzi/useranalytics.dart';
 import 'package:zinzi/orderhistory.dart';
 import 'package:zinzi/onboard.dart';
 import 'package:zinzi/user_cache.dart';
+import 'package:zinzi/feedback_screen.dart';
 
 // --- Color Constants ---
 const Color kColorPrimaryDark = Color(0xFF004D40);
@@ -409,8 +410,7 @@ class _AppDrawerState extends State<AppDrawer> {
       
       if (mounted) {
         // Navigate to login screen and remove all previous routes
-        Navigator.pushAndRemoveUntil(
-          context,
+        Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (context) => const SignUpOrLoginPage()),
           (Route<dynamic> route) => false,
         );
@@ -517,6 +517,17 @@ class _AppDrawerState extends State<AppDrawer> {
           ),
         );
       }),
+      _buildDrawerTile(Icons.feedback_outlined, 'Feedback', () {
+        Navigator.pop(context);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) =>
+                const FeedbackScreen(url: 'https://bug-whisperer-webhook-hub.lovable.app/'),
+            settings: const RouteSettings(name: '/feedback'),
+          ),
+        );
+      }),
     ]);
 
     tiles.addAll([
@@ -527,12 +538,12 @@ class _AppDrawerState extends State<AppDrawer> {
           const SnackBar(content: Text('Help Section Coming Soon!')),
         );
       }),
-      _buildDrawerTile(Icons.logout, 'Logout', _logout,
-          color: Colors.red.shade700),
       _buildDrawerTile(Icons.close, 'Close App', () {
         Navigator.pop(context);
         SystemNavigator.pop();
       }, color: Colors.red.shade700),
+      _buildDrawerTile(Icons.logout, 'Logout', _logout,
+          color: Colors.red.shade700),
     ]);
 
     return tiles;

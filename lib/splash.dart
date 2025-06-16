@@ -184,7 +184,9 @@ class _SplashScreenState extends State<SplashScreen>
           determinedNextScreen = stakeholderdas2222();
           break;
         case 'user':
-          determinedNextScreen = LandingPage();
+          // Use createRoute for consistent transition
+          Navigator.of(context).pushReplacement(LandingPage.createRoute());
+          return; // Return early since we're handling navigation here
           break;
         default:
           determinedNextScreen = AllMealsScreen();

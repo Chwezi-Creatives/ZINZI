@@ -2556,7 +2556,7 @@ class _ProfilePageState extends State<ProfilePage>
                 value: getCaseInsensitive(_userMetrics, 'ideal_weight') !=
                             'N/A' &&
                         getCaseInsensitive(_userMetrics, 'ideal_weight') != null
-                    ? '${getCaseInsensitive(_userMetrics, 'ideal_weight')} kg'
+                    ? '${_tryParseDouble(getCaseInsensitive(_userMetrics, 'ideal_weight'))?.toStringAsFixed(1) ?? 'N/A'}'
                     : 'N/A',
                 isEditing: false,
               ),

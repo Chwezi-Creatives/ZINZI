@@ -304,12 +304,8 @@ class _ChatScreenState extends State<ChatScreen> {
       canPop: false, // Prevent default back button behavior
       onPopInvoked: (didPop) {
         if (!didPop) {
-          // Navigate back to LandingPage when back is pressed
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-                builder: (context) =>
-                    LandingPage()), // Ensure LandingPage exists
-          );
+          // Navigate back to LandingPage with consistent transition
+          Navigator.of(context).pushReplacement(LandingPage.createRoute());
         }
       },
       child: Scaffold(

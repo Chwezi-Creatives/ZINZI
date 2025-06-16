@@ -92,33 +92,10 @@ class _LoginPageState extends State<LoginPage>
           // Register FCM token with user info (async, do not await)
           FCMService.registerTokenWithUserInfo();
 
-          // Navigate to the dashboard with a custom transition
+          // Navigate to the landing page with consistent transition
           Navigator.pushReplacement(
             context,
-            PageRouteBuilder(
-              pageBuilder: (context, animation, secondaryAnimation) =>
-                  LandingPage(),
-              transitionsBuilder:
-                  (context, animation, secondaryAnimation, child) {
-                const curve = Curves.easeInOut;
-                final tween = Tween<Offset>(
-                  begin: const Offset(1.0, 0.0), // Start from the right
-                  end: Offset.zero,
-                ).chain(CurveTween(curve: curve));
-
-                final opacityTween = Tween<double>(begin: 0.0, end: 1.0)
-                    .chain(CurveTween(curve: curve));
-
-                return FadeTransition(
-                  opacity: animation.drive(opacityTween),
-                  child: SlideTransition(
-                    position: animation.drive(tween),
-                    child: child,
-                  ),
-                );
-              },
-              transitionDuration: const Duration(milliseconds: 800),
-            ),
+            LandingPage.createRoute(),
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(

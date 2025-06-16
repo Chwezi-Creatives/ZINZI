@@ -10,6 +10,54 @@ import 'Sensei_chat_in_house.dart';
 import 'package:zinzi/app_drawer_unified.dart'; // Import AppDrawer
 
 class LandingPage extends StatelessWidget {
+  // Custom page route with transition
+  static Route createRoute() {
+    return PageRouteBuilder(
+      pageBuilder: (context, animation, secondaryAnimation) => LandingPage(),
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        const begin = Offset(0.0, -1.0);  // Start from top
+        const end = Offset.zero;          // End at final position
+        const curve = Curves.easeInOutQuart;
+        
+        // Fade transition
+        final fadeAnimation = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeIn,
+        );
+        
+        // Slide transition from top to bottom
+        final slideAnimation = Tween<Offset>(
+          begin: begin,
+          end: end,
+        ).animate(CurvedAnimation(
+          parent: animation,
+          curve: curve,
+        ));
+        
+        // Scale transition
+        final scaleAnimation = Tween<double>(
+          begin: 0.9,
+          end: 1.0,
+        ).animate(CurvedAnimation(
+          parent: animation,
+          curve: curve,
+        ));
+        
+        return FadeTransition(
+          opacity: fadeAnimation,
+          child: SlideTransition(
+            position: slideAnimation,
+            child: ScaleTransition(
+              scale: scaleAnimation,
+              child: child,
+            ),
+          ),
+        );
+      },
+      transitionDuration: const Duration(milliseconds: 800),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -84,9 +132,27 @@ class LandingPage extends StatelessWidget {
       BuildContext context, String title, Widget navigateTo, String imagePath) {
     return GestureDetector(
       onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => navigateTo),
+        Navigator.of(context).push(
+          PageRouteBuilder(
+            pageBuilder: (context, animation, secondaryAnimation) => navigateTo,
+            transitionsBuilder: (context, animation, secondaryAnimation, child) {
+              const begin = Offset(1.0, 0.0);
+              const end = Offset.zero;
+              const curve = Curves.easeInOutQuart;
+              
+              final tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+              final offsetAnimation = animation.drive(tween);
+              
+              return SlideTransition(
+                position: offsetAnimation,
+                child: FadeTransition(
+                  opacity: animation,
+                  child: child,
+                ),
+              );
+            },
+            transitionDuration: const Duration(milliseconds: 500),
+          ),
         );
       },
       child: Container(

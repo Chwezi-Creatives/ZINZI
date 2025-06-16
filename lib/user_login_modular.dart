@@ -43,17 +43,9 @@ class UserLoginPageModular extends StatelessWidget {
         // Save user details including phone number to shared preferences
         saveUserDetails(userId, userType, phone: phone);
         
-        // Navigate to the User Dashboard after saving user details
-        Navigator.pushReplacement(
-          context,
-          _createSlideTransitionRoute(context),
-        );
-       //   } else {
-       //     print('Data does not contain required keys: "user_id" or "user_type".');
-       //   }
-       // } else {
-       //   print('Key "data" not found in response.');
-       // }
+        // Navigate to the LandingPage after saving user details
+        Navigator.of(context).pushReplacement(LandingPage.createRoute());
+       // Note: Error handling is now done in the base_login_modular.dart file
 
         // Return a dummy widget since onLoginSuccess needs to return a Widget
         return Container(); // Return an empty widget
