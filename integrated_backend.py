@@ -615,18 +615,21 @@ class AuthenticationAndUsers(BaseRepository):
             
         table_name, id_column = user_type_map[user_type]
         
+        # First, check if the email exists in the specified table using a quick existence check
+        start_time = time.time()
         try:
-            # Check if the email exists in the specified table
-            user_exists = await conn.fetchval(
-                f"SELECT {id_column} FROM {table_name} WHERE lower(email) = $1",
+            user_id = await conn.fetchval(
+                f"SELECT {id_column} FROM {table_name} WHERE lower(email) = $1 LIMIT 1",
                 email
             )
+            check_duration = (time.time() - start_time) * 1000  # Convert to milliseconds
             
-            if not user_exists:
-                logger.info(f"Email {email} not found in {table_name}")
+            if not user_id:
+                logger.info(f"[EMAIL_CHECK] Early exit - Email {email} not found in {table_name} (checked in {check_duration:.2f}ms)")
+                # Return success response without revealing the email doesn't exist (security best practice)
                 return self._get_success_response()
                 
-            logger.info(f"[PASSWORD_RESET] Starting password reset process for {email}")
+            logger.info(f"[PASSWORD_RESET] Starting password reset process for {email} (user_id: {user_id}, checked in {check_duration:.2f}ms)")
             
             # Generate and store the reset code within a transaction
             async with conn.transaction():
@@ -799,7 +802,6 @@ class AuthenticationAndUsers(BaseRepository):
           AND code = $2 
           AND user_type = $3
         ORDER BY created_at DESC
-        LIMIT 1
         """
         
         try:
@@ -831,7 +833,7 @@ class AuthenticationAndUsers(BaseRepository):
     async def _log_missing_code(self, conn, email: str, code: str, user_type: str) -> None:
         """Log details about missing reset codes for debugging."""
         all_codes_sql = """
-        SELECT created_at, expires_at, used, is_used 
+        SELECT created_at, expires_at, is_used 
         FROM password_reset_codes 
         WHERE email = $1 AND user_type = $2
         ORDER BY created_at DESC
@@ -1097,14 +1099,13 @@ class AuthenticationAndUsers(BaseRepository):
                 # Schedule email sending in background if background_tasks is provided
                 if background_tasks is not None:
                     background_tasks.add_task(
-                        self._send_verification_email,
-                        email=email_lower,
-                        verification_code=verification_code,
-                        user_type=user_type
+                        self.send_verification_email_gmail,
+                        to_email=email_lower,
+                        verification_code=verification_code
                     )
                 else:
                     # Fallback to synchronous sending if no background_tasks provided
-                    await self._send_verification_email(email_lower, verification_code, user_type)
+                    await self.send_verification_email_gmail(to_email=email_lower, verification_code=verification_code)
                 
                 logger.info(f"User '{name}' (ID: {user_id}) registered successfully with user type {user_type}")
                 return {
@@ -2483,14 +2484,13 @@ class Chefs(BaseRepository):
             # Schedule email sending in background if background_tasks is provided
             if background_tasks is not None:
                 background_tasks.add_task(
-                    auth._send_verification_email,
-                    email=email,
-                    verification_code=verification_code,
-                    user_type=user_type
+                    auth.send_verification_email_gmail,
+                    to_email=email,
+                    verification_code=verification_code
                 )
             else:
                 # Fallback to synchronous sending if no background_tasks provided
-                await auth._send_verification_email(email, verification_code, user_type)
+                await auth.send_verification_email_gmail(to_email=email, verification_code=verification_code)
             logger.info(f"Created chef ID: {chef_id}")
             return {"Chef_id": chef_id, "user_type": user_type, "message": "Chef created"}
         else: 
@@ -2722,14 +2722,13 @@ class Producers(BaseRepository):
             # Schedule email sending in background if background_tasks is provided
             if background_tasks is not None:
                 background_tasks.add_task(
-                    auth._send_verification_email,
-                    email=email,
-                    verification_code=verification_code,
-                    user_type=user_type
+                    auth.send_verification_email_gmail,
+                    to_email=email,
+                    verification_code=verification_code
                 )
             else:
                 # Fallback to synchronous sending if no background_tasks provided
-                await auth._send_verification_email(email, verification_code, user_type)
+                await auth.send_verification_email_gmail(to_email=email, verification_code=verification_code)
             logger.info(f"Created producer ID: {producer_id}")
             return {"producer_id": producer_id, "UserType": user_type}
         else: 
@@ -2835,14 +2834,13 @@ class Transporters(BaseRepository):
             # Schedule email sending in background if background_tasks is provided
             if background_tasks is not None:
                 background_tasks.add_task(
-                    auth._send_verification_email,
-                    email=email,
-                    verification_code=verification_code,
-                    user_type=user_type
+                    auth.send_verification_email_gmail,
+                    to_email=email,
+                    verification_code=verification_code
                 )
             else:
                 # Fallback to synchronous sending if no background_tasks provided
-                await auth._send_verification_email(email, verification_code, user_type)
+                await auth.send_verification_email_gmail(to_email=email, verification_code=verification_code)
             logger.info(f"Created transporter ID: {transporter_id}")
             return {"transporter_id": transporter_id, "UserType": user_type, "message":"Transporter created"}
         else: 
@@ -2935,14 +2933,13 @@ class Stakeholders(BaseRepository):
             # Schedule email sending in background if background_tasks is provided
             if background_tasks is not None:
                 background_tasks.add_task(
-                    auth._send_verification_email,
-                    email=email,
-                    verification_code=verification_code,
-                    user_type=user_type
+                    auth.send_verification_email_gmail,
+                    to_email=email,
+                    verification_code=verification_code
                 )
             else:
                 # Fallback to synchronous sending if no background_tasks provided
-                await auth._send_verification_email(email, verification_code, user_type)
+                await auth.send_verification_email_gmail(to_email=email, verification_code=verification_code)
             logger.info(f"Created stakeholder ID: {stakeholder_id}")
             return {"stakeholder_id": stakeholder_id, "UserType": user_type}
         else: 
@@ -4939,13 +4936,27 @@ async def request_password_reset(
         email = email.strip().lower()
         user_type = user_type.strip().lower()
         
-        # Validate user exists
-        user = await conn.fetchrow(
-            "SELECT user_id, email FROM users WHERE email = $1 AND user_type = $2",
-            email, user_type
+        # Define valid user types and their corresponding tables/ID columns
+        user_type_map = {
+            'user': ('users', 'user_id'),
+            'chef': ('chefs', 'chef_id'),
+            'producer': ('producers', 'producer_id'),
+            'transporter': ('transporters', 'transporter_id')
+        }
+        
+        if user_type not in user_type_map:
+            logger.info(f"Invalid user type in password reset request: {user_type}")
+            return {"message": "If your email is registered, you will receive a password reset code"}
+            
+        table_name, id_column = user_type_map[user_type]
+        
+        # Check if user exists and get their ID in a single query
+        user_id = await conn.fetchval(
+            f"SELECT {id_column} FROM {table_name} WHERE lower(email) = $1",
+            email.lower()
         )
         
-        if not user:
+        if not user_id:
             # Don't reveal if the email exists or not for security
             logger.info(f"Password reset requested for non-existent email: {email} (type: {user_type})")
             return {"message": "If your email is registered, you will receive a password reset code"}
@@ -4958,7 +4969,7 @@ async def request_password_reset(
         email_body = f"""
         <html>
             <body>
-                <h2>Password Reset Request</h2>
+                <h2>ZINZI password reset request</h2>
                 <p>You have requested to reset your password. Please use the following code to proceed:</p>
                 <h3>{stored_reset_code}</h3>
                 <p>This code will expire in 10 minutes.</p>
