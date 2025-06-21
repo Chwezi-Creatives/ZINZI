@@ -48,6 +48,7 @@ dependencies:
   google_fonts: ^4.0.4
   flutter_tts: ^4.2.2
   speech_to_text: ^7.0.0
+  share_plus: ^7.2.1
 
   # Performance optimization packages
   rxdart: ^0.27.7
@@ -84,10 +85,17 @@ dependencies:
   audioplayers_web: ^4.1.0
   universal_io: ^2.2.2
   universal_platform: ^1.0.1
+  universal_html: ^2.2.1
   http_parser: ^4.0.2
 
   # Network connectivity
   connectivity_plus: ^5.0.2
+  device_preview: ^1.2.0
+  device_preview_screenshot: ^1.0.0
+  device_preview_plus: ^2.2.3
+  screenshot: ^3.0.0
+  permission_handler: ^12.0.0+1
+  file_saver: ^0.2.14
 
   # Add dependency overrides to handle web platform compatibility issues
 dependency_overrides:

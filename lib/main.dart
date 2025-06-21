@@ -1,25 +1,27 @@
-//cspell:disable
-// Remove the old problematic import:
-// import 'dart:io' if (dart.library.js) 'dart:html' as io; NO!
-
+// cspell:disable
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode, kDebugMode;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 import 'package:zinzi/splash.dart';
 import 'notifications/notification_provider.dart';
-// Conditionally import the appropriate FCM service implementation
 import 'notifications/fcm_service.dart'
     if (dart.library.js) 'notifications/fcm_service_web.dart' as fcm;
 import 'notifications/notification_badge.dart';
 import 'package:zinzi/app_drawer_unified.dart';
-import 'package:zinzi/platform_info.dart'; // For OS check
+import 'package:zinzi/platform_info.dart';
 import 'package:zinzi/services/performance_service.dart';
 import 'package:zinzi/utils/route_observer.dart';
 
-// Create a global route observer
+import 'package:device_preview/device_preview.dart';
+import 'package:device_preview_screenshot/device_preview_screenshot.dart';
+
+// Route observer instance
 final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
+
+// Toggle this to true when you want Device Preview in debug/profile mode
+const bool enableDevicePreview = false;
 
 void main() async {
   // Start performance monitoring
@@ -29,43 +31,52 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
-    // Initialize performance service
+    // Initialize services
     await PerformanceService.initialize();
-
-    // Load environment variables
     await dotenv.load(fileName: ".env");
-
-    // Initialize Firebase first
     await _initializeFirebase();
-    
-    // Add a small delay to ensure Firebase is fully initialized
     await Future.delayed(const Duration(milliseconds: 500));
-    
-    // Initialize FCM with error handling
     await _initializeFCM().catchError((error) {
       print('FCM initialization failed: $error');
-      // Continue app startup even if FCM fails
     });
-
-    // Initialize drawer data
     await _initializeDrawer().catchError((error) {
       print('Drawer initialization failed: $error');
-      // Continue app startup even if drawer init fails
     });
 
     // End performance monitoring
     PerformanceService.endTimer();
 
-    // Run the app
-    runApp(const MyApp());
+    final bool shouldEnableDevicePreview = !kReleaseMode && enableDevicePreview;
+
+    runApp(
+      DevicePreview(
+        enabled: shouldEnableDevicePreview,
+        tools: [
+          ...DevicePreview.defaultTools,
+          const DevicePreviewScreenshot(),
+        ],
+        builder: (context) => const MyApp(),
+      ),
+    );
   } catch (e) {
     print('Error during initialization: $e');
-    // Even if there's an error, we should still try to run the app
-    runApp(const MyApp());
+
+    final bool shouldEnableDevicePreview = !kReleaseMode && enableDevicePreview;
+
+    runApp(
+      DevicePreview(
+        enabled: shouldEnableDevicePreview,
+        tools: [
+          ...DevicePreview.defaultTools,
+          const DevicePreviewScreenshot(),
+        ],
+        builder: (context) => const MyApp(),
+      ),
+    );
   }
 }
 
-// Initialize Firebase in the background
+// Firebase initialization
 Future<void> _initializeFirebase() async {
   try {
     if (kIsWeb) {
@@ -90,50 +101,42 @@ Future<void> _initializeFirebase() async {
   }
 }
 
-// Initialize FCM in the background with proper error handling
+// FCM initialization
 Future<void> _initializeFCM() async {
   try {
-    // Add a small delay to ensure Firebase is fully initialized
     await Future.delayed(const Duration(milliseconds: 300));
-    
-    // Initialize FCM service
     await fcm.FCMService.initialize();
-    
+
     if (kIsWeb) {
       print("FCMService initialized (web)");
     } else {
-      try {
-        final os = getOperatingSystem();
-        if (isIOS()) {
-          print("FCMService initialized (iOS)");
-        } else if (isAndroid()) {
-          print("FCMService initialized (Android)");
-        } else {
-          print("FCMService initialized (other non-web OS: $os)");
-        }
-      } catch (e) {
-        print("Error getting OS info: $e");
+      final os = getOperatingSystem();
+      if (isIOS()) {
+        print("FCMService initialized (iOS)");
+      } else if (isAndroid()) {
+        print("FCMService initialized (Android)");
+      } else {
+        print("FCMService initialized (other non-web OS: $os)");
       }
     }
-    
-    // Add a small delay to ensure FCM is fully initialized
+
     await Future.delayed(const Duration(milliseconds: 200));
   } catch (e) {
     print("Error initializing FCM: $e");
-    rethrow; // Re-throw to be caught by the main try-catch
+    rethrow;
   }
 }
 
-// Initialize drawer data in the background
+// Drawer initialization (currently a placeholder)
 Future<void> _initializeDrawer() async {
   try {
-    // The drawer will initialize its own data when it's created
     print("Drawer will initialize data when created");
   } catch (e) {
     print("Error initializing drawer data: $e");
   }
 }
 
+// Main App
 class MyApp extends StatelessWidget {
   const MyApp({Key? key}) : super(key: key);
 
@@ -146,6 +149,8 @@ class MyApp extends StatelessWidget {
         child: MaterialApp(
           navigatorObservers: [routeObserver],
           debugShowCheckedModeBanner: false,
+          locale: DevicePreview.locale(context),
+          builder: DevicePreview.appBuilder,
           theme: ThemeData(
             primarySwatch: Colors.teal,
           ),

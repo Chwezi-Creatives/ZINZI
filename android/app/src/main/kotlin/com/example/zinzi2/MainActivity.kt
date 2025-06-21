@@ -1,4 +1,4 @@
-package com.example.zinzi2
+package com.chwezicreatives.zinzi2
 
 import io.flutter.embedding.android.FlutterFragmentActivity
 import android.os.Bundle

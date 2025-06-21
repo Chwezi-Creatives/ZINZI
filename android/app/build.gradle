@@ -20,10 +20,27 @@ dependencies {
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.3'
 }
 
+// Load keystore properties
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('key.properties')
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
-    namespace "com.example.zinzi2"
+    namespace "com.chwezicreatives.zinzi2"
     compileSdkVersion 35
     ndkVersion flutter.ndkVersion
+
+    // Signing configurations
+    signingConfigs {
+        release {
+            keyAlias keystoreProperties['keyAlias']
+            keyPassword keystoreProperties['keyPassword']
+            storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
+            storePassword keystoreProperties['storePassword']
+        }
+    }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
@@ -40,7 +57,7 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.example.zinzi2"
+        applicationId "com.chwezicreatives.zinzi2"
         minSdkVersion 21
         targetSdkVersion 35
         versionCode 1
@@ -49,7 +66,7 @@ android {
 
     buildTypes {
         release {
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }

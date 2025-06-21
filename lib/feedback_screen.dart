@@ -4,8 +4,13 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 class FeedbackScreen extends StatefulWidget {
   final String url;
+  final String title;
 
-  const FeedbackScreen({Key? key, required this.url}) : super(key: key);
+  const FeedbackScreen({
+    Key? key, 
+    required this.url,
+    this.title = 'Feedback',
+  }) : super(key: key);
 
   @override
   _FeedbackScreenState createState() => _FeedbackScreenState();
@@ -85,7 +90,8 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Feedback'),
-        backgroundColor: const Color(0xFF00796B), // Primary dark teal color
+        backgroundColor: Colors.teal[700], // Primary dark teal color
+        foregroundColor: Colors.white, // Primary dark teal color
         elevation: 0,
         actions: [
           if (_hasError)

@@ -517,13 +517,30 @@ class _AppDrawerState extends State<AppDrawer> {
           ),
         );
       }),
+      _buildDrawerTile(Icons.policy_outlined, 'Policy', () {
+        Navigator.pop(context);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) =>
+                const FeedbackScreen(
+                  url: 'https://policy.chwezicreatives.com',
+                  title: 'Policy',
+                ),
+            settings: const RouteSettings(name: '/policy'),
+          ),
+        );
+      }),
       _buildDrawerTile(Icons.feedback_outlined, 'Feedback', () {
         Navigator.pop(context);
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) =>
-                const FeedbackScreen(url: 'https://bug-whisperer-webhook-hub.lovable.app/'),
+                const FeedbackScreen(
+                  url: 'https://feedback.chwezicreatives.com',
+                  title: 'Feedback',
+                ),
             settings: const RouteSettings(name: '/feedback'),
           ),
         );
