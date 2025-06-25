@@ -816,11 +816,12 @@ class MealRecommendation4:
 
     def _match_diet(self, meal: Dict) -> int:
         """
-        Match user's diet preferences with meal's dietary tags using direct tag matching.
+        Match user's diet preferences with meal's dietary tags using case-insensitive tag matching.
         Returns 1 if the meal matches the user's diet preferences, 0 otherwise.
+        If no user diet preferences are specified, all meals are allowed.
         """
         if not self.user_preferences or not meal:
-            return 0
+            return 1  # Be permissive if no preferences or meal data
             
         # Get user's diet preferences as a list of lowercase strings
         user_diets = self.user_preferences.get("diet_type") or []
@@ -828,10 +829,8 @@ class MealRecommendation4:
             user_diets = [d.strip().lower() for d in user_diets.split(',') if d.strip()]
         elif isinstance(user_diets, list):
             user_diets = [str(d).strip().lower() for d in user_diets if d and str(d).strip()]
-        else:
-            user_diets = []
-            
-        # If no user diet preferences specified, don't filter on diet
+        
+        # If no user diet preferences specified, allow all meals
         if not user_diets:
             return 1
             
@@ -845,18 +844,14 @@ class MealRecommendation4:
             meal_diets = [d.strip().lower() for d in meal_diets.split(',') if d.strip()]
         elif isinstance(meal_diets, list):
             meal_diets = [str(d).strip().lower() for d in meal_diets if d and str(d).strip()]
-        else:
-            meal_diets = []
-            
-        # If meal has no diet tags, log a warning and be conservative by excluding it
+        
+        # If meal has no diet tags, don't filter it out (be permissive)
         if not meal_diets:
-            logging.warning(f"Meal {meal.get('meal_id', 'unknown')} has no diet information. Filtering out for safety.")
-            return 0
-            
-        # Check for any overlap between user's diets and meal's diets
-        # Using set intersection for efficient lookup
-        user_diets_set = set(user_diets)
-        meal_diets_set = set(meal_diets)
+            return 1
+        
+        # Convert both sets to lowercase sets for case-insensitive comparison
+        user_diets_set = {d.lower() for d in user_diets}
+        meal_diets_set = {d.lower() for d in meal_diets}
         
         # If there's any overlap, include the meal
         if user_diets_set & meal_diets_set:
@@ -955,11 +950,12 @@ class MealRecommendation4:
 
     def _match_allergies(self, meal: Dict) -> int:
         """
-        Match user's food restrictions with meal's allergy tags using direct tag matching.
+        Match user's food restrictions with meal's allergy tags using case-insensitive tag matching.
         Returns 1 if the meal is safe for the user's restrictions, 0 otherwise.
+        If user has no restrictions, all meals are allowed.
         """
         if not self.user_preferences or not meal:
-            return 0
+            return 1  # Be permissive if no preferences or meal data
             
         # Get user's food restrictions as a list of lowercase strings
         user_restrictions = self.user_preferences.get("food_restrictions") or []
@@ -967,10 +963,8 @@ class MealRecommendation4:
             user_restrictions = [r.strip().lower() for r in user_restrictions.split(',') if r.strip()]
         elif isinstance(user_restrictions, list):
             user_restrictions = [str(r).strip().lower() for r in user_restrictions if r and str(r).strip()]
-        else:
-            user_restrictions = []
-            
-        # If no user restrictions, allow the meal
+        
+        # If no user restrictions, allow all meals
         if not user_restrictions:
             return 1
             
@@ -980,23 +974,19 @@ class MealRecommendation4:
             meal_allergies = [a.strip().lower() for a in meal_allergies.split(',') if a.strip()]
         elif isinstance(meal_allergies, list):
             meal_allergies = [str(a).strip().lower() for a in meal_allergies if a and str(a).strip()]
-        else:
-            meal_allergies = []
-            
-        # If meal has no allergy info, be safe and filter it out if there are any restrictions
-        if not meal_allergies and user_restrictions:
-            logging.warning(f"Meal {meal.get('meal_id', 'unknown')} has no allergy information. Filtering out for safety.")
-            return 0
-            
-        # Check for any overlap between user's restrictions and meal's allergies
-        # Using set intersection for efficient lookup
-        user_restrictions_set = set(user_restrictions)
-        meal_allergies_set = set(meal_allergies)
+        
+        # If meal has no allergy info, be permissive and don't filter it out
+        if not meal_allergies:
+            return 1
+        
+        # Convert both sets to lowercase sets for case-insensitive comparison
+        user_restrictions_set = {r.lower() for r in user_restrictions}
+        meal_allergies_set = {a.lower() for a in meal_allergies}
         
         # If there's any overlap, the meal is not safe
         if user_restrictions_set & meal_allergies_set:
             conflicting = user_restrictions_set & meal_allergies_set
-            logging.info(
+            logging.debug(
                 f"Excluding meal {meal.get('meal_id', 'unknown')} - "
                 f"contains allergens that conflict with user's restrictions: {', '.join(conflicting)}"
             )
@@ -1006,12 +996,12 @@ class MealRecommendation4:
 
     def _match_cuisine(self, meal: Dict) -> int:
         """
-        Match user's cuisine preferences with meal's cuisine tags using direct tag matching.
+        Match user's cuisine preferences with meal's cuisine tags using case-insensitive tag matching.
         Returns 1 if the meal matches any of the user's cuisine preferences, 0 otherwise.
         If user has no cuisine preferences, all meals are allowed.
         """
         if not self.user_preferences or not meal:
-            return 0
+            return 1  # Be permissive if no preferences or meal data
             
         # Get user's cuisine preferences as a list of lowercase strings
         user_cuisines = self.user_preferences.get("cuisine_preferences") or []
@@ -1019,9 +1009,7 @@ class MealRecommendation4:
             user_cuisines = [c.strip().lower() for c in user_cuisines.split(',') if c.strip()]
         elif isinstance(user_cuisines, list):
             user_cuisines = [str(c).strip().lower() for c in user_cuisines if c and str(c).strip()]
-        else:
-            user_cuisines = []
-            
+        
         # If no user cuisine preferences, allow all meals
         if not user_cuisines:
             return 1
@@ -1032,18 +1020,14 @@ class MealRecommendation4:
             meal_cuisines = [c.strip().lower() for c in meal_cuisines.split(',') if c.strip()]
         elif isinstance(meal_cuisines, list):
             meal_cuisines = [str(c).strip().lower() for c in meal_cuisines if c and str(c).strip()]
-        else:
-            meal_cuisines = []
-            
-        # If meal has no cuisine tags, filter it out (be conservative)
+        
+        # If meal has no cuisine tags, don't filter it out (be permissive)
         if not meal_cuisines:
-            logging.debug(f"Meal {meal.get('meal_id', 'unknown')} has no cuisine information. Filtering out.")
-            return 0
-            
-        # Check for any overlap between user's cuisine preferences and meal's cuisines
-        # Using set intersection for efficient lookup
-        user_cuisines_set = set(user_cuisines)
-        meal_cuisines_set = set(meal_cuisines)
+            return 1
+        
+        # Convert both sets to lowercase sets for case-insensitive comparison
+        user_cuisines_set = {c.lower() for c in user_cuisines}
+        meal_cuisines_set = {c.lower() for c in meal_cuisines}
         
         # If there's any overlap, include the meal
         if user_cuisines_set & meal_cuisines_set:
