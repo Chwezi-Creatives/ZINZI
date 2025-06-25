@@ -2105,14 +2105,18 @@ class AuthenticationAndUsers(BaseRepository):
             # Insert into user_preferences table
             sql = """
                 INSERT INTO user_preferences 
-                (user_id, goals, food_restrictions, diet_type)
-                VALUES ($1, $2, $3, $4)
+                (user_id, goals, food_restrictions, diet_type, cuisine_preferences)
+                VALUES ($1, $2, $3, $4, $5)
             """
             
-            # Handle food_restrictions as a list and convert to comma-separated string
+            # Handle food_restrictions and cuisine_preferences as strings
             food_restrictions = preference_data_lower.get('food_restrictions')
             if isinstance(food_restrictions, list):
                 food_restrictions = ','.join(str(item).strip() for item in food_restrictions if item)
+                
+            cuisine_preferences = preference_data_lower.get('cuisine_preferences')
+            if isinstance(cuisine_preferences, list):
+                cuisine_preferences = ','.join(str(item).strip() for item in cuisine_preferences if item)
             
             diet_type = preference_data_lower.get('diet_type')
             
@@ -2120,7 +2124,8 @@ class AuthenticationAndUsers(BaseRepository):
                 user_id,
                 goals,
                 food_restrictions,
-                diet_type
+                diet_type,
+                cuisine_preferences
             )
             
             # Execute the insert
@@ -2193,7 +2198,7 @@ class AuthenticationAndUsers(BaseRepository):
         set_clauses = []
         params = []
         idx = 1
-        allowed = ['goals', 'food_restrictions', 'allergies', 'diet_type']
+        allowed = ['goals', 'food_restrictions', 'allergies', 'diet_type', 'cuisine_preferences']
         
         if not updates_lower:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No updates provided.")
@@ -2215,8 +2220,12 @@ class AuthenticationAndUsers(BaseRepository):
                     # Special handling for food_restrictions list
                     set_clauses.append(f"{k} = ${idx}")
                     params.append(','.join(str(item).strip() for item in v if item) if v else None)
+                elif k == 'cuisine_preferences' and isinstance(v, list):
+                    # Convert list to comma-separated string for cuisine_preferences
+                    set_clauses.append(f"{k} = ${idx}")
+                    params.append(','.join(str(item).strip() for item in v if item) if v else None)
                 elif isinstance(v, list):
-                    # For other list fields (if any), convert to JSON string
+                    # For other list fields, convert to JSON string
                     set_clauses.append(f"{k} = ${idx}")
                     params.append(json.dumps(v) if v else None)
                 else:
@@ -2335,13 +2344,20 @@ class AuthenticationAndUsers(BaseRepository):
 
     async def list_preferences(self, conn: asyncpg.Connection, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
         # ... (implementation uses _execute_query with conn) ...
-        sql="SELECT * FROM user_preferences"; params=[]
-        if user_id is not None: sql+=" WHERE user_id = $1"; params.append(user_id)
+        sql = "SELECT * FROM user_preferences"
+        params = []
+        if user_id is not None:
+            sql += " WHERE user_id = $1"
+            params.append(user_id)
         preferences = await self._execute_query(conn, sql, tuple(params), fetch_all=True)
         if preferences:
-             processed = [];
-             for row in preferences: p_pref=dict(row); p_pref['food_restrictions']=deserialize_list(p_pref.get('food_restrictions','')); p_pref['cuisine_preferences']=deserialize_list(p_pref.get('cuisine_preferences','')); processed.append(p_pref)
-             return processed
+            processed = []
+            for row in preferences:
+                p_pref = dict(row)
+                p_pref['food_restrictions'] = deserialize_list(p_pref.get('food_restrictions',''))
+                # Keep cuisine_preferences as string, don't deserialize
+                processed.append(p_pref)
+            return processed
 async def list_calorie_history(self, conn: asyncpg.Connection, user_id: int) -> List[Dict[str, Any]]:
         """Lists calorie history entries for a given user ID."""
         logger.info(f"Fetching calorie history for user ID: {user_id}")
