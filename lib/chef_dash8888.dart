@@ -58,6 +58,49 @@ String get _apibaseurl {
   }
 }
 
+// --- NEW: Model for Bulk Order Details ---
+class BulkOrderDetails {
+  final DateTime? planStartDate;
+  final DateTime? planEndDate;
+  final String planFrequency;
+  final List<DateTime> planSelectedDays;
+
+  BulkOrderDetails({
+    this.planStartDate,
+    this.planEndDate,
+    required this.planFrequency,
+    required this.planSelectedDays,
+  });
+
+  factory BulkOrderDetails.fromJson(Map<String, dynamic> json) {
+    DateTime? _parseDate(String? dateString) {
+      if (dateString == null) return null;
+      return DateTime.tryParse(dateString);
+    }
+
+    List<DateTime> selectedDays = [];
+    if (json['plan_selected_days'] is List) {
+      for (var dayString in json['plan_selected_days']) {
+        if (dayString != null) {
+          final parsedDay = _parseDate(dayString.toString());
+          if (parsedDay != null) {
+            selectedDays.add(parsedDay);
+          }
+        }
+      }
+    }
+    // Sort the days for consistent display
+    selectedDays.sort((a, b) => a.compareTo(b));
+
+    return BulkOrderDetails(
+      planStartDate: _parseDate(json['plan_start_date'] as String?),
+      planEndDate: _parseDate(json['plan_end_date'] as String?),
+      planFrequency: json['plan_frequency']?.toString() ?? 'N/A',
+      planSelectedDays: selectedDays,
+    );
+  }
+}
+
 class Order {
   final int orderId;
   final String mealName;
@@ -77,6 +120,9 @@ class Order {
   final String? customerName;
   final double? orderTotal;
   final List<Map<String, dynamic>>? complementaryMeals;
+  // --- NEW FIELDS for Bulk Orders ---
+  final bool isBulkOrder;
+  final BulkOrderDetails? bulkOrderDetails;
 
   Order({
     required this.orderId,
@@ -97,6 +143,9 @@ class Order {
     this.customerName,
     this.orderTotal,
     this.complementaryMeals,
+    // --- NEW: Add to constructor with a default value ---
+    this.isBulkOrder = false,
+    this.bulkOrderDetails,
   });
 
   factory Order.fromMockJson(Map<String, dynamic> json) {
@@ -154,6 +203,28 @@ class Order {
         return null;
       }
     }
+    
+    // --- NEW: Helper functions to parse bulk order fields safely ---
+    bool _parseBoolSafe(dynamic value) {
+      if (value == null) return false;
+      if (value is bool) return value;
+      if (value is String) return value.toLowerCase() == 'true' || value == '1';
+      if (value is int) return value == 1;
+      return false;
+    }
+
+    BulkOrderDetails? _parseBulkOrderDetails(dynamic value) {
+      if (value is String && value.isNotEmpty) {
+        try {
+          final decodedJson = jsonDecode(value) as Map<String, dynamic>;
+          return BulkOrderDetails.fromJson(decodedJson);
+        } catch (e) {
+          print('Error parsing bulk_order_details JSON string: $e');
+          return null;
+        }
+      }
+      return null;
+    }
 
     return Order(
       orderId: _parseIntSafe(json['order_id']),
@@ -180,6 +251,9 @@ class Order {
       customerName: _getStringSafe(json['customer_name']),
       orderTotal: _parseDoubleNullable(json['order_total']),
       complementaryMeals: _parseComplementaryMeals(json['complementary_meals']),
+      // --- NEW: Assign parsed bulk order fields ---
+      isBulkOrder: _parseBoolSafe(json['is_bulk_order']),
+      bulkOrderDetails: _parseBulkOrderDetails(json['bulk_order_details']),
     );
   }
 }
@@ -1190,6 +1264,8 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen>
       if (mounted) {
         _refreshIconController.reset();
         setState(() => _isRefreshing = false);
+        // After manual refresh, re-evaluate polling state for the current tab.
+        _handleTabChangeForPolling();
       }
     }
   }
@@ -1255,10 +1331,7 @@ extension OrdersTabRefreshExtension on _OrdersTabState {
   Future<void> manualRefreshFromAppBar() async {
     if (!mounted) return;
     print("OrdersTab: manualRefreshFromAppBar triggered.");
-    _loadOrders();
-    while (mounted && _isLoadingOrders) {
-      await Future.delayed(const Duration(milliseconds: 100));
-    }
+    await _loadOrders(); // Await the full refresh
     print("OrdersTab: manualRefreshFromAppBar completed.");
   }
 }
@@ -1299,33 +1372,82 @@ class _OrdersTabState extends State<OrdersTab>
 
     _ordersPollingTimer?.cancel();
     _ordersPollingTimer =
-        Timer.periodic(const Duration(seconds: 10), (_) async {
+        Timer.periodic(const Duration(seconds: 15), (_) async {
       if (!mounted || !_isRouteActive) return;
       await _pollOrdersStatus();
     });
   }
-
+  
+  // --- FIX: Rewritten polling logic to handle new orders and status updates ---
   Future<void> _pollOrdersStatus() async {
+    // Guard against multiple concurrent polling requests or running during a manual refresh.
+    if (_isLoadingOrders || !mounted) return;
+    
     try {
       final fetchedOrders = await ApiService().fetchOrders();
       if (!mounted) return;
-      for (final fetched in fetchedOrders) {
-        final idx =
-            _mealOrders.indexWhere((o) => o.orderId == fetched.orderId);
-        if (idx != -1 && _mealOrders[idx].orderStatus != fetched.orderStatus) {
-          setState(() {
-            _mealOrders[idx].orderStatus = fetched.orderStatus;
-          });
+      
+      final currentOrderIds = _mealOrders.map((o) => o.orderId).toSet();
+      final List<Order> newOrders = [];
+      bool hasUpdates = false;
+
+      // Filter for meal orders from the fetched data
+      final fetchedMealOrders = fetchedOrders
+          .where((order) =>
+              order.orderType?.toLowerCase() == 'meal' ||
+              order.orderType == null ||
+              order.orderType!.isEmpty)
+          .toList();
+
+      for (final fetchedOrder in fetchedMealOrders) {
+        if (!currentOrderIds.contains(fetchedOrder.orderId)) {
+          // This is a new order
+          newOrders.add(fetchedOrder);
+          hasUpdates = true;
+        } else {
+          // This is an existing order; check for updates
+          final existingOrderIndex = _mealOrders.indexWhere((o) => o.orderId == fetchedOrder.orderId);
+          if (existingOrderIndex != -1) {
+            final existingOrder = _mealOrders[existingOrderIndex];
+            // Compare relevant fields that might change
+            if (existingOrder.orderStatus != fetchedOrder.orderStatus ||
+                existingOrder.assignedRiderId != fetchedOrder.assignedRiderId) {
+              
+              // Replace the old order object with the newly fetched one to ensure all data is current
+              _mealOrders[existingOrderIndex] = fetchedOrder;
+              hasUpdates = true;
+            }
+          }
         }
       }
-    } catch (_) {}
+
+      if (hasUpdates && mounted) {
+        setState(() {
+          // Add all new orders to the beginning of the list
+          if (newOrders.isNotEmpty) {
+             _mealOrders.insertAll(0, newOrders);
+          }
+          // Re-sort the entire list to maintain chronological order
+          _mealOrders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
+          _allFetchedOrders = List.from(_mealOrders); // Keep the master list in sync
+        });
+
+        // Optionally, notify the user that new orders have arrived
+        if (newOrders.isNotEmpty) {
+          _showInfoSnackbar("${newOrders.length} new order(s) arrived.");
+        }
+      }
+    } catch (e) {
+      // Polling errors should usually fail silently to not annoy the user.
+      debugPrint("Silent polling error in OrdersTab: $e");
+    }
   }
 
   @override
   void initState() {
     super.initState();
     _isRouteActive = true;
-    _startOrdersPolling();
+    // Don't start polling immediately, let didChangeDependencies handle it.
   }
 
   @override
@@ -1392,17 +1514,20 @@ class _OrdersTabState extends State<OrdersTab>
 
   Future<void> _loadOrders() async {
     if (!mounted) return;
+    // A manual refresh should stop the timer temporarily
+    _ordersPollingTimer?.cancel(); 
+    
     if (context.mounted) ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    
     setState(() {
       _isLoadingOrders = true;
-      _allFetchedOrders = [];
-      _mealOrders = [];
       _ordersFuture = ApiService().fetchOrders();
     });
+
     try {
-      final fetchedOrders =
-          await _ordersFuture!.timeout(const Duration(seconds: 20));
+      final fetchedOrders = await _ordersFuture!.timeout(const Duration(seconds: 20));
       if (!mounted) return;
+
       _allFetchedOrders = fetchedOrders;
       _mealOrders = _allFetchedOrders
           .where((order) =>
@@ -1427,7 +1552,11 @@ class _OrdersTabState extends State<OrdersTab>
         _mealOrders = [];
       }
     } finally {
-      if (mounted) setState(() => _isLoadingOrders = false);
+      if (mounted) {
+        setState(() => _isLoadingOrders = false);
+        // --- FIX: Restart polling after a manual refresh is complete ---
+        _startOrdersPolling();
+      }
     }
   }
 
@@ -2049,6 +2178,48 @@ class _OrdersTabState extends State<OrdersTab>
     );
   }
 
+  // --- NEW: Helper widget to display bulk order details ---
+  Widget _buildBulkOrderDetailsSection(BuildContext context, BulkOrderDetails details) {
+    final textTheme = Theme.of(context).textTheme;
+    final shortDateFormat = DateFormat('EEE, MMM d');
+    
+    // Create a comma-separated string of delivery days, handling potential wrapping
+    final formattedDays = details.planSelectedDays.isNotEmpty
+        ? details.planSelectedDays
+            .map((d) => shortDateFormat.format(d))
+            .join(', ')
+        : 'No specific days selected.';
+
+    return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+            color: lighterTeal.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: lightTeal, width: 1),
+        ),
+        child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+                Row(
+                    children: [
+                        const Icon(Icons.calendar_month_outlined, size: 18, color: darkTeal),
+                        const SizedBox(width: 8),
+                        Text("Meal Plan Details", style: textTheme.titleSmall?.copyWith(color: darkTeal, fontWeight: FontWeight.bold)),
+                    ],
+                ),
+                const Divider(height: 16, thickness: 0.5, color: lightTeal),
+                if (details.planStartDate != null)
+                    _buildDetailRow(context, Icons.play_arrow_rounded, 'Starts', DateFormat.yMMMMd().format(details.planStartDate!)),
+                if (details.planEndDate != null)
+                    _buildDetailRow(context, Icons.stop_rounded, 'Ends', DateFormat.yMMMMd().format(details.planEndDate!)),
+                if (details.planSelectedDays.isNotEmpty)
+                      _buildDetailRow(context, Icons.date_range_rounded, 'Delivery Days', formattedDays),
+            ],
+        ),
+    );
+  }
+  
   Widget _buildOrderCard(BuildContext context, Order order,
       {required Function(Order) handleReadyForShipping,
       required Function(Order, String) updateSimpleStatus}) {
@@ -2075,10 +2246,30 @@ class _OrdersTabState extends State<OrdersTab>
         leading: CircleAvatar(
             backgroundColor: statusColor.withOpacity(0.15),
             child: Icon(statusIcon, color: statusColor, size: 22)),
-        title: Text(order.mealName,
-            style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis),
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                order.mealName,
+                style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis
+              ),
+            ),
+            if (order.isBulkOrder)
+              Padding(
+                padding: const EdgeInsets.only(left: 8.0),
+                child: Chip(
+                  label: const Text('Meal Plan'),
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  labelStyle: const TextStyle(fontSize: 10, color: darkTeal, fontWeight: FontWeight.w600),
+                  backgroundColor: lightTeal.withOpacity(0.7),
+                  side: BorderSide.none,
+                ),
+              ),
+          ],
+        ),
         subtitle: Padding(
             padding: const EdgeInsets.only(top: 5.0),
             child: Text('#${order.orderId} • ${dateFormat.format(order.orderDate.toLocal())}',
@@ -2123,6 +2314,10 @@ class _OrdersTabState extends State<OrdersTab>
         children: [
           const Divider(height: 1, thickness: 0.5),
           const SizedBox(height: 10),
+          // --- NEW: Display bulk order details if available ---
+          if (order.isBulkOrder && order.bulkOrderDetails != null)
+            _buildBulkOrderDetailsSection(context, order.bulkOrderDetails!),
+
           _buildDetailRow(context, Icons.person_outline_rounded, 'Customer ID',
               order.userId?.toString() ?? 'N/A'),
           _buildDetailRow(

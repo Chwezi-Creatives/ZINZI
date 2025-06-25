@@ -2,7 +2,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'widgets/custom_group_container.dart';
-// import 'dart:math'; // Unused import for min function
 import 'dart:async'; // Import for TimeoutException
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -10,15 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
-// import 'notifications/fcm_service.dart'; // Removed duplicate, one below is fine
 import 'package:zinzi/onlymeals.dart';
-// import 'package:zinzi/blogview.dart'; // Not used directly here
-// import 'package:zinzi/cart.dart' as cart; // Not used directly here
-// import 'package:zinzi/onboard.dart'; // Not used directly here
 import 'package:zinzi/signup_or_Login.dart';
-// import 'package:zinzi/splash.dart'; // Replaced with LandingPage for logout
-// import 'package:zinzi/useranalytics.dart'; // Not used directly here
-// import 'social.dart'; // Not used directly here
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:zinzi/user_cache.dart'; // Import UserCache
@@ -230,44 +222,72 @@ class _ProfilePageState extends State<ProfilePage>
   // --- State Variables & Controllers for Preferences Editing ---
   String? _selectedGoal;
   final List<String> _goalsOptions = [
-    'Weight Loss',
-    'Muscle Gain',
-    'Maintain Weight'
-  ];
+  "Lose Weight",
+  "Boost Energy Levels",
+  "Gain Muscle",
+  "Satiety",
+  "Detox and Cleanse",
+  "Enhance Metabolic Health",
+  "Improve Sleep Quality",
+  "Improved eye health",
+  "Improved immune",
+  "Joint Pain",
+  "Manage Stress Through Nutrition",
+  "Postpartum recovery",
+  "Reduced inflamation",
+  "Skin and hair improvement",
+  "Control Chronic Conditions (e.g. diabetes and hypertension)",
+];
   String? _selectedDietType;
   final List<String> _dietTypeOptions = [
-    
-    'Vegetarian',
-    'Omnivore',
-    'Vegan',
-    'All'
-  ];
+  "Anti Inflamatory",
+  "Diabetic Diet",
+  "High blood pressure",
+  "Keto (Low-Carb and High-Fat)",
+  "Muscle Repair",
+  "Normal Diet",
+  "Renal Diet"
+];
   String? _selectedFoodRestriction;
   final List<String> _foodRestrictionsOptions = [
-    'Gluten-Free',
-    'Dairy-Free',
-    'Nut-Free',
-    'None'
+    "None", // Added None option
+    "Meat Allergy (e.g. beef)",
+    "Milk/Dairy Allergy",
+    "Soy Allergy",
+    "Spice Allergy (e.g. cinnamon and paprika)",
+    "Wheat Allergy",
+    "Citrus Allergy (e.g. oranges and lemons)",
+    "Corn Allergy",
+    "Egg Allergy",
+    "Fish Allergy",
+    "Gluten Allergy",
+    "Histamine Intolerance",
+    "Latex-Fruit Syndrome (e.g. bananas)",
+    "Legume Allergy (e.g. lentils and chickpeas)",
+    "Nightshade Allergy (e.g. tomatoes and potatoes)",
+    "Peanut Allergy",
+    "Sesame Allergy",
+    "Shellfish Allergy (e.g. shrimp and lobster)",
   ];
   
-  // Cuisine preferences
-  List<String> _selectedCuisines = [];
-  final List<String> _cuisineOptions = [
-    'All',
-    'African',
-    'East African',
-    'American',
-    'Asian',
-    'Chinese',
-    'French',
-    'Indian',
-    'Italian',
-    'Japanese',
-    'Mediterranean',
-    'Mexican',
-    'Thai',
-    'Other'
+  // Cuisine preferences as a single-select string
+  String? _selectedCuisine;
+  final List<String> _cuisinePreferencesOptions = [
+    "Any", // For no specific preference
+    "African",
+    "American",
+    "Asian",
+    "Caribbean",
+    "European",
+    "Indian",
+    "Italian",
+    "Mediterranean",
+    "Mexican",
+    "Middle Eastern",
+    "South American",
+    "Other"
   ];
+
 
   // --- Animation ---
   late final AnimationController _refreshIconController;
@@ -741,29 +761,14 @@ class _ProfilePageState extends State<ProfilePage>
     
     setState(() {
       _userPreferences = {
-        'goals': prefData['goals'] ?? 'N/A',
-        'diet_type': prefData['diet_type'] ?? 'N/A',
-        'food_restrictions': _listToString(prefData['food_restrictions'], emptyValue: 'None'),
-        'cuisine_preferences': _listToString(prefData['cuisine_preferences'], emptyValue: 'all'),
+        'goals': getCaseInsensitive(prefData, 'goals') ?? 'N/A',
+        'diet_type': getCaseInsensitive(prefData, 'diet_type') ?? 'N/A',
+        'food_restrictions': _listToString(getCaseInsensitive(prefData, 'food_restrictions'), emptyValue: 'None'),
+        'cuisine_preferences': getCaseInsensitive(prefData, 'cuisine_preferences') ?? 'Any',
       };
       
       _isLoadingPreferences = false;
       
-      // Load cuisine preferences
-      final cuisinePrefs = getCaseInsensitive(prefData, 'cuisine_preferences');
-      if (cuisinePrefs != null) {
-        if (cuisinePrefs is List) {
-          _selectedCuisines = List<String>.from(cuisinePrefs.whereType<String>());
-        } else if (cuisinePrefs is String && cuisinePrefs.isNotEmpty) {
-          // Handle case where cuisine_preferences is a comma-separated string
-          _selectedCuisines = cuisinePrefs.split(',').map((e) => e.trim()).toList();
-        } else {
-          _selectedCuisines = [];
-        }
-      } else {
-        _selectedCuisines = [];
-      }
-
       if (!_isEditingPreferences) {
         _selectedGoal = _userPreferences['goals'] != 'N/A' ? _userPreferences['goals'] : null;
         if (_selectedGoal != null && !_goalsOptions.contains(_selectedGoal)) {
@@ -787,6 +792,12 @@ class _ProfilePageState extends State<ProfilePage>
         
         if (_selectedFoodRestriction != null && !_foodRestrictionsOptions.contains(_selectedFoodRestriction)) {
           _selectedFoodRestriction = null;
+        }
+
+        // Update single cuisine preference
+        _selectedCuisine = _userPreferences['cuisine_preferences'];
+        if (_selectedCuisine != null && !_cuisinePreferencesOptions.contains(_selectedCuisine)) {
+          _selectedCuisine = null; // Reset if the value from API is not in our options
         }
       }
     });
@@ -951,114 +962,44 @@ class _ProfilePageState extends State<ProfilePage>
       successMessage = 'Health metrics updated successfully!';
       _parseAndUpdateWeight();
       _parseAndUpdateHeight();
-
-      // Compute dependent values
-      String bmi = _calculateBmi(_heightCm, _weightKg);
-      String idealWeight = (_heightCm > 0 && _selectedSex != null)
-          ? (_selectedSex == 'Male'
-              ? (50 + 0.91 * (_heightCm - 152.4)).toStringAsFixed(2)
-              : (45.5 + 0.91 * (_heightCm - 152.4)).toStringAsFixed(2))
-          : 'N/A';
-      String bmiCategory = 'N/A';
-      double? bmiValue = double.tryParse(bmi);
-      if (bmiValue != null) {
-        if (bmiValue < 18.5) {
-          bmiCategory = 'Underweight';
-        } else if (bmiValue < 25) {
-          bmiCategory = 'Normal';
-        } else if (bmiValue < 30) {
-          bmiCategory = 'Overweight';
-        } else {
-          bmiCategory = 'Obese';
-        }
-      }
-      double? bmr;
-      if (_weightKg > 0 &&
-          _heightCm > 0 &&
-          _selectedAgeRange != null &&
-          _selectedSex != null) {
-        int age = 30; // Default age if parsing fails
-        final ageMatch = RegExp(r'\d+').firstMatch(_selectedAgeRange!);
-        if (ageMatch != null) {
-          age = int.tryParse(ageMatch.group(0)!) ?? 30;
-        }
-        if (_selectedSex == 'Male') {
-          bmr = 10 * _weightKg + 6.25 * _heightCm - 5 * age + 5;
-        } else {
-          bmr = 10 * _weightKg + 6.25 * _heightCm - 5 * age - 161;
-        }
-      }
-      double? dailyCalories;
-      if (bmr != null && _selectedActivityLevel != null) {
-        final activityMultipliers = {
-          'Sedentary': 1.2,
-          'Lightly Active': 1.375,
-          'Moderately Active': 1.55,
-          'Very Active': 1.725,
-          'Extra Active': 1.9 // Added just in case
-        };
-        dailyCalories =
-            bmr * (activityMultipliers[_selectedActivityLevel!] ?? 1.2);
-      }
-
-      // Create a flat metrics object with only the allowed fields as per backend requirements
-      // Convert all numeric values to strings to match backend expectations
+      
       dataToUpdate = {
         'age_range': _selectedAgeRange,
         'sex': _selectedSex,
         'weight': _weightKg > 0 ? _weightKg.toString() : null,
         'height': _heightCm > 0 ? _heightCm.toString() : null,
         'activity_level': _selectedActivityLevel,
-        // Note: Backend will calculate these dependent values automatically
-        // We don't need to send them as they'll be computed server-side
       };
-
-      // Remove null values
       dataToUpdate.removeWhere((key, value) => value == null);
 
       print("Sending metrics update: ${json.encode(dataToUpdate)}");
+      setState(() => _isEditingMetrics = false);
 
-      setState(() {
-        _userMetrics['age_range'] = _selectedAgeRange ?? 'N/A';
-        _userMetrics['sex'] = _selectedSex ?? 'N/A';
-        _userMetrics['weight'] =
-            _weightKg > 0 ? _weightKg.toStringAsFixed(1) : 'N/A';
-        _userMetrics['height'] =
-            _heightCm > 0 ? _heightCm.toStringAsFixed(1) : 'N/A';
-        _userMetrics['activity_level'] = _selectedActivityLevel ?? 'N/A';
-        _userMetrics['bmi'] = bmi;
-        _userMetrics['ideal_weight'] = idealWeight;
-        _userMetrics['bmi_category'] = bmiCategory;
-        _userMetrics['bmr'] = bmr?.toStringAsFixed(1) ?? 'N/A';
-        _userMetrics['daily_calories'] =
-            dailyCalories?.toStringAsFixed(1) ?? 'N/A';
-        _isEditingMetrics = false;
-      });
     } else if (_isEditingPreferences) {
       sectionBeingSaved = 'preferences';
-      endpointPath = '/rr/users/$_userId/preferences';
+      endpointPath = '/rr/users/$_userId/preferences'; // Updated to match backend endpoint
       cacheKeyToInvalidate = 'user_preferences_cache';
       successMessage = 'Preferences updated successfully!';
 
-      List<String> restrictionsToSend = [];
-      if (_selectedFoodRestriction != null &&
-          _selectedFoodRestriction != 'None') {
-        restrictionsToSend.add(_selectedFoodRestriction!);
-      }
+      // API expects a single string for restriction, or null if "None"
+      String? restrictionToSend = (_selectedFoodRestriction != null && _selectedFoodRestriction != 'None')
+          ? _selectedFoodRestriction
+          : null;
 
-      // Always include cuisine_preferences, even if empty, to clear existing preferences when needed
+      // API expects a single string for cuisine preference
       dataToUpdate = {
         'goals': _selectedGoal,
         'diet_type': _selectedDietType,
-        'food_restrictions': restrictionsToSend.isNotEmpty ? restrictionsToSend : [],
-        'cuisine_preferences': _selectedCuisines, // Send empty list if no cuisines selected
+        'food_restrictions': restrictionToSend,
+        'cuisine_preferences': _selectedCuisine, // Send single string
       };
+      dataToUpdate.removeWhere((key, value) => value == null); // Clean payload
 
       setState(() {
         _userPreferences['goals'] = _selectedGoal ?? 'N/A';
         _userPreferences['diet_type'] = _selectedDietType ?? 'N/A';
-        _userPreferences['food_restrictions'] =
-            _listToString(restrictionsToSend, emptyValue: 'None');
+        _userPreferences['food_restrictions'] = restrictionToSend ?? 'None';
+        _userPreferences['cuisine_preferences'] = _selectedCuisine ?? 'Any';
         _isEditingPreferences = false;
       });
     } else {
@@ -1086,15 +1027,14 @@ class _ProfilePageState extends State<ProfilePage>
             response.statusCode == 201) {
           _showSuccessSnackBar(successMessage);
           if (cacheKeyToInvalidate.isNotEmpty) {
-            await UserCache.removeData(cacheKeyToInvalidate);
-            // Also remove timestamp to force fresh fetch
+            await UserCache.removeUserData(cacheKeyToInvalidate, userId: _userId.toString());
             final prefs = await SharedPreferences.getInstance();
-            await prefs.remove('${cacheKeyToInvalidate}_timestamp');
+            await prefs.remove('${cacheKeyToInvalidate}_${_userId}_timestamp');
           }
           // Refetch the specific section that was updated
           if (sectionBeingSaved == 'details') await _fetchUserDetails();
-          if (sectionBeingSaved == 'metrics') await _fetchMetrics();
-          if (sectionBeingSaved == 'preferences') await _fetchPreferences();
+          if (sectionBeingSaved == 'metrics') await _fetchMetrics(forceRefresh: true);
+          if (sectionBeingSaved == 'preferences') await _fetchPreferences(forceRefresh: true);
         } else {
           print(
               "Failed to update profile section. Status: ${response.statusCode}, Body: ${response.body}");
@@ -1102,25 +1042,23 @@ class _ProfilePageState extends State<ProfilePage>
               'Failed to update. Server error: ${response.statusCode}');
           // Revert optimistic UI update by refetching
           if (sectionBeingSaved == 'details') await _fetchUserDetails();
-          if (sectionBeingSaved == 'metrics') await _fetchMetrics();
-          if (sectionBeingSaved == 'preferences') await _fetchPreferences();
+          if (sectionBeingSaved == 'metrics') await _fetchMetrics(forceRefresh: true);
+          if (sectionBeingSaved == 'preferences') await _fetchPreferences(forceRefresh: true);
         }
       } on TimeoutException {
         if (mounted) {
           _showErrorSnackBar('Failed to save: Connection timed out.');
-          // Revert optimistic UI update by refetching
           if (sectionBeingSaved == 'details') await _fetchUserDetails();
-          if (sectionBeingSaved == 'metrics') await _fetchMetrics();
-          if (sectionBeingSaved == 'preferences') await _fetchPreferences();
+          if (sectionBeingSaved == 'metrics') await _fetchMetrics(forceRefresh: true);
+          if (sectionBeingSaved == 'preferences') await _fetchPreferences(forceRefresh: true);
         }
       } catch (e) {
         print("Error saving profile data: $e");
         if (mounted) {
           _showErrorSnackBar('An error occurred while saving: $e');
-          // Revert optimistic UI update by refetching
           if (sectionBeingSaved == 'details') await _fetchUserDetails();
-          if (sectionBeingSaved == 'metrics') await _fetchMetrics();
-          if (sectionBeingSaved == 'preferences') await _fetchPreferences();
+          if (sectionBeingSaved == 'metrics') await _fetchMetrics(forceRefresh: true);
+          if (sectionBeingSaved == 'preferences') await _fetchPreferences(forceRefresh: true);
         }
       }
     } else {
@@ -1129,7 +1067,6 @@ class _ProfilePageState extends State<ProfilePage>
       }
       if (dataToUpdate.isEmpty) {
         print("No changes detected to save. Exiting edit mode.");
-        // Exit edit mode even if no data to PATCH, as user might have just hit save without changes
         setState(() {
           _isEditingUserDetails = false;
           _isEditingMetrics = false;
@@ -1225,11 +1162,19 @@ class _ProfilePageState extends State<ProfilePage>
             !_foodRestrictionsOptions.contains(_selectedFoodRestriction)) {
           _selectedFoodRestriction = null;
         }
+
+        // Reset single cuisine selection
+        _selectedCuisine = getCaseInsensitive(_userPreferences, 'cuisine_preferences');
+        if (_selectedCuisine != null && !_cuisinePreferencesOptions.contains(_selectedCuisine)) {
+            _selectedCuisine = null;
+        }
+        
       } else {
         // Default if _userPreferences is empty
         _selectedGoal = null;
         _selectedDietType = null;
         _selectedFoodRestriction = null;
+        _selectedCuisine = null;
       }
     });
   }
@@ -1404,16 +1349,14 @@ class _ProfilePageState extends State<ProfilePage>
     final keysToRemove = <String>{
       'user_id', 'user_type', 'auth_token', // Common auth keys
       'image_path', // Specific to this page's local image caching
-      'user_details_cache_timestamp',
-      'user_metrics_cache_timestamp',
-      'user_preferences_cache_timestamp'
     };
-    // Remove general user session keys by pattern if any exist
+    // Remove session data by pattern
     final allKeys = prefs.getKeys();
     final patterns = [
       RegExp(r'_id\b', caseSensitive: false),
       RegExp(r'_user_type\b', caseSensitive: false),
-      RegExp(r'token\b', caseSensitive: false)
+      RegExp(r'token\b', caseSensitive: false),
+      RegExp(r'_cache_'),
     ];
     for (final key in allKeys) {
       if (patterns.any((p) => p.hasMatch(key))) {
@@ -1604,7 +1547,7 @@ class _ProfilePageState extends State<ProfilePage>
                               _userPreferences
                                   .isEmpty // Shimmer for preferences
                           ? _buildShimmerCard(
-                              itemCount: 3, title: "Preferences")
+                              itemCount: 4, title: "Preferences")
                           : _buildPreferencesCard(),
                       const SizedBox(height: 24.0),
 
@@ -1649,7 +1592,7 @@ class _ProfilePageState extends State<ProfilePage>
               itemCount: 8, title: "Health Metrics"), // Metrics Shimmer
           const SizedBox(height: 16.0),
           _buildShimmerCard(
-              itemCount: 3, title: "Preferences"), // Preferences Shimmer
+              itemCount: 4, title: "Preferences"), // Preferences Shimmer
         ],
       ),
     );
@@ -2068,8 +2011,6 @@ class _ProfilePageState extends State<ProfilePage>
 
       String displayAddress =
           "Lat: ${position.latitude.toStringAsFixed(4)}, Lon: ${position.longitude.toStringAsFixed(4)}";
-      String coordsForStorage =
-          "${position.latitude},${position.longitude}"; // For storage
 
       // Attempt reverse geocoding (optional, can fail gracefully)
       try {
@@ -2095,9 +2036,8 @@ class _ProfilePageState extends State<ProfilePage>
       if (mounted) {
         _stopLocationHintAnimation();
         setState(() {
-          // Store the more detailed address for display, but consider what to save to backend (coords or full address)
+          // Store the more detailed address for display
           _userDetailsLocationController.text = displayAddress;
-          // If you want to store just coordinates, you'd use coordsForStorage when saving.
           _isFetchingLocation = false;
         });
         _showSuccessSnackBar('Location acquired!');
@@ -2152,7 +2092,6 @@ class _ProfilePageState extends State<ProfilePage>
                     vertical: 14.0, horizontal: 12.0),
               ),
               maxLines: 2, // Allow for longer addresses
-              // No validator needed for readOnly field set programmatically
             ),
           ),
           const SizedBox(width: 8),
@@ -2556,7 +2495,7 @@ class _ProfilePageState extends State<ProfilePage>
                 value: getCaseInsensitive(_userMetrics, 'ideal_weight') !=
                             'N/A' &&
                         getCaseInsensitive(_userMetrics, 'ideal_weight') != null
-                    ? '${_tryParseDouble(getCaseInsensitive(_userMetrics, 'ideal_weight'))?.toStringAsFixed(1) ?? 'N/A'}'
+                    ? '${_tryParseDouble(getCaseInsensitive(_userMetrics, 'ideal_weight'))?.toStringAsFixed(1) ?? 'N/A'} kg'
                     : 'N/A',
                 isEditing: false,
               ),
@@ -2758,6 +2697,13 @@ class _ProfilePageState extends State<ProfilePage>
               !_foodRestrictionsOptions.contains(_selectedFoodRestriction)) {
             _selectedFoodRestriction = null;
           }
+
+          // Populate cuisine preference
+          _selectedCuisine = getCaseInsensitive(_userPreferences, 'cuisine_preferences');
+          if (_selectedCuisine != null && !_cuisinePreferencesOptions.contains(_selectedCuisine)) {
+            _selectedCuisine = null;
+          }
+
         });
       },
       children: _isEditingPreferences
@@ -2790,11 +2736,9 @@ class _ProfilePageState extends State<ProfilePage>
       ),
       _buildInfoRow(
         icon: Icons.ramen_dining_outlined,
-        label: 'Cuisine Preferences',
-        value: getCaseInsensitive(_userPreferences, 'cuisine_preferences') ??
-            'Not Set',
+        label: 'Cuisine Preference',
+        value: getCaseInsensitive(_userPreferences, 'cuisine_preferences') ?? 'Any',
         isEditing: false,
-        maxLines: 3,
       ),
       const SizedBox(height: 16),
       _buildMealRecommendationsButton(),
@@ -2818,87 +2762,23 @@ class _ProfilePageState extends State<ProfilePage>
         onChanged: (value) => setState(() => _selectedDietType = value),
       ),
       _buildDropdownField<String>(
-        label: 'Food Restrictions (Primary)', 
+        label: 'Food Restriction', 
         icon: Icons.no_food_outlined,
         currentValue: _selectedFoodRestriction,
-        options: _foodRestrictionsOptions, // Includes "None"
-        hint: "Select primary restriction",
+        options: _foodRestrictionsOptions,
+        hint: "Select a restriction",
         onChanged: (value) => setState(() => _selectedFoodRestriction = value),
       ),
-      const SizedBox(height: 8),
-      // Cuisine preferences multi-select
-      Padding(
-        padding: const EdgeInsets.only(left: 8.0, right: 8.0, bottom: 8.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8.0, left: 4.0),
-              child: Row(
-                children: [
-                  Icon(Icons.ramen_dining_outlined, size: 20, color: Colors.grey[700]),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Cuisine Preferences',
-                    style: GoogleFonts.poppins(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.grey[700],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Wrap(
-              spacing: 8.0,
-              runSpacing: 8.0,
-              children: _cuisineOptions.map((cuisine) {
-                final isSelected = _selectedCuisines.contains(cuisine);
-                return FilterChip(
-                  label: Text(cuisine),
-                  selected: isSelected,
-                  onSelected: (selected) {
-                    setState(() {
-                      if (selected) {
-                        _selectedCuisines.add(cuisine);
-                      } else {
-                        _selectedCuisines.remove(cuisine);
-                      }
-                    });
-                  },
-                  selectedColor: kColorPrimary.withOpacity(0.2),
-                  checkmarkColor: kColorPrimary,
-                  labelStyle: GoogleFonts.poppins(
-                    color: isSelected ? kColorPrimary : Colors.grey[800],
-                    fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
-                  ),
-                  backgroundColor: Colors.grey[200],
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                    side: BorderSide(
-                      color: isSelected ? kColorPrimary : Colors.grey[300]!,
-                      width: 1,
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-            if (_selectedCuisines.isEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 8.0, left: 4.0),
-                child: Text(
-                  'Select your favorite cuisines',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-              ),
-          ],
-        ),
+      // Cuisine preferences as a single-select dropdown
+      _buildDropdownField<String>(
+        label: 'Cuisine Preference',
+        icon: Icons.ramen_dining_outlined,
+        currentValue: _selectedCuisine,
+        options: _cuisinePreferencesOptions,
+        onChanged: (value) => setState(() => _selectedCuisine = value),
+        hint: 'Select a cuisine',
       ),
-      const SizedBox(height: 8),
+      const SizedBox(height: 16),
       _buildMealRecommendationsButton(),
     ];
   }
@@ -2925,22 +2805,7 @@ class _ProfilePageState extends State<ProfilePage>
   }
 
   Widget _buildLogoutButton() {
-    return const SizedBox.shrink();
-    /* Removed logout button as per request
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16.0),
-      child: TextButton.icon(
-        icon: Icon(Icons.logout, color: Colors.red.shade700),
-        label: Text("Don't Logout",
-            style: GoogleFonts.poppins(color: Colors.red.shade700, fontSize: 16)),
-        onPressed: _logout,
-        style: TextButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8))),
-      ),
-    );
-    */
+    return const SizedBox.shrink(); // Logout button remains hidden as per original code
   }
 
   // --- Info Row Widget (Handles Display/Edit for Simple Fields) ---
@@ -2949,9 +2814,9 @@ class _ProfilePageState extends State<ProfilePage>
     required String label,
     required String value,
     required bool
-        isEditing, // This parameter is now less used directly by _buildInfoRow itself for TextField creation
+        isEditing,
     TextEditingController?
-        controller, // Kept for potential direct use, but _buildUserDetailsCard now provides TextFields directly
+        controller,
     TextInputType? keyboardType,
     int? maxLines = 1,
   }) {
@@ -2960,21 +2825,13 @@ class _ProfilePageState extends State<ProfilePage>
     final valueStyle =
         GoogleFonts.poppins(color: kColorTextPrimary, fontSize: 15);
 
-    // This widget is now primarily for DISPLAY purposes.
-    // Editing fields are constructed directly in _buildUserDetailsCard, _buildMetricsEditingWidgets etc.
-    // If 'isEditing' is true and a controller is passed, it implies a TextField would be built by the caller.
-    // Here, we always build the display version.
-
     Widget contentWidget = Text(
       value.isEmpty ? 'N/A' : value,
       style: valueStyle,
       maxLines: maxLines,
       overflow: TextOverflow.ellipsis,
     );
-
-    // If a controller is provided, it implies this row MIGHT be part of an edit form,
-    // but _buildInfoRow itself doesn't create the TextField.
-    // The padding adjustment for icon is based on whether it's a simple display or part of a form-like structure.
+    
     bool isPotentiallyInForm = controller != null;
 
     return Padding(
@@ -2983,7 +2840,6 @@ class _ProfilePageState extends State<ProfilePage>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            // Adjust icon alignment slightly if it's likely next to a form field (even if read-only)
             padding: EdgeInsets.only(top: isPotentiallyInForm ? 3.0 : 1.0),
             child: Icon(icon, color: kColorPrimary, size: 22),
           ),
@@ -2994,7 +2850,7 @@ class _ProfilePageState extends State<ProfilePage>
               children: [
                 Text(label, style: labelStyle),
                 const SizedBox(height: 4),
-                contentWidget, // Always display content for _buildInfoRow
+                contentWidget,
               ],
             ),
           ),
@@ -3206,7 +3062,6 @@ class _ProfilePageState extends State<ProfilePage>
         Container(
             height: 10, // Slightly thicker bar
             decoration: BoxDecoration(
-              // Could be a gradient or segmented bar in future
               color: Colors.grey.shade200, // Background for the bar track
               borderRadius: BorderRadius.circular(5),
             ),
@@ -3214,7 +3069,6 @@ class _ProfilePageState extends State<ProfilePage>
               // Align the actual colored bar within the track
               alignment: Alignment.centerLeft,
               child: FractionallySizedBox(
-                // Width factor could represent position on a scale, but simple color is fine for now
                 // For simplicity, full width with the category color
                 widthFactor: 1.0,
                 child: Container(
@@ -3262,11 +3116,9 @@ T? getCaseInsensitive<T>(Map? map, String key) {
         if (entry.value is String)
           return int.tryParse(entry.value as String) as T?;
       }
-      // Fallback for other types if direct cast might work or if specific conversion is not handled
       try {
         return entry.value as T;
       } catch (e) {
-        // print("getCaseInsensitive: Cast failed for key '$key', value '${entry.value}' (type ${entry.value.runtimeType}) to type $T. Error: $e");
         return null;
       }
     }
