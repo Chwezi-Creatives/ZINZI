@@ -2256,18 +2256,6 @@ class _OrdersTabState extends State<OrdersTab>
                 overflow: TextOverflow.ellipsis
               ),
             ),
-            if (order.isBulkOrder)
-              Padding(
-                padding: const EdgeInsets.only(left: 8.0),
-                child: Chip(
-                  label: const Text('Meal Plan'),
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                  labelStyle: const TextStyle(fontSize: 10, color: darkTeal, fontWeight: FontWeight.w600),
-                  backgroundColor: lightTeal.withOpacity(0.7),
-                  side: BorderSide.none,
-                ),
-              ),
           ],
         ),
         subtitle: Padding(
@@ -2294,6 +2282,18 @@ class _OrdersTabState extends State<OrdersTab>
                 padding: const EdgeInsets.only(right: 4.0),
                 child: Icon(Icons.warning_amber_rounded,
                     color: kColorWarning, size: 20)),
+          if (order.isBulkOrder)
+            Padding(
+              padding: const EdgeInsets.only(right: 4.0),
+              child: Chip(
+                label: const Text('Meal Plan'),
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                labelStyle: const TextStyle(fontSize: 10, color: darkTeal, fontWeight: FontWeight.w600),
+                backgroundColor: lightTeal.withOpacity(0.7),
+                side: BorderSide.none,
+              ),
+            ),
           Chip(
             label: Text(order.orderStatus, overflow: TextOverflow.ellipsis),
             backgroundColor: statusColor.withOpacity(0.15),

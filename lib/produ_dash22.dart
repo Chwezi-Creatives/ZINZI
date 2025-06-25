@@ -1,4 +1,3 @@
-
 //cspell:disable
 
 import 'dart:async';
@@ -101,6 +100,49 @@ bool _parseBoolSafe(dynamic value) {
 
 // --- Data Models ---
 
+// --- NEW: Model for Bulk Order Details ---
+class BulkOrderDetails {
+  final DateTime? planStartDate;
+  final DateTime? planEndDate;
+  final String planFrequency;
+  final List<DateTime> planSelectedDays;
+
+  BulkOrderDetails({
+    this.planStartDate,
+    this.planEndDate,
+    required this.planFrequency,
+    required this.planSelectedDays,
+  });
+
+  factory BulkOrderDetails.fromJson(Map<String, dynamic> json) {
+    DateTime? _parseDate(String? dateString) {
+      if (dateString == null) return null;
+      return DateTime.tryParse(dateString);
+    }
+
+    List<DateTime> selectedDays = [];
+    if (json['plan_selected_days'] is List) {
+      for (var dayString in json['plan_selected_days']) {
+        if (dayString != null) {
+          final parsedDay = _parseDate(dayString.toString());
+          if (parsedDay != null) {
+            selectedDays.add(parsedDay);
+          }
+        }
+      }
+    }
+    selectedDays.sort((a, b) => a.compareTo(b));
+
+    return BulkOrderDetails(
+      planStartDate: _parseDate(json['plan_start_date'] as String?),
+      planEndDate: _parseDate(json['plan_end_date'] as String?),
+      planFrequency: json['plan_frequency']?.toString() ?? 'N/A',
+      planSelectedDays: selectedDays,
+    );
+  }
+}
+
+
 // Order Model (Unified)
 class Order {
   final int orderId;
@@ -117,6 +159,9 @@ class Order {
   int? assignedRiderId;
   String? assignedRiderName;
   final List<Map<String, dynamic>>? complementaryMeals;
+  // --- NEW FIELDS for Bulk Orders ---
+  final bool isBulkOrder;
+  final BulkOrderDetails? bulkOrderDetails;
 
   Order({
     required this.orderId,
@@ -133,6 +178,9 @@ class Order {
     this.assignedRiderId,
     this.assignedRiderName,
     this.complementaryMeals,
+    // --- NEW: Add to constructor with a default value ---
+    this.isBulkOrder = false,
+    this.bulkOrderDetails,
   });
 
   factory Order.fromJson(Map<String, dynamic> json) {
@@ -159,6 +207,20 @@ class Order {
         return null;
       }
     }
+    
+    // --- NEW: Helper function to parse bulk order details safely ---
+    BulkOrderDetails? _parseBulkOrderDetails(dynamic value) {
+      if (value is String && value.isNotEmpty) {
+        try {
+          final decodedJson = jsonDecode(value) as Map<String, dynamic>;
+          return BulkOrderDetails.fromJson(decodedJson);
+        } catch (e) {
+          print('[ProducerDash] Error parsing bulk_order_details JSON string: $e');
+          return null;
+        }
+      }
+      return null;
+    }
 
     try {
       final order = Order(
@@ -176,6 +238,9 @@ class Order {
         assignedRiderId: _parseIntNullable(json['assigned_rider_id'] ?? json['transporter_id']), 
         assignedRiderName: _getStringSafe(json['assigned_rider_name']),
         complementaryMeals: parseComplementaryMeals(json['complementary_meals']),
+        // --- NEW: Assign parsed bulk order fields ---
+        isBulkOrder: _parseBoolSafe(json['is_bulk_order']),
+        bulkOrderDetails: _parseBulkOrderDetails(json['bulk_order_details']),
       );
       return order;
     } catch (e, stack) {
@@ -189,6 +254,7 @@ class Order {
     String? orderStatus, String? customerName, String? deliveryAddress, String? notes,
     String? ingredients, String? paymentStatus, ValueGetter<int?>? assignedRiderId,
     ValueGetter<String?>? assignedRiderName, List<Map<String, dynamic>>? complementaryMeals,
+    bool? isBulkOrder, ValueGetter<BulkOrderDetails?>? bulkOrderDetails,
   }) {
     return Order(
       orderId: orderId ?? this.orderId, mealName: mealName ?? this.mealName,
@@ -200,6 +266,8 @@ class Order {
       assignedRiderId: assignedRiderId != null ? assignedRiderId() : this.assignedRiderId,
       assignedRiderName: assignedRiderName != null ? assignedRiderName() : this.assignedRiderName,
       complementaryMeals: complementaryMeals ?? this.complementaryMeals,
+      isBulkOrder: isBulkOrder ?? this.isBulkOrder,
+      bulkOrderDetails: bulkOrderDetails != null ? bulkOrderDetails() : this.bulkOrderDetails,
     );
   }
 
@@ -998,6 +1066,8 @@ class ProducerDash22 extends StatefulWidget {
         'payment_status': order.paymentStatus, 'assigned_rider_id': order.assignedRiderId,
         'assigned_rider_name': order.assignedRiderName,
         'complementary_meals': order.complementaryMeals,
+        'is_bulk_order': order.isBulkOrder,
+        'bulk_order_details': order.bulkOrderDetails != null ? jsonEncode(order.bulkOrderDetails) : null,
       };
     }
     print("[ProducerDash] Warning: Could not serialize order of type ${order.runtimeType}");
@@ -1147,9 +1217,14 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     _fetchAllData();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        _isRouteActive = ModalRoute.of(context)?.isCurrent ?? false;
-        if (_currentIndex == 0 && _isRouteActive) { // Orders tab is now index 0
-          _startPolling();
+        final route = ModalRoute.of(context);
+        if (route != null) {
+          final routeObserver = RouteObserverProvider.of(context);
+          routeObserver.subscribe(this, route as PageRoute);
+          _isRouteActive = route.isCurrent;
+          if (_currentIndex == 0 && _isRouteActive) {
+            _startPolling();
+          }
         }
       }
     });
@@ -1159,11 +1234,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final route = ModalRoute.of(context);
-    if (route is PageRoute) {
-      final routeObserver = RouteObserverProvider.of(context);
-      routeObserver.subscribe(this, route);
-    }
+    // Moved subscription to initState with post-frame callback
   }
 
   @override
@@ -1178,11 +1249,10 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
   void _updateRouteStatus(bool isActive) {
     if (!mounted) return;
     setState(() => _isRouteActive = isActive);
-    if (isActive && _currentIndex == 0) { // Orders tab is now index 0
+    if (isActive && _currentIndex == 0) {
       _startPolling();
     } else {
       _pollingTimer?.cancel();
-      _pollingTimer = null;
     }
   }
 
@@ -1191,19 +1261,20 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     _pollingTimer?.cancel();
     notificationProvider.removeListener(_handleNotificationRefresh);
     WidgetsBinding.instance.removeObserver(this);
+    final routeObserver = RouteObserverProvider.of(context);
+    routeObserver.unsubscribe(this);
     super.dispose();
   }
   
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      if (_isRouteActive && _currentIndex == 0) { // Orders tab is now index 0
+      if (_isRouteActive && _currentIndex == 0) {
         _startPolling();
-        _fetchOrdersAndProduce();
+        _fetchAllData(forceRefresh: true);
       }
     } else if (state == AppLifecycleState.paused) {
       _pollingTimer?.cancel();
-      _pollingTimer = null;
     }
   }
 
@@ -1213,34 +1284,79 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
   }
 
   void _onTabChanged(int newIndex) {
+    if (!mounted || _currentIndex == newIndex) return;
+
     setState(() => _currentIndex = newIndex);
     
-    if (!_isRouteActive) return;
+    if (!_isRouteActive) {
+      _pollingTimer?.cancel();
+      return;
+    }
     
-    // Handle tab-specific logic
     if (newIndex == 0) { // Orders tab
       _startPolling();
-    } else if (newIndex == 1) { // Earnings tab
+    } else {
       _pollingTimer?.cancel();
-      _pollingTimer = null;
-      if (_payments.isEmpty && !_isLoadingPayments && !_hasPaymentError) {
+      if (newIndex == 1 && _payments.isEmpty && !_isLoadingPayments && !_hasPaymentError) {
         _fetchPayments();
       }
-    } else { // Other tabs (Produce)
-      _pollingTimer?.cancel();
-      _pollingTimer = null;
     }
   }
 
+  // --- FIX: Smarter polling logic for new orders and status updates ---
+  Future<void> _pollOrders() async {
+    if (_isRefreshing || !mounted || _currentIndex != 0 || !_isRouteActive) return;
+
+    try {
+      final fetchedOrders = await ProducerApiService.fetchProducerOrders();
+      if (!mounted) return;
+      
+      final currentOrderIds = _orders.map((o) => o.orderId).toSet();
+      final List<Order> newOrders = [];
+      bool hasUpdates = false;
+
+      for (final fetchedOrder in fetchedOrders) {
+        if (!currentOrderIds.contains(fetchedOrder.orderId)) {
+          newOrders.add(fetchedOrder);
+          hasUpdates = true;
+        } else {
+          final existingOrderIndex = _orders.indexWhere((o) => o.orderId == fetchedOrder.orderId);
+          if (existingOrderIndex != -1) {
+            final existingOrder = _orders[existingOrderIndex];
+            if (existingOrder.orderStatus != fetchedOrder.orderStatus ||
+                existingOrder.assignedRiderId != fetchedOrder.assignedRiderId) {
+              _orders[existingOrderIndex] = fetchedOrder;
+              hasUpdates = true;
+            }
+          }
+        }
+      }
+
+      if (hasUpdates) {
+        setState(() {
+          if (newOrders.isNotEmpty) {
+             _orders.insertAll(0, newOrders);
+          }
+          _sortOrders();
+        });
+
+        if (newOrders.isNotEmpty) {
+          _showInfoSnackbar("${newOrders.length} new order(s) received.");
+        }
+      }
+    } catch (e) {
+      debugPrint("[ProducerDash] Silent polling error: $e");
+    }
+  }
+
+
   void _startPolling() {
-    if (_currentIndex != 0 || !_isRouteActive) return; // Orders tab is now index 0
+    if (_currentIndex != 0 || !_isRouteActive) return;
     _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 6), (timer) {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
       if (mounted && _currentIndex == 0 && _isRouteActive && !_isRefreshing) {
         print("[ProducerDash] Polling for new orders...");
-        _fetchOrdersAndProduce(forceRefresh: false);
-      } else if (!_isRouteActive || _currentIndex != 0) {
-        timer.cancel();
+        _pollOrders();
       }
     });
     print("[ProducerDash] Started polling for orders");
@@ -1248,13 +1364,15 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
 
   Future<void> _fetchAllData({bool forceRefresh = false}) async {
     if (!mounted || _isRefreshing) return;
+    
+    _pollingTimer?.cancel(); // Pause polling during manual refresh
+    
     setState(() { _isLoading = true; _isRefreshing = true; _error = ''; });
 
     try {
       _currentProducerId = await ProducerApiService._getProducerIdInt();
       if (_currentProducerId == null) throw Exception('Producer ID not found');
 
-      // Fetch orders, produce, and sync stock in parallel
       await Future.wait([
         _fetchOrdersAndProduce(forceRefresh: forceRefresh),
         _syncStockFromProfile(),
@@ -1265,18 +1383,18 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
       if (mounted) {
         setState(() {
           _error = 'Failed to load data. Please check connection.';
-          _orders.clear();
-          _produce.clear();
-          _selectedProduceIds.clear();
-          _produceQuantities.clear();
+          _orders.clear(); _produce.clear();
+          _selectedProduceIds.clear(); _produceQuantities.clear();
         });
       }
     } finally {
-      if (mounted) setState(() { _isLoading = false; _isRefreshing = false; });
+      if (mounted) {
+        setState(() { _isLoading = false; _isRefreshing = false; });
+        _startPolling(); // --- FIX: Restart polling after refresh completes
+      }
     }
   }
   
-  // --- FIXED: Fetch producer profile and sync stock selection ---
   Future<void> _syncStockFromProfile() async {
     if (_currentProducerId == null) {
       debugPrint("[ProducerDash] Cannot sync stock: Producer ID is null.");
@@ -1296,7 +1414,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> responseBody = json.decode(response.body);
-        // Be defensive: check for a 'data' wrapper
         final Map<String, dynamic> profileData = responseBody.containsKey('data') 
             ? responseBody['data'] 
             : responseBody;
@@ -1319,7 +1436,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
           debugPrint("[ProducerDash] No stock data found in server profile.");
         }
 
-        // Directly set the state from the server data. This is the source of truth.
         setState(() {
           _selectedProduceIds = serverSelectedIds;
           _produceQuantities = serverQuantities;
@@ -1356,7 +1472,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     List<Order>? cachedOrdersData;
     List<Product>? cachedProduceData;
 
-    // Try to load from cache if not forcing refresh
     if (!forceRefresh) {
       print('[ProducerDash][CACHE] Attempting to load from cache...');
       try {
@@ -1436,7 +1551,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
       print('[ProducerDash][CACHE] Skipping cache - force refresh requested');
     }
 
-    // Fetch fresh data from the server
     try {
       print('[ProducerDash][API] Fetching fresh data from server...');
       final results = await Future.wait([
@@ -1502,14 +1616,12 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
   }
 
   void _sortOrders() {
-    // Update previous statuses when sorting
     for (var order in _orders) {
       _previousOrderStatuses[order.orderId] = order.orderStatus;
     }
     _orders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
   }
   
-  // Check if an order status has changed to completed/delivered and refresh earnings if needed
   void _checkAndRefreshEarningsOnStatusChange(int orderId, String newStatus) {
     final previousStatus = _previousOrderStatuses[orderId];
     final isNewlyCompleted = (newStatus == Order.STATUS_COMPLETED || newStatus == Order.STATUS_DELIVERED) &&
@@ -1538,15 +1650,12 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     
     print('[ProducerDash][DEBUG] Current status: $originalStatus, Will update to: $newStatus');
     
-    // Update previous status if not set
     if (!_previousOrderStatuses.containsKey(order.orderId)) {
       _previousOrderStatuses[order.orderId] = order.orderStatus;
     }
 
-    // Check if we need to refresh earnings due to status change
     _checkAndRefreshEarningsOnStatusChange(order.orderId, newStatus);
 
-    // Update UI optimistically
     setState(() {
       _orders[orderIndex].orderStatus = newStatus;
       if ([Order.STATUS_ACCEPTED, Order.STATUS_PREPARING, Order.STATUS_CANCELLED].contains(newStatus)) {
@@ -1576,13 +1685,11 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
         _showSuccessSnackbar('Order ${order.orderId} status updated to $newStatus.');
         _showOrderNextStepDialog(newStatus);
         
-        // Force refresh orders to ensure consistency
         _fetchOrdersAndProduce(forceRefresh: true);
       } else {
         print('[ProducerDash][ERROR] API returned failure for order ${order.orderId}');
         _showErrorSnackBar('Failed to update order ${order.orderId} status.');
         
-        // Revert UI changes
         setState(() {
           _orders[orderIndex].orderStatus = originalStatus;
           _orders[orderIndex] = _orders[orderIndex].copyWith(
@@ -1601,7 +1708,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
       if (mounted) {
         _showErrorSnackBar('An error occurred while updating status.');
         
-        // Revert UI changes
         setState(() {
           _orders[orderIndex].orderStatus = originalStatus;
           _orders[orderIndex] = _orders[orderIndex].copyWith(
@@ -1759,12 +1865,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     return index;
   }
 
-  // --- REMOVED METHODS ---
-  // All methods for adding, editing, deleting, and managing the form for produce items have been removed.
-  // This includes: _handleAddProduce, _handleEditProduce, _saveProduceChanges, _cancelProduceEdit, _handleProductDelete,
-  // _performDeleteProduce, _initializeProduceEditControllers, _disposeProduceEditControllers, and _cancelAllEdits.
-  // --- END REMOVED METHODS ---
-
   Future<void> _updateProducerStock() async {
     if (!mounted) return;
   
@@ -1773,13 +1873,12 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
       return;
     }
   
-    // Create stock list with both name and produce_id
     final List<Map<String, dynamic>> stockList = _selectedProduceIds.map<Map<String, dynamic>?>((String id) {
       try {
         final product = _produce.firstWhere((p) => p.produceId == id);
         final quantity = _produceQuantities[id] ?? 1; // Default to 1 if not set
         return <String, dynamic>{
-          'Name': product.produceName,  // Add the produce name
+          'Name': product.produceName,
           'produce_id': id,
           'quantity': quantity,
         };
@@ -1787,11 +1886,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
         return null;
       }
     }).where((item) => item != null).map((item) => item!).toList();
-  
-    if (stockList.isEmpty) {
-      if (mounted) _showErrorSnackBar('No valid stock items selected.');
-      return;
-    }
   
     if (mounted) _showLoadingSnackbar('Updating stock...');
   
@@ -1803,7 +1897,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     
       if (success) {
         _showSuccessSnackbar('Stock updated successfully.');
-        // Refresh data to confirm sync
         await _syncStockFromProfile();
       } else {
         _showErrorSnackBar('Failed to update stock. Please try again.');
@@ -1896,7 +1989,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
         currentIndex: _currentIndex,
         onTap: (index) {
           if (index != _currentIndex && mounted) {
-            setState(() => _currentIndex = index);
             _onTabChanged(index); 
           }
         },
@@ -1953,21 +2045,12 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
   }
 
   Widget _buildEarningsTab() {
-    // Fetch payments when the tab is first built
     if (_payments.isEmpty && !_isLoadingPayments && !_hasPaymentError) {
-      print('[EarningsTab] Triggering initial payments fetch');
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        print('[EarningsTab] Post-frame callback: fetching payments');
         if (mounted) _fetchPayments();
       });
-    } else {
-      print('[EarningsTab] Not fetching payments - ' 
-          'isLoading: $_isLoadingPayments, '
-          'hasError: $_hasPaymentError, '
-          'paymentCount: ${_payments.length}');
     }
 
-    // Prepare today's data
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final todayPayments = _payments.where((p) {
@@ -1981,20 +2064,17 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     Widget content;
     
     if (_isLoadingPayments && _payments.isEmpty) {
-      print('[EarningsTab] Showing loading indicator');
       content = const Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             CircularProgressIndicator(color: primaryTeal),
             SizedBox(height: 16),
-            Text('Loading your earnings...', 
-                 style: TextStyle(color: textOnWhite)),
+            Text('Loading your earnings...', style: TextStyle(color: textOnWhite)),
           ],
         ),
       );
     } else if (_hasPaymentError) {
-      print('[EarningsTab] Showing error view: $_error');
       content = Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -2012,18 +2092,15 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
         ],
       );
     } else if (_payments.isEmpty) {
-      print('[EarningsTab] Showing empty state');
       content = _buildEmptyState(
         'No Earnings Yet',
         'Your earnings will appear here when you receive payments.',
         icon: Icons.attach_money,
       );
     } else {
-      print('[EarningsTab] Showing ${_payments.length} payments');
       content = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Today's Earnings Card
           Card(
             elevation: 0,
             shape: RoundedRectangleBorder(
@@ -2079,7 +2156,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
             ),
           ),
           const SizedBox(height: 16),
-          // All Earnings History
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 8.0),
             child: Text(
@@ -2135,10 +2211,8 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
                 const SizedBox(width: 4),
                 Text(
                   title,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: textOnWhite.withOpacity(0.8),
-                  ),
+                  style:
+                      TextStyle(fontSize: 12, color: textOnWhite.withOpacity(0.8)),
                 ),
               ],
             ),
@@ -2277,14 +2351,12 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     if (_selectedStatusFilter == 'All') {
       filteredOrders = _orders;
     } else if (_selectedStatusFilter == 'Delivered' || _selectedStatusFilter == 'Completed') {
-      // Show both 'Delivered' and 'Completed' orders for either filter
       filteredOrders = _orders
           .where((order) =>
               order.orderStatus.toLowerCase() == 'delivered' ||
               order.orderStatus.toLowerCase() == 'completed')
           .toList();
     } else {
-      // Standard filtering for other statuses
       filteredOrders = _orders
           .where((order) =>
               order.orderStatus.toLowerCase() == _selectedStatusFilter.toLowerCase())
@@ -2325,6 +2397,47 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
       ),
     );
   }
+  
+  // --- NEW: Helper widget to display bulk order details ---
+  Widget _buildBulkOrderDetailsSection(BuildContext context, BulkOrderDetails details) {
+    final textTheme = Theme.of(context).textTheme;
+    final shortDateFormat = DateFormat('EEE, MMM d');
+    
+    final formattedDays = details.planSelectedDays.isNotEmpty
+        ? details.planSelectedDays
+            .map((d) => shortDateFormat.format(d))
+            .join(', ')
+        : 'No specific days selected.';
+
+    return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        margin: const EdgeInsets.only(top: 8, bottom: 8),
+        decoration: BoxDecoration(
+            color: faintLightTeal.withOpacity(0.7),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: lightTeal, width: 1),
+        ),
+        child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+                Row(
+                    children: [
+                        const Icon(Icons.calendar_month_outlined, size: 18, color: darkTeal),
+                        const SizedBox(width: 8),
+                        Text("Meal Plan Details", style: textTheme.titleSmall?.copyWith(color: darkTeal, fontWeight: FontWeight.bold)),
+                    ],
+                ),
+                const Divider(height: 16, thickness: 0.5, color: lightTeal),
+                if (details.planStartDate != null)
+                    _buildOrderDetailItem('Starts', DateFormat.yMMMMd().format(details.planStartDate!)),
+                if (details.planEndDate != null)
+                    _buildOrderDetailItem('Ends', DateFormat.yMMMMd().format(details.planEndDate!)),
+                if (details.planSelectedDays.isNotEmpty)
+                      _buildOrderDetailItem('Delivery Days', formattedDays),
+            ],
+        ),
+    );
+  }
 
   Widget _buildOrderItem(Order order) {
     final DateFormat dateFormat = DateFormat('MMM d, hh:mm a');
@@ -2357,7 +2470,23 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
           radius: 18, backgroundColor: statusColor.withOpacity(0.15),
           child: Icon(statusIcon, color: statusColor, size: 18),
         )),
-        title: Text(order.mealName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: textOnWhite), maxLines: 2, overflow: TextOverflow.ellipsis),
+        title: Row(
+          children: [
+            Expanded(child: Text(order.mealName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: textOnWhite), maxLines: 2, overflow: TextOverflow.ellipsis)),
+            if (order.isBulkOrder)
+              Padding(
+                padding: const EdgeInsets.only(left: 8.0),
+                child: Chip(
+                  label: const Text('Meal Plan'),
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  labelStyle: const TextStyle(fontSize: 10, color: darkTeal, fontWeight: FontWeight.w600),
+                  backgroundColor: lightTeal.withOpacity(0.7),
+                  side: BorderSide.none,
+                ),
+              ),
+          ],
+        ),
         subtitle: Padding(padding: const EdgeInsets.only(top: 3.0), child: Text('#${order.orderId} • ${dateFormat.format(order.orderDate.toLocal())}', style: const TextStyle(fontSize: 12, color: subtleText))),
         trailing: Column(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
           Text(NumberFormat.currency(symbol: 'UGX ', decimalDigits: 0).format(order.totalPrice), style: const TextStyle(fontWeight: FontWeight.bold, color: darkTeal, fontSize: 13)),
@@ -2367,6 +2496,9 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
         children: [
           Divider(height: 1, color: dividerColor.withOpacity(0.7)),
           Padding(padding: const EdgeInsets.all(12.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (order.isBulkOrder && order.bulkOrderDetails != null)
+              _buildBulkOrderDetailsSection(context, order.bulkOrderDetails!),
+
             _buildOrderDetailItem('Customer', order.customerName ?? 'Unknown'),
             _buildOrderDetailItem('Status', order.orderStatus, color: statusColor),
             _buildOrderDetailItem('Payment', order.paymentStatus ?? 'Unknown'),
@@ -2375,26 +2507,21 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
             if (order.assignedRiderId != null) 
               _buildOrderDetailItem('Assigned Rider', '${order.assignedRiderName ?? 'ID: ${order.assignedRiderId}'}', color: assignedColor),
             
-            // --- MODIFIED SECTION START ---
-            // Display complementary meals if any, with improved styling and robustness
             if (order.complementaryMeals != null && order.complementaryMeals!.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Icon on the left
                     Padding(
-                      padding: const EdgeInsets.only(top: 1.0), // Align icon with text
+                      padding: const EdgeInsets.only(top: 1.0),
                       child: Icon(Icons.cases_outlined, size: 18, color: subtleText),
                     ),
                     const SizedBox(width: 12),
-                    // Title and list of meals on the right
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Title
                           Text(
                             'Complementary Meals',
                             style: const TextStyle(
@@ -2404,13 +2531,11 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
                             ),
                           ),
                           const SizedBox(height: 6),
-                          // List of meals
                           ...order.complementaryMeals!.map((meal) => Padding(
                             padding: const EdgeInsets.only(bottom: 6.0),
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
-                                // Image
                                 if (_getStringSafe(meal['image']) != null && _getStringSafe(meal['image'])!.isNotEmpty)
                                   Padding(
                                     padding: const EdgeInsets.only(right: 8.0),
@@ -2441,7 +2566,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
                                       ),
                                     ),
                                   ),
-                                // Meal Name and Price
                                 Expanded(
                                   child: Text(
                                     '${_getStringSafe(meal['name']) ?? 'Unnamed Meal'} (${_getStringSafe(meal['price']) ?? '0'})',
@@ -2457,8 +2581,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
                   ],
                 ),
               ),
-            // --- MODIFIED SECTION END ---
-
+            
             const SizedBox(height: 12),
             _buildOrderActions(order),
           ])),
@@ -2533,7 +2656,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     );
   }
 
-  // --- FIXED: Refactored Produce Tab with Persistent Button ---
   Widget _buildProduceTab() {
     if (_isLoadingProduce && _produce.isEmpty) {
       return const Center(child: CircularProgressIndicator(color: primaryTeal));
@@ -2542,7 +2664,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
       return _buildErrorView();
     }
     
-    // Use a Stack to layer the scrollable list and the persistent button
     return Stack(
       children: [
         RefreshIndicator(
@@ -2550,7 +2671,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
           onRefresh: () => _fetchAllData(forceRefresh: true),
           color: primaryTeal,
           child: ListView(
-            // Add padding at the bottom to ensure the last item is not hidden by the button
             padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 100.0),
             physics: const AlwaysScrollableScrollPhysics(),
             children: [
@@ -2559,7 +2679,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
           ),
         ),
         
-        // The persistent button at the bottom, only visible if stock is selected
         if (_selectedProduceIds.isNotEmpty)
           Positioned(
             bottom: 16,
@@ -2596,7 +2715,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     return _buildProduceListForStock();
   }
 
-  // --- FIXED: This widget now ONLY builds the list, not the button ---
   Widget _buildProduceListForStock() {
     final availableProduce = _produce.where((p) => !p.produceId.startsWith('TEMP_')).toList();
     if (availableProduce.isEmpty && !_isLoadingProduce && _error.isEmpty) {
@@ -2641,7 +2759,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
                       setState(() {
                         if (value) {
                           _selectedProduceIds.add(product.produceId);
-                          _produceQuantities[product.produceId] = 1; // Default quantity of 1 on toggle
+                          _produceQuantities[product.produceId] = 1;
                         } else {
                           _selectedProduceIds.remove(product.produceId);
                           _produceQuantities.remove(product.produceId);
@@ -2665,7 +2783,6 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
             },
           ),
         ),
-        // The update button is no longer here.
       ],
     );
   }
