@@ -62,7 +62,7 @@ class _NutritionChatAppState extends State<NutritionChatApp> {
         appBarTheme: const AppBarTheme(
           backgroundColor: appBarColorLight,
           foregroundColor: Colors.white, // Color for title and icons
-          elevation: 1,
+          elevation: 0,
           titleTextStyle: TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,

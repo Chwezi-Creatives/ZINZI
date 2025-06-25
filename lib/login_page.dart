@@ -133,7 +133,7 @@ class _LoginPageState extends State<LoginPage>
         ),
         foregroundColor: Colors.white,
         backgroundColor: Colors.teal,
-        elevation: 5,
+        elevation: 0,
       ),
       body: Stack(
         children: [

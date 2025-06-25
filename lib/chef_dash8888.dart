@@ -782,7 +782,7 @@ class ChefDash88new extends StatelessWidget {
           appBarTheme: AppBarTheme(
             backgroundColor: primaryTeal,
             foregroundColor: whiteColor,
-            elevation: 1.0,
+            elevation: 0,
             systemOverlayStyle: SystemUiOverlayStyle.light,
             titleTextStyle: const TextStyle(
               fontSize: 20,

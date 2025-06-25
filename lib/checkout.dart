@@ -30,6 +30,18 @@ class CheckoutScreen extends StatefulWidget {
 }
 
 class _CheckoutScreenState extends State<CheckoutScreen> {
+  // Helper method to parse price from dynamic value
+  static double _parsePrice(dynamic price) {
+    if (price == null) return 0.0;
+    if (price is num) return price.toDouble();
+    if (price is String) {
+      // Remove any non-numeric characters except decimal point
+      final numericString = price.replaceAll(RegExp(r'[^\d.]'), '');
+      return double.tryParse(numericString) ?? 0.0;
+    }
+    return 0.0;
+  }
+
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController(); // Optional general phone number
@@ -188,6 +200,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
+  String _formatDate(String? dateString) {
+    if (dateString == null) return 'N/A';
+    try {
+      final date = DateTime.tryParse(dateString);
+      if (date == null) return 'Invalid date';
+      return '${date.day}/${date.month}/${date.year}';
+    } catch (e) {
+      return 'Invalid date';
+    }
+  }
+
   void _updateLoadingStateFromService() {
     if (!mounted) return;
     // This setState call will trigger a rebuild if the loading state changes,
@@ -307,6 +330,41 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         orderType = item['type'].toString();
       }
 
+      // Calculate item total price
+      double itemTotalPrice = 0.0;
+      if (item['type'] == 'meal') {
+        // Base meal price
+        final pricePerUnit = (item['price'] as num?)?.toDouble() ?? 0.0;
+        final quantity = (item['quantity'] as num?)?.toInt() ?? 1;
+        
+        // Chef price if selected
+        final chefPrice = item['selectedchef'] != null
+            ? _parsePrice(item['selectedchef']?['price'])
+            : 0.0;
+            
+        // Calculate total complementary meal prices
+        double complementaryTotal = 0.0;
+        final complementaries = item['bestservedwith'] as List? ?? [];
+        for (var comp in complementaries) {
+          if (comp is Map && comp['price'] != null) {
+            complementaryTotal += _parsePrice(comp['price']);
+          }
+        }
+        
+        // Calculate price per single unit (meal + chef + complementaries)
+        final pricePerSingleUnit = pricePerUnit + chefPrice + complementaryTotal;
+        
+        // For bulk orders, multiply by quantity and number of days
+        if (item['isBulkOrder'] == true) {
+          final planDays = item['planSelectedDays'] as List?;
+          final numberOfDays = planDays?.length ?? 0;
+          itemTotalPrice = pricePerSingleUnit * quantity * numberOfDays;
+        } else {
+          // For regular orders, just multiply by quantity
+          itemTotalPrice = pricePerSingleUnit * quantity;
+        }
+      }
+
       Map<String, dynamic> itemPayload;
       if (item['type'] == 'gig') {
         final gigDetails = item['gigDetails'] as Map<String, dynamic>? ?? {};
@@ -316,23 +374,25 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           'producer_id': gigDetails['producer_id'],
           'gig_details': {
             'gig_type': gigDetails['gig_type'],
-            'location': gigDetails['location'], // This is gig location, not delivery
+            'location': gigDetails['location'],
             'scheduled_date': gigDetails['scheduled_date'],
             'time': gigDetails['time'],
             'estimated_duration': gigDetails['estimated_duration'],
             'number_of_people': gigDetails['number_of_people'],
             'price': gigDetails['price'],
             'detailed_description': gigDetails['detailed_description'],
-          }
+          },
+          'total_price': itemTotalPrice,  // Add total price for gigs
         };
       } else {
         // Assume meal type
         final meal = item['meal'] as Map<String, dynamic>? ?? {};
         final productIdEntry = meal.entries.firstWhere(
           (e) => e.key.endsWith('_id') && e.key != 'chef_id' && e.key != 'producer_id',
-          orElse: () => const MapEntry('product_id', null), // Default if no specific _id found
+          orElse: () => const MapEntry('product_id', null),
         );
 
+        // Build base item payload
         itemPayload = {
           'order_type': orderType,
           'type': orderType,
@@ -340,61 +400,105 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           'product_id': productIdEntry.value?.toString(),
           'quantity': (item['quantity'] as num?)?.toInt(),
           'price': (item['price'] as num?)?.toDouble(),
+          'total_price': itemTotalPrice,  // Add calculated total price
           'chef_id': item['selectedchef']?['chefid']?.toString(),
           'producer_id': item['selectedproducer']?['producer_id']?.toString(),
           'bestservedwith': item['bestservedwith'] ?? [],
         };
+
+        // Add meal plan data if this is a bulk order
+        if (item['isBulkOrder'] == true) {
+          itemPayload.addAll({
+            'is_bulk_order': true,
+            'bulk_order_details': {
+              'plan_start_date': item['planStartDate'],
+              'plan_end_date': item['planEndDate'],
+              'plan_frequency': item['planFrequency'],
+              'plan_selected_days': item['planSelectedDays'],
+            }
+          });
+        }
       }
 
+      // Build the order payload with bulk order flag and payment details at the top
+      final paymentMode = _selectedPaymentMethod.toLowerCase() == 'momo' ? 'momo' : 'cash';
+      
+      // Start with bulk order flag for quick backend access
       Map<String, dynamic> orderPayload = {
+        // Bulk order flag at the very top for quick access
+        if (item['isBulkOrder'] == true) 'is_bulk_order': true,
+        
+        // Payment details
+        'payment_mode': paymentMode,
+        'payment_phone_number': paymentPhoneNumber,
+        'total_price': itemTotalPrice,
+        
+        // Core order details
         'order_type': orderType,
         'user_id': userId.toString(),
         'user_type': userType ?? 'customer',
-        'payment_phone_number': paymentPhoneNumber, // Added payment phone number here
         'items': [itemPayload],
         'delivery_address': deliveryLocation,
-        'delivery_coordinates': LocationService.instance.currentPosition != null
-            ? {
-                'latitude': LocationService.instance.currentPosition!.latitude,
-                'longitude': LocationService.instance.currentPosition!.longitude,
-              }
-            : null,
-        'notes': _notesController.text,
-        'payment_mode': _selectedPaymentMethod.toLowerCase(),
-        'total_price': item['type'] == 'gig' 
-            ? (item['gigDetails']?['price'] as num?)?.toDouble() ?? 0.0
-            : (item['price'] as num?)?.toDouble() ?? 0.0,
-        'chef_id': item['selectedchef']?['chefid']?.toString(),
-        'producer_id': item['selectedproducer']?['producer_id']?.toString(),
       };
+
+      // Add delivery details to the payload
+      orderPayload.addAll({
+        'delivery_location': deliveryLocation,
+        'delivery_latitude': LocationService.instance.currentPosition?.latitude,
+        'delivery_longitude': LocationService.instance.currentPosition?.longitude,
+        'delivery_notes': _notesController.text.trim(),
+        'payment_phone_number': paymentPhoneNumber,
+      });
+      
+      // Add bulk order details if this is a bulk order
+      if (item['isBulkOrder'] == true) {
+        orderPayload['bulk_order_details'] = {
+          'plan_start_date': item['planStartDate'],
+          'plan_end_date': item['planEndDate'],
+          'plan_frequency': item['planFrequency'],
+          'plan_selected_days': item['planSelectedDays'],
+        };
+      }
 
       print('Submitting order for item: ${item['title'] ?? item['gigDetails']?['gig_type'] ?? 'Unknown Item'}');
       print('Order Payload: ' + orderPayload.toString());
 
-      try {
-        final response = await http.post(
-          Uri.parse('$apibaseurl/rr/Aorders'),
-          headers: {'Content-Type': 'application/json'},
-          body: json.encode(orderPayload),
-        );
+      // Log the payload for debugging
+      print('Submitting order with payload: ${jsonEncode(orderPayload)}');
 
-        if (response.statusCode == 201) {
-          final responseData = json.decode(response.body);
-          final orderId = responseData['order_id'];
-          orderIds.add(orderId.toString());
-          totalProcessedPrice += (item['price'] as num?)?.toDouble() ?? 0.0;
-          print('Successfully submitted order $orderId for item: ${item['title'] ?? 'Gig'}');
-          ShoppingCart.removeItems([item]);
+      // Make the API call
+      final response = await http.post(
+        Uri.parse('$apibaseurl/rr/Aorders'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode(orderPayload),
+      ).timeout(Duration(seconds: 30));
+
+      // Log the response for debugging
+      print('Order submission response: ${response.statusCode} - ${response.body}');
+
+      if (response.statusCode == 201) {
+        final responseData = json.decode(response.body);
+        final orderId = responseData['order_id'];
+        orderIds.add(orderId.toString());
+        totalProcessedPrice += item['type'] == 'gig'
+            ? (item['gigDetails']?['price'] as num?)?.toDouble() ?? 0.0
+            : ((item['price'] as num?)?.toDouble() ?? 0.0) + 
+               ((item['selectedchef']?['price'] is num ? (item['selectedchef']?['price'] as num).toDouble() : 0.0) * (item['quantity'] as num? ?? 1).toDouble());
+        print('Successfully submitted order $orderId for item: ${item['title'] ?? 'Gig'}');
+        ShoppingCart.removeItems([item]);
+      } else {
+        final errorMessage = jsonDecode(response.body)?['detail'] ?? response.reasonPhrase ?? 'Unknown error';
+        print('Failed to place order: ${response.statusCode} - $errorMessage');
+        
+        // Show more specific error messages for validation issues
+        if (response.statusCode == 400) {
+          _showSnackBar('Validation error: $errorMessage');
         } else {
-          allOrdersSuccessful = false;
-          print('Failed to place order for item: ${item['title'] ?? 'Gig'}. Response: ${response.statusCode}, Body: ${response.body}');
-          _showSnackBar('Failed to place order for ${item['title'] ?? 'Gig'}. Error: ${response.reasonPhrase}');
-          break;
+          _showSnackBar('Failed to place order: $errorMessage');
         }
-      } catch (e) {
         allOrdersSuccessful = false;
-        print('Exception while placing order for item: ${item['title'] ?? 'Gig'}. Error: $e');
-        _showSnackBar('Error placing order for ${item['title'] ?? 'Gig'}. Please try again.');
         break;
       }
     }
@@ -430,7 +534,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     return Scaffold(
       drawer: const AppDrawer(),
       appBar: AppBar(
-        elevation: 4,
+        elevation: 0,
         title: Text('Checkout', style: GoogleFonts.poppins()),
         backgroundColor: Colors.teal[800],
         foregroundColor: Colors.white,
@@ -511,7 +615,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                         final gigPrice = (item['gigDetails']?['price'] is num)
                                             ? (item['gigDetails']['price'] as num)
                                             : (item['price'] ?? 0.0);
-                                        return 'ugx ${gigPrice.toStringAsFixed(2)}';
+                                        return 'ugx ${gigPrice.toStringAsFixed(0)}';
                                       }(),
                                       style: GoogleFonts.poppins(
                                         color: Colors.teal[700],
@@ -541,7 +645,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                     ),
                                     SizedBox(width: 8),
                                     Text(
-                                      'ugx ${((item['price'] ?? 0.0) * (item['quantity'] ?? 0)).toStringAsFixed(2)}',
+                                      'ugx ${((item['price'] ?? 0.0) * (item['quantity'] ?? 0)).toStringAsFixed(0)}',
                                       style: GoogleFonts.poppins(
                                         color: Colors.teal[700],
                                       ),
@@ -553,6 +657,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
                                       Text('Chef: ${chef['name']}', style: GoogleFonts.poppins(fontSize: 13, color: Colors.teal[800])),
+                                      if (chef['price'] != null)
+                                        Text(
+                                          'ugx ${(chef['price'] is num ? (chef['price'] as num).toDouble() : double.tryParse(chef['price'].toString()) ?? 0.0).toStringAsFixed(0)}',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 12,
+                                            color: Colors.teal[700],
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
                                     ],
                                   ),
                                 if (bestServedWith.isNotEmpty)
@@ -571,11 +684,46 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                               children: [
                                                 Expanded(child: Text(compName, style: GoogleFonts.poppins(fontSize: 12, color: Colors.teal[800]))),
-                                                Text('ugx ${compPrice.toStringAsFixed(2)}', style: GoogleFonts.poppins(fontSize: 12, color: Colors.teal[800])),
+                                                Text('ugx ${compPrice.toStringAsFixed(0)}', style: GoogleFonts.poppins(fontSize: 12, color: Colors.teal[800])),
                                               ],
                                             ),
                                           );
                                         }).toList(),
+                                      ],
+                                    ),
+                                  ),
+                                // Display meal plan details if this is a bulk order
+                                if ((item['isBulkOrder'] ?? false) == true)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 8.0, left: 8.0),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text('Meal Plan Details:', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.teal[700])),
+                                        if (item['planStartDate'] != null && item['planEndDate'] != null)
+                                          Padding(
+                                            padding: const EdgeInsets.only(left: 8.0, top: 4.0),
+                                            child: Text(
+                                              '${_formatDate(item['planStartDate'])} - ${_formatDate(item['planEndDate'])}',
+                                              style: GoogleFonts.poppins(fontSize: 12, color: Colors.teal[800]),
+                                            ),
+                                          ),
+                                        if (item['planFrequency'] != null)
+                                          Padding(
+                                            padding: const EdgeInsets.only(left: 8.0, top: 2.0),
+                                            child: Text(
+                                              'Frequency: ${item['planFrequency']}',
+                                              style: GoogleFonts.poppins(fontSize: 12, color: Colors.teal[800]),
+                                            ),
+                                          ),
+                                        if (item['planSelectedDays'] != null && (item['planSelectedDays'] as List).isNotEmpty)
+                                          Padding(
+                                            padding: const EdgeInsets.only(left: 8.0, top: 2.0),
+                                            child: Text(
+                                              'Delivery Days: ${(item['planSelectedDays'] as List).join(', ')}',
+                                              style: GoogleFonts.poppins(fontSize: 12, color: Colors.teal[800]),
+                                            ),
+                                          ),
                                       ],
                                     ),
                                   ),

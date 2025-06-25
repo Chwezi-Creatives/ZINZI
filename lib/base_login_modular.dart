@@ -143,7 +143,7 @@ class _LoginPageModularState extends State<LoginPageModular>
             ),
             foregroundColor: Colors.white,
             backgroundColor: Colors.teal.shade700,
-            elevation: 1,
+            elevation: 0,
           ),
           body: Container(
             decoration: const BoxDecoration(

@@ -1543,7 +1543,7 @@ class _ProfilePageState extends State<ProfilePage>
         title: Text('Profile', style: GoogleFonts.poppins()),
         backgroundColor: kColorPrimaryDark,
         foregroundColor: kColorTextOnPrimary,
-        elevation: 1.0,
+        elevation: 0,
         centerTitle: true,
         actions: [
           AnimatedBuilder(

@@ -1,6 +1,7 @@
 //cspell:disable
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:intl/intl.dart'; // Add this import for date formatting
 import 'package:zinzi/allmeals.dart';
 import 'package:zinzi/app_drawer_unified.dart'
     as drawer; // Import the unified AppDrawer widget with prefix
@@ -98,20 +99,47 @@ class ShoppingCart {
 
   // --- UPDATED: totalPrice calculation ---
   // Assumes item['price'] is the price per unit (meal + selected complementaries)
+  // Helper method to parse price from dynamic value
+  static double _parsePrice(dynamic price) {
+    if (price == null) return 0.0;
+    if (price is num) return price.toDouble();
+    if (price is String) {
+      // Remove any non-numeric characters except decimal point
+      final numericString = price.replaceAll(RegExp(r'[^\d.]'), '');
+      return double.tryParse(numericString) ?? 0.0;
+    }
+    return 0.0;
+  }
+
+  // **** START FIX: Correctly calculate total price for bulk and regular orders ****
   static double get totalPrice {
     return items.fold(0.0, (sum, item) {
       double itemTotal = 0.0;
       if (item['type'] == 'meal') {
-        final pricePerUnit = (item['price'] as num?)?.toDouble() ?? 0.0;
-        final quantity = (item['quantity'] as num?)?.toInt() ?? 1;
-        itemTotal = pricePerUnit * quantity;
+        final pricePerUnit =
+            (item['price'] as num?)?.toDouble() ?? 0.0; // Price of meal + comps
+        final quantity = (item['quantity'] as num?)?.toInt() ??
+            1; // For plans, this is quantity PER DAY
 
-        // Optional: Add separate chef/producer costs if they are NOT included in pricePerUnit
-        // final chef = item['selectedchef'] as Map<String, dynamic>?;
-        // final producer = item['selectedproducer'] as Map<String, dynamic>?;
-        // final chefPrice = _parsePrice(chef?['price']) * quantity; // Per item?
-        // final producerPrice = _parsePrice(producer?['price']) * quantity; // Per item?
-        // itemTotal += chefPrice + producerPrice;
+        // Get chef price if available
+        final chefPrice = item['selectedchef'] != null
+            ? _parsePrice(item['selectedchef']['price'])
+            : 0.0;
+
+        // The price for one "delivery unit" is the meal price, plus its complementaries, plus the chef fee.
+        final pricePerSingleUnit = pricePerUnit + chefPrice;
+
+        // Check if it's a bulk order
+        final bool isBulkOrder = item['isBulkOrder'] as bool? ?? false;
+        if (isBulkOrder) {
+          // For bulk orders, total is (price_per_unit * qty_per_day * num_of_days)
+          final planDays = item['planSelectedDays'] as List?;
+          final numberOfDays = planDays?.length ?? 0;
+          itemTotal = pricePerSingleUnit * quantity * numberOfDays;
+        } else {
+          // For regular orders, it's just (price_per_unit * quantity)
+          itemTotal = pricePerSingleUnit * quantity;
+        }
       } else if (item['type'] == 'gig') {
         final gigDetails = item['gigDetails'] as Map<String, dynamic>? ?? {};
         itemTotal = (gigDetails['price'] as num?)?.toDouble() ?? 0.0;
@@ -119,6 +147,7 @@ class ShoppingCart {
       return sum + itemTotal;
     });
   }
+  // **** END FIX ****
 
   // --- NEW: Get specific item quantity ---
   static int getItemQuantity(String title) {
@@ -277,14 +306,13 @@ class ShoppingCart {
       // Using identity check assumes the exact same map objects are passed.
       // A more robust check might be needed depending on how itemsToRemove is generated.
       bool shouldRemove = itemsToRemove.any((removeItem) =>
-              item['type'] == removeItem['type'] &&
-                  (item['type'] == 'meal' &&
-                      item['title'] == removeItem['title']) ||
-              (item['type'] == 'gig' && /* Compare relevant gig details */
+          item['type'] == removeItem['type'] &&
+          ((item['type'] == 'meal' && item['title'] == removeItem['title']) ||
+              (item['type'] == 'gig' &&
+                  /* Compare relevant gig details */
                   item['gigDetails']?['booking_id'] ==
-                      removeItem['gigDetails']?[
-                          'booking_id']) // Example: Compare by a unique booking ID if available
-          );
+                      removeItem['gigDetails']?['booking_id']) // Example: Compare by a unique booking ID if available
+          ));
       if (shouldRemove) removedCount++;
       return shouldRemove;
     });
@@ -298,20 +326,6 @@ class ShoppingCart {
       print(
           "No items removed. Items to remove might not have been found in the cart.");
     }
-  }
-
-  // Helper to parse price safely (could be used internally)
-  static double _parsePrice(dynamic rawPrice) {
-    double price = 0.0;
-    if (rawPrice is int)
-      price = rawPrice.toDouble();
-    else if (rawPrice is double)
-      price = rawPrice;
-    else if (rawPrice is String) {
-      String cleanedPrice = rawPrice.replaceAll(RegExp(r'[^\d.]'), '');
-      price = double.tryParse(cleanedPrice) ?? 0.0;
-    }
-    return price;
   }
 } // End ShoppingCart Class
 
@@ -440,7 +454,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
                 style: GoogleFonts.poppins()),
             backgroundColor: Colors.teal[800],
             foregroundColor: Colors.white,
-            elevation: 4,
+            elevation: 0,
             actions: [
               IconButton(
                 icon: Icon(Icons.delete_sweep, size: 24),
@@ -621,8 +635,27 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
 
       final String imageUrl = _formatImageUrl(
           meal['Image_link'] ?? meal['image_link']); // Check both keys
-      final double itemTotal =
-          pricePerUnit * quantity; // Total for this line item
+
+      // **** START FIX: Correctly calculate itemTotal for bulk and regular orders ****
+      final bool isBulk = item['isBulkOrder'] as bool? ?? false;
+      final double chefPrice = (chef != null && chef['price'] != null)
+          ? ShoppingCart._parsePrice(chef['price'])
+          : 0.0;
+
+      double itemTotal;
+      // The price for one "unit" is the meal price, plus its complementaries, plus the chef fee.
+      final pricePerSingleUnit = pricePerUnit + chefPrice;
+
+      if (isBulk) {
+        final planDays = item['planSelectedDays'] as List?;
+        final numberOfDays = planDays?.length ?? 0;
+        // The total cost for the plan is (price_per_unit * quantity_per_day * number_of_days).
+        itemTotal = pricePerSingleUnit * quantity * numberOfDays;
+      } else {
+        // The total cost for a regular item is (price_per_unit * quantity).
+        itemTotal = pricePerSingleUnit * quantity;
+      }
+      // **** END FIX ****
 
       String sourceInfo = '';
       if (chef != null && chef['name'] != null && chef['name'].isNotEmpty)
@@ -702,211 +735,379 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       int index,
       String title,
       int quantity,
-      double pricePerUnit, // Price per unit (meal + complementaries)
-      double itemTotal, // Total for the line (pricePerUnit * quantity)
+      double pricePerUnit,
+      double itemTotal,
       String imageUrl,
       String sourceInfo,
-      Map<String, dynamic> item, // Pass the full item map
-      List<Map<String, dynamic>>
-          selectedComplementaries, // Pass selected complementaries
-      Key dismissibleKey // Pass the key
-      ) {
+      Map<String, dynamic> item,
+      List<Map<String, dynamic>> selectedComplementaries,
+      Key dismissibleKey) {
+    
+    // Define colors
+    final Color primaryColor = Colors.teal[800]!;
+    final Color secondaryColor = Colors.teal[700]!;
+    final Color backgroundColor = Colors.white;
+    final Color borderColor = Colors.grey[200]!;
+    final Color textSecondary = Colors.grey[700]!;
+    final Color textTertiary = Colors.grey[500]!;
+
+    // Build complementary items column (without prices, they'll be in the right column)
     Widget complementaryWidget = SizedBox.shrink();
     if (selectedComplementaries.isNotEmpty) {
-      complementaryWidget = Padding(
-        padding:
-            const EdgeInsets.only(top: 6.0), // Spacing above complementaries
-        child: Wrap(
-          // Use Wrap for better layout if many items
-          spacing: 6.0, // Horizontal space between chips
-          runSpacing: 4.0, // Vertical space between lines of chips
-          children: selectedComplementaries.map((comp) {
-            final compName = comp['name']?.toString() ?? '';
-            // Price is already included in the main item price, so maybe don't show it again?
-            // final compPrice = (comp['price'] as double?) ?? 0.0;
-            return Chip(
-              label: Text(
-                compName,
-                style:
-                    GoogleFonts.poppins(fontSize: 11, color: Colors.teal[800]),
+      complementaryWidget = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(height: 6),
+          Text('Includes:', 
+            style: GoogleFonts.poppins(
+              fontSize: 12, 
+              color: textTertiary,
+              fontWeight: FontWeight.w500
+            ),
+          ),
+          ...selectedComplementaries.map((comp) {
+            return Padding(
+              padding: const EdgeInsets.only(top: 4.0),
+              child: Text(
+                '• ${comp['name']?.toString() ?? ''}',
+                style: GoogleFonts.poppins(
+                  fontSize: 12, 
+                  color: primaryColor,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-              avatar: Icon(Icons.add,
-                  size: 12, color: Colors.teal[700]), // Simple indicator
-              backgroundColor: Colors.teal[50],
-              padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              visualDensity: VisualDensity.compact,
             );
           }).toList(),
+        ],
+      );
+    }
+
+    // Build chef/producer info (without price)
+    Widget buildSourceInfo() {
+      if (sourceInfo.isEmpty) return SizedBox.shrink();
+      
+      return Padding(
+        padding: const EdgeInsets.only(top: 4.0, bottom: 2.0),
+        child: Row(
+          children: [
+            Icon(Icons.person_outline, size: 14, color: textTertiary),
+            SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                sourceInfo.replaceAll('Cooked by: ', '').replaceAll('From: ', ''),
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  color: textSecondary,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
         ),
       );
     }
 
     return Dismissible(
-      key: dismissibleKey, // Use the generated key
+      key: dismissibleKey,
       direction: DismissDirection.endToStart,
       background: Container(
         alignment: Alignment.centerRight,
         padding: EdgeInsets.only(right: 20),
         decoration: BoxDecoration(
-            color: Colors.red[100], borderRadius: BorderRadius.circular(12)),
-        child: Icon(Icons.delete_outline, color: Colors.red[700], size: 28),
+          color: Colors.red[50],
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(Icons.delete_outline, color: Colors.red[400], size: 28),
       ),
       confirmDismiss: (direction) => _confirmItemRemoval(context, index, title),
-      onDismissed: (direction) {/* Removal is handled in confirmDismiss */},
-      child: Card(
-        elevation: 1.5,
-        margin: EdgeInsets.symmetric(vertical: 6),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        color: Colors.white,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start, // Align top
-            children: [
-              ClipRRect(
+      onDismissed: (direction) {},
+      child: Container(
+        margin: EdgeInsets.symmetric(vertical: 6, horizontal: 0),
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          border: Border(
+            bottom: BorderSide(color: borderColor, width: 1.0),
+          ),
+        ),
+        padding: EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Image
+            Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: borderColor, width: 1),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
                 child: CachedNetworkImage(
                   imageUrl: imageUrl,
-                  key: ValueKey(imageUrl), // Add key
-                  width: 65,
-                  height: 65,
+                  key: ValueKey(imageUrl),
                   fit: BoxFit.cover,
                   placeholder: (c, u) => Container(
-                      width: 65,
-                      height: 65,
-                      color: Colors.grey[200],
-                      child: Center(
-                          child: Icon(Icons.image, color: Colors.grey[400]))),
-                  errorWidget: (c, u, e) => Container(
-                      width: 65,
-                      height: 65,
-                      color: Colors.grey[200],
-                      child: Icon(Icons.broken_image, color: Colors.grey[400])),
-                ),
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.start, // Align text top
-                  children: [
-                    Text(
-                      title,
-                      style: GoogleFonts.poppins(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.teal[900]),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (sourceInfo.isNotEmpty) ...[
-                      SizedBox(height: 4),
-                      Text(
-                        sourceInfo,
-                        style: GoogleFonts.poppins(
-                            color: Colors.grey[600], fontSize: 13),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                    SizedBox(height: 4),
-                    Text(
-                      // Show price per item
-                      'ugx ${pricePerUnit.toStringAsFixed(0)}',
-                      style: GoogleFonts.poppins(
-                          color: Colors.grey[500], fontSize: 12),
-                    ),
-                    // Show complementaries below price
-                    complementaryWidget,
-                  ],
-                ),
-              ),
-              SizedBox(width: 8),
-              Column(
-                mainAxisAlignment: MainAxisAlignment
-                    .spaceBetween, // Space total and controls vertically
-                mainAxisSize: MainAxisSize.max, // Take full height of row
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    // Total for this line item
-                    'ugx ${itemTotal.toStringAsFixed(0)}',
-                    style: GoogleFonts.poppins(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.teal[800]),
+                    color: Colors.grey[100],
+                    child: Center(child: Icon(Icons.image, color: Colors.grey[300])),
                   ),
-                  SizedBox(height: 8), // Add space
-                  _buildQuantityControls(item), // Pass full item map
+                  errorWidget: (c, u, e) => Container(
+                    color: Colors.grey[100],
+                    child: Center(child: Icon(Icons.broken_image, color: Colors.grey[300])),
+                  ),
+                ),
+              ),
+            ),
+            
+            SizedBox(width: 12),
+            
+            // Main content
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Title
+                  Text(
+                    title,
+                    style: GoogleFonts.poppins(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: primaryColor,
+                      height: 1.2,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  
+                  // Chef/producer info
+                  buildSourceInfo(),
+                  
+                  // Complementary items
+                  complementaryWidget,
+                  
+                  // Bulk order info if applicable
+                  if (item['isBulkOrder'] as bool? ?? false)
+                    _buildBulkOrderSummary(item),
+                  
+                  // Quantity controls
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4.0),
+                    child: _buildQuantityControls(item),
+                  ),
                 ],
               ),
-            ],
-          ),
+            ),
+            
+            // Price column
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                // Main item price
+                Text(
+                  pricePerUnit.toStringAsFixed(0),
+                  style: GoogleFonts.poppins(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: primaryColor,
+                  ),
+                ),
+                
+                // Chef price if exists
+                if (item['selectedchef']?['price'] != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2.0),
+                    child: Text(
+                      ShoppingCart._parsePrice(item['selectedchef']['price']).toStringAsFixed(0),
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        color: secondaryColor,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                
+                // Complementary items prices
+                ...selectedComplementaries.map((comp) {
+                  final price = (comp['price'] as num?)?.toDouble() ?? 0.0;
+                  final priceText = price.truncateToDouble() == price 
+                      ? price.toInt().toString() 
+                      : price.toString();
+                  
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 2.0),
+                    child: Text(
+                      priceText,
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        color: primaryColor.withOpacity(0.8),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ],
+            ),
+          ],
         ),
       ),
     );
   }
 
-  // Builds Quantity Controls ONLY for MEAL items
-  Widget _buildQuantityControls(Map<String, dynamic> mealItem) {
-    final String title = mealItem['title'] ?? '';
-    // Get quantity directly from the item map passed in
-    final int quantity =
-        (mealItem['quantity'] as num?)?.toInt() ?? 1; // Default to 1
+  // **** START FIX: Add a helper widget to display bulk order info ****
+  Widget _buildBulkOrderSummary(Map<String, dynamic> item) {
+    final startDateString = item['planStartDate'] as String?;
+    final endDateString = item['planEndDate'] as String?;
+    final planDays = item['planSelectedDays'] as List?;
+    final numberOfDays = planDays?.length ?? 0;
 
-    // Prevent modification if it's a bulk order item
-    final bool isBulk = mealItem['isBulkOrder'] as bool? ?? false;
+    if (numberOfDays == 0) return SizedBox.shrink();
+
+    String durationText = 'Plan Details';
+    if (startDateString != null && endDateString != null) {
+      try {
+        final startDate = DateTime.parse(startDateString);
+        final endDate = DateTime.parse(endDateString);
+        // Format to be more compact e.g. "Nov 20 - Dec 4"
+        durationText =
+            '${DateFormat('MMM d').format(startDate)} - ${DateFormat('MMM d').format(endDate)}';
+      } catch (e) {
+        // Ignore parse error, will fallback to the default "Plan Details"
+      }
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8.0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.teal.shade50,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: Colors.teal.shade100, width: 1),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.start,
+          children: [
+            Icon(Icons.calendar_today_outlined,
+                size: 14, color: Colors.teal[700]),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '$numberOfDays deliveries ($durationText)',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.teal[800],
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  // **** END FIX ****
+
+  // Builds the quantity controls for a cart item with a cleaner design
+  Widget _buildQuantityControls(Map<String, dynamic> item) {
+    final bool isBulk = item['isBulkOrder'] as bool? ?? false;
+    final int quantity = (item['quantity'] as num?)?.toInt() ?? 1;
+    final String title = item['title'] as String? ?? '';
+    
+    // Define colors
+    final Color primaryColor = Colors.teal[700]!;
+    final Color backgroundColor = Colors.grey[100]!;
+    final Color iconColor = Colors.grey[700]!;
+
+    // For bulk orders, show the quantity per day with a clean label
     if (isBulk) {
-      return Padding(
-        padding: const EdgeInsets.only(top: 8.0), // Add some spacing
-        child: Text('$quantity meals (Plan)',
-            style: GoogleFonts.poppins(
-                fontSize: 13,
-                color: Colors.grey[600],
-                fontStyle: FontStyle.italic)),
+      return Container(
+        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.teal[50],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.teal[100]!, width: 1),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.repeat, size: 14, color: primaryColor),
+            SizedBox(width: 4),
+            Text(
+              '$quantity/day',
+              style: GoogleFonts.poppins(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: primaryColor,
+              ),
+            ),
+          ],
+        ),
       );
     }
 
+    // For regular items, show a clean + and - control
     return Container(
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300, width: 1.0),
-        borderRadius: BorderRadius.circular(20),
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey[300]!, width: 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
+          // Decrease button
           IconButton(
-            icon: Icon(Icons.remove, size: 18, color: Colors.red[700]),
-            onPressed: quantity > 1
-                ? () {
-                    ShoppingCart.updateMealQuantity(title, quantity - 1);
-                    // No need for _refreshCart(), ValueListenableBuilder handles it
-                  }
-                : null, // Disable remove if quantity is 1
-            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-            constraints: BoxConstraints(),
-            splashRadius: 18,
-            tooltip: 'Decrease quantity',
+            icon: Icon(Icons.remove, size: 18, color: iconColor),
+            padding: EdgeInsets.zero,
+            constraints: BoxConstraints(
+              minWidth: 36,
+              minHeight: 32,
+            ),
+            onPressed: () {
+              if (quantity > 1) {
+                ShoppingCart.updateMealQuantity(title, quantity - 1);
+              } else {
+                _confirmItemRemoval(context, -1, title);
+              }
+            },
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6.0),
+          
+          // Quantity display
+          Container(
+            width: 24,
+            alignment: Alignment.center,
             child: Text(
-              '$quantity',
+              quantity.toString(),
               style: GoogleFonts.poppins(
-                  fontSize: 15, fontWeight: FontWeight.w500),
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+                color: Colors.grey[800],
+              ),
             ),
           ),
-          IconButton(
-            icon: Icon(Icons.add, size: 18, color: Colors.green[700]),
-            onPressed: () {
-              ShoppingCart.updateMealQuantity(title, quantity + 1);
-              // No need for _refreshCart(), ValueListenableBuilder handles it
-            },
-            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-            constraints: BoxConstraints(),
-            splashRadius: 18,
-            tooltip: 'Increase quantity',
+          
+          // Increase button
+          Container(
+            decoration: BoxDecoration(
+              color: primaryColor,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            margin: EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+            child: IconButton(
+              icon: Icon(Icons.add, size: 18, color: Colors.white),
+              padding: EdgeInsets.zero,
+              constraints: BoxConstraints(
+                minWidth: 24,
+                minHeight: 24,
+              ),
+              onPressed: () {
+                ShoppingCart.updateMealQuantity(title, quantity + 1);
+              },
+            ),
           ),
         ],
       ),
@@ -1192,7 +1393,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                   style: GoogleFonts.poppins()),
               backgroundColor: Colors.teal[800],
               foregroundColor: Colors.white,
-              elevation: 4,
+              elevation: 0,
               actions: [
                 IconButton(
                   icon: Icon(Icons.delete_sweep),

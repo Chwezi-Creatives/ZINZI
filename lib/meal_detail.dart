@@ -174,9 +174,10 @@ class _MealDetailScreenState extends State<MealDetailScreen>
   bool _isBulkOrder = false;
   DateTime? _planStartDate;
   DateTime? _planEndDate;
-  String _selectedFrequency = 'daily';
   int _quantityPerDay = 1;
-  Set<String> _selectedDays = {};
+  // **** START CHANGE: Use Set<DateTime> for specific date selection ****
+  Set<DateTime> _selectedDates = {};
+  // **** END CHANGE ****
   Map<String, dynamic>? selectedChef;
   Map<String, dynamic>? selectedProducer;
   List<dynamic> chefs = [];
@@ -195,6 +196,20 @@ class _MealDetailScreenState extends State<MealDetailScreen>
   final TextEditingController _chefSearchController = TextEditingController();
   final TextEditingController _producerSearchController =
       TextEditingController();
+
+  // --- Helper Methods ---
+  
+  /// Returns true if the current item is a meal (as opposed to a nutrition item, spice, etc.)
+  bool get _isMealItem {
+    // Check if the item has a type field that indicates it's a meal
+    if (widget.meal['type'] != null) {
+      return widget.meal['type'].toString().toLowerCase() == 'meal';
+    }
+    
+    // If no type field, check other indicators that this is a meal
+    // For example, meals typically have a 'Meal_name' field and may have 'Ingredients'
+    return widget.meal['Meal_name'] != null && widget.meal['Ingredients'] != null;
+  }
 
   // --- UI Constants (Teal Based, Mistkly Look) ---
   static const double _horizontalPadding = 16.0;
@@ -311,14 +326,19 @@ class _MealDetailScreenState extends State<MealDetailScreen>
       if (_isBulkOrder) {
           _planStartDate = ShoppingCart.getPlanStartDate(mealTitle);
           _planEndDate = ShoppingCart.getPlanEndDate(mealTitle);
-          _selectedFrequency = ShoppingCart.getPlanFrequency(mealTitle) ?? 'daily';
-          _selectedDays = ShoppingCart.getPlanSelectedDays(mealTitle) ?? {};
+          // **** START CHANGE: Restore selected dates from cart strings ****
+          final savedDayStrings = ShoppingCart.getPlanSelectedDays(mealTitle);
+          if (savedDayStrings != null) {
+            _selectedDates = savedDayStrings.map((dayStr) => DateTime.tryParse(dayStr)).whereType<DateTime>().toSet();
+          } else {
+            _selectedDates.clear();
+          }
+          // **** END CHANGE ****
       } else {
            // Reset plan details if not a bulk order in cart
            _planStartDate = null;
            _planEndDate = null;
-           _selectedFrequency = 'daily';
-           _selectedDays.clear();
+           _selectedDates.clear();
       }
 
 
@@ -361,8 +381,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
        _isBulkOrder = false;
        _planStartDate = null;
        _planEndDate = null;
-       _selectedFrequency = 'daily';
-       _selectedDays.clear();
+       _selectedDates.clear();
     }
     // --- End Critical Section ---
 
@@ -847,52 +866,21 @@ class _MealDetailScreenState extends State<MealDetailScreen>
       return;
     }
 
-    final mealTitle = widget.meal['Meal_name'] ?? 'Unknown Meal';
-    final mainMealPrice = _parsePrice(widget.meal['Price']);
-
     setState(() {
       Map<String, dynamic> chefWithId = Map<String, dynamic>.from(chef);
       // Ensure 'chefid' exists
-       if (!chefWithId.containsKey('chefid') && chefWithId.containsKey('id')) {
-           chefWithId['chefid'] = chefWithId['id'];
-       } else if (!chefWithId.containsKey('chefid')) {
-           chefWithId['chefid'] = DateTime.now().millisecondsSinceEpoch; // Fallback ID
-           print("Warning: Chef missing 'chefid', assigned temporary ID.");
-       }
+      if (!chefWithId.containsKey('chefid') && chefWithId.containsKey('id')) {
+        chefWithId['chefid'] = chefWithId['id'];
+      } else if (!chefWithId.containsKey('chefid')) {
+        chefWithId['chefid'] = DateTime.now().millisecondsSinceEpoch; // Fallback ID
+        print("Warning: Chef missing 'chefid', assigned temporary ID.");
+      }
 
       selectedChef = chefWithId;
       selectedProducer = null;
       isChefSelected = true;
-
-      // Gather currently selected complementaries data
-      List<Map<String, dynamic>> currentlySelectedComplementaries = _getSelectedComplementariesData();
-
-       // Calculate price PER UNIT (meal + complementaries)
-      double complementaryTotalPrice = currentlySelectedComplementaries.fold(0, (sum, item) => sum + (item['price'] as double? ?? 0.0));
-      double singleItemPriceWithComplementaries = mainMealPrice + complementaryTotalPrice;
-
-      // Get quantity (use current cart quantity if exists, else use screen's default)
-       int quantity = ShoppingCart.getItemQuantity(mealTitle);
-       if (quantity == 0) quantity = _quantityPerDay > 0 ? _quantityPerDay : 1; // If not in cart, use local setting
-
-      // Add/Update item in cart using ShoppingCart class
-      ShoppingCart.addItem(
-        mealTitle,
-        singleItemPriceWithComplementaries, // Price PER UNIT
-        quantity: quantity,
-        selectedchef: selectedChef, // Pass the newly selected chef map
-        selectedproducer: null, // Ensure producer is null
-        meal: widget.meal, // Pass the full meal data
-        bestservedwith: currentlySelectedComplementaries, // Pass selected complementaries list
-         // Keep bulk details consistent if updating an existing cart item
-         isBulkOrder: ShoppingCart.isBulkOrder(mealTitle),
-         planStartDate: ShoppingCart.getPlanStartDate(mealTitle),
-         planEndDate: ShoppingCart.getPlanEndDate(mealTitle),
-         planFrequency: ShoppingCart.getPlanFrequency(mealTitle),
-         planSelectedDays: ShoppingCart.getPlanSelectedDays(mealTitle),
-      );
-      isInCart = true; // Ensure cart status reflects the addition/update
     });
+    
     showCustomSnackBar(context, '${chef['name']} selected!');
     Navigator.pop(context); // Close the bottom sheet after selection
   }
@@ -917,52 +905,21 @@ class _MealDetailScreenState extends State<MealDetailScreen>
       return;
     }
 
-    final mealTitle = widget.meal['Meal_name'] ?? 'Unknown Meal';
-    final mainMealPrice = _parsePrice(widget.meal['Price']);
-
     setState(() {
-       Map<String, dynamic> producerWithId = Map<String, dynamic>.from(producer);
-       // Ensure 'producer_id' exists
-       if (!producerWithId.containsKey('producer_id') && producerWithId.containsKey('id')) {
-           producerWithId['producer_id'] = producerWithId['id'];
-       } else if (!producerWithId.containsKey('producer_id')) {
-           producerWithId['producer_id'] = DateTime.now().millisecondsSinceEpoch; // Fallback ID
-           print("Warning: Producer missing 'producer_id', assigned temporary ID.");
-       }
+      Map<String, dynamic> producerWithId = Map<String, dynamic>.from(producer);
+      // Ensure 'producer_id' exists
+      if (!producerWithId.containsKey('producer_id') && producerWithId.containsKey('id')) {
+        producerWithId['producer_id'] = producerWithId['id'];
+      } else if (!producerWithId.containsKey('producer_id')) {
+        producerWithId['producer_id'] = DateTime.now().millisecondsSinceEpoch; // Fallback ID
+        print("Warning: Producer missing 'producer_id', assigned temporary ID.");
+      }
 
       selectedProducer = producerWithId;
       selectedChef = null; // Deselect chef
       isChefSelected = false; // Update the selection state for UI
-
-      // Gather currently selected complementaries data
-      List<Map<String, dynamic>> currentlySelectedComplementaries = _getSelectedComplementariesData();
-
-       // Calculate price PER UNIT (meal + complementaries)
-      double complementaryTotalPrice = currentlySelectedComplementaries.fold(0, (sum, item) => sum + (item['price'] as double? ?? 0.0));
-      double singleItemPriceWithComplementaries = mainMealPrice + complementaryTotalPrice;
-
-      // Get quantity (use current cart quantity if exists, else use screen's default)
-       int quantity = ShoppingCart.getItemQuantity(mealTitle);
-       if (quantity == 0) quantity = _quantityPerDay > 0 ? _quantityPerDay : 1;
-
-      // Add/Update item in cart using ShoppingCart class
-      ShoppingCart.addItem(
-        mealTitle,
-        singleItemPriceWithComplementaries, // Price PER UNIT
-        quantity: quantity,
-        selectedchef: null, // Ensure chef is null
-        selectedproducer: selectedProducer, // Pass the newly selected producer map
-        meal: widget.meal,
-        bestservedwith: currentlySelectedComplementaries, // Pass selected complementaries list
-         // Keep bulk details consistent if updating
-         isBulkOrder: ShoppingCart.isBulkOrder(mealTitle),
-         planStartDate: ShoppingCart.getPlanStartDate(mealTitle),
-         planEndDate: ShoppingCart.getPlanEndDate(mealTitle),
-         planFrequency: ShoppingCart.getPlanFrequency(mealTitle),
-         planSelectedDays: ShoppingCart.getPlanSelectedDays(mealTitle),
-      );
-      isInCart = true; // Ensure cart status reflects the addition/update
     });
+    
     showCustomSnackBar(context, '${producer['name']} selected!');
     Navigator.pop(context); // Close the bottom sheet after selection
   }
@@ -990,8 +947,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                 // Optionally reset plan details
                  _planStartDate = null;
                  _planEndDate = null;
-                 _selectedFrequency = 'daily';
-                 _selectedDays.clear();
+                 _selectedDates.clear();
             });
          }
       } else {
@@ -1197,7 +1153,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
           title: Text(mealTitle, style: GoogleFonts.poppins()),
           foregroundColor: Colors.white,
           backgroundColor: kColorPrimaryDark,
-          elevation: 2,
+          elevation: 0,
           actions: [
             // Refresh Icon with Animation
             AnimatedBuilder(
@@ -1330,7 +1286,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                           errorWidget: (context, url, error) {
                              print("Error loading image: $url, Error: $error");
                              return Image.asset(
-                              'assets/images/cover.png',
+                              'assets/images/cover.png', // Fallback
                               fit: BoxFit.cover);
                           },
                           fit: BoxFit.cover,
@@ -1439,6 +1395,11 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                   _buildPropertiesSection(),
                   SizedBox(height: _sectionSpacing),
                   _buildSkillLevelAndPrepTimeCard(),
+
+                  // Add meal planning section only for meal items
+                  if (_isMealItem) _buildMealPlanningSection(),
+
+                  // **** SECTION MOVED HERE ****
                   SizedBox(height: _sectionSpacing + 4),
 
                   // --- Cooked/Fresh Selection ---
@@ -1539,9 +1500,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                   // --- Display Selected Chef/Producer Info ---
                   _buildSelectedOptionCard(),
                   SizedBox(height: _sectionSpacing),
-
-                  // Add meal planning section
-                  _buildMealPlanningSection(),
+                  // **** END OF MOVED SECTION ****
                 ],
               ),
             ),
@@ -2884,18 +2843,22 @@ class _MealDetailScreenState extends State<MealDetailScreen>
     );
   }
 
- // --- Bottom Proceed Button ---
- Widget _buildProceedToCartButton(BuildContext context) {
+  // --- Bottom Proceed Button ---
+  Widget _buildProceedToCartButton(BuildContext context) {
     // Use ValueListenableBuilder to react to cart changes for the count and enabled state
     return ValueListenableBuilder<List<Map<String, dynamic>>>(
       valueListenable: ShoppingCart.itemsNotifier,
       builder: (context, cartItems, child) {
-        int cartItemCount = cartItems.length;
-        bool canProceed = cartItemCount > 0;
-
+        final mealTitle = widget.meal['Meal_name'] ?? 'Unknown Meal';
+        final isMealInCart = cartItems.any((item) => item['title'] == mealTitle);
+        final bool hasValidPlan = _planStartDate != null && _planEndDate != null && _selectedDates.isNotEmpty;
+        final bool isBulkOrder = _isBulkOrder && hasValidPlan;
+        final bool canAddToCart = (selectedChef != null || selectedProducer != null) && 
+                                (!_isBulkOrder || (_isBulkOrder && hasValidPlan));
+        
         return Container(
           padding: EdgeInsets.fromLTRB(
-              _horizontalPadding, 10.0, _horizontalPadding, _verticalPadding + MediaQuery.of(context).padding.bottom * 0.5), // Adjust padding for safe area
+              _horizontalPadding, 10.0, _horizontalPadding, _verticalPadding + MediaQuery.of(context).padding.bottom * 0.5),
           decoration: BoxDecoration(
             color: kColorSurface,
             boxShadow: [
@@ -2909,32 +2872,40 @@ class _MealDetailScreenState extends State<MealDetailScreen>
           ),
           child: ElevatedButton.icon(
             icon: Badge(
-              label: Text('$cartItemCount', style: GoogleFonts.poppins(fontSize: 10, color: kColorPrimaryDark, fontWeight: FontWeight.bold)),
-              isLabelVisible: canProceed,
+              label: Text('${isMealInCart ? cartItems.length : 0}', 
+                  style: GoogleFonts.poppins(fontSize: 10, color: kColorPrimaryDark, fontWeight: FontWeight.bold)),
+              isLabelVisible: isMealInCart,
               backgroundColor: kColorAccent,
               alignment: AlignmentDirectional(1.1, -0.9),
-              child: Icon(Icons.shopping_cart_checkout_outlined),
+              child: Icon(isMealInCart ? Icons.shopping_cart_checkout_outlined : Icons.add_shopping_cart_outlined),
             ),
-            label: Text('Proceed to Cart', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-            onPressed: canProceed
+            label: Text(
+              isMealInCart ? 'Proceed to Cart' : 'Add to Cart', 
+              style: GoogleFonts.poppins(fontWeight: FontWeight.bold)
+            ),
+            onPressed: canAddToCart || isMealInCart
                 ? () {
-                     // Navigate to Cart Screen
-                    Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (context) => ShoppingCartScreen()))
-                         // Use _initializeData to refresh the state correctly when returning
-                        .then((_) => _initializeData());
+                    if (!isMealInCart) {
+                      _addToCart(isBulk: isBulkOrder);
+                    } else {
+                      // Navigate to Cart Screen
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => ShoppingCartScreen())
+                      ).then((_) => _initializeData());
+                    }
                   }
                 : null,
             style: ElevatedButton.styleFrom(
-              backgroundColor: canProceed ? kColorPrimaryDark : Colors.grey.shade400,
+              backgroundColor: (canAddToCart || isMealInCart) 
+                  ? (isBulkOrder ? kColorSuccess : kColorPrimaryDark) 
+                  : Colors.grey.shade400,
               foregroundColor: kColorSurface,
               padding: EdgeInsets.symmetric(vertical: 14),
               textStyle: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_buttonCornerRadius)),
               minimumSize: Size(double.infinity, 50),
-              elevation: canProceed ? 2 : 0,
+              elevation: (canAddToCart || isMealInCart) ? 2 : 0,
             ),
           ),
         );
@@ -2942,24 +2913,41 @@ class _MealDetailScreenState extends State<MealDetailScreen>
     );
   }
 
+  // **** START CHANGE: New helper to get all dates within a range ****
+  /// Returns a list of all DateTime objects between a start and end date, inclusive.
+  List<DateTime> _getDatesInRange(DateTime startDate, DateTime endDate) {
+    final dates = <DateTime>[];
+    // Loop from the start date until we pass the end date.
+    for (int i = 0; i <= endDate.difference(startDate).inDays; i++) {
+      dates.add(startDate.add(Duration(days: i)));
+    }
+    return dates;
+  }
+  // **** END CHANGE ****
+
   // Add meal planning section widget
   Widget _buildMealPlanningSection() {
+    // **** START CHANGE: Get all dates in the selected range for chip generation ****
+    final List<DateTime> allAvailableDates = (_planStartDate != null && _planEndDate != null)
+        ? _getDatesInRange(_planStartDate!, _planEndDate!)
+        : [];
+    // **** END CHANGE ****
+
     return ExpansionTile(
-      // Initially expanded? Maybe false by default.
-       initiallyExpanded: _isBulkOrder, // Expand if bulk order is active from cart
-      tilePadding: EdgeInsets.symmetric(horizontal: 8), // Reduce padding
-       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_cardCornerRadius)), // Rounded shape
-       collapsedShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_cardCornerRadius)), // Rounded shape when collapsed
-       backgroundColor: kColorSurface, // Match card background
-       collapsedBackgroundColor: kColorSurface,
-       iconColor: kColorPrimary,
-       collapsedIconColor: kColorPrimary,
+      initiallyExpanded: _isBulkOrder,
+      tilePadding: EdgeInsets.symmetric(horizontal: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_cardCornerRadius)),
+      collapsedShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_cardCornerRadius)),
+      backgroundColor: kColorSurface,
+      collapsedBackgroundColor: kColorSurface,
+      iconColor: kColorPrimary,
+      collapsedIconColor: kColorPrimary,
       title: Text(
-        'Meal Planning (Optional)', // Clarify it's optional
+        'Meal Planning (Optional)',
         style: GoogleFonts.poppins(
-          fontSize: 16, // Slightly smaller title
+          fontSize: 16,
           fontWeight: FontWeight.w600,
-           color: kColorPrimaryDark, // Use theme color
+          color: kColorPrimaryDark,
         ),
       ),
       children: [
@@ -2969,29 +2957,46 @@ class _MealDetailScreenState extends State<MealDetailScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
                Text(
-                  'Schedule regular deliveries for this meal.',
+                  'Schedule bulk deliveries for this meal.',
                   style: GoogleFonts.poppins(fontSize: 13, color: kColorTextSecondary),
                 ),
-                 SizedBox(height: 12),
+                 SizedBox(height: 4),
+                 Padding(
+                   padding: const EdgeInsets.symmetric(vertical: 4.0),
+                   child: Row(
+                     crossAxisAlignment: CrossAxisAlignment.start,
+                     children: [
+                       Icon(Icons.info_outline, color: kColorTextSecondary, size: 16),
+                       SizedBox(width: 8),
+                       Expanded(
+                         child: Text(
+                           'Meal plans require a minimum duration of 14 days.',
+                           style: GoogleFonts.poppins(fontSize: 12, color: kColorTextSecondary),
+                         ),
+                       ),
+                     ],
+                   ),
+                 ),
+                 SizedBox(height: 4),
               // Date Range Selector
               ListTile(
-                contentPadding: EdgeInsets.zero, // Remove extra padding
+                contentPadding: EdgeInsets.zero,
                 title: Text(
                   'Plan Duration',
                   style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500),
                 ),
                 subtitle: Text(
                   _planStartDate == null
-                      ? 'Tap to select start and end dates' // Clearer prompt
-                      : '${DateFormat('EEE, MMM d').format(_planStartDate!)} - ${DateFormat('EEE, MMM d').format(_planEndDate ?? _planStartDate!)}', // More detailed format
-                  style: GoogleFonts.poppins(fontSize: 12, color: _planStartDate != null ? kColorPrimary : kColorTextSecondary ), // Highlight selected dates
+                      ? 'Tap to select start and end dates'
+                      : '${DateFormat('EEE, MMM d').format(_planStartDate!)} - ${DateFormat('EEE, MMM d').format(_planEndDate ?? _planStartDate!)}',
+                  style: GoogleFonts.poppins(fontSize: 12, color: _planStartDate != null ? kColorPrimary : kColorTextSecondary ),
                 ),
                 trailing: Icon(Icons.calendar_today_outlined, color: kColorPrimary),
                 onTap: () async {
                   final DateTimeRange? dateRange = await showDateRangePicker(
                     context: context,
-                    firstDate: DateTime.now().subtract(Duration(days: 1)), // Allow today
-                    lastDate: DateTime.now().add(Duration(days: 90)), // Extend range
+                    firstDate: DateTime.now().subtract(Duration(days: 1)),
+                    lastDate: DateTime.now().add(Duration(days: 90)),
                     initialDateRange: _planStartDate != null && _planEndDate != null
                         ? DateTimeRange(start: _planStartDate!, end: _planEndDate!)
                         : null,
@@ -3001,140 +3006,61 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                           colorScheme: ColorScheme.light(
                             primary: kColorPrimary,
                             onPrimary: Colors.white,
-                            surface: kColorSurface, // Use theme surface
-                            onSurface: kColorTextPrimary, // Use theme text
+                            surface: kColorSurface,
+                            onSurface: kColorTextPrimary,
                           ),
-                           dialogBackgroundColor: kBottomSheetBgColor, // Match other backgrounds
+                           dialogBackgroundColor: kBottomSheetBgColor,
                         ),
                         child: child!,
                       );
                     },
                   );
                   if (dateRange != null && mounted) {
+                    if (dateRange.duration.inDays < 13) {
+                      showCustomSnackBar(
+                        context,
+                        'Meal plans require a minimum duration of 14 days.',
+                        isError: true,
+                      );
+                      return; 
+                    }
+                    
+                    // **** START CHANGE: Clean up selected dates that are no longer in the new range ****
+                    final newStartDate = dateRange.start;
+                    final newEndDate = dateRange.end;
+                    _selectedDates.retainWhere((date) =>
+                        (date.isAfter(newStartDate) || date.isAtSameMomentAs(newStartDate)) &&
+                        (date.isBefore(newEndDate) || date.isAtSameMomentAs(newEndDate)));
+                    // **** END CHANGE ****
+
                     setState(() {
                       _planStartDate = dateRange.start;
-                      // Ensure end date is at least the start date
-                      _planEndDate = dateRange.end.isBefore(dateRange.start) ? dateRange.start : dateRange.end;
-                       // Set bulk order flag ONLY if dates are selected
-                       _isBulkOrder = (_planStartDate != null && _planEndDate != null);
+                      _planEndDate = dateRange.end;
+                      _isBulkOrder = true; 
                     });
                   }
                 },
               ),
-                Divider(height: 1, color: kColorDivider.withOpacity(0.5)),
-
-              // Frequency Selection
-              ListTile(
-                 contentPadding: EdgeInsets.zero,
-                title: Text(
-                  'Delivery Frequency',
-                  style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500),
-                ),
-                subtitle: DropdownButton<String>(
-                  value: _selectedFrequency,
-                  isExpanded: true,
-                   underline: SizedBox.shrink(), // Remove default underline
-                    icon: Icon(Icons.arrow_drop_down, color: kColorPrimary),
-                  items: [
-                    DropdownMenuItem(value: 'daily', child: Text('Every Day', style: GoogleFonts.poppins())),
-                    DropdownMenuItem(
-                        value: 'weekdays', child: Text('Weekdays Only (Mon-Fri)', style: GoogleFonts.poppins())),
-                    DropdownMenuItem(
-                        value: 'custom', child: Text('Select Specific Days...', style: GoogleFonts.poppins())),
-                  ],
-                  onChanged: (value) {
-                    if (value != null && mounted) {
-                      setState(() {
-                        _selectedFrequency = value;
-                        // Clear custom days if switching away from custom
-                        if (value != 'custom') {
-                          _selectedDays.clear();
-                        }
-                         // Also activate bulk order flag if frequency is changed and dates are set
-                        _isBulkOrder = (_planStartDate != null && _planEndDate != null);
-                      });
-                    }
-                  },
-                ),
-              ),
-
-              // Custom Days Selection
-              if (_selectedFrequency == 'custom')
-                 AnimatedContainer( // Animate appearance
-                  duration: Duration(milliseconds: 300),
-                  curve: Curves.easeInOut,
-                  padding: EdgeInsets.only(top: 8, bottom: 8),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    children: [
-                       // Using standard weekday constants
-                      for (var dayEntry in {
-                          DateTime.monday: 'Mon',
-                          DateTime.tuesday: 'Tue',
-                          DateTime.wednesday: 'Wed',
-                          DateTime.thursday: 'Thu',
-                          DateTime.friday: 'Fri',
-                          DateTime.saturday: 'Sat',
-                          DateTime.sunday: 'Sun',
-                      }.entries)
-                        FilterChip(
-                          label: Text(
-                            dayEntry.value,
-                            style: GoogleFonts.poppins(
-                              fontSize: 12, // Smaller font
-                              color: _selectedDays.contains(dayEntry.value)
-                                  ? Colors.white
-                                  : kColorTextPrimary,
-                            ),
-                          ),
-                          selected: _selectedDays.contains(dayEntry.value),
-                          onSelected: (bool selected) {
-                            if (mounted) {
-                                setState(() {
-                                    if (selected) {
-                                        _selectedDays.add(dayEntry.value);
-                                    } else {
-                                        _selectedDays.remove(dayEntry.value);
-                                    }
-                                    // Also activate bulk order flag if days are selected and dates are set
-                                    _isBulkOrder = (_planStartDate != null && _planEndDate != null);
-                                });
-                            }
-                          },
-                           backgroundColor: kColorDivider.withOpacity(0.5), // Lighter background
-                          selectedColor: kColorPrimary,
-                           checkmarkColor: Colors.white,
-                           padding: EdgeInsets.symmetric(horizontal: 8), // Adjust padding
-                           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, // Tighter tap target
-                           shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12), // More rounded
-                                side: BorderSide(color: Colors.transparent) // No side border needed
-                           ),
-                        ),
-                    ],
-                  ),
-                ),
-               Divider(height: 1, color: kColorDivider.withOpacity(0.5)),
+              Divider(height: 1, color: kColorDivider.withOpacity(0.5)),
 
               // Quantity per day
               ListTile(
                  contentPadding: EdgeInsets.zero,
                 title: Text(
-                  'Quantity per delivery day',
+                  'Quantity per delivery',
                   style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500),
                 ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
-                       icon: Icon(Icons.remove_circle_outline, color: _quantityPerDay > 1 ? kColorPrimary : Colors.grey), // Grey out if <= 1
+                       icon: Icon(Icons.remove_circle_outline, color: _quantityPerDay > 1 ? kColorPrimary : Colors.grey),
                       tooltip: 'Decrease Quantity',
                       padding: EdgeInsets.zero,
                        constraints: BoxConstraints(),
                       onPressed: _quantityPerDay > 1 ? () {
                          if(mounted) setState(() => _quantityPerDay--);
-                      } : null, // Disable if quantity is 1
+                      } : null,
                     ),
                     SizedBox(width: 8),
                     Text('$_quantityPerDay',
@@ -3152,36 +3078,104 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                   ],
                 ),
               ),
+              Divider(height: 1, color: kColorDivider.withOpacity(0.5)),
+              
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  'Select Delivery Dates',
+                  style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500),
+                ),
+                 subtitle: _planStartDate == null
+                  ? Text(
+                      'Select a plan duration above first',
+                      style: GoogleFonts.poppins(fontSize: 12, fontStyle: FontStyle.italic),
+                    )
+                  : null,
+              ),
+
+              // **** START FIX: This is the updated FilterChip section ****
+              AnimatedContainer(
+                duration: Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                padding: EdgeInsets.only(bottom: 8),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (var date in allAvailableDates)
+                      FilterChip(
+                        label: Text(
+                          // Show day and date (e.g., "Mon 24")
+                          '${DateFormat('E').format(date)} ${date.day}',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            // Change text color based on selection
+                            color: _selectedDates.contains(date)
+                                ? Colors.white
+                                : kColorTextPrimary,
+                          ),
+                        ),
+                        selected: _selectedDates.contains(date),
+                        onSelected: (bool selected) {
+                          if (mounted) {
+                            setState(() {
+                              if (selected) {
+                                _selectedDates.add(date);
+                              } else {
+                                _selectedDates.remove(date);
+                              }
+                              _isBulkOrder = true;
+                            });
+                          }
+                        },
+                        // Styling to match the "good" image
+                        backgroundColor: kColorDivider.withOpacity(0.5),
+                        selectedColor: kColorPrimary,
+                        checkmarkColor: Colors.white,
+                        showCheckmark: true, // This is key to show the checkmark
+                        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          side: BorderSide(color: Colors.transparent),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              // **** END FIX ****
+              Divider(height: 1, color: kColorDivider.withOpacity(0.5)),
 
               // Order Summary (Show only if dates are selected)
               if (_planStartDate != null && _planEndDate != null)
                 Padding(
                   padding: EdgeInsets.only(top: 16, bottom: 8),
                   child: Card(
-                     color: kColorPrimaryLight.withOpacity(0.15), // Subtle background
-                     elevation: 0, // No extra shadow
+                     color: kColorPrimaryLight.withOpacity(0.15),
+                     elevation: 0,
                      shape: RoundedRectangleBorder(
-                         borderRadius: BorderRadius.circular(_buttonCornerRadius), // Use button radius
-                         side: BorderSide(color: kColorPrimary.withOpacity(0.2)) // Subtle border
+                         borderRadius: BorderRadius.circular(_buttonCornerRadius),
+                         side: BorderSide(color: kColorPrimary.withOpacity(0.2))
                      ),
                     child: Padding(
-                      padding: EdgeInsets.all(12), // Reduced padding
+                      padding: EdgeInsets.all(12),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('Plan Summary',
                               style: GoogleFonts.poppins(
-                                fontSize: 15, // Slightly smaller
+                                fontSize: 15,
                                 fontWeight: FontWeight.w600,
                                 color: kColorPrimaryDark
                               )),
                           SizedBox(height: 8),
                           _buildSummaryRow(
-                              'Total Delivery Days:', _calculateTotalDays()),
+                              'Delivery Days:', _getFormattedSelectedDays()),
                           _buildSummaryRow(
                               'Total Meals:', _calculateTotalMeals()),
                           _buildSummaryRow('Estimated Total Cost:',
-                              'ugx ${(_calculateTotalMeals() * _parsePrice(widget.meal['Price'])).toStringAsFixed(0)}'), // Use parsed price
+                              'ugx ${(_calculateTotalMeals() * _parsePrice(widget.meal['Price'])).toStringAsFixed(0)}'),
                             SizedBox(height: 4),
                              Text(
                               '(Note: Complementary item & provider costs are extra)',
@@ -3192,35 +3186,22 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                     ),
                   ),
                 ),
-              // Add to Cart for Bulk Order Button (conditional)
-              // Show button only if a plan is defined AND chef/producer is selected
-               if (_planStartDate != null && _planEndDate != null && _calculateTotalDays() > 0 && (selectedChef != null || selectedProducer != null))
+              // Informational text for incomplete meal plan selection
+              if (_planStartDate != null && _planEndDate != null && (_selectedDates.isEmpty || (selectedChef == null && selectedProducer == null)))
                 Padding(
                   padding: const EdgeInsets.only(top: 12.0),
-                  child: ElevatedButton.icon(
-                     icon: Icon(Icons.add_shopping_cart_outlined),
-                     label: Text('Add Plan to Cart ($_calculateTotalMeals meals)'),
-                     onPressed: () {
-                        _addToCart(isBulk: true); // Call add to cart with bulk flag
-                     },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kColorSuccess, // Use success color
-                        foregroundColor: Colors.white,
-                        minimumSize: Size(double.infinity, 45), // Make button full width
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(_buttonCornerRadius)),
-                      ),
-                  ),
-                )
-               // Show warning if plan is set but provider isn't
-               else if (_planStartDate != null && _planEndDate != null && _calculateTotalDays() > 0 && selectedChef == null && selectedProducer == null)
-                 Padding(
-                  padding: const EdgeInsets.only(top: 12.0),
                   child: Text(
-                     "Select 'Cooked' or 'Fresh' above to add the plan to cart.",
-                     style: GoogleFonts.poppins(color: kColorError, fontSize: 13, fontStyle: FontStyle.italic)
+                    _selectedDates.isEmpty
+                      ? "Select delivery dates above to add to cart"
+                      : "Select 'Cooked' or 'Fresh' to add the plan to cart",
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.poppins(
+                      color: kColorTextSecondary, 
+                      fontSize: 13,
+                      fontStyle: FontStyle.italic
+                    )
                   ),
-                 ),
+                ),
             ],
           ),
         ),
@@ -3230,75 +3211,50 @@ class _MealDetailScreenState extends State<MealDetailScreen>
 
   Widget _buildSummaryRow(String label, dynamic value) {
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 3), // Reduced vertical padding
+      padding: EdgeInsets.symmetric(vertical: 3),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label,
               style: GoogleFonts.poppins(
-                fontSize: 13, // Slightly smaller
+                fontSize: 13,
                 color: kColorTextSecondary,
               )),
           Text(value.toString(),
               style: GoogleFonts.poppins(
-                fontSize: 14, // Slightly larger value
+                fontSize: 14,
                 fontWeight: FontWeight.w600,
-                 color: kColorPrimaryDark, // Darker value text
+                 color: kColorPrimaryDark,
               )),
         ],
       ),
     );
   }
 
- int _calculateTotalDays() {
-    if (_planStartDate == null || _planEndDate == null) return 0;
-    if (_planEndDate!.isBefore(_planStartDate!)) return 0; // Invalid range
-
-    int days = 0;
-    DateTime current = _planStartDate!;
-
-    // Loop inclusive of the end date
-    while (!current.isAfter(_planEndDate!)) {
-      bool includeDay = false;
-      final currentWeekday = current.weekday; // Get weekday (1=Mon, 7=Sun)
-       // Map DateTime weekday to our 'Mon', 'Tue' strings
-      final dayStringMap = {
-           DateTime.monday: 'Mon',
-           DateTime.tuesday: 'Tue',
-           DateTime.wednesday: 'Wed',
-           DateTime.thursday: 'Thu',
-           DateTime.friday: 'Fri',
-           DateTime.saturday: 'Sat',
-           DateTime.sunday: 'Sun',
-      };
-      final currentDayString = dayStringMap[currentWeekday];
-
-      switch (_selectedFrequency) {
-        case 'daily':
-          includeDay = true;
-          break;
-        case 'weekdays':
-          // Weekday is 1 (Monday) to 5 (Friday)
-          includeDay = currentWeekday >= DateTime.monday && currentWeekday <= DateTime.friday;
-          break;
-        case 'custom':
-          // Check if the current day string ('Mon', 'Tue' etc.) is in the selected set
-          includeDay = currentDayString != null && _selectedDays.contains(currentDayString);
-          break;
-      }
-
-      if (includeDay) days++;
-      current = current.add(Duration(days: 1));
+  // **** START CHANGE: Update summary text ****
+  // Format the selected days in a user-friendly way
+  String _getFormattedSelectedDays() {
+    if (_selectedDates.isEmpty) {
+      return 'None selected';
     }
+    return '${_selectedDates.length} days selected';
+  }
+  // **** END CHANGE ****
 
-    return days;
+  // Calculate total days in the selected date range
+  int _calculateTotalDays() {
+    if (_planStartDate == null || _planEndDate == null) return 0;
+    if (_planEndDate!.isBefore(_planStartDate!)) return 0;
+    return _planEndDate!.difference(_planStartDate!).inDays + 1;
   }
 
+  // **** START CHANGE: Calculate meals based on selected dates, not range ****
   int _calculateTotalMeals() {
-     final totalDays = _calculateTotalDays();
-     // Ensure quantity is at least 1 if days > 0
-     return totalDays > 0 ? totalDays * (_quantityPerDay > 0 ? _quantityPerDay : 1) : 0;
+    // The total number of meals is the number of explicitly selected dates
+    // multiplied by the quantity per delivery.
+    return _selectedDates.length * _quantityPerDay;
   }
+  // **** END CHANGE ****
 
   @override
   void dispose() {
@@ -3330,12 +3286,13 @@ class _MealDetailScreenState extends State<MealDetailScreen>
       // Optionally shake the selection buttons or highlight them
       return;
     }
-     // Check if bulk order details are valid if adding bulk
-     if (isBulk && (_planStartDate == null || _planEndDate == null || _calculateTotalDays() <= 0)) {
+     // **** START CHANGE: Validate bulk order based on selected dates ****
+     if (isBulk && (_planStartDate == null || _planEndDate == null || _selectedDates.isEmpty)) {
         showCustomSnackBar(
-          context, 'Please select valid dates and frequency for the meal plan', isError: true);
+          context, 'Please select a valid date range and at least one delivery day.', isError: true);
         return;
      }
+     // **** END CHANGE ****
       // Also check for provider selection when adding bulk
      if (isBulk && selectedChef == null && selectedProducer == null) {
        showCustomSnackBar(
@@ -3345,14 +3302,16 @@ class _MealDetailScreenState extends State<MealDetailScreen>
 
     final mealTitle = widget.meal['Meal_name'] ?? 'Unknown Meal';
     final mainMealPrice = _parsePrice(widget.meal['Price']);
-     // Use plan quantity if bulk, otherwise use current _quantityPerDay setting (ensuring it's at least 1)
-    final int quantity = isBulk ? _calculateTotalMeals() : (_quantityPerDay > 0 ? _quantityPerDay : 1);
+     // Use plan quantity if bulk, otherwise use 1 for single item.
+    final int quantity = isBulk ? _quantityPerDay : 1; // For bulk, this is quantity PER delivery day
 
-     // Ensure quantity is valid
-     if (quantity <= 0) {
+    // The total number of meal units is now calculated inside the cart from the length of planSelectedDays
+    final int totalMealUnits = isBulk ? _calculateTotalMeals() : 1;
+    if (totalMealUnits <= 0 && !isBulk) {
         showCustomSnackBar(context, 'Quantity must be at least 1', isError: true);
         return;
-     }
+    }
+
 
     // Get selected complementaries data
     List<Map<String, dynamic>> currentlySelectedComplementaries = _getSelectedComplementariesData();
@@ -3365,7 +3324,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
     ShoppingCart.addItem(
       mealTitle,
       singleItemPriceWithComplementaries, // Price PER UNIT
-      quantity: quantity,
+      quantity: isBulk ? _quantityPerDay : 1, // Quantity for cart item
       selectedchef: selectedChef, // Pass current selection
       selectedproducer: selectedProducer, // Pass current selection
       meal: widget.meal, // Pass full meal data
@@ -3374,8 +3333,10 @@ class _MealDetailScreenState extends State<MealDetailScreen>
       isBulkOrder: isBulk,
       planStartDate: isBulk ? _planStartDate : null,
       planEndDate: isBulk ? _planEndDate : null,
-      planFrequency: isBulk ? _selectedFrequency : null,
-      planSelectedDays: isBulk ? _selectedDays : null,
+      planFrequency: isBulk ? 'custom' : null, // Always 'custom' for this logic
+      // **** START CHANGE: Convert DateTime set to Set<String> for cart ****
+      planSelectedDays: isBulk ? _selectedDates.map((date) => DateFormat('yyyy-MM-dd').format(date)).toSet() : null,
+      // **** END CHANGE ****
     );
 
     // Update local state AFTER updating shared state
@@ -3421,7 +3382,7 @@ void showCustomSnackBar(BuildContext context, String message, {bool isError = fa
   scaffoldMessenger.hideCurrentSnackBar(); // Hide previous snackbar immediately
   final snackBar = SnackBar(
     content: Text(message, style: GoogleFonts.poppins(color: isError ? Colors.white : _MealDetailScreenState.kColorPrimaryDark)),
-    duration: Duration(seconds: isError ? 3 : 2), // Longer duration for errors
+    duration: Duration(seconds: isError ? 4 : 2), // Longer duration for errors
     behavior: SnackBarBehavior.floating,
      margin: EdgeInsets.fromLTRB(15, 5, 15, 10), // Adjust margins
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_MealDetailScreenState._buttonCornerRadius)), // Use theme radius
