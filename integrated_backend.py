@@ -65,7 +65,42 @@ meal_recommender = None
 load_dotenv()
 
 # --- Logging Configuration ---
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+import sys
+
+# Configure root logger with a more robust setup
+def setup_logging():
+    # Remove any existing handlers
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Create a formatter
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    
+    # Try to set up a stream handler with error handling
+    try:
+        # Try stderr first
+        handler = logging.StreamHandler(sys.stderr)
+    except (OSError, IOError):
+        try:
+            # Fall back to stdout if stderr fails
+            handler = logging.StreamHandler(sys.stdout)
+        except (OSError, IOError):
+            # If both fail, disable logging
+            logging.disable(logging.CRITICAL)
+            return
+    
+    # Configure the handler
+    handler.setFormatter(formatter)
+    
+    # Configure the root logger
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(handler)
+
+# Initialize logging
+setup_logging()
+
+# Get logger for this module
 logger = logging.getLogger(__name__)
 
 # --- Utility Function ---

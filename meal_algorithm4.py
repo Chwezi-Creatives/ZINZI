@@ -22,75 +22,8 @@ class MealRecommendation4:
         'last_update': datetime.now()
     }
 
-    # Define robust dietary preference mappings
-    DIETARY_PREFERENCE_MAPPINGS = {
-        'vegan': [
-            'vegan', 'plant-based', 'dairy-free', 'lactose-free', 'egg-free',
-            'honey-free', 'animal-free', 'cruelty-free', 'nut-free', 'soy-free',
-            'gluten-free', 'low-sodium', 'diabetes-friendly', 'low-sugar',
-            'hohfap', 'organic', 'vegetable-based'
-        ],
-        'vegetarian': [
-            'vegetarian', 'lacto-vegetarian', 'ovo-vegetarian', 'lacto-ovo-vegetarian',
-            'dairy', 'eggs', 'honey', 'plant-based', 'nut-free', 'soy-free',
-            'gluten-free', 'low-sodium', 'diabetes-friendly', 'low-sugar',
-            'hohfap', 'organic', 'vegetable-based', 'dairy products', 'egg products'
-        ],
-        'keto': [
-            'keto', 'dairy-free', 'lactose-free', 'nut-free', 'soy-free',
-            'gluten-free', 'low-sugar', 'diabetes-friendly', 'high-protein',
-            'organic', 'omnivore'
-        ],
-        'paleo': [
-            'paleo', 'gluten-free', 'dairy-free', 'lactose-free', 'nut-free',
-            'soy-free', 'low-sugar', 'high-protein', 'organic', 'omnivore'
-        ],
-        'mediterranean': [
-            'mediterranean', 'pescatarian', 'primarily plant-based with occasional meats',
-            'dairy-free', 'lactose-free', 'nut-free', 'low-sodium',
-            'diabetes-friendly', 'low-sugar', 'low-fat', 'organic', 'omnivore'
-        ],
-        'omnivore': [
-            'omnivore', 'halal', 'kosher', 'vegetarian', 'pescatarian',
-            'primarily plant-based with occasional meats', 'high-protein',
-            'low-fat', 'dairy-free', 'lactose-free', 'nut-free', 'soy-free',
-            'gluten-free', 'low-sodium', 'diabetes-friendly', 'low-sugar',
-            'hohfap', 'organic', 'dairy', 'eggs'
-        ]
-    }
-
-    # Define robust cuisine preference mappings
-    CUISINE_PREFERENCE_MAPPINGS = {
-        'indian': ['indian'],
-        'american': ['american'],
-        'british': ['british'],
-        'korean': ['korean'],
-        'thai': ['thai'],
-        'chinese': ['chinese'],
-        'mediterranean': ['mediterranean'],
-        'japanese': ['japanese'],
-        'vietnamese': ['vietnamese'],
-        'rest of africa': ['rest of africa'],
-        'east african': ['east african'],
-        'west african': ['west african'],
-        'mexican': ['mexican'],
-        'middle eastern': ['middle eastern'],
-        'italian': ['italian'],
-        'french': ['french'],
-        'german': ['german'],
-        'brazilian': ['brazilian'],
-        'caribbean': ['caribbean'],
-        'spanish': ['spanish'],
-        'greek': ['greek'],
-        'african': ['rest of africa', 'east african', 'west african'],
-        'all': [
-            'indian', 'american', 'british', 'korean', 'thai', 'chinese',
-            'mediterranean', 'japanese', 'vietnamese', 'rest of africa',
-            'east african', 'west african', 'mexican', 'middle eastern',
-            'italian', 'french', 'german', 'brazilian', 'caribbean',
-            'spanish', 'greek'
-        ]
-    }
+    # Note: Removed DIETARY_PREFERENCE_MAPPINGS and CUISINE_PREFERENCE_MAPPINGS
+    # as they are no longer needed with direct tag matching
 
     def __init__(self, user_id: int):
         self.user_id = user_id
@@ -353,22 +286,64 @@ class MealRecommendation4:
 
         return {**numerical_nutrition, **categorical_levels, "nutrient_score": nutrient_score}
 
+    def _categorize_goal(self, goal: str) -> str:
+        """Categorize the user's goal for calculation purposes."""
+        goal = (goal or "").lower()
+        
+        # Weight-related goals
+        if any(term in goal for term in ["lose weight", "weight loss"]):
+            return "weight_loss"
+        if any(term in goal for term in ["gain muscle", "muscle gain"]):
+            return "muscle_gain"
+        if "satiety" in goal:
+            return "maintain"
+            
+        # Health conditions that might affect calculations in the future
+        health_conditions = ["diabetes", "hypertension", "joint pain", "postpartum", "inflammation"]
+        if any(condition in goal for condition in health_conditions):
+            return "health_condition"
+            
+        return "general_wellness"
+
+    def _get_goal_adjustment_factor(self, goal: str) -> float:
+        """Get the calorie adjustment factor based on the goal category."""
+        goal_category = self._categorize_goal(goal)
+        
+        adjustment_factors = {
+            "weight_loss": -0.15,    # 15% reduction for weight loss
+            "muscle_gain": 0.15,     # 15% increase for muscle gain
+            "maintain": 0.0,         # No adjustment for maintenance/satiety
+            "health_condition": 0.0,  # No adjustment by default for health conditions
+            "general_wellness": 0.0   # No adjustment for general wellness
+        }
+        
+        return adjustment_factors.get(goal_category, 0.0)
+
     def calculate_daily_calorie_budget(self) -> float:
+        """
+        Calculate the user's daily calorie budget based on their metrics and goals.
+        
+        Returns:
+            float: The calculated daily calorie budget
+        """
         if not self.user_metrics or not self.user_preferences:
             logging.warning("User metrics or preferences not found. Using default calorie budget.")
             return 2000
 
-        weight = self.user_metrics["weight"] or 70
-        height = self.user_metrics["height"] or 170
-        age = int(self.user_metrics["age_range"].split("-")[0]) if self.user_metrics["age_range"] else 30
-        sex = self.user_metrics["sex"] or "male"
+        # Get basic metrics with defaults
+        weight = self.user_metrics.get("weight") or 70
+        height = self.user_metrics.get("height") or 170
+        age = int(self.user_metrics["age_range"].split("-")[0]) if self.user_metrics.get("age_range") else 30
+        sex = (self.user_metrics.get("sex") or "male").lower()
 
+        # Calculate BMR using Mifflin-St Jeor equation
         if sex == "male":
             bmr = 10 * weight + 6.25 * height - 5 * age + 5
         else:
             bmr = 10 * weight + 6.25 * height - 5 * age - 161
 
-        activity_level = self.user_metrics.get("activity_level", "sedentary")
+        # Apply activity factor
+        activity_level = (self.user_metrics.get("activity_level") or "sedentary").lower()
         activity_factors = {
             "sedentary": 1.2,
             "lightly active": 1.375,
@@ -378,30 +353,26 @@ class MealRecommendation4:
         }
         tdee = bmr * activity_factors.get(activity_level, 1.2)
 
-        goals = self.user_preferences.get("goals")
-    
-        # Define adjustment percentages (can be customized as needed)
-        ADJUSTMENT_MULTIPLIERS = {
-            "weight loss": 0.15,  # 15% reduction for weight loss
-            "muscle gain": 0.20,  # 20% increase for muscle gain
-            "maintenance": 0.0    # No adjustment for maintenance
-        }
-    
-        # Get the appropriate multiplier based on goal
-        adjustment_percent = ADJUSTMENT_MULTIPLIERS.get(goals, 0.0)
-    
-        # Apply the adjustment
-        if goals == "weight loss":
-            tdee *= (1 - adjustment_percent)  # Reduce calories for weight loss
-        elif goals == "muscle gain":
-            tdee *= (1 + adjustment_percent)  # Increase calories for muscle gain
-    
-        # Ensure minimum calorie threshold (e.g., never go below 1200 calories for safety)
+        # Get goal from preferences
+        goal = self.user_preferences.get("goals", "")
+        
+        # Get adjustment factor based on goal
+        adjustment_percent = self._get_goal_adjustment_factor(goal)
+        
+        # Apply adjustment if needed
+        if adjustment_percent != 0:
+            tdee *= (1 + adjustment_percent)
+
+        # Ensure minimum calorie threshold (never go below 1200 calories for safety)
         MINIMUM_CALORIES = 1200
         tdee = max(round(tdee, 1), MINIMUM_CALORIES)
-    
-        logging.info(f"Adjusted TDEE for {goals}: {tdee} calories (using {adjustment_percent*100}% {'reduction' if goals == 'weight loss' else 'increase' if goals == 'muscle gain' else 'no adjustment'})")
-    
+
+        logging.info(
+            f"Calculated TDEE: {tdee} calories | "
+            f"Goal: {goal} | "
+            f"Adjustment: {adjustment_percent*100}%"
+        )
+
         return tdee
 
     def _has_user_data_changed(self):
@@ -738,256 +709,165 @@ class MealRecommendation4:
         else:
             return "lunch"
 
-    # Class-level goal mappings
-    GOAL_MAPPINGS = {
-        "weight loss": [
-            "lose weight", "weight loss", "weight management",
-            "fat loss", "reduce body fat",
-            "bmi reduction", "reduce bmi",
-            "postpartum weight management", "postpartum",
-            "control chronic conditions", "chronic disease management",
-            "diabetes management", "hypertension management",
-            "detox", "cleanse", "detox and cleanse",
-            "improve metabolic health", "metabolic health",
-            "improved skin", "skin improvement",
-            "improve overall fitness",
-            "build sustainable eating habits"
-        ],
-        "muscle gain": [
-            "gain muscle", "build muscle", "muscle building",
-            "hypertrophy", "increase muscle mass",
-            "achieve specific body composition goals", "body recomposition",
-            "enhance athletic performance", "improve performance",
-            "sports nutrition", "strength training",
-            "recover from nutritional deficiencies", "nutrition recovery",
-            "protein intake", "increase protein",
-            "boost energy levels", "increase energy",
-            "improved sleep quality", "better sleep", "recovery sleep",
-            "satiety"
-        ],
-        "maintain weight": [
-            "maintain current weight", "weight maintenance",
-            "sustain current weight", "weight stability",
-            "build sustainable eating habits", "sustainable diet",
-            "healthy eating", "balanced nutrition",
-            "improve overall fitness", "general fitness",
-            "wellness", "holistic health",
-            "boost energy levels", "sustain energy",
-            "enhance metabolic health", "metabolic health",
-            "achieve a healthier bmi", "healthy bmi",
-            "manage stress through nutrition", "stress management",
-            "improved sleep quality", "better sleep",
-            "control chronic conditions", "chronic disease management",
-            "improved eye health", "eye health",
-            "general health", "overall health",
-            "reduce inflammation",
-            "improved skin"
-        ]
-    }
-    
     def _match_goal(self, meal: Dict) -> int:
-        meal_goal = (meal.get("goal") or "").strip().lower()
-        user_goal = (self.user_preferences.get("goals") or "").strip().lower() if self.user_preferences else None
+        """
+        Match user's goals with meal's goals using direct tag matching.
+        Returns 1 if there's a match, 0 otherwise.
         
-        if not meal_goal or not user_goal:
+        Handles various goal types including:
+        - Weight-related goals (weight loss, muscle gain)
+        - Health conditions (diabetes, hypertension, etc.)
+        - General wellness goals (energy, sleep, etc.)
+        """
+        if not self.user_preferences or not meal:
             return 0
             
-        # Normalize goals for comparison
-        meal_goals = [g.strip().lower() for g in str(meal_goal).split(',') if g.strip()]
-        user_goal = str(user_goal).strip().lower()
-        
-        # If no valid meal goals or no user goal, don't filter on it
-        if not meal_goals or not user_goal:
+        # Get user goals as a set of lowercase strings
+        user_goals = self.user_preferences.get("goals") or []
+        if isinstance(user_goals, str):
+            user_goals = [g.strip().lower() for g in user_goals.split(',') if g.strip()]
+        elif isinstance(user_goals, list):
+            user_goals = [str(g).strip().lower() for g in user_goals if g and str(g).strip()]
+        else:
+            user_goals = []
+            
+        # If no user goals specified, don't filter on goals
+        if not user_goals:
             return 1
             
-        # Check if user's goal has a mapping
-        if user_goal in self.GOAL_MAPPINGS:
-            goal_variations = self.GOAL_MAPPINGS[user_goal]
+        # If meal has no goals, don't filter it out (be permissive)
+        meal_goals = meal.get("goal") or ""
+        if isinstance(meal_goals, str):
+            meal_goals = [g.strip().lower() for g in meal_goals.split(',') if g.strip()]
+        elif isinstance(meal_goals, list):
+            meal_goals = [str(g).strip().lower() for g in meal_goals if g and str(g).strip()]
+        else:
+            meal_goals = []
             
-            # Check if any of the meal's goals match the user's goal variations
-            for mg in meal_goals:
-                # Check for exact matches
-                if mg in goal_variations:
-                    return 1
-                    
-                # Check for partial matches in case of longer descriptions
-                if any(gv in mg for gv in goal_variations):
-                    return 1
+        if not meal_goals:
+            logging.debug(f"Meal {meal.get('meal_id', 'unknown')} has no goals specified")
+            return 1
             
-            # Handle conflicting terms based on goal type
-            conflicting_terms = []
-            
-            # Define conflicts based on primary goal categories
-            if 'loss' in user_goal or 'lose' in user_goal:
-                # For weight loss, avoid muscle gain related terms
-                conflicting_terms.extend(['gain muscle', 'bulk', 'hypertrophy', 'mass gain', 'weight gain'])
-                # Also check for any weight gain terms in the meal's goals
-                if any('gain' in mg and 'weight' in mg for mg in meal_goals):
-                    return 0
-                    
-            elif 'gain' in user_goal and 'muscle' in user_goal:
-                # For muscle gain, avoid weight loss terms
-                conflicting_terms.extend(['lose weight', 'fat loss', 'weight loss', 'reduce', 'weight reduction'])
-            
-            # Check for conflicts in any of the meal's goals
-            for mg in meal_goals:
-                if any(conflict in mg for conflict in conflicting_terms):
-                    logging.debug(f"Excluding meal due to conflicting goal: {mg} for user goal: {user_goal}")
-                    return 0
-            
-            # For maintenance, be more permissive but still check for strong conflicts
-            if 'maintain' in user_goal:
-                strong_conflicts = ['lose weight', 'weight loss', 'gain muscle', 'bulk', 'weight gain']
-                if any(any(conflict in mg for conflict in strong_conflicts) for mg in meal_goals):
-                    return 0
-                    
-        return 0
-            
-        # Check for partial matches within variations
-        for variation in goal_variations:
-            # Split variations into words for more precise matching
-            variation_words = set(word.strip() for word in variation.split() if len(word) > 2)
-            for mg in meal_goals:
-                meal_words = set(word.strip() for word in mg.split() if len(word) > 2)
-                variation_words = set(word.strip() for word in variation.split() if len(word) > 2)
-                meal_words = set(word.strip() for word in meal_goal.split() if len(word) > 2)
-                
-                # Check for word overlaps (at least one meaningful word in common)
-                if variation_words & meal_words:
-                    # For weight-related terms, be more strict
-                    if any(term in variation for term in ['weight', 'lose', 'gain', 'bmi', 'fat']):
-                        # Require at least two matching words or exact phrase match
-                        if (len(variation_words & meal_words) >= 2 or 
-                            variation in meal_goal or 
-                            meal_goal in variation):
-                            return 1
-                    else:
-                        # For other terms, single word match is sufficient
-                        return 1
-                        
-            # Special handling for overlaps between goals
-            if 'improve overall fitness' in meal_goal:
-                # This is a valid overlap for all goals
+        # Check for any match between user goals and meal goals
+        user_goals_set = set(user_goals)
+        meal_goals_set = set(meal_goals)
+        
+        # Special handling for specific goal patterns
+        for meal_goal in meal_goals:
+            # General fitness goals match any specific goal
+            if any(term in meal_goal for term in ['improve overall fitness', 'general wellness']):
                 return 1
                 
+            # Sustainable eating matches most health-related goals
             if 'build sustainable eating habits' in meal_goal:
-                # Valid for weight loss (portion control) and maintenance
-                if 'loss' in user_goal or 'maintain' in user_goal:
-                    return 1
-                    
+                return 1  # Match all goals as sustainable eating is generally good
+                
+            # Special case: Satiety - exclude for weight loss, include for others
             if 'satiety' in meal_goal:
-                # Exclude satiety meals for weight loss goals
-                if 'loss' in user_goal or 'lose' in user_goal:
+                if any(goal in ['lose weight', 'weight loss'] for goal in user_goals):
                     return 0
-                # For other goals (muscle gain, maintenance), allow satiety meals
                 return 1
                 
-            # No matches found in this mapping
-            return 0
+            # Special case: Energy-boosting meals for energy goals
+            if 'energy' in meal_goal and any('energy' in goal for goal in user_goals):
+                return 1
+                
+            # Special case: Anti-inflammatory meals for joint pain/inflammation
+            if any(term in meal_goal for term in ['anti-inflammatory', 'reduce inflammation']) and \
+               any(term in ' '.join(user_goals) for term in ['joint pain', 'inflammation']):
+                return 1
+        
+        # Check for direct matches
+        if user_goals_set & meal_goals_set:
+            return 1
             
-        # Fallback to exact matching if no explicit mapping exists
-        return 1 if meal_goal == user_goal else 0
+        # Check for partial matches with special handling for different goal types
+        for user_goal in user_goals:
+            for meal_goal in meal_goals:
+                # For weight-related terms, be more strict
+                if any(term in user_goal for term in ['weight', 'lose', 'gain', 'bmi', 'fat']):
+                    # Require at least one full word match
+                    user_words = set(user_goal.split())
+                    meal_words = set(meal_goal.split())
+                    if user_words & meal_words:
+                        return 1
+                # For health conditions, be more permissive
+                elif any(term in user_goal for term in ['diabetes', 'hypertension', 'joint pain', 'inflammation']):
+                    if any(term in meal_goal for term in ['healthy', 'balanced', 'nutrient-dense']):
+                        return 1
+                    if 'diabetes' in user_goal and 'low glycemic' in meal_goal:
+                        return 1
+                    if 'hypertension' in user_goal and 'low sodium' in meal_goal:
+                        return 1
+                # For general wellness goals, be more permissive
+                elif any(term in user_goal for term in ['energy', 'sleep', 'immune', 'skin', 'hair', 'detox', 'cleanse']):
+                    if any(term in meal_goal for term in ['healthy', 'nutrient-dense', 'balanced']):
+                        return 1
+                # Default: any partial match is sufficient
+                elif user_goal in meal_goal or meal_goal in user_goal:
+                    return 1
+        
+        # Log why the meal was excluded
+        logging.debug(
+            f"Excluding meal {meal.get('meal_id', 'unknown')} - "
+            f"meal goals ({', '.join(meal_goals)}) do not match user goals ({', '.join(user_goals)})"
+        )
+        return 0
 
     def _match_diet(self, meal: Dict) -> int:
-        # Get user's diet preference (if any)
-        user_diet = (self.user_preferences.get("diet_type") or "").strip().lower() if self.user_preferences else ""
-        
-        # If no user diet preference, or if diet is 'omnivore' or 'all', don't filter on diet
-        if not user_diet or user_diet in ['omnivore', 'all']:
-            return 1
+        """
+        Match user's diet preferences with meal's dietary tags using direct tag matching.
+        Returns 1 if the meal matches the user's diet preferences, 0 otherwise.
+        """
+        if not self.user_preferences or not meal:
+            return 0
             
-        # Get meal's diet preferences as a list, handling both string and list inputs
-        meal_diets = meal.get("dietary_preference") or meal.get("diet_type") or ""
-        
-        # Check meal ingredients if available (for strict diets like vegan/vegetarian)
-        ingredients = (meal.get("ingredients") or "").lower()
-        
-        # For vegan/vegetarian diets, we need to be extremely strict
-        if user_diet in ['vegan', 'vegetarian']:
-            # Comprehensive list of non-vegan/vegetarian ingredients and terms to check for
-            non_vegan_terms = [
-                # Meats
-                'beef', 'pork', 'chicken', 'turkey', 'duck', 'goose', 'quail', 'pheasant',
-                'lamb', 'mutton', 'veal', 'venison', 'bison', 'buffalo', 'rabbit', 'game',
-                'bacon', 'ham', 'sausage', 'pepperoni', 'salami', 'prosciutto', 'pancetta',
-                'chorizo', 'pastrami', 'bologna', 'bratwurst', 'frankfurter', 'hot dog',
-                'steak', 'roast', 'chop', 'cutlet', 'fillet', 'tenderloin', 'ribs', 'wings',
-                'ground beef', 'ground turkey', 'ground chicken', 'minced meat',
-                'organ meat', 'liver', 'kidney', 'heart', 'tongue', 'brain', 'sweetbreads',
-                'gelatin', 'collagen', 'lard', 'tallow', 'suet', 'dripping',
-                
-                # Fish and seafood
-                'fish', 'seafood', 'salmon', 'tuna', 'cod', 'haddock', 'halibut', 'tilapia',
-                'trout', 'mackerel', 'sardine', 'anchovy', 'herring', 'sardine', 'sprat',
-                'shrimp', 'prawn', 'lobster', 'crab', 'crayfish', 'langoustine',
-                'scallop', 'clam', 'mussel', 'oyster', 'octopus', 'squid', 'cuttlefish',
-                'eel', 'caviar', 'roe', 'fish eggs', 'surimi', 'fish sauce', 'shrimp paste',
-                'oyster sauce', 'fish oil', 'cod liver oil', 'krill oil',
-                
-                # Dairy and eggs
-                'milk', 'cheese', 'butter', 'yogurt', 'yoghurt', 'cream', 'sour cream',
-                'creme fraiche', 'buttermilk', 'whey', 'casein', 'lactose', 'lactate',
-                'ghee', 'clarified butter', 'curd', 'paneer', 'quark', 'kefir',
-                'eggs', 'egg whites', 'egg yolks', 'albumen', 'ovalbumin', 'mayo', 'mayonnaise',
-                'custard', 'ice cream', 'gelato', 'pudding', 'flan',
-                
-                # Other animal products
-                'honey', 'royal jelly', 'propolis', 'beeswax', 'shellac', 'confectioner\'s glaze',
-                'carmine', 'cochineal', 'carminic acid', 'guarana',
-                'rennet', 'animal rennet', 'pepsin', 'trypsin',
-                'vitamin d3', 'cholecalciferol', 'l-cysteine', 'cysteine',
-                'omega-3', 'epa', 'dha', 'fish oil', 'cod liver oil', 'krill oil',
-                
-                # Common non-vegan additives
-                'e120', 'e441', 'e542', 'e631', 'e901', 'e904', 'e913', 'e920', 'e921', 'e966',
-                
-                # General terms that might indicate non-vegan
-                'meat', 'poultry', 'seafood', 'fish', 'dairy', 'animal', 'animal-derived',
-                'animal based', 'animal product', 'animal by-product'
-            ]
-            
-            # Additional terms specific to vegetarian (but not vegan) that we want to flag
-            if user_diet == 'vegan':
-                non_vegan_terms.extend([
-                    'dairy', 'milk', 'cheese', 'butter', 'yogurt', 'cream', 'eggs', 'honey',
-                    'whey', 'casein', 'lactose', 'ghee', 'rennet'
-                ])
-            
-            # Clean up the ingredients string for better matching
-            ingredients = ' ' + ingredients.replace(',', ' ').replace('.', ' ').lower() + ' '
-            
-            # Check for any non-vegan terms in the ingredients
-            for term in non_vegan_terms:
-                if f' {term} ' in ingredients:
-                    logging.warning(f"Excluding meal {meal.get('meal_id', 'unknown')} - contains non-{user_diet} ingredient: {term}")
-                    return 0
-        
-        # If meal has no diet info, log a warning but don't exclude it (ingredients are our primary check)
-        if not meal_diets:
-            logging.warning(f"Meal {meal.get('meal_id', 'unknown')} has no diet information. Relying on ingredient check only.")
-            return 1
-            
-        # Convert to list if it's a string (handling both comma-separated and space-separated)
-        if isinstance(meal_diets, str):
-            # First try splitting by comma, if that doesn't work, try space
-            if ',' in meal_diets:
-                meal_diets = [d.strip().lower() for d in meal_diets.split(',') if d.strip()]
-            else:
-                meal_diets = [d.strip().lower() for d in meal_diets.split() if d.strip()]
-        elif not isinstance(meal_diets, list):
-            meal_diets = [str(meal_diets).lower()]
+        # Get user's diet preferences as a list of lowercase strings
+        user_diets = self.user_preferences.get("diet_type") or []
+        if isinstance(user_diets, str):
+            user_diets = [d.strip().lower() for d in user_diets.split(',') if d.strip()]
+        elif isinstance(user_diets, list):
+            user_diets = [str(d).strip().lower() for d in user_diets if d and str(d).strip()]
         else:
-            meal_diets = [str(d).lower().strip() for d in meal_diets if d and str(d).strip()]
-        
-        # If no valid diet types found in meal, log a warning but don't exclude it
-        if not meal_diets:
-            logging.warning(f"Meal {meal.get('meal_id', 'unknown')} has empty diet information. Relying on ingredient check only.")
+            user_diets = []
+            
+        # If no user diet preferences specified, don't filter on diet
+        if not user_diets:
             return 1
             
-        # Get compatible diets for user's diet type
-        compatible_diets = self.DIETARY_PREFERENCE_MAPPINGS.get(user_diet, [])
-        if not compatible_diets:
-            compatible_diets = [user_diet]
+        # If 'omnivore' or 'all' is in user diets, include all meals
+        if any(d in ['omnivore', 'all'] for d in user_diets):
+            return 1
+            
+        # Get meal's diet tags as a list of lowercase strings
+        meal_diets = meal.get("dietary_preference") or meal.get("diet_type") or ""
+        if isinstance(meal_diets, str):
+            meal_diets = [d.strip().lower() for d in meal_diets.split(',') if d.strip()]
+        elif isinstance(meal_diets, list):
+            meal_diets = [str(d).strip().lower() for d in meal_diets if d and str(d).strip()]
+        else:
+            meal_diets = []
+            
+        # If meal has no diet tags, log a warning and be conservative by excluding it
+        if not meal_diets:
+            logging.warning(f"Meal {meal.get('meal_id', 'unknown')} has no diet information. Filtering out for safety.")
+            return 0
+            
+        # Check for any overlap between user's diets and meal's diets
+        # Using set intersection for efficient lookup
+        user_diets_set = set(user_diets)
+        meal_diets_set = set(meal_diets)
+        
+        # If there's any overlap, include the meal
+        if user_diets_set & meal_diets_set:
+            return 1
+            
+        # Log why the meal was excluded
+        logging.debug(
+            f"Excluding meal {meal.get('meal_id', 'unknown')} - "
+            f"meal diets ({', '.join(meal_diets)}) do not match user diets ({', '.join(user_diets)})"
+        )
+        return 0
             
         # Create a clean string of all meal diets for easier checking
         meal_diets_str = ' '.join(meal_diets).lower()
@@ -1074,93 +954,107 @@ class MealRecommendation4:
             return 1
 
     def _match_allergies(self, meal: Dict) -> int:
-        # Handle case where user_preferences is None or food_restrictions is None/empty
-        if not self.user_preferences or not self.user_preferences.get("food_restrictions"):
-            return 1  # No restrictions specified, allow all meals
+        """
+        Match user's food restrictions with meal's allergy tags using direct tag matching.
+        Returns 1 if the meal is safe for the user's restrictions, 0 otherwise.
+        """
+        if not self.user_preferences or not meal:
+            return 0
             
-        # Get user's food restrictions (allergies)
-        user_restrictions = [r.strip().lower() for r in self.user_preferences["food_restrictions"] if r and str(r).strip()]
-        
-        # If no valid user restrictions, allow the meal
+        # Get user's food restrictions as a list of lowercase strings
+        user_restrictions = self.user_preferences.get("food_restrictions") or []
+        if isinstance(user_restrictions, str):
+            user_restrictions = [r.strip().lower() for r in user_restrictions.split(',') if r.strip()]
+        elif isinstance(user_restrictions, list):
+            user_restrictions = [str(r).strip().lower() for r in user_restrictions if r and str(r).strip()]
+        else:
+            user_restrictions = []
+            
+        # If no user restrictions, allow the meal
         if not user_restrictions:
             return 1
             
-        # Get meal's allergy information as a list, handling both string and list inputs
+        # Get meal's allergy tags as a list of lowercase strings
         meal_allergies = meal.get("allergies") or ""
         if isinstance(meal_allergies, str):
             meal_allergies = [a.strip().lower() for a in meal_allergies.split(',') if a.strip()]
-        else:
+        elif isinstance(meal_allergies, list):
             meal_allergies = [str(a).strip().lower() for a in meal_allergies if a and str(a).strip()]
-        
+        else:
+            meal_allergies = []
+            
         # If meal has no allergy info, be safe and filter it out if there are any restrictions
         if not meal_allergies and user_restrictions:
             logging.warning(f"Meal {meal.get('meal_id', 'unknown')} has no allergy information. Filtering out for safety.")
             return 0
             
-        # Define the robust allergy mapping
-        ALLERGY_MAPPING = {
-            'nut-free': ['peanut allergy', 'tree nut allergy'],
-            'dairy-free': ['dairy allergy'],
-            'gluten-free': ['gluten allergy'],
-            'none': []
-        }
+        # Check for any overlap between user's restrictions and meal's allergies
+        # Using set intersection for efficient lookup
+        user_restrictions_set = set(user_restrictions)
+        meal_allergies_set = set(meal_allergies)
         
-        # Check each user restriction against the meal's allergies
-        for restriction in user_restrictions:
-            # Skip empty or invalid restrictions
-            if not restriction:
-                continue
-                
-            # Get the allergies to exclude based on the restriction
-            allergies_to_exclude = ALLERGY_MAPPING.get(restriction.lower(), [])
+        # If there's any overlap, the meal is not safe
+        if user_restrictions_set & meal_allergies_set:
+            conflicting = user_restrictions_set & meal_allergies_set
+            logging.info(
+                f"Excluding meal {meal.get('meal_id', 'unknown')} - "
+                f"contains allergens that conflict with user's restrictions: {', '.join(conflicting)}"
+            )
+            return 0
             
-            # If the restriction is 'none', no allergies to exclude
-            if restriction.lower() == 'none':
-                continue
-                
-            # If no allergies to exclude for this restriction, skip
-            if not allergies_to_exclude:
-                continue
-                
-            # Check if any of the meal's allergies match the exclusions
-            for meal_allergy in meal_allergies:
-                if any(excluded in meal_allergy for excluded in allergies_to_exclude):
-                    logging.info(f"Excluding meal {meal.get('meal_id', 'unknown')} - contains {meal_allergy} "
-                                 f"which conflicts with user's {restriction} restriction")
-                    return 0
-                    
         return 1
 
     def _match_cuisine(self, meal: Dict) -> int:
         """
-        Enhanced cuisine matching using robust mappings.
-        Returns 1 (include) if:
-        - No user cuisine preferences are specified (empty list, None, or empty string)
-        - The meal's cuisine matches any of the user's cuisine preferences
+        Match user's cuisine preferences with meal's cuisine tags using direct tag matching.
+        Returns 1 if the meal matches any of the user's cuisine preferences, 0 otherwise.
+        If user has no cuisine preferences, all meals are allowed.
         """
-        # Handle case where user_preferences is None or cuisine_preferences is None/empty
-        if not self.user_preferences or not self.user_preferences.get("cuisine_preferences"):
-            return 1  # No cuisine preferences specified, allow all meals
+        if not self.user_preferences or not meal:
+            return 0
             
-        # Get user's cuisine preferences, filtering out any empty or invalid values
-        user_cuisines = [c.strip().lower() for c in self.user_preferences["cuisine_preferences"] 
-                        if c and str(c).strip()]
-        
-        # If no valid user cuisine preferences, allow all meals
+        # Get user's cuisine preferences as a list of lowercase strings
+        user_cuisines = self.user_preferences.get("cuisine_preferences") or []
+        if isinstance(user_cuisines, str):
+            user_cuisines = [c.strip().lower() for c in user_cuisines.split(',') if c.strip()]
+        elif isinstance(user_cuisines, list):
+            user_cuisines = [str(c).strip().lower() for c in user_cuisines if c and str(c).strip()]
+        else:
+            user_cuisines = []
+            
+        # If no user cuisine preferences, allow all meals
         if not user_cuisines:
             return 1
             
-        # Get meal's cuisine information
-        meal_cuisine = (meal.get("cuisine_preferences") or "").strip().lower()
-        
-        # If meal has no cuisine specified, filter it out (be conservative)
-        if not meal_cuisine:
+        # Get meal's cuisine tags as a list of lowercase strings
+        meal_cuisines = meal.get("cuisine_type") or ""
+        if isinstance(meal_cuisines, str):
+            meal_cuisines = [c.strip().lower() for c in meal_cuisines.split(',') if c.strip()]
+        elif isinstance(meal_cuisines, list):
+            meal_cuisines = [str(c).strip().lower() for c in meal_cuisines if c and str(c).strip()]
+        else:
+            meal_cuisines = []
+            
+        # If meal has no cuisine tags, filter it out (be conservative)
+        if not meal_cuisines:
+            logging.debug(f"Meal {meal.get('meal_id', 'unknown')} has no cuisine information. Filtering out.")
             return 0
-
-        # Get all compatible cuisines for user preferences
-        compatible_cuisines = set()
-        for pref in user_cuisines:
-            compatible_cuisines.update(self.CUISINE_PREFERENCE_MAPPINGS.get(pref.lower(), [pref.lower()]))
+            
+        # Check for any overlap between user's cuisine preferences and meal's cuisines
+        # Using set intersection for efficient lookup
+        user_cuisines_set = set(user_cuisines)
+        meal_cuisines_set = set(meal_cuisines)
+        
+        # If there's any overlap, include the meal
+        if user_cuisines_set & meal_cuisines_set:
+            return 1
+            
+        # Log why the meal was excluded
+        logging.debug(
+            f"Excluding meal {meal.get('meal_id', 'unknown')} - "
+            f"meal cuisines ({', '.join(meal_cuisines)}) do not match user preferences ({', '.join(user_cuisines)})"
+        )
+        return 0
 
         return 1 if any(cuisine in meal_cuisine for cuisine in compatible_cuisines) else 0
 
