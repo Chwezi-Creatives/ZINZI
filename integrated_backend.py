@@ -3558,21 +3558,31 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
                 logger.error(f"Unexpected error processing order data: {e}", exc_info=True)
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Server error processing order data: {e}") from e
 
+            # Extract bulk order details if present
+            is_bulk_order = False
+            bulk_order_details = None
+            
+            if items and len(items) > 0 and 'is_bulk_order' in items[0]:
+                is_bulk_order = items[0]['is_bulk_order']
+                bulk_order_details = items[0].get('bulk_order_details')
+                
             sql = """
                 INSERT INTO orders (
                     user_id, user_type, order_type, product_id, chef_id, producer_id, transporter_id,
                     order_date, delivery_address, order_status, total_price, notes,
                     payment_status, payment_mode, amount_paid, transaction_id, quantity,
-                    gig_details, complementary_meals, user_phone
+                    gig_details, complementary_meals, user_phone,
+                    is_bulk_order, bulk_order_details
                 )
-                VALUES ($1,$2,$3,$4,$5,$6,$7, NOW(), $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+                VALUES ($1,$2,$3,$4,$5,$6,$7, NOW(), $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
                 RETURNING order_id
             """
             params: Tuple[Any, ...] = (
                 user_id_i, user_type, order_type_l, prod_id_s, chef_id_i, producer_id_i, transporter_id_i,
                 delivery_address_s, order_status_l, price_f, notes_s, payment_status_l,
                 payment_mode_l, paid_f, transaction_id, qty_i, gig_details_json,
-                complementary_meals_serialized_json, user_phone
+                complementary_meals_serialized_json, user_phone,
+                is_bulk_order, json.dumps(bulk_order_details) if bulk_order_details else None
             )
             # Execute the query and get the raw result
             result = await conn.fetchrow(sql, *params)
@@ -3672,7 +3682,7 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
                 o.order_date, o.delivery_address, o.order_status, o.total_price, o.notes,
                 o.payment_status, o.payment_mode, o.amount_paid, o.transaction_id, o.quantity, o.user_phone,
                 o.restaurant_phone, o.gig_details, o.complementary_meals,
-                o.updated_at, -- Ensure this column exists in your 'orders' table
+                o.updated_at, o.is_bulk_order, o.bulk_order_details,
                 COALESCE( md.meal_name, supd.product_name, hd.product_name, gd.product_name, sd.product_name, prod.product_name, CASE WHEN o.order_type = 'gig' THEN o.gig_details->>'gig_type' ELSE 'Unknown Product' END ) AS product_name,
                 md.ingredients, producer.name AS producer_name, producer.location AS producer_address, chef.name AS chef_name, chef.location AS chef_address, transporter.name AS transporter_name, COALESCE(chef.location, producer.location, '') AS pickup_location
             FROM orders o
@@ -6275,13 +6285,65 @@ async def delete_supplement_endpoint(supplement_id: int, conn: asyncpg.Connectio
 async def create_order_endpoint(order_data: dict = Body(...), conn: asyncpg.Connection = Depends(get_db)):
     logger.debug(f"Received order payload: {order_data}")
     try:
-        # Extract required fields
-        user_id = order_data['user_id']
-        order_type = order_data['order_type']
-        user_type = order_data['user_type']  # Required field
+        # First, validate required payment fields are present and in the correct format
+        required_payment_fields = {
+            'payment_mode': (str, ['momo', 'cash']),  # Field: (type, allowed_values)
+            'payment_phone_number': (str, None),  # Just validate type
+            'total_price': ((int, float), None)  # Can be int or float
+        }
         
-        # Extract payment details if payment mode is momo
-        payment_mode = order_data.get('payment_mode', 'cash').lower()
+        missing_fields = [field for field in required_payment_fields if field not in order_data]
+        if missing_fields:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Missing required payment fields: {', '.join(missing_fields)}"
+            )
+            
+        # Validate field types and values
+        for field, (field_type, allowed_values) in required_payment_fields.items():
+            value = order_data[field]
+            
+            # Check type
+            if not isinstance(value, field_type) and not (field_type == (int, float) and isinstance(value, (int, float))):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid type for {field}. Expected {field_type}, got {type(value).__name__}"
+                )
+                
+            # Check allowed values if specified
+            if allowed_values and str(value).lower() not in allowed_values:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid value for {field}. Must be one of: {', '.join(allowed_values)}"
+                )
+        
+        # Ensure payment_status is not set by client
+        if 'payment_status' in order_data:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="payment_status cannot be set by client. It is determined by the server."
+            )
+        
+        # Extract required fields with validation
+        try:
+            user_id = int(order_data['user_id'])
+            order_type = str(order_data['order_type']).strip()
+            user_type = str(order_data['user_type']).strip()
+            payment_mode = str(order_data['payment_mode']).lower()
+            payment_phone_number = str(order_data['payment_phone_number']).strip()
+            total_price = float(order_data['total_price'])
+            
+            if total_price <= 0:
+                raise ValueError("total_price must be greater than 0")
+                
+            if not payment_phone_number:
+                raise ValueError("payment_phone_number cannot be empty")
+                
+        except (ValueError, KeyError) as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid order data: {str(e)}"
+            )
         
         # Initialize payment variables with default values
         transaction_id = None
@@ -6344,7 +6406,7 @@ async def create_order_endpoint(order_data: dict = Body(...), conn: asyncpg.Conn
                 # Use the external_id as the transaction_id for the order to ensure consistency
                 transaction_id = external_id  # Use the same external_id we generated for MoMo
                 payment_status = 'paid'  # Set status to indicate payment is being processed
-                amount_paid = 0.0
+                amount_paid = total_price  # Set amount_paid to total_price immediately
                 
                 logger.info(f"[PAYMENT] MoMo payment initiated successfully. Transaction ID: {transaction_id}")
                 logger.info("[PAYMENT] Payment processing completed successfully")
