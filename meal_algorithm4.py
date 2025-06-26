@@ -180,8 +180,7 @@ class MealRecommendation4:
                 with connection.cursor(cursor_factory=RealDictCursor) as cursor:
                     query = """
                         SELECT 
-                            m.meal_id, m.meal_name, m.meal_category, m.goal, m.dietary_preference,
-                            m.allergies, m.cuisine_preferences as cuisine_type, m.prep_time,
+                            m.*,
                             string_agg(DISTINCT pr.produce_name, ', ') AS ingredients,
                             COALESCE(SUM(mi.produce_quantity_in_grams), 0) as total_weight,
                             jsonb_object_agg(
