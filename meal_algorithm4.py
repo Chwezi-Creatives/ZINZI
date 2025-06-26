@@ -69,7 +69,10 @@ class MealRecommendation4:
 
     def _get_user_data(self, connection) -> tuple:
         try:
-            with connection.cursor() as cursor:
+            # Import RealDictCursor here to avoid circular imports
+            from psycopg2.extras import RealDictCursor
+            
+            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
                 # First, try to get data with a JOIN
                 query_join = """
                     SELECT 
@@ -84,32 +87,52 @@ class MealRecommendation4:
                 result = cursor.fetchone()
 
                 if not result:
-                    # If no preferences, there's nothing to work with
                     logging.warning(f"No user preferences found for user_id {self.user_id}")
                     return None, None
 
-                # Fallback for metrics if the JOIN returns nulls (e.g., no metrics row)
-                if result[4] is None:
+                # Check if we have metrics from the JOIN
+                if result.get('weight') is None:
                     logging.warning(f"No user metrics found for user_id {self.user_id}, fetching separately or using defaults.")
-                    query_metrics = "SELECT weight, height, age_range, sex, activity_level FROM user_metrics WHERE user_id = %s"
+                    query_metrics = """
+                        SELECT weight, height, age_range, sex, activity_level 
+                        FROM user_metrics 
+                        WHERE user_id = %s
+                    """
                     cursor.execute(query_metrics, (self.user_id,))
                     metrics_result = cursor.fetchone()
                 else:
-                    metrics_result = result[4:]
+                    metrics_result = result
 
                 preferences = {
-                    "goals": result[0],
-                    "diet_type": result[1],
-                    "food_restrictions": result[2],
-                    "cuisine_preferences": result[3],
+                    "goals": result.get("goals"),
+                    "diet_type": result.get("diet_type"),
+                    "food_restrictions": result.get("food_restrictions"),
+                    "cuisine_preferences": result.get("cuisine_preferences"),
                 }
                 
+                # Safely extract and convert metrics with proper type checking
+                def safe_get_float(data, key, default=0.0):
+                    value = data.get(key) if data else None
+                    try:
+                        return float(value) if value is not None else default
+                    except (ValueError, TypeError):
+                        return default
+                        
+                def safe_get_str(data, key, default=""):
+                    value = data.get(key) if data else None
+                    if value is None:
+                        return default
+                    try:
+                        return str(value).strip().lower()
+                    except (AttributeError, TypeError):
+                        return default.lower()
+                
                 metrics = {
-                    "weight": float(metrics_result[0]) if metrics_result and metrics_result[0] is not None else 70,
-                    "height": float(metrics_result[1]) if metrics_result and metrics_result[1] is not None else 170,
-                    "age_range": metrics_result[2] if metrics_result and metrics_result[2] else "30-40",
-                    "sex": (metrics_result[3].strip().lower() if metrics_result and metrics_result[3] else "male"),
-                    "activity_level": (metrics_result[4].strip().lower() if metrics_result and metrics_result[4] else "sedentary")
+                    "weight": safe_get_float(metrics_result, "weight", 70.0),
+                    "height": safe_get_float(metrics_result, "height", 170.0),
+                    "age_range": safe_get_str(metrics_result, "age_range", "30-40"),
+                    "sex": safe_get_str(metrics_result, "sex", "male"),
+                    "activity_level": safe_get_str(metrics_result, "activity_level", "sedentary")
                 }
                 
                 return preferences, metrics
