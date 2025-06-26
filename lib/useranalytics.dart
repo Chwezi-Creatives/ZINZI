@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart'; // For user_id
 import 'package:visibility_detector/visibility_detector.dart';
 import 'package:flutter/widgets.dart'; // For RouteAware, RouteObserver
 import 'package:zinzi/app_drawer_unified.dart'; // Unified app drawer for navigation
+import 'package:zinzi/utils/goal_utils.dart'; // For goal categorization
 
 // Create a RouteObserver instance at the top level
 final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
@@ -329,25 +330,38 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
 
     final dailyCalories =
         (_metricsData!.metrics['daily_calories'] as num?)?.toDouble() ?? 2000.0;
-    final goal = _metricsData!.preferences['goal'] as String? ?? 'Maintenance';
+    final goal = _metricsData!.preferences['goal'] as String? ?? '';
+    final goalCategory = categorizeGoal(goal);
 
     double proteinRatio;
     double carbsRatio;
     double fatsRatio;
 
-    switch (goal) {
-      case 'Weight Loss':
+    switch (goalCategory) {
+      case 'weight_loss':
         proteinRatio = 0.40; // 40%
         carbsRatio = 0.30; // 30%
         fatsRatio = 0.30; // 30%
         break;
-      case 'Muscle Gain':
+      case 'muscle_gain':
         proteinRatio = 0.30; // 30%
         carbsRatio = 0.50; // 50%
         fatsRatio = 0.20; // 20%
         break;
-      case 'Maintenance':
+      case 'maintain':
+        proteinRatio = 0.30; // 30%
+        carbsRatio = 0.40; // 40%
+        fatsRatio = 0.30; // 30%
+        break;
+      case 'health_condition':
+        // Slightly higher protein and healthy fats for health conditions
+        proteinRatio = 0.35; // 35%
+        carbsRatio = 0.35; // 35%
+        fatsRatio = 0.30; // 30%
+        break;
+      case 'general_wellness':
       default:
+        // Balanced macronutrients for general wellness
         proteinRatio = 0.30; // 30%
         carbsRatio = 0.40; // 40%
         fatsRatio = 0.30; // 30%
@@ -368,8 +382,10 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
   }
 
   String _getMacroSummaryMessage() {
-    final goal = _metricsData?.preferences['goal'] as String? ?? 'Maintenance';
-    final String goalPrefix = 'Your goal is to **$goal**. ';
+    final goal = _metricsData?.preferences['goal'] as String? ?? '';
+    final goalCategory = categorizeGoal(goal);
+    final displayGoal = getGoalCategoryDisplayName(goalCategory);
+    final String goalPrefix = 'Your goal is to **$displayGoal**. ';
 
     if (aggregatedMacroGrams.values.every((v) => v == 0)) {
       return '${goalPrefix}Log your meals to see your macronutrient breakdown.';
