@@ -856,7 +856,7 @@ class _ProfilePageState extends State<ProfilePage>
 
       // 2. Update user profile with the new image URL
       final response = await http.patch(
-        Uri.parse('$apiBaseUrl/rr/rusers/$_userId'),
+        Uri.parse('$apiBaseUrl/rr/users/$_userId'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'image': imgurUrl}),
       );
