@@ -240,17 +240,17 @@ class _ProfilePageState extends State<ProfilePage>
 ];
   String? _selectedDietType;
   final List<String> _dietTypeOptions = [
-  "Anti Inflamatory",
+  "Normal Diet",
   "Diabetic Diet",
   "High blood pressure",
+  "Renal Diet",
+  "Anti Inflamatory",
   "Keto (Low-Carb and High-Fat)",
   "Muscle Repair",
-  "Normal Diet",
-  "Renal Diet"
 ];
   String? _selectedFoodRestriction;
   final List<String> _foodRestrictionsOptions = [
-    "None", // Added None option
+    "No Allergies",
     "Meat Allergy (e.g. beef)",
     "Milk/Dairy Allergy",
     "Soy Allergy",
@@ -1269,9 +1269,9 @@ class _ProfilePageState extends State<ProfilePage>
         double totalInches = _heightCm / 2.54; // cm to total inches
         double feet = (totalInches ~/ 12).toDouble(); // Integer part for feet
         double inches = (totalInches % 12); // Remainder for inches
-        _heightFeetController.text = feet > 0 ? feet.toStringAsFixed(0) : '';
+        _heightFeetController.text = feet > 0 ? feet.round().toString() : '';
         _heightInchesController.text =
-            inches > 0 ? inches.toStringAsFixed(1) : '';
+            inches > 0 ? inches.round().toString() : '';
       } else {
         if (_heightFeetController.text.isNotEmpty)
           _heightFeetController.clear();

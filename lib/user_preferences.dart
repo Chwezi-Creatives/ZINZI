@@ -53,11 +53,16 @@ class _UserPreferencesPageState extends State<UserPreferencesPage>
     "Skin and hair improvement", "Control Chronic Conditions (e.g. diabetes and hypertension)",
   ];
   final List<String> _dietTypeOptions = [
-    "Anti Inflamatory", "Diabetic Diet", "High blood pressure", "Keto (Low-Carb and High-Fat)",
-    "Muscle Repair", "Normal Diet", "Renal Diet"
+  "Normal Diet",
+  "Diabetic Diet",
+  "Renal Diet",
+  "High blood pressure",
+  "Anti Inflamatory",
+  "Keto (Low-Carb and High-Fat)",
+  "Muscle Repair",
   ];
   final List<String> _foodRestrictionsOptions = [
-    "None", "Meat Allergy (e.g. beef)", "Milk/Dairy Allergy", "Soy Allergy",
+    "No Allergies", "Meat Allergy (e.g. beef)", "Milk/Dairy Allergy", "Soy Allergy",
     "Spice Allergy (e.g. cinnamon and paprika)", "Wheat Allergy", "Citrus Allergy (e.g. oranges and lemons)",
     "Corn Allergy", "Egg Allergy", "Fish Allergy", "Gluten Allergy", "Histamine Intolerance",
     "Latex-Fruit Syndrome (e.g. bananas)", "Legume Allergy (e.g. lentils and chickpeas)",

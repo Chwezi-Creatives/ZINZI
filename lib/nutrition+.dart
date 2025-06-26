@@ -852,7 +852,7 @@ class _NutritionPageState extends State<NutritionPage>
           labelStyle: const TextStyle(fontWeight: FontWeight.bold),
           tabs: const [
             Tab(text: 'Spices'),
-            Tab(text: 'Herbs'),
+            Tab(text: 'Herbals'),
             Tab(text: 'Supplements'),
             Tab(text: 'Gadgets'),
           ],
