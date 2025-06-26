@@ -844,68 +844,84 @@ class _ProfilePageState extends State<ProfilePage>
       _showErrorSnackBar('User ID not found. Cannot upload image.');
       return;
     }
-    _showSuccessSnackBar('processing image...'); // Temporary feedback
+    _showSuccessSnackBar('Processing image...');
 
     try {
-      // Upload to Imgur first
-      Future<String?> uploadImageToImgur(File imageFile) async {
-        try {
-          final uploadUrl = Uri.parse('https://api.imgur.com/3/image');
-          final request = http.MultipartRequest('POST', uploadUrl);
-          request.headers['Authorization'] = '$imgurClientID';
-          request.files
-              .add(await http.MultipartFile.fromPath('image', imageFile.path));
-
-          final response = await request.send();
-          final responseData = await response.stream.bytesToString();
-          final jsonResult = jsonDecode(responseData);
-          return jsonResult['data']['link']?.toString();
-        } catch (e) {
-          print('Imgur upload error: \\$e');
-          return null;
-        }
+      // 1. Upload to Imgur
+      final imgurUrl = await _uploadToImgur(imageFile);
+      if (imgurUrl == null) {
+        _showErrorSnackBar('Failed to upload image to Imgur');
+        return;
       }
 
-      final imgurUrl = await uploadImageToImgur(imageFile);
+      // 2. Update user profile with the new image URL
+      final response = await http.patch(
+        Uri.parse('$apiBaseUrl/rr/rusers/$_userId'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'image': imgurUrl}),
+      );
 
-      if (!mounted) return;
-
-      if (imgurUrl != null) {
-        // Now send the Imgur URL to the user details endpoint
-        final url = '$apiBaseUrl/rr/users/$_userId';
-        final response = await http
-            .patch(
-              Uri.parse(url),
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: json.encode({
-                'image': imgurUrl,
-              }),
-            )
-            .timeout(const Duration(seconds: 30));
-
-        if (response.statusCode == 200) {
-          setState(() {
-            _profileImageUrl = imgurUrl;
-            _profileImagePath = null; // Clear local path if server URL is used
-          });
-          // Update userDetails map and cache
+      if (response.statusCode == 200) {
+        // Update local state
+        setState(() {
+          _profileImageUrl = imgurUrl;
+          _profileImagePath = null; // Clear local path if server URL is used
           _userDetails['image'] = imgurUrl;
-          await UserCache.saveData('user_details_cache', _userDetails);
-          await _saveImageToPrefs(''); // Clear local path pref
-          _showSuccessSnackBar('Profile image updated successfully!');
-        } else {
-          _showErrorSnackBar('Failed to update profile with Imgur URL');
-        }
+        });
+        
+        // Update cache
+        await UserCache.saveData('user_details_cache', _userDetails);
+        await _saveImageToPrefs(''); // Clear local path pref
+        _showSuccessSnackBar('Profile image updated successfully!');
       } else {
-        _showErrorSnackBar('Failed to upload image to Image server');
+        final error = jsonDecode(response.body)?['message'] ?? 'Unknown error';
+        _showErrorSnackBar('Failed to update profile: $error');
       }
     } on TimeoutException {
-      if (mounted) _showErrorSnackBar('Image upload timed out.');
+      _showErrorSnackBar('Image upload timed out. Please try again.');
+    } on http.ClientException catch (e) {
+      print('Network error during image upload: $e');
+      _showErrorSnackBar('Network error. Please check your connection.');
     } catch (e) {
-      print("Error uploading image: $e");
-      if (mounted) _showErrorSnackBar('Error uploading image: $e');
+      print('Error uploading image: $e');
+      _showErrorSnackBar('Failed to upload image. Please try again.');
+    }
+  }
+
+  Future<String?> _uploadToImgur(File imageFile) async {
+    try {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('https://api.imgur.com/3/image'),
+      );
+      
+      // Set authorization header with Client-ID
+      request.headers['Authorization'] = 'Client-ID $imgurClientID';
+      
+      // Add image file to the request
+      request.files.add(
+        await http.MultipartFile.fromPath('image', imageFile.path),
+      );
+
+      // Send the request
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+      final responseData = jsonDecode(response.body);
+      
+      print('Imgur upload response: ${response.statusCode} ${response.body}');
+      
+      if (response.statusCode == 200 && 
+          responseData['success'] == true && 
+          responseData['data']?['link'] != null) {
+        return responseData['data']['link'].toString();
+      } else {
+        final error = responseData['data']?['error'] ?? 'Unknown Imgur error';
+        print('Imgur upload failed: $error');
+        return null;
+      }
+    } catch (e) {
+      print('Error in _uploadToImgur: $e');
+      return null;
     }
   }
 
