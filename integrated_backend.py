@@ -4514,6 +4514,58 @@ class CalculationLogic:
         except Exception as e:
             logger.warning(f"BMR calc err: w={weight},h={height},age={age_range},sex={sex}. {e}")
             return 0
+    def _categorize_goal(self, goal: str) -> str:
+        """
+        Categorize the user's goal for calculation purposes.
+        
+        Args:
+            goal: The user's goal string
+            
+        Returns:
+            str: Goal category ('weight_loss', 'muscle_gain', 'maintain', 'health_condition', 'general_wellness')
+        """
+        if not goal:
+            return 'general_wellness'
+            
+        goal = str(goal).lower()
+        
+        # Weight-related goals
+        if any(term in goal for term in ["lose weight", "weight loss"]):
+            return "weight_loss"
+        if any(term in goal for term in ["gain muscle", "muscle gain"]):
+            return "muscle_gain"
+        if any(term in goal for term in ["maintain", "satiety"]):
+            return "maintain"
+            
+        # Health conditions that might affect calculations in the future
+        health_conditions = ["diabetes", "hypertension", "joint pain", "postpartum", "inflammation"]
+        if any(condition in goal for condition in health_conditions):
+            return "health_condition"
+            
+        return "general_wellness"
+
+    def _get_goal_adjustment_factor(self, goal: str) -> float:
+        """
+        Get the calorie adjustment factor based on the goal category.
+        
+        Args:
+            goal: The user's goal string
+            
+        Returns:
+            float: Adjustment factor to apply to TDEE
+        """
+        goal_category = self._categorize_goal(goal)
+        
+        adjustment_factors = {
+            "weight_loss": -0.15,    # 15% reduction for weight loss
+            "muscle_gain": 0.15,     # 15% increase for muscle gain
+            "maintain": 0.0,         # No adjustment for maintenance/satiety
+            "health_condition": 0.0,  # No adjustment by default for health conditions
+            "general_wellness": 0.0   # No adjustment for general wellness
+        }
+        
+        return adjustment_factors.get(goal_category, 0.0)
+
     def calculate_daily_calories(self, bmr, activity_level, goals=None):
         """
         Calculate daily calories based on BMR, activity level, and weight goal.
@@ -4521,7 +4573,7 @@ class CalculationLogic:
         Args:
             bmr: Basal Metabolic Rate
             activity_level: User's activity level
-            goals: Optional weight goal ('weight loss', 'maintain weight', 'muscle gain')
+            goals: Optional weight goal string (supports various formats)
             
         Returns:
             int: Adjusted daily calorie target
@@ -4533,13 +4585,12 @@ class CalculationLogic:
             return 0
             
         # Get activity multiplier
-        act_level = str(activity_level).strip().lower().replace(" ","_") if activity_level else 'sedentary'
+        act_level = str(activity_level).lower().strip() if activity_level else 'sedentary'
         mults = {
             'sedentary': 1.2,
-            'lightly_active': 1.375,
-            'moderately_active': 1.55,
-            'very_active': 1.725,
-            'extremely_active': 1.9,
+            'lightly active': 1.375,
+            'moderately active': 1.55,
+            'very active': 1.725,
             'extra_active': 1.9
         }
         mult = mults.get(act_level, 1.2)
@@ -4549,11 +4600,11 @@ class CalculationLogic:
         # Calculate base TDEE
         daily_calories = round(bmr_f * mult)
         
-        # Apply weight goal adjustments if provided
-        if goals == 'Weight Loss':
-            daily_calories = int(daily_calories * 0.85)  # 15% reduction for weight loss
-        elif goals == 'Muscle Gain':
-            daily_calories = int(daily_calories * 1.20)  # 20% increase for muscle muscle gain
+        # Apply goal-based adjustments if goals are provided
+        if goals:
+            adjustment_percent = self._get_goal_adjustment_factor(goals)
+            daily_calories = int(daily_calories * (1 + adjustment_percent))
+            logger.info(f"Applied {adjustment_percent*100:.1f}% adjustment for goal: {goals}")
             
         return daily_calories
 
