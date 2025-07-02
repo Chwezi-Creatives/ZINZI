@@ -233,7 +233,7 @@ class MealRecommendation4:
                             
                             nutritional_info = self._calculate_meal_nutrition(meal_id, ingredients)
                             meal['Nutritional_Info'] = nutritional_info
-                            meal['price'] = 10000
+                            # Price is already included from the database query (m.* in the SELECT statement)
                             
                             meals.append(meal)
                         except Exception as e:

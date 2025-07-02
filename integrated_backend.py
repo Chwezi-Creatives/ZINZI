@@ -41,6 +41,12 @@ import json
 import asyncio
 import math
 from typing import Dict, Any, Optional, List, Union, Tuple
+from functools import wraps
+from meal_algorithm4 import MealRecommendation4
+from location_service import LocationService
+from services.fcm_service import FirebaseMessagingService
+from services.disbursement_service import DisbursementService
+from passlib.context import CryptContext
 
 # Import notification service
 from services.notification_service import NotificationService
@@ -3164,7 +3170,7 @@ class Meals(BaseRepository):
         mid=str(meal_id); updates_lower=lowercase_keys(updates);
         if not updates_lower: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No updates.")
         updates_lower['date_last_edited']=datetime.now() # Auto update edit time
-        set_clauses=[]; params=[]; idx=1; allowed=['meal_name','meal_category','ingredients','complementary_dishes','recipe','recipe_link','image_link','goal','dietary_preference','allergies','disease_management','cuisine_preferences','skill_level','prep_time','meal_description','date_last_edited']
+        set_clauses=[]; params=[]; idx=1; allowed=['meal_name','meal_category','ingredients','complementary_dishes','recipe','recipe_link','image_link','goal','dietary_preference','allergies','disease_management','cuisine_preferences','skill_level','prep_time','meal_description','date_last_edited','price']
         for k,v in updates_lower.items():
              if k in allowed: set_clauses.append(f"{k}=${idx}"); params.append(v); idx+=1
         if not set_clauses: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid fields.")
@@ -3176,7 +3182,7 @@ class Meals(BaseRepository):
         # This query joins ingredients and complementaries - keep as is
         sql_query = """
         WITH MealDetails AS (
-            SELECT m.meal_id, m.meal_name, m.meal_category, m.recipe, m.recipe_link, m.image_link, m.goal, m.dietary_preference, m.allergies, m.disease_management, m.cuisine_preferences, m.skill_level, m.prep_time, m.meal_description FROM meals m
+            SELECT m.meal_id, m.meal_name, m.meal_category, m.recipe, m.recipe_link, m.image_link, m.goal, m.dietary_preference, m.allergies, m.disease_management, m.cuisine_preferences, m.skill_level, m.prep_time, m.meal_description, COALESCE(m.price, 0) as price FROM meals m
         )
         SELECT md.*,
             COALESCE((SELECT STRING_AGG(p.produce_name, ', ') FROM meal_ingredients i JOIN produce p ON i.produce_id = p.produce_id WHERE i.meal_id = md.meal_id), '') AS ingredients,
@@ -3188,7 +3194,7 @@ class Meals(BaseRepository):
         processed = []
         for row in results:
             meal=dict(row);
-            meal_dict={"Meal_id":meal.get("meal_id"),"Meal_name":meal.get("meal_name"),"Meal_category":meal.get("meal_category"), "Recipe":meal.get("recipe"),"Recipe_link":meal.get("recipe_link"),"Image_link":meal.get("image_link"), "Goal":meal.get("goal"),"Dietary_preference":meal.get("dietary_preference"),"Allergies":meal.get("allergies"), "Disease_management":meal.get("disease_management"),"Cuisine_preferences":meal.get("cuisine_preferences"), "Skill_level":meal.get("skill_level"),"Prep_time":meal.get("prep_time"),"Meal_description":meal.get("meal_description"), "Ingredients":meal.get("ingredients") or "","Complementary_dishes":meal.get("complementary_dishes") or "", "Price":10000} # Default price
+            meal_dict={"Meal_id":meal.get("meal_id"),"Meal_name":meal.get("meal_name"),"Meal_category":meal.get("meal_category"), "Recipe":meal.get("recipe"),"Recipe_link":meal.get("recipe_link"),"Image_link":meal.get("image_link"), "Goal":meal.get("goal"),"Dietary_preference":meal.get("dietary_preference"),"Allergies":meal.get("allergies"), "Disease_management":meal.get("disease_management"),"Cuisine_preferences":meal.get("cuisine_preferences"), "Skill_level":meal.get("skill_level"),"Prep_time":meal.get("prep_time"),"Meal_description":meal.get("meal_description"), "Ingredients":meal.get("ingredients") or "","Complementary_dishes":meal.get("complementary_dishes") or "", "Price":meal.get("price", 0)}
             processed.append(meal_dict)
         return processed
 
@@ -4981,6 +4987,303 @@ def handle_stripe_payment_cancellation() -> Dict[str, Any]:
     return {"status": "cancelled", "message": "Payment not completed."}
 
 
+# Rate Limiting and Brute Force Protection
+class RateLimiter:
+    def __init__(self):
+        # Format: {ip: {'attempts': int, 'first_attempt': timestamp, 'last_attempt': timestamp, 'blocked_until': timestamp}}
+        self.ip_tracker = {}
+        # Format: {username: {'attempts': int, 'blocked_until': timestamp}}
+        self.account_tracker = {}
+        self.cleanup_interval = 3600  # Clean up old entries every hour
+        self.last_cleanup = time.time()
+        
+    def _cleanup_old_entries(self):
+        current_time = time.time()
+        if current_time - self.last_cleanup < self.cleanup_interval:
+            return
+            
+        # Clean up IP tracker
+        for ip in list(self.ip_tracker.keys()):
+            entry = self.ip_tracker[ip]
+            # Remove entries older than 24 hours
+            if current_time - entry['last_attempt'] > 86400:
+                del self.ip_tracker[ip]
+                
+        # Clean up account tracker
+        for username in list(self.account_tracker.keys()):
+            entry = self.account_tracker[username]
+            # Remove entries that are no longer blocked and older than 24 hours
+            if 'blocked_until' in entry and entry['blocked_until'] < current_time:
+                if current_time - entry.get('last_attempt', 0) > 86400:
+                    del self.account_tracker[username]
+                    
+        self.last_cleanup = current_time
+    
+    def check_rate_limit(self, ip: str, username: str) -> Optional[Dict[str, Any]]:
+        """Check if the request should be rate limited.
+        
+        Returns:
+            Dict with 'blocked' (bool) and 'retry_after' (int) if blocked, None otherwise
+        """
+        current_time = time.time()
+        self._cleanup_old_entries()
+        
+        # Check account-based rate limiting first
+        account_entry = self.account_tracker.get(username, {'attempts': 0})
+        if 'blocked_until' in account_entry and account_entry['blocked_until'] > current_time:
+            return {
+                'blocked': True,
+                'retry_after': int(account_entry['blocked_until'] - current_time),
+                'reason': 'account_blocked',
+                'message': 'Too many failed login attempts. Please try again later.'
+            }
+            
+        # Check IP-based rate limiting
+        ip_entry = self.ip_tracker.get(ip, {'attempts': 0, 'first_attempt': current_time})
+        
+        # Reset counter if last attempt was more than 15 minutes ago
+        if current_time - ip_entry.get('last_attempt', 0) > 900:  # 15 minutes
+            ip_entry = {'attempts': 0, 'first_attempt': current_time}
+            
+        # Update attempt count and timestamps
+        ip_entry['attempts'] += 1
+        ip_entry['last_attempt'] = current_time
+        self.ip_tracker[ip] = ip_entry
+        
+        # Implement sliding window rate limiting
+        time_window = 900  # 15 minutes in seconds
+        max_attempts = 5   # Maximum 5 attempts per 15 minutes per IP
+        
+        if ip_entry['attempts'] > max_attempts:
+            # Calculate how long to block (exponential backoff)
+            block_duration = min(3600, 60 * (2 ** (ip_entry['attempts'] - max_attempts)))  # Cap at 1 hour
+            ip_entry['blocked_until'] = current_time + block_duration
+            self.ip_tracker[ip] = ip_entry
+            
+            return {
+                'blocked': True,
+                'retry_after': block_duration,
+                'reason': 'ip_blocked',
+                'message': 'Too many requests. Please try again later.'
+            }
+            
+        return None
+    
+    def record_failed_attempt(self, username: str):
+        """Record a failed login attempt for an account."""
+        current_time = time.time()
+        entry = self.account_tracker.get(username, {'attempts': 0, 'last_attempt': 0})
+        
+        # Reset counter if last attempt was more than 15 minutes ago
+        if current_time - entry.get('last_attempt', 0) > 900:  # 15 minutes
+            entry = {'attempts': 0, 'last_attempt': current_time}
+            
+        entry['attempts'] += 1
+        entry['last_attempt'] = current_time
+        
+        # Block account after 3 failed attempts
+        if entry['attempts'] >= 3:
+            # Exponential backoff: 5 minutes * 2^(attempts - 3), max 24 hours
+            block_duration = min(86400, 300 * (2 ** (entry['attempts'] - 3)))
+            entry['blocked_until'] = current_time + block_duration
+            
+        self.account_tracker[username] = entry
+        
+    def clear_attempts(self, username: str, ip: str = None):
+        """Clear failed attempts for a successful login."""
+        if username in self.account_tracker:
+            del self.account_tracker[username]
+        if ip and ip in self.ip_tracker:
+            del self.ip_tracker[ip]
+
+    @staticmethod
+    def get_client_ip(request: Request) -> str:
+        """Get the client's IP address.
+        
+        Args:
+            request: FastAPI Request object
+            
+        Returns:
+            str: Client's IP address
+        """
+        # Try to get X-Forwarded-For header for proxies
+        x_forwarded_for = request.headers.get('x-forwarded-for')
+        if x_forwarded_for:
+            # Get the first IP in the list (original client IP)
+            ip = x_forwarded_for.split(',')[0].strip()
+        else:
+            # Fall back to request client host
+            ip = request.client.host
+        return ip
+
+# Initialize rate limiter
+rate_limiter = RateLimiter()
+
+
+@app.post('/rr/login2', status_code=status.HTTP_200_OK)  # Changed from '/rr/admin/login' for security
+async def admin_login_endpoint(
+    request: Request,
+    username: str = Body(..., embed=True),
+    password: str = Body(..., embed=True),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Authenticate an admin user with rate limiting and brute force protection.
+    
+    Args:
+        username: Admin username
+        password: Admin password
+        
+    Returns:
+        Dict with login status and admin user data if successful
+        
+    Raises:
+        HTTPException: If authentication fails or rate limit is exceeded
+    """
+    # Get client IP for rate limiting
+    client_ip = RateLimiter.get_client_ip(request)
+    
+    # Check rate limits
+    rate_limit = rate_limiter.check_rate_limit(client_ip, username)
+    if rate_limit and rate_limit['blocked']:
+        retry_after = rate_limit['retry_after']
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            detail={
+                'message': rate_limit['message'],
+                'retry_after': retry_after,
+                'status': 'error'
+            }
+        )
+    
+    try:
+        # Attempt login
+        result = await admin_users.login_admin(conn, username, password)
+        
+        # Clear failed attempts on successful login
+        rate_limiter.clear_attempts(username, client_ip)
+        
+        return result
+        
+    except HTTPException as he:
+        # Record failed attempt for rate limiting
+        if he.status_code in [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN]:
+            rate_limiter.record_failed_attempt(username)
+            
+            # Check if account is now blocked
+            account_entry = rate_limiter.account_tracker.get(username, {})
+            if 'blocked_until' in account_entry:
+                retry_after = int(account_entry['blocked_until'] - time.time())
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    headers={"Retry-After": str(retry_after)},
+                    detail={
+                        'message': 'Account temporarily locked due to too many failed attempts. Please try again later.',
+                        'retry_after': retry_after,
+                        'status': 'error'
+                    }
+                )
+                
+        # Re-raise the original exception
+        raise
+        
+    except Exception as e:
+        logger.error(f"Error in admin login endpoint: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail='An error occurred during authentication.'
+        )
+import warnings
+
+class AdminUsers(BaseRepository):
+    """Handles admin user authentication and management."""
+    
+    def __init__(self):
+        # Suppress bcrypt version warning
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    
+    async def login_admin(self, conn: asyncpg.Connection, username: str, password: str) -> Dict[str, Any]:
+        """
+        Authenticate an admin user.
+        
+        Args:
+            conn: Database connection
+            username: Admin username
+            password: Plain text password
+            
+        Returns:
+            Dict with login status and user data if successful
+            
+        Raises:
+            HTTPException: If authentication fails
+        """
+        try:
+            # Query the admin user by username (case-sensitive)
+            # Only select columns that exist in the console_users table
+            sql = """
+                SELECT id, username, password_hash, role, created_at
+                FROM console_users 
+                WHERE username = $1
+            """
+            result = await self._execute_query(conn, sql, (username,), fetch_one=True)
+            
+            if not result:
+                logger.warning(f"Admin login failed: Username '{username}' not found")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail='Invalid username or password.'
+                )
+                
+            stored_hash = result.get('password_hash')
+            if not stored_hash or not stored_hash.startswith('$2'):
+                logger.error(f"Invalid password hash format for admin user: {username}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail='Authentication error.'
+                )
+                
+            # Verify password using bcrypt
+            if not self.pwd_context.verify(password, stored_hash):
+                logger.warning(f"Admin login failed: Invalid password for user: {username}")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail='Invalid username or password.'
+                )
+                
+            # Update last login time
+            try:
+                update_sql = """
+                    UPDATE console_users 
+                    SET last_login = NOW() 
+                    WHERE id = $1
+                """
+                await self._execute_query(conn, update_sql, (result['id'],))
+            except Exception as update_err:
+                logger.error(f"Failed to update last_login for admin {username}: {update_err}")
+            
+            logger.info(f"Admin login successful: {username}")
+            return {
+                'message': 'Login successful',
+                'data': {
+                    'admin_id': result['id'],
+                    'username': result['username'],
+                    'role': result['role'],
+                    'created_at': result['created_at'].isoformat() if result.get('created_at') else None
+                }
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error during admin login: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail='An error occurred during authentication.'
+            )
+
 # --- Backend Class Instantiations ---
 # These instances are created once and used by endpoints via Depends(get_db)
 auth_users = AuthenticationAndUsers()
@@ -4998,8 +5301,7 @@ meal_fetcher = GetAllMeals()
 disbursement_handler = Disbursements()
 supplements_crud = Supplements()
 produce_crud = Produce()
-
-
+admin_users = AdminUsers()  # Add admin users instance
 
 
 @app.get('/rr/users/{user_id}/combined_metrics')
@@ -7228,7 +7530,155 @@ async def create_stakeholder_disbursement_endpoint(stakeholder_id: int=Body(...)
     new_id = await disbursement_handler.insert_stakeholder_disbursement(conn, stakeholder_id, order_data)
     return {"message": "Stakeholder disbursement created", "disbursement_id": new_id}
 
+# --- Batch Price Updates ---
+class BatchUpdates:
+    """Handles batch update operations across different categories"""
+    
+    # Map category names to their respective CRUD classes and ID fields
+    CATEGORY_MAP = {
+        'meals': (Meals, 'meal_id', str),
+        'herbals': (Herbals, 'herbal_id', int),
+        'gadgets': (Gadgets, 'gadget_id', int),
+        'produce': (Produce, 'produce_id', int),
+        'spices': (Spices, 'spice_id', int),
+        'supplements': (Supplements, 'supplement_id', int)
+    }
+
+    @classmethod
+    async def batch_update_prices(cls, conn: asyncpg.Connection, category: str, updates: list[dict]) -> dict:
+        """
+        Update prices for multiple items in a category in a single transaction.
+        
+        Args:
+            conn: Database connection
+            category: The category name (e.g., 'meals', 'herbals')
+            updates: List of dicts with 'id' and 'price' keys
+            
+        Returns:
+            dict: Results of the batch operation
+        """
+        if category not in cls.CATEGORY_MAP:
+            raise ValueError(f"Unsupported category: {category}")
+
+        crud_class, id_field, id_type = cls.CATEGORY_MAP[category]
+        crud = crud_class()
+        results = {'success': [], 'errors': []}
+        success_count = 0
+        error_count = 0
+
+        try:
+            async with conn.transaction():
+                for update in updates:
+                    try:
+                        item_id = update.get('id')
+                        price = update.get('price')
+                        
+                        # Validate and convert ID type
+                        try:
+                            item_id = id_type(item_id)
+                        except (ValueError, TypeError) as e:
+                            results['errors'].append({
+                                'id': item_id,
+                                'error': f'Invalid ID type for {category}: {e}'
+                            })
+                            error_count += 1
+                            continue
+
+                        # Update the item with proper field name for the category
+                        price_field = 'price'  # Default field name
+                        if category == 'meals':
+                            price_field = 'price'
+                        elif category == 'herbals':
+                            price_field = 'price'
+                        elif category == 'gadgets':
+                            price_field = 'price'
+                        elif category == 'produce':
+                            price_field = 'price_per_unit'  # Example: produce might use different field
+                        elif category == 'spices':
+                            price_field = 'price'  # Spices use 'price' field as per update_spice method
+                            
+                        update_data = {price_field: float(price) if price is not None else None}
+                        
+                        # Get the appropriate update method
+                        update_method = getattr(crud, f'update_{category[:-1]}', None)
+                        
+                        if not update_method:
+                            update_method = getattr(crud, 'update_meal', None)  # Fallback to update_meal if exists
+                        
+                        if not update_method:
+                            raise ValueError(f"No update method found for category: {category}")
+                            
+                        await update_method(conn, item_id, update_data)
+                        
+                        results['success'].append({
+                            'id': item_id,
+                            'price': price
+                        })
+                        success_count += 1
+                        
+                    except Exception as e:
+                        error_msg = str(e)
+                        logger.error(f"Error updating {category} {item_id}: {error_msg}")
+                        results['errors'].append({
+                            'id': item_id,
+                            'error': error_msg
+                        })
+                        error_count += 1
+
+            return {
+                'status': 'completed',
+                'success_count': success_count,
+                'error_count': error_count,
+                'results': results
+            }
+
+        except Exception as e:
+            logger.error(f"Batch update transaction failed: {str(e)}")
+            raise
+
+@app.patch('/rr/batch-update-prices')
+async def batch_update_prices_endpoint(
+    batch_data: dict = Body(..., example={
+        "category": "meals",  # or 'herbals', 'gadgets', etc.
+        "updates": [
+            {"id": "M123", "price": 10.99},
+            {"id": "M124", "price": 15.99}
+        ]
+    }),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """Endpoint for batch updating prices across different categories"""
+    try:
+        category = batch_data.get('category', '').lower()
+        updates = batch_data.get('updates', [])
+        
+        if not updates:
+            raise HTTPException(
+                status_code=400,
+                detail="No updates provided"
+            )
+            
+        if not category or category not in BatchUpdates.CATEGORY_MAP:
+            valid_categories = ", ".join(BatchUpdates.CATEGORY_MAP.keys())
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid category. Must be one of: {valid_categories}"
+            )
+        
+        # Process the batch update
+        result = await BatchUpdates.batch_update_prices(conn, category, updates)
+        return JSONResponse(content=result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch update failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Batch update failed: {str(e)}"
+        )
+
 # --- Configuration Setup (Run before App Definition or in Lifespan) ---
-# Moved configuration calls inside functions or removed if env vars are sufficient
+# Moved configuration calls inside functions or removed if env vars are sufficient       
 
 # --- Remove __main__ block ---
