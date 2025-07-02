@@ -380,6 +380,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       Map<String, dynamic> itemPayload;
       if (item['type'] == 'gig') {
         final gigDetails = item['gigDetails'] as Map<String, dynamic>? ?? {};
+        
+        // Calculate gig total price
+        final gigPrice = (gigDetails['price'] as num?)?.toDouble() ?? 0.0;
+        itemTotalPrice = gigPrice; // Set the itemTotalPrice for gigs
+        
         itemPayload = {
           'user_id': userId.toString(),
           'chef_id': gigDetails['chef_id'],
@@ -391,11 +396,22 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             'time': gigDetails['time'],
             'estimated_duration': gigDetails['estimated_duration'],
             'number_of_people': gigDetails['number_of_people'],
-            'price': gigDetails['price'],
+            'price': gigPrice,
             'detailed_description': gigDetails['detailed_description'],
+            // Include additional gig-specific fields if needed
+            'chef_name': gigDetails['chef_name'],
+            'producer_name': gigDetails['producer_name'],
           },
-          'total_price': itemTotalPrice,  // Add total price for gigs
+          'total_price': itemTotalPrice,
+          'payment_method': _selectedPaymentMethod,
+          'payment_phone': paymentPhoneNumber,
+          'delivery_location': deliveryLocation,
+          'notes': _notesController.text.trim(),
         };
+        
+        print('Gig price breakdown:');
+        print('- Base price: $gigPrice');
+        print('- Total: $itemTotalPrice');
       } else {
         // Assume meal type
         final meal = item['meal'] as Map<String, dynamic>? ?? {};

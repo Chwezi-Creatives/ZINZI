@@ -361,22 +361,35 @@ class _Nutri_DetailPageState extends State<Nutri_DetailPage>
   }
 
   void _addToCartWithProducer(Map<String, dynamic> producer) {
+    // Ensure we have a valid price, default to 0.0 if null
+    final price = widget.item.price ?? 0.0;
+    
+    // Create meal data with all required fields
+    final mealData = {
+      'name': widget.item.name,
+      'image_link': widget.item.imagePath,
+      'description': widget.item.description,
+      'price': price, // Ensure price is included in meal data
+      'order_type': widget.item.orderType, // e.g., 'spice', 'gadget', etc.
+      widget.item.productIdKey: widget.item.productIdValue, // e.g., 'spice_id': '12'
+    };
+
+    // Add to cart with proper structure
     cart.ShoppingCart.addItem(
       widget.item.name,
-      widget.item.price ?? 0.0,
+      price, // Price per unit
       quantity: 1,
       selectedproducer: producer,
-      meal: {
-        'name': widget.item.name,
-        'image_link': widget.item.imagePath,
-        'description': widget.item.description,
-        'price': widget.item.price,
-        'order_type': widget.item.orderType, // e.g., 'spice', 'gadget', etc.
-        widget.item.productIdKey:
-            widget.item.productIdValue, // e.g., 'spice_id': '12'
-      },
+      meal: mealData,
       bestservedwith: [], // No complementary section for these items
+      // Explicitly set base price to ensure it's not null
+      basePrice: price,
     );
+    
+    // Update cart state
+    setState(() {
+      isInCart = true;
+    });
   }
 
   @override

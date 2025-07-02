@@ -989,7 +989,8 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'Total per meal',
+                        // Show 'per item' for nutrition items, 'per meal' for regular meals
+                        item['meal']?['order_type'] != null ? 'Total per item' : 'Total per meal',
                         style: GoogleFonts.poppins(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
