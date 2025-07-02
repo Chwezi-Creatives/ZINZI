@@ -14,6 +14,7 @@ import 'package:zinzi/signup_page.dart';
 import 'package:zinzi/user_login_modular.dart';
 import 'package:zinzi/stakeholdersignup.dart' as stakeholder_signup;
 import 'package:zinzi/stk_login_modular.dart';
+import 'console/console_login.dart';
 
 // --- Constants ---
 // Refined Color Palette (kept similar for consistency)
@@ -289,12 +290,44 @@ class _SignUpOrLoginPageState extends State<SignUpOrLoginPage>
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        // Optional Mascot
+                        // Optional Mascot with Admin Access
                         SlideTransition(
                           position: _mascotFloat,
-                          child: Image.asset(
-                            "assets/images/acc.png", // Ensure this path is correct
-                            height: 70, // Slightly smaller
+                          child: GestureDetector(
+                            onDoubleTap: () {
+                              // Navigate to admin console with custom transition
+                              Navigator.of(context).push(
+                                PageRouteBuilder(
+                                  pageBuilder: (context, animation, secondaryAnimation) => const AdminLoginPage(),
+                                  transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                                    const begin = Offset(0.0, 1.0);
+                                    const end = Offset.zero;
+                                    const curve = Curves.easeInOutCubic;
+                                    
+                                    var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+                                    var offsetAnimation = animation.drive(tween);
+                                    
+                                    // Add fade effect
+                                    var fadeTween = Tween<double>(begin: 0.0, end: 1.0);
+                                    var fadeAnimation = animation.drive(fadeTween);
+                                    
+                                    return FadeTransition(
+                                      opacity: fadeAnimation,
+                                      child: SlideTransition(
+                                        position: offsetAnimation,
+                                        child: child,
+                                      ),
+                                    );
+                                  },
+                                  transitionDuration: const Duration(milliseconds: 600),
+                                ),
+                              );
+                            },
+                            child: Image.asset(
+                              "assets/images/acc.png",
+                              height: 70,
+                              semanticLabel: 'Double tap to access admin console',
+                            ),
                           ),
                         ),
                         const SizedBox(height: 20), // Increased spacing

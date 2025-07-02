@@ -330,39 +330,51 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         orderType = item['type'].toString();
       }
 
-      // Calculate item total price
-      double itemTotalPrice = 0.0;
-      if (item['type'] == 'meal') {
-        // Base meal price
-        final pricePerUnit = (item['price'] as num?)?.toDouble() ?? 0.0;
-        final quantity = (item['quantity'] as num?)?.toInt() ?? 1;
-        
-        // Chef price if selected
-        final chefPrice = item['selectedchef'] != null
-            ? _parsePrice(item['selectedchef']?['price'])
-            : 0.0;
-            
-        // Calculate total complementary meal prices
+        // Calculate item total price with breakdown
+        double itemTotalPrice = 0.0;
         double complementaryTotal = 0.0;
-        final complementaries = item['bestservedwith'] as List? ?? [];
-        for (var comp in complementaries) {
-          if (comp is Map && comp['price'] != null) {
-            complementaryTotal += _parsePrice(comp['price']);
+        double basePrice = 0.0;
+        double chefPrice = 0.0;
+        int quantity = 1;
+        
+        if (item['type'] == 'meal') {
+          // Get base price (either from item or calculate from meal)
+          basePrice = (item['basePrice'] as num?)?.toDouble() ?? 
+                     (item['price'] as num?)?.toDouble() ?? 0.0;
+                      
+          quantity = (item['quantity'] as num?)?.toInt() ?? 1;
+          
+          // Chef price if selected
+          chefPrice = item['selectedchef'] != null
+              ? _parsePrice(item['selectedchef']?['price'])
+              : 0.0;
+          
+          // Get complementary items and total
+          complementaryTotal = (item['complementaryTotal'] as num?)?.toDouble() ?? 0.0;
+          
+          // Ensure basePrice is properly initialized
+          final effectiveBasePrice = basePrice;
+          
+          // Calculate price per single unit (base + chef + complements)
+          final pricePerSingleUnit = effectiveBasePrice + chefPrice + complementaryTotal;
+          
+          // For bulk orders, multiply by quantity and number of days
+          if (item['isBulkOrder'] == true) {
+            final planDays = item['planSelectedDays'] as List?;
+            final numberOfDays = planDays?.length ?? 0;
+            itemTotalPrice = pricePerSingleUnit * quantity * numberOfDays;
+          } else {
+            // For regular orders, just multiply by quantity
+            itemTotalPrice = pricePerSingleUnit * quantity;
           }
-        }
-        
-        // Calculate price per single unit (meal + chef + complementaries)
-        final pricePerSingleUnit = pricePerUnit + chefPrice + complementaryTotal;
-        
-        // For bulk orders, multiply by quantity and number of days
-        if (item['isBulkOrder'] == true) {
-          final planDays = item['planSelectedDays'] as List?;
-          final numberOfDays = planDays?.length ?? 0;
-          itemTotalPrice = pricePerSingleUnit * quantity * numberOfDays;
-        } else {
-          // For regular orders, just multiply by quantity
-          itemTotalPrice = pricePerSingleUnit * quantity;
-        }
+          
+          // Debug output
+          print('Price breakdown for $quantity x ${item['title']}:');
+          print('- Base price: $basePrice');
+          print('- Chef price: $chefPrice');
+          print('- Complementary total: $complementaryTotal');
+          print('- Price per unit: $pricePerSingleUnit');
+          print('- Total: $itemTotalPrice');
       }
 
       Map<String, dynamic> itemPayload;
@@ -392,18 +404,36 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           orElse: () => const MapEntry('product_id', null),
         );
 
-        // Build base item payload
+        // Build base item payload with detailed price breakdown
+        final effectiveBasePrice = basePrice; // Ensure basePrice is properly scoped
         itemPayload = {
           'order_type': orderType,
           'type': orderType,
           productIdEntry.key: productIdEntry.value?.toString(),
           'product_id': productIdEntry.value?.toString(),
-          'quantity': (item['quantity'] as num?)?.toInt(),
-          'price': (item['price'] as num?)?.toDouble(),
-          'total_price': itemTotalPrice,  // Add calculated total price
-          'chef_id': item['selectedchef']?['chefid']?.toString(),
+          'quantity': quantity,
+          
+          // Price breakdown
+          'price': itemTotalPrice, // Total price per unit (base + chef + complements)
+          'base_price': effectiveBasePrice, // Base meal price only
+          'chef_price': chefPrice, // Chef service fee if any
+          'complementary_total': complementaryTotal, // Total of all complements
+          'total_price': itemTotalPrice, // Final total (base + chef + complements) * quantity
+          
+          // Item details
+          'meal_id': item['meal']?['Meal_id']?.toString() ?? productIdEntry.value?.toString(),
+          'chef_id': item['selectedchef']?['chef_id']?.toString() ?? item['selectedchef']?['chefid']?.toString(),
           'producer_id': item['selectedproducer']?['producer_id']?.toString(),
-          'bestservedwith': item['bestservedwith'] ?? [],
+          
+          // Include complementary items with details
+          'bestservedwith': (item['complementaryItems'] as List?)?.map((comp) => {
+            'name': comp['name'] ?? '',
+            'price': (comp['price'] as num?)?.toDouble() ?? 0.0,
+            'image': comp['image'] ?? '',
+          }).toList() ?? [],
+          
+          // Include original bestservedwith for backward compatibility
+          'original_bestservedwith': item['bestservedwith'] ?? [],
         };
 
         // Add meal plan data if this is a bulk order
@@ -482,11 +512,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         final responseData = json.decode(response.body);
         final orderId = responseData['order_id'];
         orderIds.add(orderId.toString());
-        totalProcessedPrice += item['type'] == 'gig'
-            ? (item['gigDetails']?['price'] as num?)?.toDouble() ?? 0.0
-            : ((item['price'] as num?)?.toDouble() ?? 0.0) + 
-               ((item['selectedchef']?['price'] is num ? (item['selectedchef']?['price'] as num).toDouble() : 0.0) * (item['quantity'] as num? ?? 1).toDouble());
+        
+        // Update total processed price using the itemTotalPrice we already calculated
+        totalProcessedPrice += itemTotalPrice;
+        
         print('Successfully submitted order $orderId for item: ${item['title'] ?? 'Gig'}');
+        print('Price breakdown - Base: $basePrice, Chef: $chefPrice, Complements: $complementaryTotal, Total: $itemTotalPrice');
         ShoppingCart.removeItems([item]);
       } else {
         final errorMessage = jsonDecode(response.body)?['detail'] ?? response.reasonPhrase ?? 'Unknown error';

@@ -271,7 +271,7 @@ class NutritionPage extends StatefulWidget {
       bool isValid = false;
       if (cachedData != null && cachedTs != null) {
         final cacheTime = DateTime.tryParse(cachedTs.toString());
-        if (cacheTime != null && now.difference(cacheTime) < CacheConfig.chefProducerDetailCacheDuration) { // Use appropriate duration
+        if (cacheTime != null && now.difference(cacheTime) < CacheConfig.allMealsCacheDuration) { // Use 1-day cache duration
           isValid = true;
         }
       }

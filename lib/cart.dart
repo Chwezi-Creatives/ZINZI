@@ -34,14 +34,15 @@ class ShoppingCart {
   static void addItem(
     String title,
     double pricePerUnit, {
-    // Renamed for clarity (price includes meal + complementaries)
     int quantity = 1,
     Map<String, dynamic>? selectedchef,
     Map<String, dynamic>? selectedproducer,
     required Map<String, dynamic> meal,
-    required List<Map<String, dynamic>>
-        bestservedwith, // Currently selected complementaries
-    // --- NEW: Bulk order fields ---
+    required List<Map<String, dynamic>> bestservedwith,
+    // Price breakdown fields
+    double? basePrice,
+    double? complementaryTotal,
+    // Bulk order fields
     bool isBulkOrder = false,
     DateTime? planStartDate,
     DateTime? planEndDate,
@@ -52,26 +53,52 @@ class ShoppingCart {
     final hasChef = selectedchef != null && selectedchef.isNotEmpty;
     final hasProducer = selectedproducer != null && selectedproducer.isNotEmpty;
 
+    // Calculate complementary total if not provided
+    final calculatedComplementaryTotal = complementaryTotal ?? 
+        (bestservedwith.fold<double>(0.0, (double sum, item) {
+          final price = item['price'];
+          return sum + (price is num ? price.toDouble() : 0.0);
+        }));
+    
+    // Calculate base price if not provided (for backward compatibility)
+    final calculatedBasePrice = basePrice ?? 
+        (meal['Price'] != null && meal['Price'] is num 
+            ? (meal['Price'] as num).toDouble() 
+            : 0.0);
+
+    // Calculate chef price if selected (hasChef ensures selectedchef is not null)
+    final calculatedChefPrice = hasChef 
+        ? _parsePrice(selectedchef['price'])
+        : 0.0;
+
+    // Calculate total price (base + chef + complementary)
+    final calculatedTotalPrice = calculatedBasePrice + calculatedChefPrice + calculatedComplementaryTotal;
+
     // Use the helper method
     final existingItemIndex = findItemIndex(title);
 
     final Map<String, dynamic> newItemData = {
       'title': title,
-      'price':
-          pricePerUnit, // Store price per unit (meal + its complementaries)
+      'price': calculatedTotalPrice, // Total price (base + complementary)
+      'basePrice': calculatedBasePrice, // Base meal price only
+      'complementaryTotal': calculatedComplementaryTotal, // Total of all complements
+      'complementaryItems': bestservedwith.map((item) => {
+        'name': item['name'] ?? '',
+        'price': item['price'] is num ? (item['price'] as num).toDouble() : 0.0,
+        'image': item['image'] ?? '',
+      }).toList(),
       'quantity': quantity,
       'selectedchef': hasChef ? selectedchef : null,
       'selectedproducer': hasProducer ? selectedproducer : null,
-      'meal': meal, // Store base meal info
-      'bestservedwith':
-          bestservedwith, // Store ONLY the selected complementaries
+      'meal': meal,
+      'bestservedwith': bestservedwith,
       'type': itemType,
-      // Store bulk order details
+      // Bulk order details
       'isBulkOrder': isBulkOrder,
-      'planStartDate': planStartDate?.toIso8601String(), // Store as ISO string
-      'planEndDate': planEndDate?.toIso8601String(), // Store as ISO string
+      'planStartDate': planStartDate?.toIso8601String(),
+      'planEndDate': planEndDate?.toIso8601String(),
       'planFrequency': planFrequency,
-      'planSelectedDays': planSelectedDays?.toList(), // Store Set as List
+      'planSelectedDays': planSelectedDays?.toList(),
     };
 
     if (existingItemIndex != -1) {
@@ -110,35 +137,30 @@ class ShoppingCart {
     }
     return 0.0;
   }
-
   // **** START FIX: Correctly calculate total price for bulk and regular orders ****
   static double get totalPrice {
     return items.fold(0.0, (sum, item) {
       double itemTotal = 0.0;
       if (item['type'] == 'meal') {
-        final pricePerUnit =
-            (item['price'] as num?)?.toDouble() ?? 0.0; // Price of meal + comps
-        final quantity = (item['quantity'] as num?)?.toInt() ??
-            1; // For plans, this is quantity PER DAY
-
-        // Get chef price if available
-        final chefPrice = item['selectedchef'] != null
-            ? _parsePrice(item['selectedchef']['price'])
-            : 0.0;
-
-        // The price for one "delivery unit" is the meal price, plus its complementaries, plus the chef fee.
-        final pricePerSingleUnit = pricePerUnit + chefPrice;
-
+        // Get base price, chef price, and complementary total
+        final basePrice = (item['basePrice'] as num?)?.toDouble() ?? 0.0;
+        final chefPrice = (item['selectedchef']?['price'] as num?)?.toDouble() ?? 0.0;
+        final complementaryTotal = (item['complementaryTotal'] as num?)?.toDouble() ?? 0.0;
+        final quantity = (item['quantity'] as num?)?.toInt() ?? 1;
+        
+        // Calculate price per unit including all components
+        final pricePerUnit = basePrice + chefPrice + complementaryTotal;
+        
         // Check if it's a bulk order
         final bool isBulkOrder = item['isBulkOrder'] as bool? ?? false;
         if (isBulkOrder) {
-          // For bulk orders, total is (price_per_unit * qty_per_day * num_of_days)
+          // For bulk orders, total is (total_price_per_meal * qty_per_day * num_of_days)
           final planDays = item['planSelectedDays'] as List?;
           final numberOfDays = planDays?.length ?? 0;
-          itemTotal = pricePerSingleUnit * quantity * numberOfDays;
+          itemTotal = pricePerUnit * quantity * numberOfDays;
         } else {
-          // For regular orders, it's just (price_per_unit * quantity)
-          itemTotal = pricePerSingleUnit * quantity;
+          // For regular orders, it's just (total_price_per_meal * quantity)
+          itemTotal = pricePerUnit * quantity;
         }
       } else if (item['type'] == 'gig') {
         final gigDetails = item['gigDetails'] as Map<String, dynamic>? ?? {};
@@ -592,7 +614,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       child: ElevatedButton.icon(
         icon: Icon(Icons.lock_outline, size: 20),
         label: Text(
-            'Checkout (ugx ${totalAmount.toStringAsFixed(0)})'), // Format without decimals
+            'Checkout (${totalAmount.toStringAsFixed(0)} UGX)'),
         style: ElevatedButton.styleFrom(
             backgroundColor:
                 cartItems.isNotEmpty ? Colors.teal[700] : Colors.grey,
@@ -729,6 +751,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
     }
   }
 
+  // **** START FIX: Replaced widget for clean, aligned prices ****
   // Helper Widget for Meal Item Card Content
   Widget _buildMealItemCardContent(
       BuildContext context,
@@ -742,51 +765,23 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       Map<String, dynamic> item,
       List<Map<String, dynamic>> selectedComplementaries,
       Key dismissibleKey) {
-    
     // Define colors
     final Color primaryColor = Colors.teal[800]!;
-    final Color secondaryColor = Colors.teal[700]!;
     final Color backgroundColor = Colors.white;
     final Color borderColor = Colors.grey[200]!;
     final Color textSecondary = Colors.grey[700]!;
     final Color textTertiary = Colors.grey[500]!;
 
-    // Build complementary items column (without prices, they'll be in the right column)
-    Widget complementaryWidget = SizedBox.shrink();
-    if (selectedComplementaries.isNotEmpty) {
-      complementaryWidget = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(height: 6),
-          Text('Includes:', 
-            style: GoogleFonts.poppins(
-              fontSize: 12, 
-              color: textTertiary,
-              fontWeight: FontWeight.w500
-            ),
-          ),
-          ...selectedComplementaries.map((comp) {
-            return Padding(
-              padding: const EdgeInsets.only(top: 4.0),
-              child: Text(
-                '• ${comp['name']?.toString() ?? ''}',
-                style: GoogleFonts.poppins(
-                  fontSize: 12, 
-                  color: primaryColor,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            );
-          }).toList(),
-        ],
-      );
-    }
+    // Get price breakdown
+    final double basePrice = (item['basePrice'] as num?)?.toDouble() ?? 0.0;
+    final double chefPrice = (item['selectedchef']?['price'] != null)
+        ? ShoppingCart._parsePrice(item['selectedchef']['price'])
+        : 0.0;
 
-    // Build chef/producer info (without price)
+    // Build chef/producer info
     Widget buildSourceInfo() {
       if (sourceInfo.isEmpty) return SizedBox.shrink();
-      
+
       return Padding(
         padding: const EdgeInsets.only(top: 4.0, bottom: 2.0),
         child: Row(
@@ -795,7 +790,9 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
             SizedBox(width: 4),
             Expanded(
               child: Text(
-                sourceInfo.replaceAll('Cooked by: ', '').replaceAll('From: ', ''),
+                sourceInfo
+                    .replaceAll('Cooked by: ', '')
+                    .replaceAll('From: ', ''),
                 style: GoogleFonts.poppins(
                   fontSize: 12,
                   color: textSecondary,
@@ -851,109 +848,183 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
                   fit: BoxFit.cover,
                   placeholder: (c, u) => Container(
                     color: Colors.grey[100],
-                    child: Center(child: Icon(Icons.image, color: Colors.grey[300])),
+                    child: Center(
+                        child: Icon(Icons.image, color: Colors.grey[300])),
                   ),
                   errorWidget: (c, u, e) => Container(
                     color: Colors.grey[100],
-                    child: Center(child: Icon(Icons.broken_image, color: Colors.grey[300])),
+                    child: Center(
+                        child:
+                            Icon(Icons.broken_image, color: Colors.grey[300])),
                   ),
                 ),
               ),
             ),
-            
+
             SizedBox(width: 12),
-            
-            // Main content
+
+            // Main content - ALL content and prices are now in here for alignment.
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Title
-                  Text(
-                    title,
-                    style: GoogleFonts.poppins(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: primaryColor,
-                      height: 1.2,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  // Row 1: Title and Total Price for this line item in the cart
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: GoogleFonts.poppins(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: primaryColor,
+                            height: 1.2,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        itemTotal.toStringAsFixed(0),
+                        style: GoogleFonts.poppins(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: primaryColor,
+                        ),
+                        textAlign: TextAlign.right,
+                      ),
+                    ],
                   ),
-                  
+
                   // Chef/producer info
                   buildSourceInfo(),
-                  
-                  // Complementary items
-                  complementaryWidget,
-                  
+
+                  SizedBox(height: 8),
+
+                  // -- PRICE BREAKDOWN SECTION --
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Base price and chef service
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Base meal',
+                              style: GoogleFonts.poppins(
+                                  fontSize: 12, color: textSecondary)),
+                          Text(basePrice.toStringAsFixed(0),
+                              style: GoogleFonts.poppins(
+                                  fontSize: 12, color: textSecondary)),
+                        ],
+                      ),
+
+                      if (chefPrice > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2.0),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Chef service',
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 12, color: textSecondary)),
+                              Text(chefPrice.toStringAsFixed(0),
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 12, color: textSecondary)),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+
+                  // Complementary items section with subtle separator
+                  if (selectedComplementaries.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4.0, bottom: 2.0),
+                      child: Text(
+                        'Best served with:',
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          color: Colors.grey[500],
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ),
+
+                  ...selectedComplementaries.map((comp) {
+                    final price = (comp['price'] as num?)?.toDouble() ?? 0.0;
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 2.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '• ${comp['name']?.toString() ?? ''}',
+                              style: GoogleFonts.poppins(
+                                  fontSize: 12, color: textSecondary),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            price.toStringAsFixed(0),
+                            style: GoogleFonts.poppins(
+                                fontSize: 12, color: textSecondary),
+                            textAlign: TextAlign.right,
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4.0),
+                    child: Divider(height: 1, color: borderColor),
+                  ),
+
+                  // Total per meal (base + chef + complements)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Total per meal',
+                        style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: primaryColor),
+                      ),
+                      Text(
+                        (basePrice + chefPrice + ((item['complementaryTotal'] as num?)?.toDouble() ?? 0.0)).toStringAsFixed(0),
+                        style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: primaryColor),
+                      ),
+                    ],
+                  ),
+
+                  // -- END OF BREAKDOWN --
+
                   // Bulk order info if applicable
                   if (item['isBulkOrder'] as bool? ?? false)
                     _buildBulkOrderSummary(item),
-                  
+
                   // Quantity controls
                   Padding(
-                    padding: const EdgeInsets.only(top: 4.0),
+                    padding: const EdgeInsets.only(top: 8.0),
                     child: _buildQuantityControls(item),
                   ),
                 ],
               ),
-            ),
-            
-            // Price column
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                // Main item price
-                Text(
-                  pricePerUnit.toStringAsFixed(0),
-                  style: GoogleFonts.poppins(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: primaryColor,
-                  ),
-                ),
-                
-                // Chef price if exists
-                if (item['selectedchef']?['price'] != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2.0),
-                    child: Text(
-                      ShoppingCart._parsePrice(item['selectedchef']['price']).toStringAsFixed(0),
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        color: secondaryColor,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                
-                // Complementary items prices
-                ...selectedComplementaries.map((comp) {
-                  final price = (comp['price'] as num?)?.toDouble() ?? 0.0;
-                  final priceText = price.truncateToDouble() == price 
-                      ? price.toInt().toString() 
-                      : price.toString();
-                  
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 2.0),
-                    child: Text(
-                      priceText,
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        color: primaryColor.withOpacity(0.8),
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ],
             ),
           ],
         ),
       ),
     );
   }
+  // **** END FIX ****
 
   // **** START FIX: Add a helper widget to display bulk order info ****
   Widget _buildBulkOrderSummary(Map<String, dynamic> item) {

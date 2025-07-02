@@ -2,7 +2,7 @@
 class CacheConfig {
   static const Duration metricsCacheDuration = Duration(days: 2);
   static const Duration preferencesCacheDuration = Duration(days: 2);
-  static const Duration allMealsCacheDuration = Duration(days: 2);
+  static const Duration allMealsCacheDuration = Duration(days: 1);
   static const Duration chefNetCacheDuration = Duration(days: 2);
   static const Duration profileCacheDuration = Duration(days: 2);
   static const Duration mealDetailCacheDuration = Duration(days: 2);

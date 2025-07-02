@@ -14,6 +14,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'dart:async';
 import 'package:google_fonts/google_fonts.dart'; // For consistent font
 import 'package:shared_preferences/shared_preferences.dart';
+import  'package:zinzi/onboard.dart';
 
 import 'package:zinzi/user_cache.dart'; // Import UserCache
 import 'package:zinzi/cache_config.dart'; // Import CacheConfig
@@ -1027,26 +1028,28 @@ class _MealDetailScreenState extends State<MealDetailScreen>
     // Get selected complementaries data
     List<Map<String, dynamic>> currentlySelectedComplementaries = _getSelectedComplementariesData();
 
-     // Calculate new price per unit based on current selections
+     // Calculate complementary total price
     double complementaryTotalPrice = currentlySelectedComplementaries.fold(0, (sum, item) => sum + (item['price'] as double? ?? 0.0));
     double singleItemPriceWithComplementaries = mainMealPrice + complementaryTotalPrice;
-
 
     // Update cart - addItem will replace the existing item
     ShoppingCart.addItem(
       mealTitle,
-      singleItemPriceWithComplementaries, // Pass the NEW price PER UNIT
+      singleItemPriceWithComplementaries, // Pass the combined price for backward compatibility
       quantity: currentQuantity, // Keep the existing quantity
       selectedchef: selectedChef, // Keep the currently selected chef
       selectedproducer: selectedProducer, // Keep the currently selected producer
       meal: widget.meal,
       bestservedwith: currentlySelectedComplementaries, // Pass the NEW list of selected items
-       // Keep bulk details consistent with the cart item
-       isBulkOrder: ShoppingCart.isBulkOrder(mealTitle),
-       planStartDate: ShoppingCart.getPlanStartDate(mealTitle),
-       planEndDate: ShoppingCart.getPlanEndDate(mealTitle),
-       planFrequency: ShoppingCart.getPlanFrequency(mealTitle),
-       planSelectedDays: ShoppingCart.getPlanSelectedDays(mealTitle),
+      // Price breakdown
+      basePrice: mainMealPrice, // Pass the base meal price
+      complementaryTotal: complementaryTotalPrice, // Pass the complementary dishes total
+      // Keep bulk details consistent with the cart item
+      isBulkOrder: ShoppingCart.isBulkOrder(mealTitle),
+      planStartDate: ShoppingCart.getPlanStartDate(mealTitle),
+      planEndDate: ShoppingCart.getPlanEndDate(mealTitle),
+      planFrequency: ShoppingCart.getPlanFrequency(mealTitle),
+      planSelectedDays: ShoppingCart.getPlanSelectedDays(mealTitle),
     );
      // Optional: Show feedback that cart was updated
      // showCustomSnackBar(context, 'Cart updated with complementary items.');
@@ -3349,8 +3352,10 @@ class _MealDetailScreenState extends State<MealDetailScreen>
         });
      }
 
-    showCustomSnackBar(context, '${isBulk ? 'Meal plan' : mealTitle} added to cart successfully');
-     // Optionally navigate to cart or provide stronger feedback
+    // Show the custom dialog instead of snackbar
+    if (mounted) {
+      _showAddedToCartDialog(mealTitle, isBulk);
+    }
   }
 
 
@@ -3363,13 +3368,146 @@ class _MealDetailScreenState extends State<MealDetailScreen>
  Widget _buildChefProducerSelection() => SizedBox.shrink();
  Widget _buildComplementaryMeals() => SizedBox.shrink(); // Replaced by _buildBestServedWith
 
+  // Show a custom dialog when item is added to cart
+  void _showAddedToCartDialog(String mealTitle, bool isBulk) {
+    showDialog(
+      context: context,
+      barrierDismissible: true, // Allow tapping outside to dismiss
+      builder: (BuildContext context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16.0),
+          ),
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          child: Container(
+            padding: EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black26,
+                  blurRadius: 10,
+                  offset: Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Success Icon with green colors
+                Container(
+                  padding: EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.green[50],
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.check_circle,
+                    color: Colors.green[600],
+                    size: 60,
+                  ),
+                ),
+                SizedBox(height: 20),
+                // Title
+                Text(
+                  'Added to Cart!',
+                  style: GoogleFonts.poppins(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.teal[900],
+                  ),
+                ),
+                SizedBox(height: 8),
+                // Message
+                Text(
+                  isBulk
+                      ? 'Your meal plan has been added to cart.'
+                      : '$mealTitle has been added to your cart.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.poppins(
+                    fontSize: 16,
+                    color: Colors.grey[600],
+                    height: 1.4,
+                  ),
+                ),
+                SizedBox(height: 24),
+                // Buttons Row
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    // Continue Exploring Button
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          // Navigate to landing page with a clean stack
+                          Navigator.of(context).pushAndRemoveUntil(
+                            MaterialPageRoute(builder: (context) => LandingPage()),
+                            (Route<dynamic> route) => false,
+                          );
+                        },
+                        style: OutlinedButton.styleFrom(
+                          padding: EdgeInsets.symmetric(vertical: 14),
+                          side: BorderSide(color: Colors.teal[700]!), // Teal border
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: Text(
+                          'Continue Exploring',
+                          style: GoogleFonts.poppins(
+                            color: Colors.teal[700], // Teal text
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 12),
+                    // View Cart Button
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          // Navigate to cart screen
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (context) => ShoppingCartScreen()),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          padding: EdgeInsets.symmetric(vertical: 14),
+                          backgroundColor: Colors.teal[700], // Teal background
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          elevation: 2,
+                        ),
+                        child: Text(
+                          'View Cart',
+                          style: GoogleFonts.poppins(
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
 } // End _MealDetailScreenState
 
 // --- Custom SnackBar Utility ---
 // Updated to include an optional error style
 void showCustomSnackBar(BuildContext context, String message, {bool isError = false}) {
   // Ensure context is still valid
-   final navigator = Navigator.maybeOf(context);
+  final navigator = Navigator.maybeOf(context);
    if (navigator == null || !navigator.mounted) return;
 
 

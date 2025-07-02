@@ -1030,9 +1030,6 @@ class _AllMealsScreenState extends State<AllMealsScreen>
             .map((e) => e.toString().trim())
             .where((s) => s.isNotEmpty));
       }
-
-      // Process complementary dish images
-      final List<String> complementaryImageLinks = [];
       
       // Build a lookup map from meal name (lowercased) to meal data for all meals
       final Map<String, Map<String, dynamic>> mealNameToMealMap = {
@@ -1041,21 +1038,41 @@ class _AllMealsScreenState extends State<AllMealsScreen>
             m['Meal_name'].toString().toLowerCase(): m
       };
 
-      // Get image links for complementary dishes
+      // Create a list of complementary items with name, price, and image
+      final List<Map<String, dynamic>> bestServedWith = [];
+      
+      // Process each complementary dish
       for (String dishName in complementaryDishNames) {
         final complementaryMeal = mealNameToMealMap[dishName.toLowerCase()];
+        
+        // Get the image URL
         String imageUrl = 'assets/images/cover.png'; // Default placeholder
-
         if (complementaryMeal != null && complementaryMeal['Image_link'] != null) {
           imageUrl = _processImagePath(complementaryMeal['Image_link'], dishName);
         } else {
           print("Complementary dish '$dishName' or its image not found. Using placeholder.");
         }
-        complementaryImageLinks.add(imageUrl);
+        
+        // Get the price, defaulting to 0.0 if not found
+        double price = 0.0;
+        if (complementaryMeal != null && complementaryMeal['Price'] != null) {
+          if (complementaryMeal['Price'] is num) {
+            price = complementaryMeal['Price'].toDouble();
+          } else if (complementaryMeal['Price'] is String) {
+            price = double.tryParse(complementaryMeal['Price'].replaceAll(RegExp(r'[^\d.]'), '')) ?? 0.0;
+          }
+        }
+        
+        // Add to the bestServedWith list
+        bestServedWith.add({
+          'name': dishName,
+          'price': price,
+          'image': imageUrl,
+        });
       }
 
-      // Add the processed complementary images to the meal data
-      mealToSend['complementary_images'] = complementaryImageLinks;
+      // Add the processed complementary items to the meal data
+      mealToSend['bestservedwith'] = bestServedWith;
 
       // Ensure the meal has all required fields with default values if missing
       mealToSend['Meal_name'] = mealToSend['Meal_name'] ?? 'Unknown Meal';
