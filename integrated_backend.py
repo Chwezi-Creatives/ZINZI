@@ -1183,11 +1183,33 @@ class AuthenticationAndUsers(BaseRepository):
         # Get current timestamp for reference
         current_time = datetime.now()
         
+        # Define mapping of user types to their respective tables and ID columns
+        USER_TYPE_TABLES = {
+            'user': 'users',
+            'chef': 'chefs',
+            'producer': 'producers',
+            'transporter': 'transporters',
+            'stakeholder': 'stakeholders'
+        }
+        
+        # Normalize user_type to lowercase for case-insensitive comparison
+        user_type_lower = user_type.lower()
+        
+        # Validate user_type
+        if user_type_lower not in USER_TYPE_TABLES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f'Invalid user type: {user_type}. Must be one of: {list(USER_TYPE_TABLES.keys())}'
+            )
+        
+        # Get the appropriate table name for this user type
+        table_name = USER_TYPE_TABLES[user_type_lower]
+        
         # Log the verification attempt with all relevant details
         logger.info(
             f"Verification attempt - "
             f"User ID: {user_id}, "
-            f"Type: {user_type}, "
+            f"Type: {user_type} (table: {table_name}), "
             f"Code: {verification_code}, "
             f"Current Time: {current_time}"
         )
@@ -1215,7 +1237,20 @@ class AuthenticationAndUsers(BaseRepository):
               AND LOWER(user_type) = LOWER($3)
         """
         
-        update_query = "UPDATE users SET is_email_verified = TRUE WHERE user_id = $1"
+        # Dynamic update query based on user type
+        update_query = f"UPDATE {table_name} SET is_email_verified = TRUE WHERE "
+        if user_type_lower == 'user':
+            update_query += "user_id"
+        elif user_type_lower == 'chef':
+            update_query += "chefid"
+        elif user_type_lower == 'producer':
+            update_query += "producer_id"
+        elif user_type_lower == 'transporter':
+            update_query += "transporter_id"
+        elif user_type_lower == 'stakeholder':
+            update_query += "stakeholder_id"
+        update_query += " = $1"
+        
         delete_query = "DELETE FROM email_verifications WHERE user_id = $1 AND verification_code = $2"
         
         try:
@@ -2915,6 +2950,27 @@ class Transporters(BaseRepository):
         for t in transporters_list: p_trans=dict(t); [p_trans.update({k:v.isoformat()}) for k,v in p_trans.items() if isinstance(v, (datetime, date))]; processed.append(p_trans)
         if transporter_id is not None and not processed: logger.warning(f"Transporter not found ID: {transporter_id}"); return []
         return processed
+
+    def _check_restricted_fields(self, updates: dict, restricted_fields: list = None):
+        """
+        Check if any restricted fields are being updated.
+        
+        Args:
+            updates: Dictionary of updates to check
+            restricted_fields: List of field names that cannot be updated
+            
+        Raises:
+            HTTPException: 403 if any restricted fields are found in updates
+        """
+        if restricted_fields is None:
+            restricted_fields = ['transporter_id', 'email', 'registration_date', 'user_type']
+            
+        restricted_updates = [field for field in updates if field in restricted_fields]
+        if restricted_updates:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f'Cannot update restricted fields: {", ".join(restricted_updates)}'
+            )
 
     async def update_transporter(self, conn: asyncpg.Connection, transporter_id: int, updates: dict):
         # ... (uses conn for _execute_query) ...
@@ -5353,7 +5409,7 @@ async def request_password_reset(
         # Define valid user types and their corresponding tables/ID columns
         user_type_map = {
             'user': ('users', 'user_id'),
-            'chef': ('chefs', 'chef_id'),
+            'chef': ('chefs', 'chefid'), #chefid is not an error. dont change it to chef_id or ou willbreak the chefs table
             'producer': ('producers', 'producer_id'),
             'transporter': ('transporters', 'transporter_id')
         }
@@ -5649,8 +5705,9 @@ async def resend_verification_email(
                         bg_conn, email_to_send, user_id, user_type_lower
                     )
                     # Send the email with the verification code
-                    await auth_handler._send_verification_email(
-                        email_to_send, verification_code, user_type_lower
+                    await auth_handler.send_verification_email_gmail(
+                        to_email=email_to_send, 
+                        verification_code=verification_code
                     )
                     # Success message is logged in _send_verification_email
             except Exception as e:
