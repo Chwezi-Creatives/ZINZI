@@ -310,12 +310,14 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
             ? null
             : _licensePlateController.text.trim(),
         'profile_image_url': continueWithoutImage ? null : _uploadedImageUrl,
-        'location_coordinates':
-            _locationCoordinates.isNotEmpty ? _locationCoordinates : null,
-        'address':
-            _humanReadableAddress.isNotEmpty ? _humanReadableAddress : null,
+        'location': _locationCoordinates.isNotEmpty 
+            ? '${_humanReadableAddress.isNotEmpty ? "$_humanReadableAddress, " : ""}$_locationCoordinates'
+            : '',
         'user_type': 'Transporter',
       };
+      
+      // Debug print to verify location data
+      print('Sending location data: ${signupData['location']}');
 
       // --- Actual API Call ---
       try {

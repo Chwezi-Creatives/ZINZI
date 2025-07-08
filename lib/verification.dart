@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:zinzi/transooter_dash_before_mapbox.dart';
 import 'user_metrics.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -347,125 +348,294 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
     if (!_isUserDataLoaded) {
       return Scaffold(
         appBar: AppBar(
-          title: const Text('Email Verification'),
+          title: Text(
+            'Email Verification',
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
           backgroundColor: Colors.teal,
         ),
         body: const Center(
-          child: CircularProgressIndicator(),
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
+          ),
         ),
       );
     }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Email Verification'),
+        title: Text(
+          'Email Verification',
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
         backgroundColor: Colors.teal,
       ),
-      body: Stack(
-        children: [
-          // Background image within a container
-          Container(
-            width: double.infinity,
-            height: double.infinity,
-            decoration: BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage('assets/images/soft.jpg'),
-                fit: BoxFit.cover,
-              ),
-            ),
-          ),
-          // Overlaying content
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Verification image
-                  Container(
-                    height: 100,
-                    margin: const EdgeInsets.only(bottom: 16.0),
-                    decoration: BoxDecoration(
-                      color: Colors.transparent,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: Image.asset(
-                        'assets/images/verification.jpg',
-                        fit: BoxFit.cover,
-                      ),
-                    ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return Stack(
+            children: [
+              // Background with subtle gradient
+              Container(
+                width: double.infinity,
+                height: double.infinity,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.white,
+                      Colors.teal[50]!,
+                    ],
                   ),
-                  const SizedBox(height: 80),
-                  const Text(
-                    'Enter your verification code:',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.teal,
+                ),
+              ),
+              // Overlaying content
+              SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight,
+                    minWidth: constraints.maxWidth,
+                  ),
+                  child: IntrinsicHeight(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: constraints.maxWidth > 500 
+                            ? constraints.maxWidth * 0.15 
+                            : 24.0,
+                        vertical: 24.0,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // Verification image with better spacing
+                          Container(
+                            height: constraints.maxHeight * 0.15,
+                            margin: const EdgeInsets.only(top: 16.0, bottom: 40.0),
+                            decoration: BoxDecoration(
+                              color: Colors.transparent,
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.05),
+                                  blurRadius: 20,
+                                  offset: const Offset(0, 10),
+                                ),
+                              ],
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(16),
+                              child: Image.asset(
+                                'assets/images/verification.jpg',
+                                fit: BoxFit.contain,
+                              ),
+                            ),
+                          ),
+                  // Main heading with better hierarchy
+                  Text(
+                    'Verify Your Email',
+                    style: GoogleFonts.poppins(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.teal[900],
+                      height: 1.3,
                     ),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 8),
+                  // Subtitle text
+                  Text(
+                    'We\'ve sent a verification code to your email',
+                    style: GoogleFonts.poppins(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w400,
+                      color: Colors.grey[600],
+                      height: 1.5,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 32),
                   Form(
                     key: _formKey,
                     child: TextFormField(
                       controller: _codeController,
                       decoration: InputDecoration(
                         labelText: 'Verification Code',
-                        filled: true,
-                        fillColor: Colors.white.withOpacity(0.8),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                        labelStyle: GoogleFonts.poppins(
+                          color: Colors.teal[800],
+                          fontSize: 15,
                         ),
+                        floatingLabelStyle: GoogleFonts.poppins(
+                          color: Colors.teal[700],
+                          fontWeight: FontWeight.w500,
+                        ),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: Colors.grey[300]!,
+                            width: 1.5,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: Colors.teal[700]!, 
+                            width: 2,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: Colors.grey[300]!,
+                            width: 1.5,
+                          ),
+                        ),
+                        errorBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: Colors.red[400]!,
+                            width: 1.5,
+                          ),
+                        ),
+                        focusedErrorBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: Colors.red[400]!,
+                            width: 2,
+                          ),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 18,
+                        ),
+                        errorStyle: GoogleFonts.poppins(
+                          color: Colors.red[600],
+                          fontSize: 13,
+                        ),
+                      ),
+                      style: GoogleFonts.poppins(
+                        color: Colors.black87,
+                        fontSize: 15,
                       ),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
-                          return 'Required';
+                          return 'Please enter the verification code';
                         }
                         return null;
                       },
+                      onChanged: (value) {
+                        // Clear any existing error when user types
+                        if (_formKey.currentState?.validate() ?? false) {
+                          setState(() {});
+                        }
+                      },
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: _isLoading ? null : _verifyEmail,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 16, horizontal: 32),
-                      backgroundColor: Colors.teal,
-                    ),
-                    child: _isLoading
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : const Text('VERIFY',
-                            style: TextStyle(color: Colors.white)),
-                  ),
-                  const SizedBox(height: 20),
-                  if (_verificationFailed) ...[
-                    const SizedBox(height: 10),
-                    TextButton(
-                      onPressed: _isLoading ? null : _resendVerificationCode,
-                      child: const Text(
-                        'Resend Verification Code',
-                        style: TextStyle(
-                          color: Colors.teal,
-                          fontWeight: FontWeight.bold,
+                  const SizedBox(height: 28),
+                  // Verify button with loading state
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: _isLoading ? null : _verifyEmail,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.teal[700],
+                        foregroundColor: Colors.white,
+                        elevation: 4,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        // Add shadow and animation
+                        shadowColor: Colors.teal.withOpacity(0.3),
+                        animationDuration: const Duration(milliseconds: 200),
                       ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2.5,
+                              ),
+                            )
+                          : Text(
+                              'VERIFY EMAIL',
+                              style: GoogleFonts.poppins(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 16,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
                     ),
-                    const SizedBox(height: 10),
+                  ),
+                  const SizedBox(height: 24),
+                  // Resend code or status message
+                  if (_verificationFailed) ...[
+                    Column(
+                      children: [
+                        Text(
+                          'Code not received?',
+                          style: GoogleFonts.poppins(
+                            color: Colors.grey[700],
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 8),
+                        TextButton(
+                          onPressed: _isLoading ? null : _resendVerificationCode,
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 12, horizontal: 20),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            backgroundColor: Colors.teal[50],
+                          ),
+                          child: Text(
+                            'Resend Verification Code',
+                            style: GoogleFonts.poppins(
+                              color: Colors.teal[800],
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
                   ] else
-                    const Text(
-                      "Didn't receive a code? Check your email it could take a few seconds to arrive.",
-                      style: TextStyle(fontSize: 14, color: Colors.black54),
+                    Text(
+                      "If you don't see the email, check your spam folder or wait a moment.",
+                      style: GoogleFonts.poppins(
+                        color: Colors.grey[600],
+                        fontSize: 13,
+                        fontWeight: FontWeight.w400,
+                        height: 1.5,
+                      ),
                       textAlign: TextAlign.center,
                     ),
-                ],
+                  
+                  // Add some bottom padding for better scrolling on small devices
+                  SizedBox(height: MediaQuery.of(context).padding.bottom + 16),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
-        ],
+            ],
+          );
+        },
       ),
     );
   }

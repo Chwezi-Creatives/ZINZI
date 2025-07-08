@@ -1,6 +1,7 @@
 // lib/console.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'console_api_service.dart';
 import 'console_data_models.dart';
@@ -425,19 +426,59 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
       return;
     }
 
-    // Show loading indicator
+    // Show loading indicator with countdown
     final scaffoldMessenger = ScaffoldMessenger.of(context);
-    final loadingSnackBar = SnackBar(
-      content: Row(
-        children: [
-          const CircularProgressIndicator(value: null, strokeWidth: 2.0),
-          const SizedBox(width: 16.0),
-          Text('Updating ${_items.length} items...'),
-        ],
+    int remainingItems = _items.length;
+    
+    // Create a controller to manage the snackbar content
+    final snackbarController = StreamController<int>.broadcast();
+    
+    // Show initial snackbar
+    final snackbar = SnackBar(
+      content: StreamBuilder<int>(
+        stream: snackbarController.stream,
+        initialData: remainingItems,
+        builder: (context, snapshot) {
+          final currentCount = snapshot.data ?? remainingItems;
+          final total = _items.length;
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  value: null,
+                  strokeWidth: 2.0,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+              const SizedBox(width: 12.0),
+              Flexible(
+                child: Text(
+                  'Updating $currentCount/$total items...',
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 2,
+                ),
+              ),
+            ],
+          );
+        },
       ),
       duration: const Duration(minutes: 1), // Long duration to prevent auto-dismissal
     );
-    scaffoldMessenger.showSnackBar(loadingSnackBar);
+    
+    scaffoldMessenger.showSnackBar(snackbar);
+    
+    // Start countdown timer
+    final timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (remainingItems > 0) {
+        remainingItems--;
+        snackbarController.add(remainingItems);
+      } else {
+        timer.cancel();
+      }
+    });
 
     try {
       // Prepare updates
@@ -484,6 +525,10 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
         updates: updates,
       );
 
+      // Cancel the timer and close the controller
+      timer.cancel();
+      await snackbarController.close();
+      
       // Remove loading indicator
       scaffoldMessenger.hideCurrentSnackBar();
 
@@ -562,10 +607,13 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
       print('Batch update error: $e');
       print('Stack trace: $stackTrace');
       
+      // Cancel the timer and close the controller in case of error
+      timer.cancel();
+      await snackbarController.close();
+      
       // Remove loading indicator
       scaffoldMessenger.hideCurrentSnackBar();
-      
-      // Show user-friendly error message
+      _showErrorSnackBar('Error during batch update: $e');
       if (mounted) {
         _showErrorSnackBar(
           'An error occurred while updating prices. Please try again. ' 

@@ -5,7 +5,9 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 import 'package:zinzi/splash.dart';
+import 'package:zinzi/stakeholdersignup.dart';
 import 'package:zinzi/user_preferences.dart';
+import 'package:zinzi/verification.dart';
 import 'notifications/notification_provider.dart';
 import 'notifications/fcm_service.dart'
     if (dart.library.js) 'notifications/fcm_service_web.dart' as fcm;

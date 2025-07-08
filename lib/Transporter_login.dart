@@ -6,7 +6,8 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi/transooter_dash_before_mapbox.dart';
 import 'package:zinzi/transporter_signup.dart';
-import 'notifications/fcm_service.dart';
+import 'package:zinzi/notifications/fcm_service.dart';
+import 'package:zinzi/screens/password_recovery_screen.dart';
 //import 'transoorter_dash_new.dartp'; // being tested for now
 
 // --- Hardcoded Colors (Copied) ---
@@ -199,7 +200,31 @@ class _TransporterLoginPageState extends State<TransporterLoginPage> {
                   const SizedBox(height: 16),
                   _buildTextFormField( controller: _passwordController, labelText: "Password", hintText: "Enter your password", icon: Icons.lock_outline, obscureText: _obscurePassword, validator: (v) => (v == null || v.isEmpty) ? "Enter password" : null, suffixIcon: IconButton( icon: Icon( _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined, color: primaryTeal.withOpacity(0.7), size: 20, ), onPressed: () => setState(() => _obscurePassword = !_obscurePassword), ), ),
                   const SizedBox(height: 10),
-                  Align( alignment: Alignment.centerRight, child: TextButton( onPressed: () { _showSnackBar("Forgot Password tapped (Not Implemented)", isError: false); }, style: TextButton.styleFrom( padding: EdgeInsets.zero, minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap, ), child: const Text("Forgot Password?", style: TextStyle(color: subtleTextColor, fontSize: 13)), ), ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => PasswordRecoveryScreen(
+                              userType: 'transporter',
+                              email: _identifierController.text.isNotEmpty ? _identifierController.text : null,
+                            ),
+                          ),
+                        );
+                      },
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text(
+                        "Forgot Password?",
+                        style: TextStyle(color: subtleTextColor, fontSize: 13),
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 25),
                   _buildLoginButton(),
                   const SizedBox(height: 30),

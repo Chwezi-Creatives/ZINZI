@@ -9,24 +9,11 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
-// Make sure this import is correct
-// import 'package:zinzi/verification.dart';
+import 'package:zinzi/verification.dart';
 // Placeholder for verification page if the above is wrong:
 import 'package:flutter/cupertino.dart'; // Using Cupertino for placeholder
 import 'package:shared_preferences/shared_preferences.dart';
 import 'notifications/fcm_service.dart';
-
-// --- Placeholder Verification Page ---
-class EmailVerificationPage extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text("Verify Email")),
-      body: Center(child: Text("Verification screen placeholder")),
-    );
-  }
-}
-// --- End Placeholder ---
 
 // Assuming API_BASE_URL-intranet is set, provide a fallback
 final apibaseurl =
