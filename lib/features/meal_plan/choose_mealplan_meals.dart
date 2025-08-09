@@ -1,15 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-
-import '../../../utils/debouncer.dart';
+import 'package:provider/provider.dart';
+import '../../features/subscription/subscription_provider.dart';
 
 // Color constants
 const Color kColorPrimary = Color(0xFF00796B);
@@ -35,80 +34,92 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
     with SingleTickerProviderStateMixin {
   // API Configuration
   late final String apiBaseUrl;
-  static const int _mealsPerPage = 20;
-  int _currentPage = 1;
-  bool _hasMore = true;
+  // Loading state
   bool _isLoading = false;
-  bool _isLoadingMore = false;
   bool _isSaving = false;
-
-  // Controllers
+  bool _isLoadingChefs = false;
+  List<Map<String, dynamic>> _chefs = [];
+  String? _selectedChefId;
   final TextEditingController _searchController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
-  final _debouncer = Debouncer(delay: const Duration(milliseconds: 300));
-  final Map<String, AnimationController> _animationControllers = {};
-
-  // State variables
   List<Map<String, dynamic>> _allMeals = [];
   List<Map<String, dynamic>> _filteredMeals = [];
-  List<Map<String, dynamic>> _chefs = [];
-  Map<String, dynamic>? _selectedChef;
   final Set<String> _selectedMealIds = {};
 
   @override
   void initState() {
     super.initState();
     apiBaseUrl = dotenv.env['API_BASE_URL'] ?? 'https://api.zinzi.ug';
-    _loadInitialData();
-    _setupScrollListener();
+    _fetchChefs();
+    _fetchMeals();
   }
 
   @override
   void dispose() {
     _searchController.dispose();
-    _scrollController.dispose();
-    _debouncer.cancel();
-    for (final controller in _animationControllers.values) {
-      controller.dispose();
-    }
-    _animationControllers.clear();
     super.dispose();
   }
 
-  void _setupScrollListener() {
-    _scrollController.addListener(() {
-      if (_scrollController.position.pixels ==
-          _scrollController.position.maxScrollExtent) {
-        _loadMoreMeals();
-      }
-    });
-  }
+  Future<void> _fetchChefs() async {
+    if (_isLoadingChefs) return;
 
-  Future<void> _loadInitialData() async {
+    setState(() {
+      _isLoadingChefs = true;
+    });
+
     try {
-      setState(() => _isLoading = true);
-      await Future.wait([
-        _fetchMeals(),
-        _fetchChefs(),
-      ]);
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token') ?? '';
+
+      final response = await http.get(
+        Uri.parse('$apiBaseUrl/rr/rchefs'),
+        headers: {
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        // Handle both direct list and wrapped in 'data' key responses
+        final List<dynamic> data = responseData is List
+            ? responseData
+            : (responseData['data'] as List? ?? []);
+
+        setState(() {
+          _chefs = List<Map<String, dynamic>>.from(data);
+          if (_chefs.isNotEmpty) {
+            _selectedChefId = _chefs.first['chefid']?.toString() ?? '';
+            debugPrint(
+                'Fetched chefs: ${_chefs.map((c) => '${c['name']} (${c['chefid']})').toList()}');
+          } else {
+            _selectedChefId = null;
+            debugPrint('No chefs available');
+          }
+        });
+      } else {
+        throw Exception('Failed to load chefs');
+      }
     } catch (e) {
-      final errorMessage = 'Failed to load data: $e';
+      debugPrint('Error fetching chefs: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(errorMessage)),
+          const SnackBar(content: Text('Error loading chefs')),
         );
       }
     } finally {
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() {
+          _isLoadingChefs = false;
+        });
       }
     }
   }
 
-  Future<void> _fetchMeals({bool loadMore = false}) async {
-    if ((loadMore && !_hasMore) || _isLoadingMore) return;
+  Future<void> _fetchMeals() async {
+    if (_isLoading) return;
 
-    setState(() => loadMore ? _isLoadingMore = true : _isLoading = true);
+    setState(() {
+      _isLoading = true;
+    });
 
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -118,143 +129,29 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
         'Content-Type': 'application/json',
       };
 
-      final params = {
-        'page': loadMore ? _currentPage + 1 : 1,
-        'per_page': _mealsPerPage.toString(),
-        if (_selectedChef != null) 'chef_id': _selectedChef!['id'].toString(),
-        'search': _searchController.text,
-      }..removeWhere((key, value) => value == null);
-
-      final uri = Uri.parse('$apiBaseUrl/api/meals').replace(
-        queryParameters: params,
-      );
-
+      final uri = Uri.parse('$apiBaseUrl/rr/meals');
       final response = await http.get(uri, headers: headers);
 
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final List<dynamic> meals = data['data'] ?? [];
-        
+        final responseData = json.decode(response.body);
+        final List<dynamic> mealsList = responseData['data'] ?? [];
         setState(() {
-          if (loadMore) {
-            _allMeals.addAll(meals.cast<Map<String, dynamic>>());
-            _currentPage++;
-          } else {
-            _allMeals = meals.cast<Map<String, dynamic>>();
-            _currentPage = 1;
-          }
-          _filteredMeals = List.from(_allMeals);
-          _hasMore = (data['meta']?['next_page_url'] ?? null) != null;
+          _allMeals = List<Map<String, dynamic>>.from(mealsList);
+          _filteredMeals = List<Map<String, dynamic>>.from(_allMeals);
         });
       } else {
-        throw Exception('Failed to load meals');
-      }
-    } catch (e) {
-      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading meals: $e')),
+          SnackBar(
+              content: Text('Failed to load meals: ${response.statusCode}')),
         );
       }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _isLoadingMore = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _fetchChefs() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      final response = await http.get(
-        Uri.parse('$apiBaseUrl/api/chefs'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (mounted) {
-          setState(() {
-            _chefs = List<Map<String, dynamic>>.from(data['data'] ?? []);
-          });
-        }
-      }
     } catch (e) {
-      debugPrint('Error loading chefs: $e');
-    }
-  }
-
-  Future<void> _loadMoreMeals() async {
-    if (_isLoadingMore || !_hasMore) return;
-    await _fetchMeals(loadMore: true);
-  }
-
-  Future<void> _saveMealPlan() async {
-    if (_selectedMealIds.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select at least one meal')),
+        const SnackBar(content: Text('Error fetching meals')),
       );
-      return;
-    }
-
-    setState(() => _isSaving = true);
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      
-      final response = await http.post(
-        Uri.parse('$apiBaseUrl/api/subscriptions/${widget.subscriptionId}/meals'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: json.encode({
-          'meal_ids': _selectedMealIds.toList(),
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        if (mounted) {
-          Navigator.of(context).pop(true); // Return success
-        }
-      } else {
-        throw Exception('Failed to save meal plan');
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving meal plan: $e')),
-        );
-      }
     } finally {
-      if (mounted) {
-        setState(() => _isSaving = false);
-      }
+      setState(() => _isLoading = false);
     }
-  }
-
-  void _filterMeals(String query) {
-    _debouncer.run(() {
-      setState(() {
-        if (query.isEmpty) {
-          _filteredMeals = List.from(_allMeals);
-        } else {
-          _filteredMeals = _allMeals.where((meal) {
-            final name = meal['name']?.toString().toLowerCase() ?? '';
-            final description = meal['description']?.toString().toLowerCase() ?? '';
-            final searchTerm = query.toLowerCase();
-            return name.contains(searchTerm) || description.contains(searchTerm);
-          }).toList();
-        }
-      });
-    });
   }
 
   String _processImagePath(String? imageUrl) {
@@ -265,8 +162,7 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
 
   Future<void> _toggleMealSelection(String mealId) async {
     await HapticFeedback.selectionClick();
-    if (!mounted) return;
-    
+
     setState(() {
       if (_selectedMealIds.contains(mealId)) {
         _selectedMealIds.remove(mealId);
@@ -276,47 +172,10 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
     });
   }
 
-  Widget _buildChefDropdown() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-      child: DropdownButtonFormField<Map<String, dynamic>>(
-        value: _selectedChef,
-        decoration: InputDecoration(
-          labelText: 'Filter by Chef',
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8.0),
-          ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        ),
-        items: [
-          const DropdownMenuItem(
-            value: null,
-            child: Text('All Chefs'),
-          ),
-          ..._chefs.map((chef) {
-            return DropdownMenuItem(
-              value: chef,
-              child: Text(chef['name'] ?? 'Unknown Chef'),
-            );
-          }).toList(),
-        ],
-        onChanged: (chef) {
-          setState(() {
-            _selectedChef = chef;
-            _fetchMeals();
-          });
-        },
-      ),
-    );
-  }
-
   Widget _buildMealCard(Map<String, dynamic> meal) {
-    final mealId = meal['id']?.toString() ?? '';
+    final mealId = meal['Meal_id']?.toString() ?? '';
     final isSelected = _selectedMealIds.contains(mealId);
-    final imageUrl = _processImagePath(meal['image_url']);
-    final price = meal['price'] is num ? (meal['price'] as num).toDouble() : 0.0;
-    final rating = meal['rating']?.toDouble() ?? 0.0;
-    final restrictions = (meal['dietary_restrictions'] as List<dynamic>?)?.cast<String>() ?? [];
+    final imageUrl = _processImagePath(meal['Image_link']);
 
     return Card(
       elevation: 2,
@@ -350,13 +209,15 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
                             width: 100,
                             height: 100,
                             color: Colors.grey[200],
-                            child: const Center(child: CircularProgressIndicator()),
+                            child: const Center(
+                                child: CircularProgressIndicator()),
                           ),
                           errorWidget: (context, url, error) => Container(
                             width: 100,
                             height: 100,
                             color: Colors.grey[200],
-                            child: const Icon(Icons.fastfood, size: 40, color: Colors.grey),
+                            child: const Icon(Icons.fastfood,
+                                size: 40, color: Colors.grey),
                           ),
                         ),
                       ),
@@ -382,64 +243,24 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                meal['name'] ?? 'Unnamed Meal',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            if (rating > 0) ...[
-                              const Icon(Icons.star, color: Colors.amber, size: 16),
-                              const SizedBox(width: 4),
-                              Text(
-                                rating.toStringAsFixed(1),
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                            ],
-                          ],
+                        Text(
+                          meal['Meal_name'] ?? 'Unnamed Meal',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'UGX ${price.toStringAsFixed(0)}',
+                          'UGX ${meal['Price'] ?? 0}',
                           style: const TextStyle(
                             color: kColorPrimary,
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
                           ),
                         ),
-                        if (restrictions.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Wrap(
-                            spacing: 4,
-                            runSpacing: 2,
-                            children: restrictions.take(2).map((restriction) => Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.green[50],
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: Colors.green[100]!),
-                              ),
-                              child: Text(
-                                restriction,
-                                style: TextStyle(
-                                  color: Colors.green[800],
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            )).toList(),
-                          ),
-                        ],
                       ],
                     ),
                   ),
@@ -470,6 +291,51 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
     );
   }
 
+  Widget _buildChefDropdown() {
+    if (_isLoadingChefs) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_chefs.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+        child: Text('No chefs available'),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: DropdownButtonFormField<String>(
+        value: _selectedChefId,
+        decoration: InputDecoration(
+          labelText: 'Select Chef',
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        ),
+        items: _chefs.map<DropdownMenuItem<String>>((chef) {
+          return DropdownMenuItem<String>(
+            value: chef['chefid']?.toString() ?? '',
+            child: Text(chef['name']?.toString() ?? 'Unnamed Chef'),
+          );
+        }).toList(),
+        onChanged: (value) {
+          setState(() {
+            _selectedChefId = value;
+          });
+        },
+        validator: (value) {
+          if (value == null || value.isEmpty) {
+            return 'Please select a chef';
+          }
+          return null;
+        },
+      ),
+    );
+  }
+
   Widget _buildSearchField() {
     return Padding(
       padding: const EdgeInsets.all(16.0),
@@ -478,26 +344,79 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
         decoration: InputDecoration(
           hintText: 'Search meals...',
           prefixIcon: const Icon(Icons.search),
-          suffixIcon: _searchController.text.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.clear),
-                  onPressed: () {
-                    _searchController.clear();
-                    _filterMeals('');
-                  },
-                )
-              : null,
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8.0),
+            borderRadius: BorderRadius.circular(30),
+            borderSide: BorderSide.none,
           ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          filled: true,
+          fillColor: Colors.grey[200],
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 0, horizontal: 20),
         ),
-        onChanged: _filterMeals,
+        onChanged: (value) {
+          setState(() {
+            if (value.isEmpty) {
+              _filteredMeals = List.from(_allMeals);
+            } else {
+              final searchLower = value.toLowerCase();
+              _filteredMeals = _allMeals.where((meal) {
+                return (meal['Meal_name']
+                            ?.toString()
+                            .toLowerCase()
+                            .contains(searchLower) ??
+                        false) ||
+                    (meal['Meal_description']
+                            ?.toString()
+                            .toLowerCase()
+                            .contains(searchLower) ??
+                        false);
+              }).toList();
+            }
+          });
+        },
       ),
     );
   }
 
   Widget _buildMealGrid() {
+    if (_isLoading && _allMeals.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_isLoadingChefs) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_filteredMeals.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(16.0),
+          child: Text('No meals found. Please try a different search.'),
+        ),
+      );
+    }
+
+    if (_filteredMeals.isEmpty) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.search_off, size: 64, color: Colors.grey),
+            SizedBox(height: 16),
+            Text(
+              'No meals found',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Try adjusting your search',
+              style: TextStyle(color: Colors.grey),
+            ),
+          ],
+        ),
+      );
+    }
+
     return GridView.builder(
       padding: const EdgeInsets.all(8.0),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -506,82 +425,279 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
         crossAxisSpacing: 8.0,
         mainAxisSpacing: 8.0,
       ),
-      itemCount: _filteredMeals.length + (_hasMore ? 1 : 0),
+      itemCount: _filteredMeals.length,
       itemBuilder: (context, index) {
-        if (index >= _filteredMeals.length) {
-          if (!_isLoadingMore) {
-            _loadMoreMeals();
-          }
-          return const Center(child: CircularProgressIndicator());
-        }
         return _buildMealCard(_filteredMeals[index]);
       },
     );
+  }
+
+  Future<void> _saveMealPlan() async {
+    if (_isSaving || _selectedMealIds.isEmpty) return;
+
+    // Validate chef selection
+    if (_selectedChefId == null || _selectedChefId!.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please select a chef')),
+        );
+      }
+      return;
+    }
+
+    // Validate chef exists in the list
+    try {
+      final selectedChef = _chefs.firstWhere(
+        (chef) => chef['chefid']?.toString() == _selectedChefId,
+      );
+      debugPrint(
+          'Selected chef: ${selectedChef['name']} (${selectedChef['chefid']})');
+    } catch (e) {
+      debugPrint('Error finding selected chef: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Selected chef not found. Please try again.')),
+        );
+      }
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    debugPrint('[_saveMealPlan] Starting meal plan save process...');
+    debugPrint('[_saveMealPlan] Selected meal IDs: $_selectedMealIds');
+    debugPrint('[_saveMealPlan] Selected chef ID: $_selectedChefId');
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
+
+      debugPrint('[_saveMealPlan] Getting user ID...');
+      // Safely get user_id whether it's stored as int or string
+      dynamic userId = prefs.get('user_id');
+      debugPrint(
+          '[_saveMealPlan] Raw user ID from prefs: $userId (type: ${userId.runtimeType})');
+
+      if (userId == null) {
+        final error = 'User not authenticated - user_id is null';
+        debugPrint('[_saveMealPlan] ERROR: $error');
+        throw Exception(error);
+      }
+
+      // Convert userId to int if it's a string
+      final int userIdInt =
+          userId is int ? userId : int.tryParse(userId.toString()) ?? 0;
+
+      debugPrint('[_saveMealPlan] Processed user ID (int): $userIdInt');
+
+      if (userIdInt == 0) {
+        final error = 'Invalid user ID format: $userId';
+        debugPrint('[_saveMealPlan] ERROR: $error');
+        throw Exception(error);
+      }
+
+      debugPrint('[_saveMealPlan] Finding first selected meal...');
+      // Get the first selected meal's chef ID (assuming all selected meals are from the same chef)
+      final firstMeal = _allMeals.firstWhere(
+        (meal) => _selectedMealIds.contains(meal['Meal_id']),
+        orElse: () => <String, dynamic>{},
+      );
+
+      if (firstMeal.isEmpty) {
+        final error = 'No valid meals found in _allMeals for selected IDs';
+        debugPrint('[_saveMealPlan] ERROR: $error');
+        debugPrint(
+            '[_saveMealPlan] Available meal IDs in _allMeals: ${_allMeals.map((m) => m['Meal_id']).toList()}');
+        throw Exception(error);
+      }
+
+      final chefId = int.tryParse(_selectedChefId!);
+      if (chefId == null) {
+        debugPrint('Invalid chef ID: $_selectedChefId');
+        throw Exception('Invalid chef ID');
+      }
+
+      // Get subscription details to use the correct dates
+      final subscriptionProvider =
+          Provider.of<SubscriptionProvider>(context, listen: false);
+      await subscriptionProvider.loadSubscriptionStatus();
+
+      if (subscriptionProvider.subscriptionStatus == null ||
+          subscriptionProvider.subscriptionStatus!['current_plan'] == null) {
+        throw Exception(
+            'Could not load subscription details. Please try again.');
+      }
+
+      final currentPlan =
+          subscriptionProvider.subscriptionStatus!['current_plan'];
+
+      // Parse subscription dates
+      DateTime startDate;
+      DateTime endDate;
+
+      try {
+        startDate = DateTime.parse(currentPlan['start_date'].toString());
+        endDate = DateTime.parse(currentPlan['end_date'].toString());
+
+        if (startDate.isAfter(endDate)) {
+          throw Exception(
+              'Invalid subscription dates: start date is after end date');
+        }
+      } catch (e) {
+        debugPrint('Error parsing subscription dates: $e');
+        // Fallback to current date + 1 month if there's an issue with subscription dates
+        final now = DateTime.now();
+        startDate = now;
+        endDate = DateTime(now.year, now.month + 1, now.day);
+      }
+
+      // Format dates as YYYY-MM-DD without time
+      final String formattedStartDate =
+          '${startDate.year}-${startDate.month.toString().padLeft(2, '0')}-${startDate.day.toString().padLeft(2, '0')}';
+      final String formattedEndDate =
+          '${endDate.year}-${endDate.month.toString().padLeft(2, '0')}-${endDate.day.toString().padLeft(2, '0')}';
+
+      debugPrint('[_saveMealPlan] Preparing API request with:');
+      debugPrint('  - chefId: $chefId');
+      debugPrint('  - subscriptionId: ${widget.subscriptionId}');
+      debugPrint('  - startDate: $formattedStartDate');
+      debugPrint('  - endDate: $formattedEndDate');
+      debugPrint('  - selectedMealIds: $_selectedMealIds');
+
+      final requestBody = {
+        'user_id': userIdInt,
+        'chefid': chefId,
+        'subscription_id': widget.subscriptionId,
+        'name': 'My Meal Plan',
+        'start_date': formattedStartDate,
+        'end_date': formattedEndDate,
+        'meals': _selectedMealIds
+            .map((mealId) => {
+                  'meal_id': mealId,
+                  'quantity':
+                      1, // Default quantity to 1, can be made configurable
+                })
+            .toList(),
+      };
+
+      debugPrint('[_saveMealPlan] Request body: ${jsonEncode(requestBody)}');
+
+      final url = '$apiBaseUrl/api/meal-plans';
+      debugPrint('[_saveMealPlan] Sending POST request to: $url');
+
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode(requestBody),
+      );
+
+      debugPrint('[_saveMealPlan] Response status: ${response.statusCode}');
+      debugPrint('[_saveMealPlan] Response body: ${response.body}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        debugPrint('[_saveMealPlan] Meal plan saved successfully!');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Meal plan saved successfully!')),
+          );
+          Navigator.of(context).pop(true); // Return success
+        }
+      } else {
+        final error = json.decode(response.body);
+        final errorMsg =
+            'Failed to save meal plan: ${response.statusCode} - ${error['detail'] ?? response.body}';
+        debugPrint('[_saveMealPlan] ERROR: $errorMsg');
+        throw Exception(errorMsg);
+      }
+    } catch (e, stackTrace) {
+      debugPrint('[_saveMealPlan] EXCEPTION: $e');
+      debugPrint('[_saveMealPlan] Stack trace: $stackTrace');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error saving meal plan: ${e.toString()}')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+      debugPrint('[_saveMealPlan] Save process completed');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Choose Meals - ${widget.subscriptionPlanName}'),
-        centerTitle: true,
-        elevation: 0,
+        title: const Text('Choose Your Meals'),
+        backgroundColor: kColorPrimary,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () {
+              _fetchMeals();
+              _fetchChefs();
+            },
+          ),
+        ],
       ),
-      body: _isLoading && _filteredMeals.isEmpty
+      body: _isLoading || _isLoadingChefs
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                _buildSearchField(),
-                _buildChefDropdown(),
-                Expanded(
-                  child: _filteredMeals.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.fastfood,
-                                size: 64,
-                                color: Colors.grey[400],
-                              ),
-                              const SizedBox(height: 16),
-                              const Text(
-                                'No meals found',
-                                style: TextStyle(fontSize: 18),
-                              ),
-                              const SizedBox(height: 8),
-                              const Text(
-                                'Try adjusting your search or filters',
-                                style: TextStyle(color: Colors.grey),
-                              ),
-                            ],
-                          ),
-                        )
-                      : _buildMealGrid(),
+                // Header Section (fixed height)
+                Container(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Chef Selection Dropdown
+                      _buildChefDropdown(),
+                      const SizedBox(height: 16),
+                      // Search Field
+                      _buildSearchField(),
+                    ],
+                  ),
                 ),
-                if (_isLoadingMore)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 16.0),
-                    child: CircularProgressIndicator(),
+
+                // Meals Grid (scrollable)
+                Expanded(
+                  child: _buildMealGrid(),
+                ),
+
+                // Save Button (fixed at bottom)
+                if (_selectedMealIds.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.all(16.0),
+                    child: ElevatedButton(
+                      onPressed: _isSaving ? null : _saveMealPlan,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kColorPrimary,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        minimumSize: const Size(double.infinity, 50),
+                      ),
+                      child: _isSaving
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            )
+                          : const Text(
+                              'Save Meal Plan',
+                              style: TextStyle(fontSize: 16),
+                            ),
+                    ),
                   ),
               ],
             ),
-      floatingActionButton: _selectedMealIds.isNotEmpty
-          ? FloatingActionButton.extended(
-              onPressed: _isSaving ? null : _saveMealPlan,
-              label: _isSaving
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  : const Text('Save Selection'),
-              icon: const Icon(Icons.save),
-            )
-          : null,
     );
   }
 }

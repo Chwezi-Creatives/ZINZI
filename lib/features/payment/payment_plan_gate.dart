@@ -103,11 +103,13 @@ class _PaymentPlanGateState extends State<PaymentPlanGate> {
         final planName = subscriptionProvider.subscriptionStatus!['current_plan']?['plan']?['name'] ?? 'Meal Plan';
         
         if (subscriptionId != null && mounted) {
-          // Call the onPlanVerified callback if provided - let it handle the navigation
-          if (widget.onPlanVerified != null) {
-            widget.onPlanVerified!();
-          } else {
-            // Fallback navigation if no callback is provided
+          // Always navigate to ChooseMealPlanMealsScreen after successful payment
+          // Even if there's an onPlanVerified callback, we'll still navigate to the meal selection
+          if (mounted) {
+            // Call the callback first if provided
+            widget.onPlanVerified?.call();
+            
+            // Then navigate to the meal selection screen
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(
                 builder: (context) => ChooseMealPlanMealsScreen(
@@ -123,10 +125,10 @@ class _PaymentPlanGateState extends State<PaymentPlanGate> {
       
       // Fallback to home if we couldn't get subscription details
       if (mounted) {
+        // Still call the callback if provided
         widget.onPlanVerified?.call();
-        if (!context.mounted) return;
         
-        // If the callback didn't navigate, go to home
+        // Then navigate to home as fallback
         if (ModalRoute.of(context)?.isCurrent ?? false) {
           Navigator.of(context).pushReplacementNamed('/');
         }

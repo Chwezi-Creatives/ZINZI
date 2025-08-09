@@ -4,10 +4,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../features/subscription/subscription_provider.dart';
 import '../../features/subscription/subscription_service.dart';
+import '../../features/meal_plan/choose_mealplan_meals.dart';
 
 class SubscriptionPaymentDialog extends StatefulWidget {
   final SubscriptionPlan plan;
-  final Function()? onPaymentSuccess;
+  final Function(Map<String, dynamic> subscriptionData)? onPaymentSuccess;
 
   const SubscriptionPaymentDialog({
     Key? key,
@@ -74,16 +75,25 @@ class _SubscriptionPaymentDialogState extends State<SubscriptionPaymentDialog> {
   }
 
   Future<void> _processPayment() async {
-    if (!_formKey.currentState!.validate()) return;
+    debugPrint('🔍 [SubscriptionPaymentDialog] Starting payment process');
+    if (!_formKey.currentState!.validate()) {
+      debugPrint('⚠️ [SubscriptionPaymentDialog] Form validation failed');
+      return;
+    }
 
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
+    debugPrint('🔄 [SubscriptionPaymentDialog] Form validated, processing payment...');
 
     try {
       // Get the subscription provider
       final subscriptionProvider = context.read<SubscriptionProvider>();
+      
+      debugPrint('💳 [SubscriptionPaymentDialog] Subscribing to plan ${widget.plan.id}');
+      debugPrint('📱 [SubscriptionPaymentDialog] Payment method: $_selectedPaymentMethod');
+      debugPrint('📞 [SubscriptionPaymentDialog] Phone: ${_phoneController.text.trim()}');
       
       // Process the subscription
       final success = await subscriptionProvider.subscribeToPlan(
@@ -92,25 +102,102 @@ class _SubscriptionPaymentDialogState extends State<SubscriptionPaymentDialog> {
         paymentMethod: _selectedPaymentMethod,
         phoneNumber: _phoneController.text.trim(),
       );
+      
+      // Get the subscription status directly from the provider
+      await subscriptionProvider.loadSubscriptionStatus();
+      final response = subscriptionProvider.subscriptionStatus;
+      debugPrint('✅ [SubscriptionPaymentDialog] Subscription result: $success');
+      debugPrint('📦 [SubscriptionPaymentDialog] Full response: $response');
 
-      if (success && mounted) {
+      if (!mounted) {
+        debugPrint('⚠️ [SubscriptionPaymentDialog] Widget not mounted after subscription');
+        return null;
+      }
+      
+      if (success && response != null) {
+        debugPrint('🎉 [SubscriptionPaymentDialog] Payment successful!');
         // Save the phone number for future use
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('phone_number', _phoneController.text.trim());
         
-        // Close the dialog and call the success callback
-        Navigator.of(context).pop(true);
-        widget.onPaymentSuccess?.call();
-      } else if (mounted) {
+        // Extract subscription data from the nested response structure
+        final currentPlan = response['current_plan'] as Map<String, dynamic>?;
+        final subscriptionData = {
+          'subscription_id': currentPlan?['id']?.toString(),
+          'plan_id': currentPlan?['plan_id']?.toString(),
+          'plan_name': currentPlan?['plan_name']?.toString() ?? widget.plan.name,
+          'start_date': currentPlan?['start_date']?.toString(),
+          'end_date': currentPlan?['end_date']?.toString(),
+          'status': currentPlan?['status']?.toString(),
+        };
+        
+        debugPrint('📋 [SubscriptionPaymentDialog] Extracted subscription data: $subscriptionData');
+        
+        // Close the dialog and return the subscription data
+        if (mounted) {
+          Navigator.of(context).pop(subscriptionData);
+        }
+        
+        // Get the navigator context before any async operations
+        final navigatorContext = context;
+        
+        // Call the success callback if provided
+        if (widget.onPaymentSuccess != null) {
+          debugPrint('🔄 [SubscriptionPaymentDialog] Calling onPaymentSuccess callback with subscription data');
+          try {
+            widget.onPaymentSuccess!({
+              'subscription_id': subscriptionData['subscription_id']?.toString(),
+              'plan_name': subscriptionData['plan_name'] ?? widget.plan.name,
+              'start_date': subscriptionData['start_date']?.toString(),
+              'end_date': subscriptionData['end_date']?.toString(),
+              'status': subscriptionData['status']?.toString(),
+            });
+            debugPrint('✅ [SubscriptionPaymentDialog] onPaymentSuccess callback completed');
+          } catch (e) {
+            debugPrint('❌ [SubscriptionPaymentDialog] Error in onPaymentSuccess callback: $e');
+          }
+        } else {
+          debugPrint('ℹ️ [SubscriptionPaymentDialog] No onPaymentSuccess callback provided');
+        }
+        
+        // If we get here, we need to handle the navigation ourselves
+        try {
+          // Load the subscription status
+          await subscriptionProvider.loadSubscriptionStatus();
+          
+          if (!navigatorContext.mounted) return;
+          
+          if (subscriptionProvider.subscriptionStatus != null) {
+            final subscriptionId = subscriptionProvider.subscriptionStatus!['subscription_id'] as int?;
+            final planName = subscriptionProvider.subscriptionStatus!['current_plan']?['plan']?['name']?.toString() ?? 'Meal Plan';
+            
+            if (subscriptionId != null && navigatorContext.mounted) {
+              // Use the navigator context to push the new route
+              Navigator.of(navigatorContext).pushReplacement(
+                MaterialPageRoute(
+                  builder: (context) => ChooseMealPlanMealsScreen(
+                    subscriptionId: subscriptionId,
+                    subscriptionPlanName: planName,
+                  ),
+                ),
+              );
+            }
+          }
+        } catch (e) {
+          debugPrint('Error in payment success handler: $e');
+        }
+      } else {
         setState(() {
           _errorMessage = 'Failed to process payment. Please try again.';
         });
       }
     } catch (e) {
       debugPrint('Payment error: $e');
-      setState(() {
-        _errorMessage = 'An error occurred. Please try again.';
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'An error occurred. Please try again.';
+        });
+      }
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);

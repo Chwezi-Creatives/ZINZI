@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../features/subscription/subscription_provider.dart';
 import 'subscription_payment_dialog.dart';
+import '../../features/meal_plan/choose_mealplan_meals.dart';
 
 class PaymentPlanWall extends StatefulWidget {
   final VoidCallback? onPlanSelected;
@@ -36,8 +37,74 @@ class _PaymentPlanWallState extends State<PaymentPlanWall> {
     await provider.loadSubscriptionPlans();
   }
 
+  Future<void> _onPaymentSuccess(Map<String, dynamic> subscriptionData) async {
+    debugPrint('✅ [PaymentPlanWall] onPaymentSuccess callback called with data: $subscriptionData');
+    
+    if (!mounted) {
+      debugPrint('⚠️ [PaymentPlanWall] Widget not mounted, cannot proceed with navigation');
+      return;
+    }
+    
+    // Extract subscription ID and plan name from the subscription data
+    final subscriptionId = subscriptionData['subscription_id'] != null 
+        ? int.tryParse(subscriptionData['subscription_id'].toString())
+        : null;
+    final planName = subscriptionData['plan_name'] as String? ?? 'Meal Plan';
+    
+    debugPrint('📝 [PaymentPlanWall] Using subscription data from payment response - ID: $subscriptionId, Plan: $planName');
+    
+    if (subscriptionId != null && mounted) {
+      debugPrint('🚀 [PaymentPlanWall] Navigating to ChooseMealPlanMealsScreen with subscription ID: $subscriptionId');
+      
+      // Update the subscription provider with the new subscription data
+      try {
+        // Force a refresh of the subscription status
+        final provider = context.read<SubscriptionProvider>();
+        await provider.loadSubscriptionStatus();
+        
+        if (mounted) {
+          // Navigate to ChooseMealPlanMealsScreen with the subscription data
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => ChooseMealPlanMealsScreen(
+                subscriptionId: subscriptionId,
+                subscriptionPlanName: planName,
+              ),
+            ),
+          );
+          debugPrint('✅ [PaymentPlanWall] Navigation complete');
+        }
+      } catch (e) {
+        debugPrint('⚠️ [PaymentPlanWall] Error updating subscription status: $e');
+        // Show error to user
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Payment successful but there was an error updating your subscription status.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      }
+    } else {
+      debugPrint('⚠️ [PaymentPlanWall] Missing subscription ID in response');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Payment successful but there was an error processing your subscription.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _handlePlanSelected(int planId) async {
-    if (_isProcessing) return;
+    debugPrint('🔄 [PaymentPlanWall] Starting plan selection for plan ID: $planId');
+    if (_isProcessing) {
+      debugPrint('⚠️ [PaymentPlanWall] Already processing, ignoring duplicate tap');
+      return;
+    }
 
     setState(() {
       _isProcessing = true;
@@ -45,39 +112,35 @@ class _PaymentPlanWallState extends State<PaymentPlanWall> {
     });
 
     try {
+      debugPrint('🔍 [PaymentPlanWall] Finding plan with ID: $planId');
       // Find the selected plan
       final provider = context.read<SubscriptionProvider>();
       final plan = provider.plans.firstWhere((p) => p.id == planId);
       
-      // Show the payment dialog
-      final paymentSuccessful = await showDialog<bool>(
+      debugPrint('💳 [PaymentPlanWall] Showing payment dialog for plan: ${plan.name}');
+      
+      // Show the payment dialog and wait for the response
+      await showDialog<Map<String, dynamic>>(
         context: context,
         builder: (context) => SubscriptionPaymentDialog(
           plan: plan,
+          onPaymentSuccess: _onPaymentSuccess,
         ),
-      ) ?? false;
-
-      if (paymentSuccessful && mounted) {
-        // Call the onPlanSelected callback if payment was successful
-        if (widget.onPlanSelected != null) {
-          widget.onPlanSelected!();
-        }
-
-        // Show success message
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Subscription successful!'),
-            backgroundColor: Colors.green,
-          ),
-        );
+      );
+      
+      // Dialog is closed, reset processing state
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+        });
       }
     } catch (e) {
-      setState(() {
-        _errorMessage = 'Failed to process subscription. Please try again.';
-      });
-      debugPrint('Subscription error: $e');
-      
+      debugPrint('⚠️ [PaymentPlanWall] Error during plan selection: $e');
       if (mounted) {
+        setState(() {
+          _errorMessage = 'Failed to process plan selection. Please try again.';
+          _isProcessing = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error: ${e.toString()}'),
