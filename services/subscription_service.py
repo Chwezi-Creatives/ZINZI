@@ -1,8 +1,12 @@
 import json
+import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Union, Tuple, AsyncGenerator
 import asyncpg
 from fastapi import HTTPException, status
+
+# Set up logger
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 from enum import Enum, auto
 
@@ -61,6 +65,47 @@ class PlanUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class SubscriptionService:
+    
+    async def ensure_indexes_exist(self, conn: asyncpg.Connection) -> None:
+        """
+        Ensure all required indexes for optimal performance exist
+        """
+        index_queries = [
+            """
+            CREATE INDEX IF NOT EXISTS idx_meal_plans_meal_plan_id 
+            ON meal_plans(meal_plan_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_meal_plans_user_id 
+            ON meal_plans(user_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_meal_plans_chefid 
+            ON meal_plans(chefid)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_meal_plan_meals_plan_meal 
+            ON meal_plan_meals(meal_plan_id, meal_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_meal_plan_meals_meal 
+            ON meal_plan_meals(meal_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_meals_meal_id 
+            ON meals(meal_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_subscriptions_user_status 
+            ON subscriptions(user_id, status)
+            """
+        ]
+        
+        for query in index_queries:
+            try:
+                await conn.execute(query)
+            except Exception as e:
+                print(f"Error creating index: {str(e)}")
 
     async def get_subscription_plans(self, conn: asyncpg.Connection, include_inactive: bool = False) -> List[Dict[str, Any]]:
         """
@@ -518,6 +563,9 @@ class SubscriptionService:
         Raises:
             HTTPException: If validation fails or database error occurs
         """
+        import time
+        start_time = time.time()
+        logger.info("Starting meal plan creation...")
         # Validate input data
         try:
             meal_plan = MealPlanCreate(**meal_plan_data)
@@ -550,41 +598,54 @@ class SubscriptionService:
             
         # Start transaction
         async with conn.transaction():
-            # Create meal plan
-            meal_plan_query = """
-            INSERT INTO meal_plans (
-                user_id, chefid, subscription_id, 
-                name, start_date, end_date
-            )
+            # Create the meal plan
+            query = """
+            INSERT INTO meal_plans (user_id, chefid, subscription_id, name, start_date, end_date)
             VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING meal_plan_id
+            RETURNING meal_plan_id, user_id, chefid, subscription_id, name, start_date, end_date, created_at
             """
             
-            # Execute meal plan creation
-            meal_plan_result = await conn.fetchrow(
-                meal_plan_query,
-                meal_plan.user_id,
-                meal_plan.chefid,
-                meal_plan.subscription_id,
-                meal_plan.name,
-                meal_plan.start_date,
-                meal_plan.end_date
-            )
-            
-            if not meal_plan_result:
+            try:
+                db_start_time = time.time()
+                meal_plan_result = await conn.fetchrow(
+                    query,
+                    meal_plan.user_id,
+                    meal_plan.chefid,
+                    meal_plan.subscription_id,
+                    meal_plan.name,
+                    meal_plan.start_date,
+                    meal_plan.end_date
+                )
+                db_duration = (time.time() - db_start_time) * 1000  # Convert to milliseconds
+                logger.info(f"Meal plan created in {db_duration:.2f}ms - ID: {meal_plan_result['meal_plan_id']}")
+                
+                # Add meals to the meal plan
+                if meal_plan.meals:
+                    add_meals_start = time.time()
+                    await self._add_meals_to_plan(conn, meal_plan_result['meal_plan_id'], meal_plan.meals)
+                    add_meals_duration = (time.time() - add_meals_start) * 1000
+                    logger.info(f"Added {len(meal_plan.meals)} meals to plan in {add_meals_duration:.2f}ms")
+                
+                # Get the full meal plan with meals
+                get_plan_start = time.time()
+                result = await self.get_meal_plan(conn, meal_plan_result['meal_plan_id'])
+                get_plan_duration = (time.time() - get_plan_start) * 1000
+                
+                total_duration = (time.time() - start_time) * 1000
+                logger.info(
+                    f"Meal plan creation completed in {total_duration:.2f}ms | "
+                    f"Meals: {len(meal_plan.meals)} | "
+                    f"DB: {db_duration:.2f}ms | "
+                    f"Get Plan: {get_plan_duration:.2f}ms"
+                )
+                return result
+                
+            except Exception as e:
+                logger.error(f"Error creating meal plan: {e}", exc_info=True)
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to create meal plan"
                 )
-                
-            meal_plan_id = meal_plan_result['meal_plan_id']
-            
-            # Add meals to meal plan (to be continued in next chunk)
-            if meal_plan.meals:
-                await self._add_meals_to_plan(conn, meal_plan_id, meal_plan.meals)
-            
-            # Fetch the complete meal plan with meals
-            return await self.get_meal_plan(conn, meal_plan_id)
     
     async def _add_meals_to_plan(
         self,
@@ -593,7 +654,12 @@ class SubscriptionService:
         meals: List[Dict[str, Any]]
     ) -> None:
         """
-        Add meals to a meal plan
+        Add meals to a meal plan with performance logging.
+        
+        Note: Meal existence validation is handled by the database foreign key constraint
+        (fk_meal_plan_meals_meals). Do NOT add explicit meal existence checks as they
+        would degrade performance. The database will raise a ForeignKeyViolationError
+        if any meal doesn't exist.
         
         Args:
             conn: Database connection
@@ -601,42 +667,62 @@ class SubscriptionService:
             meals: List of meal dictionaries with meal_id and quantity
             
         Raises:
-            HTTPException: If any meal is not found
+            HTTPException: If any meal is not found or other database error occurs
         """
-        # Check if all meal IDs exist
-        meal_ids = [m['meal_id'] for m in meals]
-        meal_check_query = """
-        SELECT meal_id FROM meals 
-        WHERE meal_id = ANY($1::varchar[])
-        """
-        existing_meals = await conn.fetch(meal_check_query, meal_ids)
-        existing_meal_ids = {str(row['meal_id']) for row in existing_meals}
+        import time
+        start_time = time.time()
         
-        # Check for missing meals
-        missing_meals = [m for m in meals if m['meal_id'] not in existing_meal_ids]
-        if missing_meals:
-            missing_ids = [m['meal_id'] for m in missing_meals]
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Meals not found: {', '.join(missing_ids)}"
-            )
+        if not meals:
+            logger.info("No meals to add, skipping...")
+            return
+            
+        # Prepare arrays for bulk insert
+        meal_ids = [meal['meal_id'] for meal in meals]
+        quantities = [meal.get('quantity', 1) for meal in meals]
         
-        # Insert meal plan meals
-        meal_plan_meals_query = """
+        # Log meal IDs being processed (first 5 for brevity)
+        sample_meals = ", ".join(meal_ids[:5])
+        if len(meal_ids) > 5:
+            sample_meals += f" and {len(meal_ids) - 5} more"
+        logger.info(f"Adding {len(meal_ids)} meals to plan {meal_plan_id}: {sample_meals}")
+        
+        # Single query with unnest for bulk insert/update
+        # Note: The database's foreign key constraint (fk_meal_plan_meals_meals)
+        # will automatically validate that all meal_ids exist in the meals table
+        query = """
         INSERT INTO meal_plan_meals (meal_plan_id, meal_id, quantity)
-        VALUES ($1, $2, $3)
+        SELECT $1, m.meal_id, m.quantity
+        FROM unnest($2::varchar[], $3::int[]) AS m(meal_id, quantity)
         ON CONFLICT (meal_plan_id, meal_id) 
         DO UPDATE SET quantity = EXCLUDED.quantity
         """
         
-        # Prepare batch insert values
-        values = [
-            (meal_plan_id, meal['meal_id'], meal.get('quantity', 1))
-            for meal in meals
-        ]
-        
-        # Execute batch insert
-        await conn.executemany(meal_plan_meals_query, values)
+        # Execute the bulk insert/update
+        try:
+            db_start = time.time()
+            await conn.execute(query, meal_plan_id, meal_ids, quantities)
+            db_duration = (time.time() - db_start) * 1000
+            total_duration = (time.time() - start_time) * 1000
+            
+            logger.info(
+                f"Successfully processed {len(meal_ids)} meals for plan {meal_plan_id} | "
+                f"Total time: {total_duration:.2f}ms | "
+                f"DB operation: {db_duration:.2f}ms"
+            )
+            
+        except asyncpg.ForeignKeyViolationError as e:
+            logger.error(f"Failed to add meals - invalid meal ID: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="One or more specified meals do not exist"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error adding meals to plan {meal_plan_id}: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to add meals to plan: {str(e)}"
+            )
     
     async def get_meal_plan(
         self,
@@ -644,7 +730,7 @@ class SubscriptionService:
         meal_plan_id: int
     ) -> Dict[str, Any]:
         """
-        Get a meal plan by ID with associated meals
+        Get a meal plan by ID with associated meals using a single optimized query
         
         Args:
             conn: Database connection
@@ -656,18 +742,38 @@ class SubscriptionService:
         Raises:
             HTTPException: If meal plan not found
         """
-        # Get meal plan
-        meal_plan_query = """
+        # Single query to get meal plan with associated meals
+        query = """
+        WITH meal_plan_data AS (
+            SELECT 
+                mp.*,
+                u.name as user_name,
+                u.phone_number as user_phone,
+                (
+                    SELECT json_agg(
+                        json_build_object(
+                            'meal_id', m.meal_id,
+                            'name', m.meal_name,
+                            'image_url', m.image_link,
+                            'quantity', mpm.quantity
+                        )
+                    )
+                    FROM meal_plan_meals mpm
+                    JOIN meals m ON mpm.meal_id = m.meal_id
+                    WHERE mpm.meal_plan_id = mp.meal_plan_id
+                ) as meals
+            FROM meal_plans mp
+            JOIN users u ON mp.user_id = u.user_id
+            WHERE mp.meal_plan_id = $1
+            GROUP BY mp.meal_plan_id, u.user_id
+        )
         SELECT 
-            mp.*,
-            u.name as user_name,
-            u.phone_number as user_phone
-        FROM meal_plans mp
-        JOIN users u ON mp.user_id = u.user_id
-        WHERE mp.meal_plan_id = $1
+            m.*,
+            COALESCE(m.meals, '[]'::json) as meals
+        FROM meal_plan_data m
         """
         
-        meal_plan = await conn.fetchrow(meal_plan_query, meal_plan_id)
+        meal_plan = await conn.fetchrow(query, meal_plan_id)
         
         if not meal_plan:
             raise HTTPException(
@@ -675,19 +781,9 @@ class SubscriptionService:
                 detail="Meal plan not found"
             )
         
-        # Get associated meals
-        meals_query = """
-        SELECT m.meal_id, m.meal_name as name, m.image_link as image_url, mpm.quantity
-        FROM meal_plan_meals mpm
-        JOIN meals m ON mpm.meal_id = m.meal_id
-        WHERE mpm.meal_plan_id = $1
-        """
-        meals = await conn.fetch(meals_query, meal_plan_id)
-        
-        # Prepare response
+        # Convert to dict and handle the JSON meals
         response = dict(meal_plan)
-        response['meals'] = [dict(meal) for meal in meals]
-        
+        # The meals are already in the correct format from the query
         return response
         
     async def get_chef_meal_plans(

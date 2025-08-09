@@ -197,6 +197,15 @@ async def lifespan(app: FastAPI):
         # Preload meal data to avoid slow first request
         await preload_meal_data()
         
+        # Ensure all required database indexes exist
+        subscription_service = SubscriptionService()
+        try:
+            async with db_pool.acquire() as conn:
+                await subscription_service.ensure_indexes_exist(conn)
+                logger.info("Database indexes verified/created successfully")
+        except Exception as e:
+            logger.error(f"Error ensuring database indexes: {e}", exc_info=True)
+        
         # Initialize services on-demand
         app.state.notification_service = None
         app.state.fcm_service = None
