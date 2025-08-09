@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:zinzi/features/meal_plan/choose_mealplan_meals.dart';
 import 'package:zinzi/features/payment/payment_plan_wall.dart';
 import 'package:zinzi/features/subscription/subscription_provider.dart';
 import 'package:flutter/foundation.dart';
@@ -89,11 +90,59 @@ class _PaymentPlanGateState extends State<PaymentPlanGate> {
     }
   }
 
-  void _onPlanSelected() {
-    // The actual plan selection and subscription is now handled by the PaymentPlanWall
-    // which uses the SubscriptionProvider to manage the subscription state
-    // This method is kept for backward compatibility but doesn't need to do anything
-    // as the PaymentPlanWall will handle the subscription flow
+  Future<void> _onPlanSelected() async {
+    if (!mounted) return;
+    
+    try {
+      // Get the latest subscription status
+      final subscriptionProvider = context.read<SubscriptionProvider>();
+      await subscriptionProvider.loadSubscriptionStatus();
+      
+      if (subscriptionProvider.subscriptionStatus != null) {
+        final subscriptionId = subscriptionProvider.subscriptionStatus!['subscription_id'];
+        final planName = subscriptionProvider.subscriptionStatus!['current_plan']?['plan']?['name'] ?? 'Meal Plan';
+        
+        if (subscriptionId != null && mounted) {
+          // Call the onPlanVerified callback if provided - let it handle the navigation
+          if (widget.onPlanVerified != null) {
+            widget.onPlanVerified!();
+          } else {
+            // Fallback navigation if no callback is provided
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (context) => ChooseMealPlanMealsScreen(
+                  subscriptionId: subscriptionId as int,
+                  subscriptionPlanName: planName as String,
+                ),
+              ),
+            );
+          }
+          return;
+        }
+      }
+      
+      // Fallback to home if we couldn't get subscription details
+      if (mounted) {
+        widget.onPlanVerified?.call();
+        if (!context.mounted) return;
+        
+        // If the callback didn't navigate, go to home
+        if (ModalRoute.of(context)?.isCurrent ?? false) {
+          Navigator.of(context).pushReplacementNamed('/');
+        }
+      }
+    } catch (e) {
+      debugPrint('Error in payment plan selection: $e');
+      if (mounted) {
+        widget.onPlanVerified?.call();
+        if (!context.mounted) return;
+        
+        // If the callback didn't navigate, go to home
+        if (ModalRoute.of(context)?.isCurrent ?? false) {
+          Navigator.of(context).pushReplacementNamed('/');
+        }
+      }
+    }
   }
 
   @override

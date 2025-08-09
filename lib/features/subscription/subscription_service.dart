@@ -162,6 +162,8 @@ class SubscriptionService {
   Future<Map<String, dynamic>> subscribeToPlan({
     required int planId,
     String? paymentTransactionId,
+    String? paymentMethod,
+    String? phoneNumber,
   }) async {
     try {
       final userId = await _getUserId();
@@ -174,14 +176,36 @@ class SubscriptionService {
         body['payment_transaction_id'] = paymentTransactionId;
       }
       
+      if (paymentMethod != null) {
+        body['payment_method'] = paymentMethod;
+      }
+      
+      if (phoneNumber != null) {
+        // Ensure phone number is in the correct format (remove +256 if present and add it)
+        String formattedPhone = phoneNumber.trim();
+        if (formattedPhone.startsWith('+256')) {
+          formattedPhone = formattedPhone.substring(4);
+        } else if (formattedPhone.startsWith('0')) {
+          formattedPhone = formattedPhone.substring(1);
+        }
+        body['phone_number'] = formattedPhone;
+      }
+      
+      debugPrint('📡 Sending subscription request to: ${_baseUrl}api/subscriptions');
+      debugPrint('📦 Request body: $body');
+      
       final response = await http.post(
         Uri.parse('${_baseUrl}api/subscriptions'),
         headers: await _getHeaders(),
         body: jsonEncode(body),
       );
 
+      debugPrint('📡 Response status: ${response.statusCode}');
+      debugPrint('📦 Response body: ${response.body}');
+
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body);
+        debugPrint('✅ Subscription successful. Response data: $data');
         // Cache the subscription locally
         await _cacheSubscription(data);
         return data;
@@ -335,39 +359,74 @@ class SubscriptionService {
     }
   }
 
-  // Check if user has an active subscription (local cache check)
+  // Check if user has an active subscription
   Future<bool> hasActiveSubscription() async {
-    final prefs = await SharedPreferences.getInstance();
-    final plan = prefs.getString(_activePlanKey);
-    final expiryDateStr = prefs.getString(_planExpiryKey);
-    
-    if (plan == null || expiryDateStr == null) {
-      return false;
-    }
-    
     try {
-      final expiryDate = DateTime.parse(expiryDateStr);
-      final now = DateTime.now();
+      final prefs = await SharedPreferences.getInstance();
       
-      // Check if plan is expired
-      if (now.isAfter(expiryDate)) {
-        await _clearCachedSubscription();
+      // Check our subscription flag first (fast path)
+      final hasActiveFlag = prefs.getBool('has_active_subscription') ?? false;
+      if (!hasActiveFlag) {
         return false;
       }
       
-      return true;
+      // Check if we have an end date
+      final expiryDateStr = prefs.getString(_planExpiryKey);
+      if (expiryDateStr != null) {
+        final expiryDate = DateTime.parse(expiryDateStr);
+        if (expiryDate.isBefore(DateTime.now())) {
+          // Subscription has expired
+          await prefs.setBool('has_active_subscription', false);
+          return false;
+        }
+        return true;
+      }
+      
+      // If we don't have an end date, check with the server
+      final status = await getSubscriptionStatus();
+      final isActive = status['is_active'] == true;
+      
+      // Update our local cache
+      await prefs.setBool('has_active_subscription', isActive);
+      if (status['end_date'] != null) {
+        await prefs.setString(_planExpiryKey, status['end_date'].toString());
+      }
+      
+      return isActive;
     } catch (e) {
+      debugPrint('Error checking subscription status: $e');
       return false;
     }
   }
 
   // Cache subscription details locally
   Future<void> _cacheSubscription(Map<String, dynamic> subscription) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_activePlanKey, subscription['plan']['name'] ?? '');
-    
-    if (subscription['end_date'] != null) {
-      await prefs.setString(_planExpiryKey, subscription['end_date']);
+    try {
+      debugPrint('💾 Caching subscription data: $subscription');
+      final prefs = await SharedPreferences.getInstance();
+      
+      String? endDate;
+      
+      // Get end date from subscription
+      endDate = subscription['end_date']?.toString();
+      
+      // No need to cache plan name if we don't have it - we'll get it when loading subscription status
+      // The important part is that the subscription was successful
+      
+      debugPrint('📅 End date to cache: $endDate');
+      
+      // Store a flag that we have an active subscription
+      await prefs.setBool('has_active_subscription', true);
+      
+      if (endDate != null && endDate.isNotEmpty) {
+        await prefs.setString(_planExpiryKey, endDate);
+      }
+      
+      debugPrint('✅ Successfully cached subscription data');
+    } catch (e) {
+      debugPrint('❌ Error caching subscription: $e');
+      debugPrint('Stack trace: ${StackTrace.current}');
+      // Don't rethrow - failing to cache shouldn't fail the subscription
     }
   }
 

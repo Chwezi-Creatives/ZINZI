@@ -3,7 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart'; // For custom fonts
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:zinzi/features/meal_plan/choose_mealplan_meals.dart';
+import 'package:zinzi/features/subscription/subscription_provider.dart';
 import 'package:zinzi/onboard.dart';
 import 'package:zinzi/signup_or_login.dart'; // Assuming this is your login/signup choice page
 import 'package:zinzi/nutri_detail.dart' as nutrition_details;
@@ -185,21 +188,93 @@ class _SplashScreenState extends State<SplashScreen>
           determinedNextScreen = stakeholderdas2222();
           break;
         case 'user':
-          // Use createRoute for consistent transition
-          Navigator.of(context).pushReplacement(LandingPage.createRoute());
-          return; // Return early since we're handling navigation here
+          // For regular users, check if they have an active subscription
+          try {
+            final subscriptionProvider = Provider.of<SubscriptionProvider>(
+              context,
+              listen: false,
+            );
+            
+            await subscriptionProvider.loadSubscriptionStatus();
+            
+            if (subscriptionProvider.hasActiveSubscription && 
+                subscriptionProvider.subscriptionStatus != null) {
+              final subscriptionId = subscriptionProvider.subscriptionStatus!['subscription_id'];
+              final planName = subscriptionProvider.subscriptionStatus!['current_plan']?['plan']?['name'] ?? 'Meal Plan';
+              
+              if (subscriptionId != null && mounted) {
+                // Navigate directly to meal plan selection if subscription exists
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (context) => ChooseMealPlanMealsScreen(
+                      subscriptionId: subscriptionId as int,
+                      subscriptionPlanName: planName as String,
+                    ),
+                  ),
+                );
+                return;
+              }
+            }
+            
+            // If no active subscription or error, go to landing page
+            if (mounted) {
+              Navigator.of(context).pushReplacement(LandingPage.createRoute());
+            }
+            return;
+            
+          } catch (e) {
+            debugPrint('Error checking subscription status in splash: $e');
+            // Fallback to landing page on error
+            if (mounted) {
+              Navigator.of(context).pushReplacement(LandingPage.createRoute());
+            }
+            return;
+          }
           break;
         default:
-          // Wrap AllMealsScreen with PaymentPlanGate
+          // For other user types, wrap AllMealsScreen with PaymentPlanGate
           determinedNextScreen = PaymentPlanGate(
             child: AllMealsScreen(),
             requirePlan: true,
-            onPlanVerified: () {
+            onPlanVerified: () async {
               // This will be called after successful plan verification
               if (mounted) {
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(builder: (context) => AllMealsScreen()),
-                );
+                try {
+                  // Get the subscription provider
+                  final subscriptionProvider = Provider.of<SubscriptionProvider>(
+                    context,
+                    listen: false,
+                  );
+                  
+                  // Load the latest subscription status
+                  await subscriptionProvider.loadSubscriptionStatus();
+                  
+                  if (subscriptionProvider.subscriptionStatus != null) {
+                    final subscriptionId = subscriptionProvider.subscriptionStatus!['subscription_id'] as int?;
+                    final planName = subscriptionProvider.subscriptionStatus!['current_plan']?['plan']?['name']?.toString() ?? 'Meal Plan';
+                    
+                    if (subscriptionId != null && mounted) {
+                      Navigator.of(context).pushReplacement(
+                        MaterialPageRoute(
+                          builder: (context) => ChooseMealPlanMealsScreen(
+                            subscriptionId: subscriptionId,
+                            subscriptionPlanName: planName,
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+                  }
+                } catch (e) {
+                  debugPrint('Error navigating to meal plan selection: $e');
+                }
+                
+                // Fallback to AllMealsScreen if we can't get subscription details
+                if (mounted) {
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(builder: (context) => AllMealsScreen()),
+                  );
+                }
               }
             },
           );

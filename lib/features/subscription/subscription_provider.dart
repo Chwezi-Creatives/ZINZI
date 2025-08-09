@@ -78,21 +78,40 @@ class SubscriptionProvider with ChangeNotifier {
   Future<bool> subscribeToPlan({
     required int planId,
     String? paymentTransactionId,
+    String? paymentMethod,
+    String? phoneNumber,
   }) async {
     _setLoading(true);
+    _error = null;
+    
     try {
-      await _subscriptionService.subscribeToPlan(
+      debugPrint('🔄 Attempting to subscribe to plan $planId');
+      debugPrint('💳 Payment method: $paymentMethod');
+      debugPrint('📱 Phone number: $phoneNumber');
+      
+      final result = await _subscriptionService.subscribeToPlan(
         planId: planId,
         paymentTransactionId: paymentTransactionId,
+        paymentMethod: paymentMethod,
+        phoneNumber: phoneNumber,
       );
+      
+      debugPrint('✅ Subscription successful. Result: $result');
       
       // Refresh subscription status after successful subscription
       await loadSubscriptionStatus();
-      _error = null;
       return true;
-    } catch (e) {
+      
+    } catch (e, stackTrace) {
       _error = e.toString();
-      debugPrint('Error subscribing to plan: $e');
+      debugPrint('❌ Error subscribing to plan: $e');
+      debugPrint('Stack trace: $stackTrace');
+      
+      // Try to extract a more user-friendly error message
+      if (e.toString().contains('NoSuchMethodError')) {
+        _error = 'Error processing subscription. Please try again.';
+      }
+      
       return false;
     } finally {
       _setLoading(false);

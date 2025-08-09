@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../features/subscription/subscription_provider.dart';
+import 'subscription_payment_dialog.dart';
 
 class PaymentPlanWall extends StatefulWidget {
   final VoidCallback? onPlanSelected;
@@ -44,16 +45,30 @@ class _PaymentPlanWallState extends State<PaymentPlanWall> {
     });
 
     try {
-      // In a real app, you would handle payment processing here
-      // For now, we'll just call the onPlanSelected callback if provided
-      if (widget.onPlanSelected != null) {
-        widget.onPlanSelected!();
-      }
+      // Find the selected plan
+      final provider = context.read<SubscriptionProvider>();
+      final plan = provider.plans.firstWhere((p) => p.id == planId);
+      
+      // Show the payment dialog
+      final paymentSuccessful = await showDialog<bool>(
+        context: context,
+        builder: (context) => SubscriptionPaymentDialog(
+          plan: plan,
+        ),
+      ) ?? false;
 
-      // Show success message
-      if (mounted) {
+      if (paymentSuccessful && mounted) {
+        // Call the onPlanSelected callback if payment was successful
+        if (widget.onPlanSelected != null) {
+          widget.onPlanSelected!();
+        }
+
+        // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Subscription successful!')),
+          const SnackBar(
+            content: Text('Subscription successful!'),
+            backgroundColor: Colors.green,
+          ),
         );
       }
     } catch (e) {
@@ -61,11 +76,18 @@ class _PaymentPlanWallState extends State<PaymentPlanWall> {
         _errorMessage = 'Failed to process subscription. Please try again.';
       });
       debugPrint('Subscription error: $e');
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } finally {
       if (mounted) {
-        setState(() {
-          _isProcessing = false;
-        });
+        setState(() => _isProcessing = false);
       }
     }
   }

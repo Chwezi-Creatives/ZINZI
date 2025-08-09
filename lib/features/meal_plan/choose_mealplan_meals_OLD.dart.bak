@@ -1,0 +1,1219 @@
+// cspell:disable
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:ui';
+
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/services.dart'; // For HapticFeedback
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'widgets/chef_selection_dialog.dart';
+
+
+                  if (isSelected)
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(
+                          color: kColorPrimary,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.check_rounded,
+                          color: Colors.white,
+                          size: 16,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(width: 16),
+              // Chef details
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      chef['name'] ?? 'Unnamed Chef',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (chef['specialty'] != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        chef['specialty'],
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+class ChooseMealPlanMealsScreen extends StatefulWidget {
+  final int subscriptionId;
+  final String subscriptionPlanName;
+
+  const ChooseMealPlanMealsScreen({
+    super.key,
+    required this.subscriptionId,
+    required this.subscriptionPlanName,
+  });
+
+  @override
+  _ChooseMealPlanMealsScreenState createState() => _ChooseMealPlanMealsScreenState();
+}
+
+class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen> with SingleTickerProviderStateMixin {
+  // Controllers
+  final ScrollController _scrollController = ScrollController();
+  final TextEditingController _searchController = TextEditingController();
+  final _debouncer = Debouncer(milliseconds: 500);
+  
+  // State variables
+  List<Meal> _meals = [];
+  List<Meal> _filteredMeals = [];
+  List<Map<String, dynamic>> _chefs = [];
+  Map<String, dynamic>? _selectedChef;
+  Set<String> _selectedMealIds = {};
+  bool _isLoadingChefs = false;
+  String _chefError = '';
+  final TextEditingController _chefSearchController = TextEditingController();
+  
+  // Loading states
+  bool _isLoading = false;
+  bool _isLoadingChefs = false;
+  bool _isSaving = false;
+  bool _hasMore = true;
+  bool _isRefreshing = false;
+  bool _isPreloadingEnabled = true;
+  
+  // Pagination
+  int _page = 1;
+  static const int _itemsPerPage = 10;
+  
+  // Error handling
+  String _error = '';
+  
+  // Cache for meals
+  List<dynamic> _mealsCache = [];
+  DateTime? _mealsCacheTimestamp;
+  
+  // Image preloading
+  final Set<String> _preloadedImages = {};
+
+  // Helper method to process image paths
+  String _processImagePath(String? imagePath) {
+    if (imagePath == null || imagePath.isEmpty) {
+      return 'assets/images/placeholder_meal.png';
+    }
+    if (imagePath.startsWith('http')) {
+      return imagePath;
+    }
+    return '$apiBaseUrl/$imagePath';
+  }
+  
+  // Load meals from cache or API
+  Future<void> _loadMeals() async {
+    if (_isLoading) return;
+    
+    setState(() => _isLoading = true);
+    
+    try {
+      // Try to load from cache first
+      final prefs = await SharedPreferences.getInstance();
+      final cachedMeals = prefs.getString(_mealsCacheKey);
+      final cachedTimestamp = prefs.getInt(_mealsCacheTimestampKey);
+      
+      if (cachedMeals != null && cachedTimestamp != null) {
+        final cacheTime = DateTime.fromMillisecondsSinceEpoch(cachedTimestamp);
+        if (DateTime.now().difference(cacheTime) < _cacheDuration) {
+          final meals = jsonDecode(cachedMeals) as List;
+          setState(() {
+            _allMeals = List<Map<String, dynamic>>.from(meals);
+            _filteredMeals = List<Map<String, dynamic>>.from(meals);
+            _isLoading = false;
+          });
+          return;
+        }
+      }
+      
+      // If cache is invalid or expired, load from API
+      await _loadMealsFromApi();
+    } catch (e) {
+      debugPrint('Error loading meals: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to load meals')),
+        );
+      }
+      setState(() => _isLoading = false);
+    }
+  }
+  
+  // Load meals from API
+  Future<void> _loadMealsFromApi() async {
+    try {
+      final apiService = Provider.of<ApiService>(context, listen: false);
+      final response = await apiService.get('/meals');
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as List;
+        final meals = List<Map<String, dynamic>>.from(data);
+        
+        // Save to cache
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_mealsCacheKey, jsonEncode(meals));
+        await prefs.setInt(_mealsCacheTimestampKey, DateTime.now().millisecondsSinceEpoch);
+        
+        if (mounted) {
+          setState(() {
+            _allMeals = meals;
+            _filteredMeals = List.from(meals);
+            _isLoading = false;
+          });
+        }
+      } else {
+        throw Exception('Failed to load meals');
+      }
+    } catch (e) {
+      debugPrint('Error loading meals from API: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+      rethrow;
+    }
+  }
+  
+  // Refresh meals
+  Future<void> _refreshMeals() async {
+    _isCacheInvalid = true;
+    await _loadMeals();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Choose Your Meals'),
+        backgroundColor: kColorPrimary,
+        actions: [
+          if (_isSaving)
+            const Padding(
+              padding: EdgeInsets.only(right: 16.0, top: 8.0, bottom: 8.0),
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: _refreshMeals,
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : Column(
+                children: [
+                  // Search and filter section
+                  if (_chefs.isNotEmpty) _buildChefDropdown(),
+                  
+                  // Meals list
+                  Expanded(
+                    child: _filteredMeals.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.fastfood, size: 64, color: Colors.grey),
+                                  const SizedBox(height: 16),
+                                  const Text(
+                                    'No meals available',
+                                    style: TextStyle(fontSize: 16, color: Colors.grey),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  TextButton(
+                                    onPressed: _refreshMeals,
+                                    child: const Text('Retry'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : ListView.builder(
+                            controller: _scrollController,
+                            itemCount: _filteredMeals.length + (_hasMore ? 1 : 0),
+                            itemBuilder: (context, index) {
+                              if (index >= _filteredMeals.length) {
+                                return _buildLoadingIndicator();
+                              }
+                              final meal = _filteredMeals[index];
+                              return _buildMealItem(meal);
+                            },
+                          ),
+                  ),
+                ],
+              ),
+      ),
+      floatingActionButton: _selectedMealIds.isNotEmpty && _selectedChef != null
+          ? FloatingActionButton.extended(
+              onPressed: _saveMealPlan,
+              label: const Text('Save Selections'),
+              icon: const Icon(Icons.save),
+              backgroundColor: kColorPrimary,
+            )
+          : null,
+    );
+  }
+
+  // Build loading indicator for pagination
+  Widget _buildLoadingIndicator() {
+    return _isLoading
+        ? const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16.0),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        : const SizedBox.shrink();
+  }
+  
+  // Build chef dropdown
+  Widget _buildChefDropdown() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: DropdownButtonFormField<Map<String, dynamic>>(
+        value: _selectedChef,
+        decoration: InputDecoration(
+          labelText: 'Select Chef',
+          border: const OutlineInputBorder(),
+          filled: true,
+          fillColor: Colors.grey[100],
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          prefixIcon: const Icon(Icons.people, color: kColorPrimary),
+          suffixIcon: _isLoadingChefs
+              ? const Padding(
+                  padding: EdgeInsets.all(8.0),
+                  child: SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              : null,
+        ),
+        items: _chefs.map((chef) {
+          return DropdownMenuItem<Map<String, dynamic>>(
+            value: chef,
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 16,
+                  backgroundImage: chef['avatar_url'] != null
+                      ? NetworkImage(chef['avatar_url'] as String)
+                      : const AssetImage('assets/images/chef_placeholder.png') as ImageProvider,
+                ),
+                const SizedBox(width: 12),
+                Text(chef['name'] ?? 'Unknown Chef'),
+              ],
+            ),
+          );
+        }).toList(),
+        onChanged: (chef) {
+          setState(() {
+            _selectedChef = chef;
+          });
+        },
+        validator: (value) => value == null ? 'Please select a chef' : null,
+      ),
+    );
+  }
+
+  Widget _buildMealItem(Map<String, dynamic> meal) {
+    final isSelected = _selectedMealIds.contains(meal['id']?.toString());
+    final imageUrl = _processImagePath(meal['image_url']);
+    
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: InkWell(
+        onTap: () {
+          setState(() {
+            final mealId = meal['id']?.toString();
+            if (mealId != null) {
+              if (isSelected) {
+                _selectedMealIds.remove(mealId);
+              } else {
+                _selectedMealIds.add(mealId);
+              }
+            }
+          });
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Row(
+            children: [
+              // Meal image
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8.0),
+                child: CachedNetworkImage(
+                  imageUrl: imageUrl,
+                  width: 80,
+                  height: 80,
+                  fit: BoxFit.cover,
+                  placeholder: (context, url) => Container(
+                    width: 80,
+                    height: 80,
+                    color: Colors.grey[200],
+                    child: const Center(child: CircularProgressIndicator()),
+                  ),
+                  errorWidget: (context, url, error) => Container(
+                    width: 80,
+                    height: 80,
+                    color: Colors.grey[200],
+                    child: const Icon(Icons.fastfood, size: 40),
+                  ),
+                ),
+              ),
+              
+              const SizedBox(width: 16.0),
+              
+              // Meal details
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      meal['name'] ?? 'Unnamed Meal',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4.0),
+                    Text(
+                      'UGX ${meal['price']?.toStringAsFixed(2) ?? '0.00'}',
+                      style: const TextStyle(
+                        color: kColorPrimary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              // Selection indicator
+              Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: isSelected ? kColorPrimary : Colors.transparent,
+                  border: Border.all(
+                    color: isSelected ? kColorPrimary : Colors.grey,
+                    width: 2,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: isSelected
+                    ? const Icon(Icons.check, size: 16, color: Colors.white)
+                    : null,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _debounce = Debouncer(milliseconds: 500);
+    _loadMeals();
+    _loadChefs();
+    _setupScrollListener();
+  }
+  
+  @override
+  void dispose() {
+    _debounce.cancel();
+    _scrollController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// Load cache from SharedPreferences (persistent storage)
+  /// Returns true if cache was loaded successfully
+  Future<bool> _loadMealsCacheFromPrefs() async {
+    try {
+      final cachedData = await UserCache.getData(_mealsCacheKey);
+      final timestampData = await UserCache.getData(_mealsCacheTimestampKey);
+
+      if (cachedData != null && timestampData != null) {
+        _mealsCache = List<Map<String, dynamic>>.from(cachedData);
+        _mealsCacheTimestamp = DateTime.parse(timestampData);
+        debugPrint('[MealPlan] Cache loaded with ${_mealsCache.length} items');
+        return _mealsCache.isNotEmpty;
+      }
+    } catch (e) {
+      debugPrint('[MealPlan] Error loading cache: $e');
+    }
+    _mealsCache = [];
+    _mealsCacheTimestamp = null;
+    return false;
+  }
+
+  /// Check if the cache is invalid (either empty or too old)
+  bool get _isCacheInvalid {
+    if (_mealsCache.isEmpty) return true;
+    if (_mealsCacheTimestamp == null) return true;
+
+    // Consider cache invalid if older than 1 day
+    final cacheAge = DateTime.now().difference(_mealsCacheTimestamp!);
+    return cacheAge.inDays >= 1;
+  }
+
+  /// Save meals to cache
+  Future<void> _saveMealsToCache(List<Map<String, dynamic>> meals) async {
+    _mealsCache = List<Map<String, dynamic>>.from(meals);
+    _mealsCacheTimestamp = DateTime.now();
+    
+    try {
+      await UserCache.saveData(_mealsCacheKey, _mealsCache);
+      await UserCache.saveData(
+          _mealsCacheTimestampKey, _mealsCacheTimestamp!.toIso8601String());
+    } catch (e) {
+      debugPrint('[MealPlan] Error saving cache: $e');
+    }
+  }
+
+  /// Handle scroll events for infinite loading
+  void _onScroll() {
+    if (_scrollController.position.pixels >= 
+        _scrollController.position.maxScrollExtent - 200) {
+      _preloadImages();
+    }
+  }
+
+  /// Preload images for better performance
+  Future<void> _preloadImages() async {
+    if (!_isPreloadingEnabled) return;
+    
+    // Get the current viewport dimensions
+    final viewportWidth = MediaQuery.of(context).size.width.toInt();
+    final viewportHeight = MediaQuery.of(context).size.height.toInt();
+    
+    // Preload images for visible items and a few items ahead
+    for (int i = 0; i < _filteredMeals.length; i++) {
+      if (i > 20) break; // Limit number of preloaded images
+      
+      final meal = _filteredMeals[i];
+      final imageUrl = _processImagePath(
+        meal['image_url'] ?? '',
+        meal['name'] ?? 'Meal ${i + 1}',
+      );
+      
+      if (imageUrl.isNotEmpty && !_preloadedImages.contains(imageUrl)) {
+        _preloadedImages.add(imageUrl);
+        await precacheImage(
+          CachedNetworkImageProvider(imageUrl).image,
+          context,
+          maxWidth: viewportWidth,
+          maxHeight: viewportHeight,
+        );
+      }
+    }
+  }
+
+  /// Refresh meals data, invalidating cache
+  Future<void> _refreshMeals() async {
+    if (_isRefreshing) return;
+    
+    setState(() {
+      _isRefreshing = true;
+      _error = '';
+    });
+
+    try {
+      final meals = await _fetchMeals();
+      await _saveMealsToCache(meals);
+      
+      setState(() {
+        _allMeals = meals;
+        _filteredMeals = List.from(meals);
+        _isRefreshing = false;
+      });
+      
+      // Preload images after refresh
+      if (mounted) {
+        _preloadImages();
+      }
+    } catch (e) {
+      setState(() {
+        _error = 'Failed to refresh meals. Please try again.';
+        _isRefreshing = false;
+      });
+      debugPrint('Error refreshing meals: $e');
+    }
+  }
+
+  Future<void> _loadInitialData() async {
+    setState(() => _isLoading = true);
+    try {
+      await _fetchMeals();
+      await _fetchChefs();
+    } catch (e) {
+      debugPrint('Error loading data: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _fetchMeals() async {
+    try {
+      final response = await http.get(Uri.parse('$apiBaseUrl/api/meals'));
+      if (response.statusCode == 200) {
+        setState(() {
+          _allMeals = List<Map<String, dynamic>>.from(jsonDecode(response.body));
+          _filteredMeals = List.from(_allMeals);
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching meals: $e');
+    }
+  }
+
+  Future<void> _fetchChefs() async {
+    if (_isLoadingChefs) return;
+    
+    setState(() {
+      _isLoadingChefs = true;
+      _chefError = '';
+    });
+
+    try {
+      final response = await http.get(
+        Uri.parse('$apiBaseUrl/api/chefs'),
+      ).timeout(const Duration(seconds: 10));
+      
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body);
+        final chefs = List<Map<String, dynamic>>.from(data);
+        
+        if (mounted) {
+          setState(() {
+            _chefs = chefs;
+            // Select first chef by default if none selected
+            if (_selectedChef == null && chefs.isNotEmpty) {
+              _selectedChef = chefs.first;
+            }
+          });
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to load chefs. Please try again.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } on TimeoutException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Connection timeout. Please check your internet.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _chefError = 'Error loading chefs. Please try again.';
+        });
+      }
+      debugPrint('Error fetching chefs: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingChefs = false);
+      }
+    }
+  }
+
+  Future<void> _toggleMealSelection(String mealId) async {
+    // Haptic feedback for better touch response
+    await HapticFeedback.selectionClick();
+    
+    setState(() {
+      if (_selectedMealIds.contains(mealId)) {
+        _selectedMealIds.remove(mealId);
+      } else {
+        _selectedMealIds.add(mealId);
+        // Show a snackbar when reaching certain selection milestones
+        if (_selectedMealIds.length % 3 == 0 && _selectedMealIds.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${_selectedMealIds.length} meals selected'),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 1),
+            ),
+          );
+        }
+      }
+    });
+  }
+
+  Future<void> _saveMealPlan() async {
+    // Validate selection
+    if (_selectedMealIds.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please select at least one meal'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (_selectedChef == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please select a chef'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Show loading indicator
+    bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Confirm Meal Plan'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('You\'ve selected ${_selectedMealIds.length} meals'),
+              const SizedBox(height: 8),
+              Text('Chef: ${_selectedChef!['name'] ?? 'N/A'}'),
+              const SizedBox(height: 16),
+              const Text('Would you like to save this meal plan?'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('CANCEL'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kColorPrimary,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('CONFIRM'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    bool isSuccess = false;
+    String message = 'Meal plan saved successfully';
+    
+    try {
+      if (!mounted) return;
+      
+      // Show loading overlay
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(kColorPrimary),
+          ),
+        ),
+      );
+
+      final response = await http.post(
+        Uri.parse('$apiBaseUrl/api/meal-plans'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'subscription_id': widget.subscriptionId,
+          'chef_id': _selectedChef!['id'],
+          'meal_ids': _selectedMealIds.toList(),
+        }),
+      ).timeout(const Duration(seconds: 30));
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        isSuccess = true;
+        // Clear selection on success
+        setState(() {
+          _selectedMealIds.clear();
+        });
+      } else {
+        message = 'Failed to save meal plan. Please try again.';
+        debugPrint('API Error: ${response.statusCode} - ${response.body}');
+      }
+    } on TimeoutException {
+      message = 'Request timed out. Please check your connection and try again.';
+    } catch (e) {
+      message = 'An error occurred: ${e.toString()}';
+      debugPrint('Error saving meal plan: $e');
+    } finally {
+      if (mounted) {
+        // Dismiss loading overlay
+        Navigator.of(context).pop();
+        
+        // Show result message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: isSuccess ? Colors.green : Colors.red,
+            duration: const Duration(seconds: 3),
+            action: SnackBarAction(
+              label: 'OK',
+              textColor: Colors.white,
+              onPressed: () {
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+              },
+            ),
+          ),
+        );
+
+        // Navigate back on success
+        if (isSuccess && mounted) {
+          Navigator.of(context).pop(true);
+        }
+      }
+    }
+  }
+
+  Widget _buildChefDropdown() {
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: _selectedChef != null ? kColorPrimary.withOpacity(0.5) : Colors.grey[300]!,
+          width: _selectedChef != null ? 1.5 : 1.0,
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: _showChefSelectionDialog,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.emoji_people_rounded, 
+                    color: kColorPrimary,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'YOUR CHEF',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey[600],
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              _buildChefSelectionContent(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChefSelectionContent() {
+    if (_isLoadingChefs) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_selectedChef != null) {
+      return Row(
+        children: [
+          CircleAvatar(
+            radius: 24,
+            backgroundColor: kColorPrimary.withOpacity(0.1),
+            child: _buildChefAvatar(_selectedChef!),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _selectedChef!['name'] ?? 'Unnamed Chef',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (_selectedChef!['specialty'] != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    _selectedChef!['specialty'],
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Icon(
+            Icons.arrow_forward_ios_rounded,
+            size: 16,
+            color: Colors.grey[400],
+          ),
+        ],
+      );
+    }
+
+    return Row(
+      children: [
+        CircleAvatar(
+          radius: 24,
+          backgroundColor: Colors.grey[200],
+          child: Icon(Icons.person_add_alt_1_rounded, 
+            color: Colors.grey[400],
+            size: 28,
+          ),
+        ),
+        const SizedBox(width: 12),
+        const Expanded(
+          child: Text(
+            'Select a chef',
+            style: TextStyle(
+              fontSize: 16,
+              color: Colors.grey,
+            ),
+          ),
+        ),
+        Icon(
+          Icons.arrow_forward_ios_rounded,
+          size: 16,
+          color: Colors.grey[400],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildChefAvatar(Map<String, dynamic> chef) {
+    if (chef['avatar_url'] != null) {
+      return ClipOval(
+        child: CachedNetworkImage(
+          imageUrl: _processImagePath(chef['avatar_url']),
+          width: 40,
+          height: 40,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => CircularProgressIndicator(
+            strokeWidth: 2,
+            valueColor: AlwaysStoppedAnimation<Color>(kColorPrimary),
+          ),
+          errorWidget: (context, url, error) => Icon(
+            Icons.person,
+            size: 24,
+            color: Colors.grey[400],
+          ),
+        ),
+      );
+    }
+    return Icon(
+      Icons.person,
+      size: 28,
+      color: Colors.grey[400],
+    );
+  }
+
+  Future<void> _showChefSelectionDialog() async {
+    _chefSearchController.clear();
+    
+    final selectedChef = await showChefSelectionDialog(
+      context: context,
+      chefs: _chefs,
+      selectedChef: _selectedChef,
+      isLoading: _isLoadingChefs,
+      hasError: _chefError.isNotEmpty,
+    );
+
+    if (selectedChef != null && mounted) {
+      setState(() => _selectedChef = selectedChef);
+    }
+  }
+}
+                        padding: const EdgeInsets.all(16.0),
+                        sliver: SliverGrid(
+                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            crossAxisSpacing: 12.0,
+                            mainAxisSpacing: 12.0,
+                            childAspectRatio: 0.8,
+                          ),
+                          delegate: SliverChildBuilderDelegate(
+                            (context, index) {
+                              final meal = _filteredMeals[index];
+                              final isSelected = _selectedMealIds.contains(meal['id']?.toString());
+                              return _buildMealItem(meal, isSelected);
+                            },
+                            childCount: _filteredMeals.length,
+                          ),
+                        ),
+                      ),
+                      // Loading more indicator
+                      if (_isLoadingMore)
+                        const SliverToBoxAdapter(
+                          child: Padding(
+                            padding: EdgeInsets.all(16.0),
+                            child: Center(child: CircularProgressIndicator()),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+          ),
+          // Save button
+          if (_selectedMealIds.isNotEmpty && _selectedChef != null)
+            Positioned(
+              bottom: 16,
+              right: 16,
+              child: FloatingActionButton(
+                onPressed: _saveMealPlan,
+                child: const Icon(Icons.save, size: 20),
+                backgroundColor: kColorPrimary,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _getDietaryIcon(String? restriction) {
+    final iconData = switch (restriction?.toLowerCase()) {
+      'vegetarian' => Icons.eco,
+      'vegan' => Icons.forest,
+      'gluten-free' => Icons.do_not_touch,
+      'dairy-free' => Icons.water_drop,
+      'nut-free' => Icons.park,
+      'halal' => Icons.mosque,
+      _ => Icons.restaurant,
+    };
+
+    final color = switch (restriction?.toLowerCase()) {
+      'vegetarian' => Colors.green,
+      'vegan' => Colors.green[700],
+      'gluten-free' => Colors.amber[700],
+      'dairy-free' => Colors.blue[300],
+      'nut-free' => Colors.brown[400],
+      'halal' => Colors.green[800],
+      _ => Colors.grey[600],
+    };
+
+    return Tooltip(
+      message: restriction ?? 'Dietary Info',
+      child: Icon(iconData, size: 16, color: color),
+    );
+  }
+
+  // Animation controller for meal selection
+  final Map<String, AnimationController> _animationControllers = {};
+  final Map<String, Tween<double>> _scaleTweens = {};
+  final double _selectedScale = 1.02;
+  final Duration _animationDuration = const Duration(milliseconds: 200);
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _searchController.dispose();
+    _chefSearchController.dispose();
+    for (var controller in _animationControllers.values) {
+      controller.dispose();
+    }
+    _animationControllers.clear();
+    super.dispose();
+  }
+
+  AnimationController _getAnimationController(String mealId) {
+    if (!_animationControllers.containsKey(mealId)) {
+      _animationControllers[mealId] = AnimationController(
+        vsync: this,
+        duration: _animationDuration,
+      )..addListener(() => setState(() {}));
+      
+      _scaleTweens[mealId] = Tween<double>(
+        begin: 1.0,
+        end: _selectedScale,
+      ).chain(CurveTween(curve: Curves.easeInOut));
+    }
+    return _animationControllers[mealId]!;
+  }
+
+  Widget _buildMealItem(Map<String, dynamic> meal, bool isSelected) {
+    final mealId = meal['id']?.toString() ?? '';
+    final restrictions = (meal['dietary_restrictions'] as List<dynamic>?)?.cast<String>() ?? [];
+    final hasRestrictions = restrictions.isNotEmpty;
+    final rating = meal['rating']?.toDouble() ?? 0.0;
+    final ratingCount = meal['rating_count'] ?? 0;
+    
+    // Get or create animation controller for this meal
+    final animationController = _getAnimationController(mealId);
+    
+    // Animate selection/deselection
+    if (isSelected && animationController.status != AnimationStatus.completed) {
+      animationController.forward();
+    } else if (!isSelected && animationController.status != AnimationStatus.dismissed) {
+      animationController.reverse();
+    }
+
+    return Semantics(
+      button: true,
+      label: '${meal['name']}. ${isSelected ? 'Selected' : 'Not selected'}. Tap to ${isSelected ? 'deselect' : 'select'}.',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _toggleMealSelection(mealId),
+        onTapDown: (_) {
+          // Visual feedback on tap down
+          if (mealId != null) {
+            _animationControllers[mealId]?.forward();
+          }
+        },
+        onTapCancel: () {
+          // Reset animation if tap is canceled
+          if (mealId != null && !_selectedMealIds.contains(mealId)) {
+            _animationControllers[mealId]?.reverse();
+          }
+        },
+      child: ScaleTransition(
+        scale: _scaleTweens[mealId]?.evaluate(AlwaysStoppedAnimation(animationController.value)) ?? 1.0,
+        child: AnimatedContainer(
+          duration: _animationDuration,
+          margin: const EdgeInsets.all(4.0),
+          transform: Matrix4.identity()
+            ..setEntry(3, 2, 0.001) // Perspective
+            ..rotateX(0.0),
+          child: Card(
+            elevation: isSelected ? 6.0 : 2.0,
+            shadowColor: isSelected ? kColorPrimary.withOpacity(0.3) : Colors.black12,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12.0),
+              side: isSelected
+                  ? BorderSide(color: kColorPrimary, width: 2.0)
+                  : BorderSide(color: Colors.grey.withOpacity(0.2)),
+            ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Meal image with selection overlay
+              Expanded(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    // Meal image
+                    CachedNetworkImage(
+                      imageUrl: meal['image_url'] ?? '',
+                      fit: BoxFit.cover,
+                      placeholder: (context, url) => Container(
+                        color: Colors.grey[200],
+                        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                      ),
+                      errorWidget: (context, url, error) => Container(
+                        color: Colors.grey[200],
+                        child: const Icon(Icons.fastfood, size: 40, color: Colors.grey),
+                      ),
+                ),
+              ),
+              if (_selectedChef!['specialty'] != null) ...[
+                const SizedBox(height: 2),
+                Text(
+                  _selectedChef!['specialty'],
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey[600],
+                  ),
+                            '${meal['calories']} cal',
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        if (meal['cooking_time'] != null)
+                          _buildInfoChip(
+                            Icons.timer_outlined,
+                            '${meal['cooking_time']} min',
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoChip(IconData icon, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Colors.grey[600]),
+          const SizedBox(width: 4),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.grey[700],
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+}

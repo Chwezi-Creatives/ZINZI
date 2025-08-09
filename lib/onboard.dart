@@ -1,7 +1,10 @@
 //cspell:disable
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:zinzi/allmeals.dart';
+import 'package:zinzi/features/meal_plan/choose_mealplan_meals.dart';
 import 'package:zinzi/features/payment/payment_plan_gate.dart';
+import 'package:zinzi/features/subscription/subscription_provider.dart';
 import 'package:zinzi/chef.dartp';
 import 'package:zinzi/chef_net.dart';
 //import 'package:zinzi/producer_network_testing.dart';
@@ -115,11 +118,44 @@ class LandingPage extends StatelessWidget {
                     PaymentPlanGate(
                       child: AllMealsScreen(),
                       requirePlan: true,
-                      onPlanVerified: () {
+                      onPlanVerified: () async {
                         // This will be called after successful plan verification
-                        Navigator.of(context).pushReplacement(
-                          MaterialPageRoute(builder: (context) => AllMealsScreen()),
-                        );
+                        try {
+                          // Get the subscription provider
+                          final subscriptionProvider = Provider.of<SubscriptionProvider>(
+                            context,
+                            listen: false,
+                          );
+                          
+                          // Load the latest subscription status
+                          await subscriptionProvider.loadSubscriptionStatus();
+                          
+                          if (subscriptionProvider.subscriptionStatus != null) {
+                            final subscriptionId = subscriptionProvider.subscriptionStatus!['subscription_id'] as int?;
+                            final planName = subscriptionProvider.subscriptionStatus!['current_plan']?['plan']?['name']?.toString() ?? 'Meal Plan';
+                            
+                            if (subscriptionId != null && context.mounted) {
+                              Navigator.of(context).pushReplacement(
+                                MaterialPageRoute(
+                                  builder: (context) => ChooseMealPlanMealsScreen(
+                                    subscriptionId: subscriptionId,
+                                    subscriptionPlanName: planName,
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
+                          }
+                        } catch (e) {
+                          debugPrint('Error navigating to meal plan selection: $e');
+                        }
+                        
+                        // Fallback to AllMealsScreen if we can't get subscription details
+                        if (context.mounted) {
+                          Navigator.of(context).pushReplacement(
+                            MaterialPageRoute(builder: (context) => AllMealsScreen()),
+                          );
+                        }
                       },
                     ),
                     'assets/images/MealsRG.png',
