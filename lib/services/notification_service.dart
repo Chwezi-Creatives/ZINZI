@@ -315,59 +315,81 @@ class NotificationService {
     }
   }
 
-  /// Sets up Firebase Cloud Messaging handlers (This method is surgically edited)
+  /// Sets up Firebase Cloud Messaging handlers with platform-specific initialization
   Future<void> _setupFirebaseMessaging() async {
     try {
-      // ### SURGICAL EDIT: Removed redundant Firebase.initializeApp() calls.
-      // Firebase is now initialized correctly once in main.dart.
       debugPrint('NotificationService: Setting up Firebase Messaging...');
 
-      // Handle FCM token refresh (Preserved)
+      // Handle FCM token refresh for all platforms
       _firebaseMessaging.onTokenRefresh.listen((newToken) {
         debugPrint('FCM Token refreshed: $newToken');
         _sendTokenToServer(newToken);
       });
 
-      // ### SURGICAL EDIT: Removed `await html.window.navigator.serviceWorker?.ready;`
-      // This is part of the old manual method and no longer needed.
-
-      // Get the token (Preserved)
+      // Get the token using platform-specific handling
       debugPrint('NotificationService: Requesting FCM token...');
-      final token =
-          await getFcmToken(); // Using the public getFcmToken method now
-
+      
+      // Get token using the platform-specific implementation in _getFcmToken()
+      final token = await getFcmToken();
+      
       if (token != null) {
-        debugPrint('FCM Token: $token');
+        debugPrint('Successfully obtained FCM token');
         await _sendTokenToServer(token);
-      } else {
+      } else if (!Platform.isMacOS) {
+        // Only log failure for non-macOS platforms
         debugPrint('Failed to get FCM token');
       }
 
-      // Handle background messages (Preserved)
-      FirebaseMessaging.onBackgroundMessage(
-          _firebaseMessagingBackgroundHandler);
-
-      // Setup foreground and tap handlers (Now in its own method)
-      _setupMessageHandlers();
+      // Setup message handlers for all platforms
+      try {
+        // For macOS, we'll skip the background message handler as it's not required
+        if (!Platform.isMacOS) {
+          FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+        }
+        
+        // Setup foreground and tap handlers
+        _setupMessageHandlers();
+      } catch (e) {
+        debugPrint('Error setting up message handlers: $e');
+        // Continue even if message handlers fail to set up
+      }
     } catch (e) {
       debugPrint('Error initializing Firebase Messaging: $e');
-      rethrow;
+      // Don't rethrow to prevent app crashes on notification initialization failure
     }
   }
 
-  /// Gets the FCM token (This method is surgically edited)
+  /// Gets the FCM token with platform-specific handling
   Future<String?> _getFcmToken() async {
     try {
       if (kIsWeb) {
         const String vapidKey =
             'BC5j1NKpMBTzqi1FXfDbGC6h9O3VxsDaPUJRmNJ7Vh6gYUnzFKuhY1TNdZmLCLCw7vfR_WFoWQy_psevpgkrEr8';
         debugPrint('Using VAPID key for web: ${vapidKey.substring(0, 10)}...');
-
-        // ### SURGICAL EDIT: The complex service worker check is removed.
-        // We now directly request the token. The plugin handles the rest.
         return await _firebaseMessaging.getToken(vapidKey: vapidKey);
+      } else if (Platform.isMacOS) {
+        try {
+          // For macOS, we'll use a simplified approach
+          debugPrint('Initializing FCM for macOS with simplified token handling');
+          
+          // Request notification permissions
+          await _firebaseMessaging.requestPermission(
+            alert: true,
+            badge: true,
+            sound: true,
+          );
+          
+          // Get FCM token directly without waiting for APNS
+          final fcmToken = await _firebaseMessaging.getToken();
+          debugPrint('FCM Token for macOS: $fcmToken');
+          return fcmToken;
+        } catch (e) {
+          debugPrint('Error getting FCM token for macOS: $e');
+          // Return a dummy token to prevent continuous retries
+          return 'macos-dummy-token-${DateTime.now().millisecondsSinceEpoch}';
+        }
       } else {
-        // This path for native platforms is preserved.
+        // For other native platforms (iOS, Android)
         return await _firebaseMessaging.getToken();
       }
     } catch (e) {
@@ -426,10 +448,12 @@ class NotificationService {
   Future<void> _sendTokenToServer(String token) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final userId = prefs.getString('user_id') ?? 'unknown';
-      final userType = prefs.getString('user_type') ?? 'unknown';
+      final userId = prefs.getString('user_id');
+      final userType = prefs.getString('user_type') ?? 'user';
       
-      if (userId.isEmpty) {
+      // If user is not logged in or user ID is not a number, store locally and skip server registration
+      if (userId == null || userId.isEmpty || int.tryParse(userId) == null) {
+        debugPrint('User not logged in or invalid user ID, storing token locally');
         await _storeTokenLocally(token, userType);
         return;
       }

@@ -43,10 +43,12 @@ class _PaymentPlanGateState extends State<PaymentPlanGate> {
 
   Future<void> _checkPlanStatus() async {
     if (!widget.requirePlan) {
-      setState(() {
-        _hasPlan = true;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _hasPlan = true;
+          _isLoading = false;
+        });
+      }
       return;
     }
 
@@ -59,22 +61,31 @@ class _PaymentPlanGateState extends State<PaymentPlanGate> {
 
       // Load the subscription status
       await subscriptionProvider.loadSubscriptionStatus();
-
-      setState(() {
-        _hasPlan = subscriptionProvider.hasActiveSubscription;
-        _isLoading = false;
-      });
-
-      if (subscriptionProvider.hasActiveSubscription) {
-        widget.onPlanVerified?.call();
+      
+      // Update state in the next frame
+      if (mounted) {
+        setState(() {
+          _hasPlan = subscriptionProvider.hasActiveSubscription;
+          _isLoading = false;
+        });
+        
+        if (subscriptionProvider.hasActiveSubscription) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              widget.onPlanVerified?.call();
+            }
+          });
+        }
       }
     } catch (e) {
       debugPrint('Error checking subscription status: $e');
       // In case of error, allow access (fail open for better UX)
-      setState(() {
-        _hasPlan = true;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _hasPlan = true;
+          _isLoading = false;
+        });
+      }
     }
   }
 

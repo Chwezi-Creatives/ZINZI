@@ -51,6 +51,43 @@ app.*.map.json
 # Ignore Gradle build output directory
 build
 
+# iOS
+ios/**/xcuserdata/
+ios/**/Pods/
+ios/**/.symlinks/
+ios/**/Flutter/Flutter.framework/
+ios/**/Flutter/Flutter.podspec
+ios/**/Flutter/flutter_export_environment.sh
+ios/**/Flutter/.last_build_id
+ios/**/Flutter/app.flx
+ios/**/Flutter/app.dill
+ios/**/Flutter/app.dill.incremental
+ios/**/Flutter/flutter_assets/
+ios/**/ServiceDefinitions.json
+ios/**/Runner/GeneratedPluginRegistrant.*
+ios/**/Runner.xcodeproj/project.xcworkspace/xcuserdata/
+ios/**/Runner.xcodeproj/xcuserdata/
+ios/**/Runner.xcworkspace/xcuserdata/
+ios/**/Runner.xcworkspace/xcshareddata/
+ios/**/Runner.xcworkspace/
+
+# macOS
+macos/**/Flutter/Flutter.framework/
+macos/**/Flutter/Flutter.podspec
+macos/**/Flutter/FlutterMacOS.podspec
+macos/**/Flutter/GeneratedPluginRegistrant.swift
+macos/**/Flutter/ephemeral/
+macos/**/Flutter/flutter_export_environment.sh
+macos/**/Flutter/.last_build_id
+macos/**/Runner.xcodeproj/project.xcworkspace/xcuserdata/
+macos/**/Runner.xcodeproj/xcuserdata/
+macos/**/Runner.xcworkspace/xcuserdata/
+macos/**/Runner.xcworkspace/xcshareddata/
+
+# Swift Package Manager
+.swiftpm/
+.build/
+
 # Miscellaneous files to ignore
 *.class    # Compiled Java classes
 *.log      # Log files

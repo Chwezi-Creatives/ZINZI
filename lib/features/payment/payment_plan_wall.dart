@@ -49,7 +49,7 @@ class _PaymentPlanWallState extends State<PaymentPlanWall> {
       if (widget.onPlanSelected != null) {
         widget.onPlanSelected!();
       }
-      
+
       // Show success message
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -74,8 +74,9 @@ class _PaymentPlanWallState extends State<PaymentPlanWall> {
   Widget build(BuildContext context) {
     return Consumer<SubscriptionProvider>(
       builder: (context, subscriptionProvider, _) {
-        final isLoading = widget.isLoading || _isProcessing || subscriptionProvider.isLoading;
-        
+        final isLoading =
+            widget.isLoading || _isProcessing || subscriptionProvider.isLoading;
+
         return Scaffold(
           appBar: AppBar(
             title: const Text('Choose Your Plan'),
@@ -125,18 +126,21 @@ class _PaymentPlanWallState extends State<PaymentPlanWall> {
                         padding: const EdgeInsets.only(bottom: 16.0),
                         child: Text(
                           _errorMessage!,
-                          style: const TextStyle(color: Colors.red, fontSize: 14),
+                          style:
+                              const TextStyle(color: Colors.red, fontSize: 14),
                           textAlign: TextAlign.center,
                         ),
                       ),
 
                     // Loading indicator
-                    if (subscriptionProvider.plans.isEmpty && subscriptionProvider.isLoading)
+                    if (subscriptionProvider.plans.isEmpty &&
+                        subscriptionProvider.isLoading)
                       const CircularProgressIndicator()
                     else if (subscriptionProvider.plans.isEmpty)
                       const Text('No subscription plans available')
                     else
-                      ..._buildPlanCards(context, subscriptionProvider, isLoading),
+                      ..._buildPlanCards(
+                          context, subscriptionProvider, isLoading),
 
                     const SizedBox(height: 32),
 
@@ -155,7 +159,8 @@ class _PaymentPlanWallState extends State<PaymentPlanWall> {
                       onPressed: () {
                         // TODO: Handle terms and privacy policy
                       },
-                      child: const Text('View Terms of Service and Privacy Policy'),
+                      child: const Text(
+                          'View Terms of Service and Privacy Policy'),
                     ),
                   ],
                 ),
@@ -173,37 +178,35 @@ class _PaymentPlanWallState extends State<PaymentPlanWall> {
     bool isLoading,
   ) {
     return provider.plans.map((plan) {
-      final isPopular = plan['name'] == 'Bi-Weekly';
-      final priceInShillings = (plan['price_in_cents'] / 100).toStringAsFixed(0);
-      final period = plan['billing_cycle_days'] == 14 
-          ? 'every 2 weeks' 
-          : 'per month';
-      
-      // Convert features from JSON to list of strings
-      List<String> features = [];
-      if (plan['features'] != null && plan['features'] is List) {
-        features = List<String>.from(plan['features']);
-      } else {
-        // Default features if none provided
-        features = [
-          'Unlimited access to all meals',
-          'Free delivery on all orders',
-          'Exclusive member discounts',
-          if (plan['billing_cycle_days'] == 30) 'Priority customer support',
-          'Cancel anytime',
-        ];
-      }
+      final isPopular = plan.name.toLowerCase().contains('bi-weekly') ||
+          plan.name.toLowerCase().contains('Bi weekly');
+      final priceInShillings = plan.price.toInt(); // Display the price as is
+      final period = plan.billingCycle.toLowerCase().contains('month')
+          ? 'per month'
+          : 'every 2 weeks';
+
+      // Use features from the plan, or fallback to default if empty
+      final features = plan.features.isNotEmpty 
+          ? plan.features 
+          : [
+              'Unlimited access to all meals',
+              'Free delivery on all orders',
+              'Exclusive member discounts',
+              if (plan.billingCycle.toLowerCase().contains('month'))
+                'Priority customer support',
+              'Cancel anytime',
+            ];
 
       return Padding(
         padding: const EdgeInsets.only(bottom: 24.0),
         child: _buildPlanCard(
           context,
-          title: plan['name'] ?? 'Premium Plan',
-          price: 'KSH $priceInShillings',
+          title: plan.name,
+          price: 'UGX $priceInShillings',
           period: period,
           features: features,
           isPopular: isPopular,
-          onTap: () => _handlePlanSelected(plan['id']),
+          onTap: () => _handlePlanSelected(plan.id),
           isLoading: isLoading,
         ),
       );
@@ -329,7 +332,8 @@ class _PaymentPlanWallState extends State<PaymentPlanWall> {
                           height: 20,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white),
                           ),
                         )
                       : Text(

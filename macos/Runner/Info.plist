@@ -48,6 +48,12 @@
     <string>Hear helpful alerts when new updates arrive</string>
     
     <!-- Required for network access -->
+    
+    <!-- Location Services -->
+    <key>NSLocationUsageDescription</key>
+    <string>Zinzi uses your location to provide personalized content and services near you</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Zinzi needs access to your location to show nearby services and content</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsArbitraryLoads</key>

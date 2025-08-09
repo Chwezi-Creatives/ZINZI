@@ -116,7 +116,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_launcher_icons: ^0.14.4 # or the latest version
-
+ 
 flutter_launcher_icons:
   android: true
   ios: true

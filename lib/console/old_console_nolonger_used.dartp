@@ -3,16 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
-// Assuming these are your actual import paths
-import 'package:zinzi/console/console_api_service.dart' as console_api; 
-import 'console_data_models.dart';   // Restored for clarity
-import 'console_plans.dart';         // New plan management tab
-import 'package:zinzi/services/api_service.dart' as zinzi_api; // Renamed to avoid conflict
-import 'package:zinzi/services/shared_prefs_storage.dart';
-import 'package:zinzi/features/subscription/services/plan_service.dart';
-
+import 'console_api_service.dart';
+import 'console_data_models.dart';
 
 // --- Color Constants ---
 const kTealColor = Colors.teal;
@@ -22,8 +14,7 @@ const kBackgroundColor = Color(0xFFF5F5F5);
 const kDarkTextColor = Color(0xFF333333);
 const kSubtleTextColor = Colors.grey;
 
-// Added 'plans' to the enum
-enum Category { plans, meals, spices, herbals, gadgets, supplements }
+enum Category { meals, spices, herbals, gadgets, supplements }
 
 class AdminConsolePage extends StatefulWidget {
   const AdminConsolePage({super.key});
@@ -33,68 +24,41 @@ class AdminConsolePage extends StatefulWidget {
 }
 
 class _AdminConsolePageState extends State<AdminConsolePage> {
-  // Use the specific console API service for products
-  final console_api.ApiService _productApiService = console_api.ApiService(); 
-  late final PlanService _planService;
-
-  Category _selectedCategory = Category.plans;
+  final ApiService _apiService = ApiService();
+  Category _selectedCategory = Category.meals;
   List<Product> _items = [];
   bool _isLoading = true;
   String? _errorMessage;
-  late Future<void> _initServicesFuture;
 
   @override
   void initState() {
     super.initState();
-    _initServicesFuture = _initializeServices();
-  }
-
-  // Handles async initialization of services required for the console
-  Future<void> _initializeServices() async {
-    final prefs = await SharedPreferences.getInstance();
-    final storageService = SharedPrefsStorage(prefs);
-    // Assuming zinzi_api.ApiService is what PlanService needs
-    final apiService = zinzi_api.ApiService(); 
-    _planService = PlanService(apiService: apiService, storageService: storageService);
-    // Fetch initial data for the default category
-    await _fetchData();
+    _fetchData();
   }
 
   Future<void> _fetchData() async {
-    // If plans tab is selected, do nothing as it handles its own state
-    if (_selectedCategory == Category.plans) {
-      if (mounted) setState(() => _isLoading = false);
-      return;
-    }
-
-    if (!mounted) return;
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
     try {
-      // Logic restored from the original working file
       switch (_selectedCategory) {
         case Category.meals:
-          _items = await _productApiService.fetchItems('meals', Meal.fromJson);
+          _items = await _apiService.fetchItems('meals', Meal.fromJson);
           break;
         case Category.spices:
-          _items = await _productApiService.fetchItems('spices', Spice.fromJson);
+          _items = await _apiService.fetchItems('spices', Spice.fromJson);
           break;
         case Category.herbals:
-          // Corrected endpoint from 'rherbals' to 'herbals'
-          _items = await _productApiService.fetchItems('herbals', Herbal.fromJson);
+          _items = await _apiService.fetchItems('rherbals', Herbal.fromJson);
           break;
         case Category.gadgets:
-          _items = await _productApiService.fetchItems('gadgets', Gadget.fromJson);
+          _items = await _apiService.fetchItems('gadgets', Gadget.fromJson);
           break;
         case Category.supplements:
-          _items = await _productApiService.fetchItems('supplements', Supplement.fromJson);
-          break;
-        case Category.plans:
-           // This case is handled by the initial check, but here for completeness
-          _items = []; 
+          _items =
+              await _apiService.fetchItems('supplements', Supplement.fromJson);
           break;
       }
     } catch (e) {
@@ -110,9 +74,7 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
     if (_selectedCategory != category) {
       setState(() {
         _selectedCategory = category;
-        _items = []; // Clear old items for better UX
-        _isLoading = true; // Show loading indicator immediately
-        _errorMessage = null;
+        _items = []; // Clear old items immediately for better UX
       });
       _fetchData();
     }
@@ -129,28 +91,12 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
         elevation: 2,
         iconTheme: const IconThemeData(color: kWhiteColor),
       ),
-      body: FutureBuilder(
-        future: _initServicesFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator(color: kTealColor));
-          }
-          if (snapshot.hasError) {
-            return Center(child: Text("Error initializing services: ${snapshot.error}"));
-          }
-          // Services are initialized, build the main UI
-          return Column(
-            children: [
-              _buildCategorySelector(),
-              // Only show batch update for product categories
-              Visibility(
-                visible: _selectedCategory != Category.plans,
-                child: _buildBatchUpdateCard(),
-              ),
-              Expanded(child: _buildContent()),
-            ],
-          );
-        },
+      body: Column(
+        children: [
+          _buildCategorySelector(),
+          _buildBatchUpdateCard(),
+          Expanded(child: _buildContent()),
+        ],
       ),
     );
   }
@@ -270,11 +216,6 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
   }
 
   Widget _buildContent() {
-    // If 'plans' is selected, show the dedicated widget
-    if (_selectedCategory == Category.plans) {
-      return ConsolePlansTab(planService: _planService);
-    }
-    
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator(color: kTealColor));
     }
@@ -296,17 +237,14 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
         itemCount: _items.length,
         itemBuilder: (context, index) {
           final item = _items[index];
-          // Use the restored item card builder
-          return _buildItemCard(item); 
+          return _buildItemCard(item);
         },
       ),
     );
   }
 
-  // Restored from original working file
   Widget _buildItemCard(Product item) {
     String imageUrl = '';
-    // This logic is crucial and was missing in the broken version
     if (item is Meal) imageUrl = item.imageUrl;
     if (item is Spice) imageUrl = item.imageUrl ?? '';
     if (item is Herbal) imageUrl = item.imageUrl ?? '';
@@ -352,7 +290,7 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
     );
   }
 
-  // Restored from original working file
+  // Build fallback avatar with first letter or placeholder image
   Widget _buildFallbackAvatar(String name) {
     if (name.isNotEmpty) {
       return Text(
@@ -361,7 +299,6 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
             const TextStyle(color: kDarkTextColor, fontWeight: FontWeight.bold),
       );
     }
-    // Assuming you have this placeholder in your assets
     return Image.asset(
       'images/mealimageplaceholder.png',
       width: 40,
@@ -372,7 +309,7 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
     );
   }
 
-  // --- LOGIC FOR UPDATES (Restored from original) ---
+  // --- LOGIC FOR UPDATES ---
 
   void _showUpdateDialog(Product item) {
     final priceController = TextEditingController();
@@ -386,6 +323,7 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Granular update
               TextField(
                 controller: priceController,
                 decoration: InputDecoration(
@@ -407,6 +345,7 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
                 },
               ),
               const Divider(height: 30),
+              // Percentage update
               TextField(
                 controller: percentageController,
                 decoration: const InputDecoration(
@@ -483,9 +422,8 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
     }
   }
 
-  // This is the fully-featured, working batch update handler from the original
   Future<void> _handleBatchUpdate(String percentageStr, bool isIncrease) async {
-     if (percentageStr.isEmpty) {
+    if (percentageStr.isEmpty) {
       _showErrorSnackBar('Please enter a percentage value');
       return;
     }
@@ -501,6 +439,7 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
       return;
     }
 
+    // Show a confirmation dialog
     final shouldProceed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -521,57 +460,221 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
       ),
     );
 
-    if (shouldProceed != true) return;
+    if (shouldProceed != true) {
+      return;
+    }
 
+    // Show loading indicator with countdown
     final scaffoldMessenger = ScaffoldMessenger.of(context);
-    scaffoldMessenger.showSnackBar(SnackBar(
-      content: Row(children: const [
-        CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(kWhiteColor)),
-        SizedBox(width: 16),
-        Text('Updating prices...'),
-      ]),
-      duration: Duration(minutes: 5), // Long duration
-    ));
+    int remainingItems = _items.length;
+
+    // Create a controller to manage the snackbar content
+    final snackbarController = StreamController<int>.broadcast();
+
+    // Show initial snackbar
+    final snackbar = SnackBar(
+      content: StreamBuilder<int>(
+        stream: snackbarController.stream,
+        initialData: remainingItems,
+        builder: (context, snapshot) {
+          final currentCount = snapshot.data ?? remainingItems;
+          final total = _items.length;
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  value: null,
+                  strokeWidth: 2.0,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+              const SizedBox(width: 12.0),
+              Flexible(
+                child: Text(
+                  'Updating $currentCount/$total items...',
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 2,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+      duration:
+          const Duration(minutes: 1), // Long duration to prevent auto-dismissal
+    );
+
+    scaffoldMessenger.showSnackBar(snackbar);
+
+    // Start countdown timer
+    final timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (remainingItems > 0) {
+        remainingItems--;
+        snackbarController.add(remainingItems);
+      } else {
+        timer.cancel();
+      }
+    });
 
     try {
+      // Prepare updates
       final updates = _items.map((item) {
         final currentPrice = item.price ?? 0.0;
-        double newPrice = isIncrease
-            ? currentPrice * (1 + (percentage / 100))
-            : currentPrice * (1 - (percentage / 100));
-        newPrice = newPrice < 0 ? 0 : newPrice;
-        return {'id': item.id, 'price': double.parse(newPrice.toStringAsFixed(0))};
+        double newPrice;
+
+        if (isIncrease) {
+          newPrice = currentPrice * (1 + (percentage / 100));
+        } else {
+          newPrice = currentPrice * (1 - (percentage / 100));
+          // Ensure price doesn't go below 0
+          newPrice = newPrice < 0 ? 0 : newPrice;
+        }
+
+        // Round to 0 decimal places for whole number prices
+        newPrice = double.parse(newPrice.toStringAsFixed(0));
+
+        return {
+          'id': item.id,
+          'price': newPrice,
+        };
       }).toList();
 
-      final categoryName = _selectedCategory.name;
+      // Get the category name that matches our API endpoint
+      String getCategoryName() {
+        switch (_selectedCategory) {
+          case Category.meals:
+            return 'meals';
+          case Category.spices:
+            return 'spices';
+          case Category.herbals:
+            return 'herbals'; // Note: This should match your backend endpoint
+          case Category.gadgets:
+            return 'gadgets';
+          case Category.supplements:
+            return 'supplements';
+        }
+      }
 
-      final result = await _productApiService.batchUpdatePrices(
-        category: categoryName,
+      // Call the batch update API
+      final result = await _apiService.batchUpdatePrices(
+        category: getCategoryName(),
         updates: updates,
       );
 
+      // Cancel the timer and close the controller
+      timer.cancel();
+      await snackbarController.close();
+
+      // Remove loading indicator
       scaffoldMessenger.hideCurrentSnackBar();
 
       if (result.success) {
+        // Handle successful batch update (even if some items failed)
         String message = '✅ Successfully updated ${result.successCount} items';
-        if (result.failureCount > 0) {
-          message += '\n❌ ${result.failureCount} items failed to update.';
-          // Optionally show detailed errors in a dialog as in the original
+        bool hasErrors = result.failureCount > 0;
+
+        if (hasErrors) {
+          message += '\n❌ ${result.failureCount} items failed to update';
         }
-        _showSuccessSnackBar(message);
-        await _fetchData();
+
+        // Show detailed errors if any
+        if (result.errors != null && result.errors!.isNotEmpty) {
+          final errorMessages = result.errors!
+              .take(3)
+              .map((e) => '• ID ${e.id}: ${e.error}')
+              .join('\n');
+          final more = result.errors!.length > 3
+              ? '\n...and ${result.errors!.length - 3} more errors'
+              : '';
+
+          // Show detailed errors in a scrollable dialog
+          if (!mounted) return;
+          await showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Update Results'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('✅ ${result.successCount} items updated successfully'),
+                    if (hasErrors) ...[
+                      const SizedBox(height: 16),
+                      const Text('❌ The following items had issues:',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      Text(errorMessages + more),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        } else {
+          // Show simple success message if no errors
+          if (!mounted) return;
+          scaffoldMessenger.showSnackBar(
+            SnackBar(
+              content: Text(message),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+
+        // Always refresh the data to show current state
+        if (mounted) {
+          await _fetchData();
+        }
       } else {
-        _showErrorSnackBar(result.message ?? 'Batch update failed.');
+        // Show detailed error message if the entire batch failed
+        String errorMessage = result.message ?? 'Failed to update prices';
+        if (result.errors != null && result.errors!.isNotEmpty) {
+          errorMessage += '\n\nFirst error: ${result.errors!.first.error}';
+        }
+
+        if (mounted) {
+          _showErrorSnackBar(errorMessage);
+        }
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      // Log the full error for debugging
+      print('Batch update error: $e');
+      print('Stack trace: $stackTrace');
+
+      // Cancel the timer and close the controller in case of error
+      timer.cancel();
+      await snackbarController.close();
+
+      // Remove loading indicator
       scaffoldMessenger.hideCurrentSnackBar();
-      _showErrorSnackBar('An error occurred: $e');
+      _showErrorSnackBar('Error during batch update: $e');
+      if (mounted) {
+        _showErrorSnackBar(
+            'An error occurred while updating prices. Please try again. '
+            'If the problem persists, contact support.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
   Future<void> _updateAndRefresh(dynamic id, double newPrice) async {
     setState(() => _isLoading = true);
-    final success = await _productApiService.updatePrice(_selectedCategory.name, id, newPrice);
+    final success =
+        await _apiService.updatePrice(_selectedCategory.name, id, newPrice);
     if (success) {
       await _fetchData(); // Refresh the list
     } else {
@@ -586,17 +689,6 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
         SnackBar(
           content: Text(message),
           backgroundColor: Colors.redAccent,
-        ),
-      );
-    }
-  }
-
-  void _showSuccessSnackBar(String message) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: Colors.green,
         ),
       );
     }

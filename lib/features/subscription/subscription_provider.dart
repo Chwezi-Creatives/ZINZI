@@ -1,6 +1,7 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'subscription_service.dart';
+import 'subscription_service.dart' show SubscriptionService, SubscriptionPlan, MealPlan;
 
 class SubscriptionProvider with ChangeNotifier {
   final SubscriptionService _subscriptionService = SubscriptionService();
@@ -8,13 +9,15 @@ class SubscriptionProvider with ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   Map<String, dynamic>? _subscriptionStatus;
-  List<Map<String, dynamic>> _plans = [];
+  List<SubscriptionPlan> _plans = [];
+  List<MealPlan> _chefMealPlans = [];
   
   // Getters
   bool get isLoading => _isLoading;
   String? get error => _error;
   Map<String, dynamic>? get subscriptionStatus => _subscriptionStatus;
-  List<Map<String, dynamic>> get plans => _plans;
+  List<SubscriptionPlan> get plans => _plans;
+  List<MealPlan> get chefMealPlans => _chefMealPlans;
   
   // Check if user has an active subscription
   bool get hasActiveSubscription {
@@ -32,15 +35,28 @@ class SubscriptionProvider with ChangeNotifier {
   
   // Load subscription status from the server
   Future<void> loadSubscriptionStatus() async {
+    // Skip if already loading
+    if (_isLoading) return;
+    
     _setLoading(true);
     try {
       _subscriptionStatus = await _subscriptionService.getSubscriptionStatus();
       _error = null;
+      // Schedule the notification for the next frame
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_isLoading) {
+          _setLoading(false);
+        }
+      });
     } catch (e) {
       _error = e.toString();
       debugPrint('Error loading subscription status: $e');
-    } finally {
-      _setLoading(false);
+      // Schedule the notification for the next frame
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_isLoading) {
+          _setLoading(false);
+        }
+      });
     }
   }
   
@@ -61,13 +77,13 @@ class SubscriptionProvider with ChangeNotifier {
   // Subscribe to a plan
   Future<bool> subscribeToPlan({
     required int planId,
-    required String paymentMethodId,
+    String? paymentTransactionId,
   }) async {
     _setLoading(true);
     try {
       await _subscriptionService.subscribeToPlan(
         planId: planId,
-        paymentMethodId: paymentMethodId,
+        paymentTransactionId: paymentTransactionId,
       );
       
       // Refresh subscription status after successful subscription
@@ -103,6 +119,60 @@ class SubscriptionProvider with ChangeNotifier {
     }
   }
   
+  // Create a new meal plan
+  Future<bool> createMealPlan({
+    required int subscriptionId,
+    required int chefId,
+    required String name,
+    required DateTime startDate,
+    required DateTime endDate,
+    required List<Map<String, dynamic>> meals,
+  }) async {
+    _setLoading(true);
+    try {
+      await _subscriptionService.createMealPlan(
+        subscriptionId: subscriptionId,
+        chefId: chefId,
+        name: name,
+        startDate: startDate,
+        endDate: endDate,
+        meals: meals,
+      );
+      _error = null;
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('Error creating meal plan: $e');
+      return false;
+    } finally {
+      _setLoading(false);
+    }
+  }
+  
+  // Load meal plans for a chef
+  Future<void> loadChefMealPlans({
+    required int chefId,
+    String? status,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
+    _setLoading(true);
+    try {
+      _chefMealPlans = await _subscriptionService.getChefMealPlans(
+        chefId: chefId,
+        status: status,
+        startDate: startDate,
+        endDate: endDate,
+      );
+      _error = null;
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('Error loading chef meal plans: $e');
+    } finally {
+      _setLoading(false);
+    }
+  }
+  
   // Check if user has an active subscription (local cache check)
   Future<bool> checkLocalSubscriptionStatus() async {
     return await _subscriptionService.hasActiveSubscription();
@@ -112,7 +182,12 @@ class SubscriptionProvider with ChangeNotifier {
   void _setLoading(bool value) {
     if (_isLoading != value) {
       _isLoading = value;
-      notifyListeners();
+      // Use Timer.run to ensure we're not in the middle of a build
+      Timer.run(() {
+        if (hasListeners) {
+          notifyListeners();
+        }
+      });
     }
   }
   
