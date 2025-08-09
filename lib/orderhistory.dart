@@ -13,7 +13,8 @@ import 'package:shimmer/shimmer.dart'; // For loading shimmer
 import 'package:shared_preferences/shared_preferences.dart'; // For Shared Preferences
 import 'package:zinzi/user_cache.dart';
 import 'package:provider/provider.dart';
-import 'notifications/notification_provider.dart'; // For notification refresh functionality
+import 'notifications_UIs/notification_provider.dart'; // For notification refresh functionality
+import 'package:flutter/foundation.dart';
 
 // --- Environment & API ---
 final String apiBaseUrl = dotenv.env['API_BASE_URL'] ??
@@ -54,7 +55,7 @@ String _formatDate(String? dateString) {
     // Example Format: Jan 15, 2024, 10:30 AM
     return DateFormat.yMMMd().add_jm().format(dateTime);
   } catch (e) {
-    print("Error formatting date '$dateString': $e");
+    debugPrint("Error formatting date '$dateString': $e");
     return dateString; // Return original if parsing fails
   }
 }
@@ -66,7 +67,7 @@ String _formatCurrency(dynamic amount) {
     return NumberFormat.currency(symbol: 'ugx ', decimalDigits: 2)
         .format(doubleValue);
   } catch (e) {
-    print("Error formatting currency '$amount': $e");
+    debugPrint("Error formatting currency '$amount': $e");
     return amount.toString(); // Return original if parsing fails
   }
 }
@@ -138,7 +139,7 @@ class OrderHistoryScreen extends StatefulWidget {
     final prefs = await SharedPreferences.getInstance();
     final String? userId = prefs.getString('user_id');
     if (userId == null) {
-      print('[Splash][OrderHistory] No user ID found, skipping cache preload');
+      debugPrint('[Splash][OrderHistory] No user ID found, skipping cache preload');
       return;
     }
     
@@ -194,10 +195,10 @@ class OrderHistoryScreen extends StatefulWidget {
           }
         }
       } catch (e) {
-        print('[Splash][OrderHistory] preload error: $e');
+        debugPrint('[Splash][OrderHistory] preload error: $e');
       }
     } else {
-      print('[Splash][OrderHistory] preload skipped: Cache still valid.');
+      debugPrint('[Splash][OrderHistory] preload skipped: Cache still valid.');
     }
   }
 
@@ -286,8 +287,8 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
   @override
   void initState() {
     super.initState();
-    print('[DEBUG] initState called for OrderHistoryScreen');
-    print('[OrderHistory] Polling page initialized.'); // DEBUG: Polling page start
+    debugPrint('[DEBUG] initState called for OrderHistoryScreen');
+    debugPrint('[OrderHistory] Polling page initialized.'); // DEBUG: Polling page start
     
     // Initialize refresh animation controller
     _refreshController = AnimationController(
@@ -333,7 +334,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
   }
 
   void _handleNotificationRefresh() {
-    print('[DEBUG] _handleNotificationRefresh called for OrderHistoryScreen');
+    debugPrint('[DEBUG] _handleNotificationRefresh called for OrderHistoryScreen');
     if (!_isRefreshing) {
       setState(() {
         _isRefreshing = true;
@@ -351,14 +352,14 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
   void _startPolling() {
     // Cancel existing timer if any
     _pollingTimer?.cancel();
-    print('[OrderHistory] Polling started (interval: 5s).'); // DEBUG: Polling started
+    debugPrint('[OrderHistory] Polling started (interval: 5s).'); // DEBUG: Polling started
     _pollingTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
       // --- MODIFIED: Only poll if verification process is NOT active ---
       if (!_isVerificationProcessActive && mounted) {
-        print("Polling for order updates...");
+        debugPrint("Polling for order updates...");
         _refreshHistorySilently();
       } else {
-        print("Polling skipped: Verification process active or widget not mounted.");
+        debugPrint("Polling skipped: Verification process active or widget not mounted.");
       }
     });
   }
@@ -367,9 +368,9 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
   Future<void> _refreshHistorySilently() async {
     final prefs = await SharedPreferences.getInstance();
     String? userId = prefs.getString('user_id');
-    print('[DEBUG] _refreshHistorySilently called. _isRefreshing=$_isRefreshing, userId=$userId');
+    debugPrint('[DEBUG] _refreshHistorySilently called. _isRefreshing=$_isRefreshing, userId=$userId');
     if (_isRefreshing) {
-      print('[DEBUG] Early return: _isRefreshing is true, skipping poll.');
+      debugPrint('[DEBUG] Early return: _isRefreshing is true, skipping poll.');
       return; // Prevent concurrent refreshes
     }
     
@@ -383,7 +384,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
     setState(() {
       _isRefreshing = true;
     });
-    print("Refreshing order history silently...");
+    debugPrint("Refreshing order history silently...");
     try {
       if (userId == null || userId.isEmpty) {
         final int? intUserId = prefs.getInt('user_id');
@@ -391,13 +392,13 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
           userId = intUserId.toString();
           await prefs.setString('user_id', userId);
         } else {
-          print("[DEBUG] Silent Refresh: User ID not found in preferences. Returning early.");
+          debugPrint("[DEBUG] Silent Refresh: User ID not found in preferences. Returning early.");
           return;
         }
       }
-      print('[DEBUG] Before await _fetchAndUpdateOrderHistory');
+      debugPrint('[DEBUG] Before await _fetchAndUpdateOrderHistory');
       final freshOrders = await _fetchAndUpdateOrderHistory(userId);
-      print('[DEBUG] After await _fetchAndUpdateOrderHistory');
+      debugPrint('[DEBUG] After await _fetchAndUpdateOrderHistory');
       if (mounted) {
         _checkForStatusChanges(freshOrders);
         setState(() {
@@ -406,7 +407,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
         });
       }
     } catch (e) {
-      print("[DEBUG] Error during silent history refresh: $e");
+      debugPrint("[DEBUG] Error during silent history refresh: $e");
     } finally {
       // Stop refresh animation
       if (_refreshController.isAnimating) {
@@ -421,7 +422,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
       } else {
         _isRefreshing = false;
       }
-      print('[DEBUG] _refreshHistorySilently complete. _isRefreshing=$_isRefreshing');
+      debugPrint('[DEBUG] _refreshHistorySilently complete. _isRefreshing=$_isRefreshing');
     }
   }
 
@@ -443,7 +444,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
         _userId = intUserId.toString();
         await prefs.setString('user_id', _userId!);
       } else {
-        print("User ID not found in preferences. User needs to log in.");
+        debugPrint("User ID not found in preferences. User needs to log in.");
         throw Exception("User not logged in.");
       }
     }
@@ -456,7 +457,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
           userId = intUserId.toString();
           await prefs.setString('user_id', userId);
         } else {
-          print("User ID not found in preferences. User needs to log in.");
+          debugPrint("User ID not found in preferences. User needs to log in.");
           throw Exception("User not logged in.");
         }
       }
@@ -476,7 +477,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
       }
       
       if (cacheValid) {
-        print('[OrderHistory] Loaded from user-specific cache.');
+        debugPrint('[OrderHistory] Loaded from user-specific cache.');
         // Start background fetch but return cached data immediately
         _fetchAndUpdateOrderHistory(_userId!);
         if (mounted) {
@@ -488,7 +489,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
         return List<Map<String, dynamic>>.from(cachedOrders);
       } else {
         // No valid cache, fetch from API
-        print('[OrderHistory] No valid cache, fetching from API...');
+        debugPrint('[OrderHistory] No valid cache, fetching from API...');
         final freshOrders = await _fetchAndUpdateOrderHistory(_userId!);
         if (mounted) {
           setState(() { 
@@ -499,25 +500,25 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
         return freshOrders;
       }
     } catch (e) {
-      print("Error during initial history load setup: $e");
+      debugPrint("Error during initial history load setup: $e");
       throw Exception("Failed to initialize order history: "+e.toString());
     }
   }
 
   // --- Helper to fetch from API and update cache ---
   Future<List<Map<String, dynamic>>> _fetchAndUpdateOrderHistory(String userId) async {
-    print('[DEBUG] Entering _fetchAndUpdateOrderHistory for userId=$userId');
+    debugPrint('[DEBUG] Entering _fetchAndUpdateOrderHistory for userId=$userId');
     final orders = await _fetchOrderHistoryDetails(userId);
-    print('[DEBUG] After await _fetchOrderHistoryDetails in _fetchAndUpdateOrderHistory');
+    debugPrint('[DEBUG] After await _fetchOrderHistoryDetails in _fetchAndUpdateOrderHistory');
     try {
       // Save to user-specific cache
       await UserCache.saveUserData(_cacheKey, orders, userId: userId);
       await UserCache.saveUserData(_cacheTsKey, DateTime.now().toIso8601String(), userId: userId);
-      print('[OrderHistory] Saved to user-specific cache');
+      debugPrint('[OrderHistory] Saved to user-specific cache');
     } catch (e) {
-      print('[OrderHistory] Error saving to user-specific cache: $e');
+      debugPrint('[OrderHistory] Error saving to user-specific cache: $e');
     }
-    print('[DEBUG] Exiting _fetchAndUpdateOrderHistory for userId=$userId');
+    debugPrint('[DEBUG] Exiting _fetchAndUpdateOrderHistory for userId=$userId');
     return orders;
   }
 
@@ -541,16 +542,16 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
 
   Future<List<Map<String, dynamic>>> _fetchOrderHistoryDetails(
       String userId) async {
-    print('[DEBUG] Entering _fetchOrderHistoryDetails for userId=$userId');
+    debugPrint('[DEBUG] Entering _fetchOrderHistoryDetails for userId=$userId');
     List<Map<String, dynamic>> orders = [];
     final prefs = await SharedPreferences.getInstance();
     final userType = prefs.getString('user_type') ?? 'customer';
     final uri = Uri.parse('$apiBaseUrl/rr/orders?user_id=$userId&user_type=$userType');
-    print("Fetching order history from: $uri");
+    debugPrint("Fetching order history from: $uri");
 
     try {
       final response = await http.get(uri).timeout(const Duration(seconds: 35));
-      print('[OrderHistory] Poll result: Status ${response.statusCode}, Body: ${response.body}'); // DEBUG: Show API result
+      debugPrint('[OrderHistory] Poll result: Status ${response.statusCode}, Body: ${response.body}'); // DEBUG: Show API result
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -567,11 +568,11 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
                 orderData['order_id'] = parsedId;
                 orders.add(orderData);
               } else {
-                print(
+                debugPrint(
                     "Warning: Could not parse order_id, skipping: $orderData");
               }
             } else {
-              print(
+              debugPrint(
                   "Warning: Non-map item in order data list, skipping: $orderItem");
             }
           }
@@ -579,11 +580,11 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
           // --- Status Change Detection REMOVED ---
           // Dialog is now triggered by user tap, not automatically on status change detection here.
         } else {
-          print("Unexpected data format received: $data");
+          debugPrint("Unexpected data format received: $data");
           throw Exception('Invalid data format from server.');
         }
       } else {
-        print(
+        debugPrint(
             "Failed fetch: Status ${response.statusCode}, Body: ${response.body}");
         throw Exception(
             'Failed to load order history (Status: ${response.statusCode}).');
@@ -602,18 +603,18 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
         });
       }
 
-      print("Fetched and sorted ${orders.length} orders.");
-      print('[DEBUG] Exiting _fetchOrderHistoryDetails for userId=$userId');
+      debugPrint("Fetched and sorted ${orders.length} orders.");
+      debugPrint('[DEBUG] Exiting _fetchOrderHistoryDetails for userId=$userId');
       return orders;
     } on TimeoutException catch (_) {
-      print("Order history request timed out.");
+      debugPrint("Order history request timed out.");
       throw Exception('Request timed out. Please check your connection.');
     } on http.ClientException catch (e) {
-      print("Network error fetching order history: ${e.message}");
+      debugPrint("Network error fetching order history: ${e.message}");
       throw Exception('Network error: Could not connect to the server.');
     } catch (e) {
-      print("[DEBUG] Exception in _fetchOrderHistoryDetails for userId=$userId: $e");
-      print("Error fetching or processing order history details: $e");
+      debugPrint("[DEBUG] Exception in _fetchOrderHistoryDetails for userId=$userId: $e");
+      debugPrint("Error fetching or processing order history details: $e");
       throw Exception('Failed to load order history. Please try again.');
     }
   }
@@ -628,7 +629,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
         _loadingVerificationOrderId = orderId;
       });
     }
-    print("Verification process started for Order #$orderId. Polling paused.");
+    debugPrint("Verification process started for Order #$orderId. Polling paused.");
 
     // 3. Show Dialog (which includes fetching the code)
     await _showCompletionCodeDialog(orderId);
@@ -646,7 +647,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
     bool codeFetchedSuccessfully = false;
 
     final uri = Uri.parse('$apiBaseUrl/rr/get_completion_code/$orderId');
-    print("Fetching completion code for Order #$orderId from: $uri");
+    debugPrint("Fetching completion code for Order #$orderId from: $uri");
 
     try {
       final response = await http
@@ -658,27 +659,27 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
         if (data is Map<String, dynamic> && data['completion_code'] != null) {
           completionCode = data['completion_code'].toString();
           codeFetchedSuccessfully = true; // Mark success
-          print("Completion code fetched successfully for Order #$orderId.");
+          debugPrint("Completion code fetched successfully for Order #$orderId.");
         } else {
           errorMessage = 'Invalid response format for completion code.';
-          print("Unexpected completion code response format: $data");
+          debugPrint("Unexpected completion code response format: $data");
         }
       } else {
         errorMessage =
             'Failed to fetch completion code (Status: ${response.statusCode}).';
-        print(
+        debugPrint(
             "Failed to fetch completion code: Status ${response.statusCode}, Body: ${response.body}");
       }
     } on TimeoutException catch (_) {
       errorMessage = 'Request for completion code timed out.';
-      print("Completion code request timed out for Order #$orderId.");
+      debugPrint("Completion code request timed out for Order #$orderId.");
     } on http.ClientException catch (e) {
       errorMessage = 'Network error fetching completion code.';
-      print(
+      debugPrint(
           "Network error fetching completion code for Order #$orderId: ${e.message}");
     } catch (e) {
       errorMessage = 'Error fetching completion code: ${e.toString()}';
-      print("Error fetching completion code for Order #$orderId: $e");
+      debugPrint("Error fetching completion code for Order #$orderId: $e");
     }
 
     // --- Stop loading animation BEFORE showing the dialog ---
@@ -778,7 +779,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
                       _isVerificationProcessActive = false;
                     });
                   }
-                  print("Verification dialog closed. Polling resumed.");
+                  debugPrint("Verification dialog closed. Polling resumed.");
                   // Optionally trigger a silent refresh now?
                   // _refreshHistorySilently(); // Or let the next poll cycle handle it
                 },
@@ -791,13 +792,13 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
       // If not mounted when dialog should show, ensure polling is resumed
       // This is a fallback, should ideally not happen if logic is correct
       _isVerificationProcessActive = false;
-      print("Widget not mounted, ensuring polling is resumed.");
+      debugPrint("Widget not mounted, ensuring polling is resumed.");
     }
   }
 
   // Method to refresh the fetch (pull-to-refresh)
   Future<void> _refreshHistory() async {
-    print("Refreshing order history via pull-to-refresh...");
+    debugPrint("Refreshing order history via pull-to-refresh...");
     // Ensure verification state is reset on manual refresh
     if (mounted) {
       setState(() {
@@ -816,7 +817,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
     try {
       await _orderHistoryFuture;
     } catch (e) {
-      print("Error caught during manual refresh: $e");
+      debugPrint("Error caught during manual refresh: $e");
     }
   }
 
@@ -824,7 +825,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
   void _navigateToLogin() {
     if (mounted) {
       Navigator.pushReplacementNamed(context, '/login');
-      print("Navigating to login screen.");
+      debugPrint("Navigating to login screen.");
     }
   }
 
@@ -866,7 +867,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> with SingleTick
                   onPressed: _isRefreshing
                       ? null // Disable button while refreshing
                       : () {
-                          print('Manual refresh triggered from app bar');
+                          debugPrint('Manual refresh triggered from app bar');
                           _refreshHistorySilently();
                         },
                 );

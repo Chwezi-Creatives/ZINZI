@@ -1,20 +1,17 @@
 // cspell:disable
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode, kDebugMode;
+import 'package:flutter/foundation.dart' show kDebugMode, kReleaseMode;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'firebase_options.dart';
 import 'package:provider/provider.dart';
 import 'package:zinzi/splash.dart';
-import 'package:zinzi/stakeholdersignup.dart';
-import 'package:zinzi/user_preferences.dart';
-import 'package:zinzi/verification.dart';
-import 'notifications/notification_provider.dart';
-import 'notifications/fcm_service.dart'
-    if (dart.library.js) 'notifications/fcm_service_web.dart' as fcm;
-import 'notifications/notification_badge.dart';
-import 'package:zinzi/app_drawer_unified.dart';
-import 'package:zinzi/platform_info.dart';
+import 'notifications_UIs/notification_provider.dart';
+import 'notifications_UIs/notification_badge.dart';
+import 'package:zinzi/features/subscription/subscription_provider.dart';
 import 'package:zinzi/services/performance_service.dart';
+import 'package:zinzi/services/notification_service.dart';
 import 'package:zinzi/utils/route_observer.dart';
 
 import 'package:device_preview/device_preview.dart';
@@ -37,13 +34,51 @@ void main() async {
     // Initialize services
     await PerformanceService.initialize();
     await dotenv.load(fileName: ".env");
-    await _initializeFirebase();
+    
+    // Initialize Firebase
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    
+    // Initialize Notification Service with error handling
+    try {
+      final notificationService = NotificationService();
+      await notificationService.initialize();
+      
+      // Set up notification tap handler
+      NotificationService.onNotificationTap = (dynamic payload) {
+        debugPrint('Notification tapped with payload: $payload');
+        
+        // Handle the payload based on its type
+        if (payload is Map<String, dynamic>) {
+          // Handle map payload (from data messages or notification data)
+          debugPrint('Notification data: $payload');
+          // Example: 
+          // if (payload['type'] == 'message') {
+          //   Navigator.pushNamed(context, '/messages', arguments: payload);
+          // }
+        } else if (payload is RemoteMessage) {
+          // Handle RemoteMessage directly if needed
+          debugPrint('RemoteMessage received: ${payload.messageId}');
+          debugPrint('Notification data: ${payload.data}');
+        }
+      };
+      
+      // Get and log the FCM token
+      final fcmToken = await notificationService.getFcmToken();
+      if (fcmToken != null) {
+        debugPrint('FCM Token: $fcmToken');
+      }
+    } catch (e) {
+      debugPrint('Error initializing notification service: $e');
+      // Re-throw if this is a critical error that should prevent app startup
+      if (kDebugMode) rethrow;
+    }
+    
+    // Initialize other services
     await Future.delayed(const Duration(milliseconds: 500));
-    await _initializeFCM().catchError((error) {
-      print('FCM initialization failed: $error');
-    });
     await _initializeDrawer().catchError((error) {
-      print('Drawer initialization failed: $error');
+      debugPrint('Drawer initialization failed: $error');
     });
 
     // End performance monitoring
@@ -62,7 +97,7 @@ void main() async {
       ),
     );
   } catch (e) {
-    print('Error during initialization: $e');
+    debugPrint('Error during initialization: $e');
 
     final bool shouldEnableDevicePreview = !kReleaseMode && enableDevicePreview;
 
@@ -79,63 +114,14 @@ void main() async {
   }
 }
 
-// Firebase initialization
-Future<void> _initializeFirebase() async {
-  try {
-    if (kIsWeb) {
-      await Firebase.initializeApp(
-        options: FirebaseOptions(
-          apiKey: "AIzaSyAtPIxFkbzNtZ8_9ADNmb_6IriS_0jD4kE",
-          authDomain: "zinzi-fcm2.firebaseapp.com",
-          projectId: "zinzi-fcm2",
-          storageBucket: "zinzi-fcm2.firebasestorage.app",
-          messagingSenderId: "140229310127",
-          appId: "1:140229310127:web:05f48494c489bd048b065a",
-          measurementId: "G-HFLZEDCKZN",
-        ),
-      );
-      print("Firebase initialized (web)");
-    } else {
-      await Firebase.initializeApp();
-      print("Firebase initialized (mobile/desktop)");
-    }
-  } catch (e) {
-    print("Error initializing Firebase: $e");
-  }
-}
-
-// FCM initialization
-Future<void> _initializeFCM() async {
-  try {
-    await Future.delayed(const Duration(milliseconds: 300));
-    await fcm.FCMService.initialize();
-
-    if (kIsWeb) {
-      print("FCMService initialized (web)");
-    } else {
-      final os = getOperatingSystem();
-      if (isIOS()) {
-        print("FCMService initialized (iOS)");
-      } else if (isAndroid()) {
-        print("FCMService initialized (Android)");
-      } else {
-        print("FCMService initialized (other non-web OS: $os)");
-      }
-    }
-
-    await Future.delayed(const Duration(milliseconds: 200));
-  } catch (e) {
-    print("Error initializing FCM: $e");
-    rethrow;
-  }
-}
+// Firebase initialization is now handled directly in main()
 
 // Drawer initialization (currently a placeholder)
 Future<void> _initializeDrawer() async {
   try {
-    print("Drawer will initialize data when created");
+    debugPrint("Drawer will initialize data when created");
   } catch (e) {
-    print("Error initializing drawer data: $e");
+    debugPrint("Error initializing drawer data: $e");
   }
 }
 
@@ -145,8 +131,11 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider<NotificationProvider>(
-      create: (_) => NotificationProvider(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => NotificationProvider()),
+        ChangeNotifierProvider(create: (_) => SubscriptionProvider()),
+      ],
       child: RouteObserverProvider(
         routeObserver: routeObserver,
         child: MaterialApp(

@@ -19,6 +19,7 @@ import 'package:zinzi/utils/image_utils.dart'; // Import ImageUtils
 // --- NEW IMPORTS FOR BETTER LOADING ANIMATION ---
 import 'package:lottie/lottie.dart';
 import 'package:animated_text_kit/animated_text_kit.dart';
+import 'package:flutter/foundation.dart';
 // --- END NEW IMPORTS ---
 
 
@@ -125,7 +126,7 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
           _filteredMealsNotifier.value = [];
         });
       }
-      print("User ID not found in SharedPreferences.");
+      debugPrint("User ID not found in SharedPreferences.");
       return; // Exit if no user ID
     }
 
@@ -144,7 +145,7 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
             _filteredMealsNotifier.value = [];
           });
         }
-        print("Invalid user ID format in SharedPreferences: $userId");
+        debugPrint("Invalid user ID format in SharedPreferences: $userId");
         return; // Exit if user ID is invalid string
       }
     } else {
@@ -156,7 +157,7 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
           _filteredMealsNotifier.value = [];
         });
       }
-      print(
+      debugPrint(
           "Unexpected user ID type in SharedPreferences: ${userId.runtimeType}");
       return; // Exit if user ID is unexpected type
     }
@@ -177,7 +178,7 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
       });
 
     } catch (e) {
-      print('Error fetching meals: $e');
+      debugPrint('Error fetching meals: $e');
       if (!mounted) return;
 
       // No fallback to cache - just show error
@@ -229,20 +230,20 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
             }));
           }
         }
-        print('Unexpected JSON format for meals: $decoded');
+        debugPrint('Unexpected JSON format for meals: $decoded');
         throw Exception(
             'Unexpected response format from server.'); // Throw specific error
       } else {
-        print('Error fetching meals: ${response.statusCode}');
+        debugPrint('Error fetching meals: ${response.statusCode}');
         throw Exception(
             'Failed to load meals (Status Code: ${response.statusCode})'); // Throw specific error
       }
     } on TimeoutException {
-      print('Error fetching meals: Request timed out.');
+      debugPrint('Error fetching meals: Request timed out.');
       throw Exception(
           'Could not connect to server. Please check your connection.');
     } catch (e) {
-      print('Error fetching meals: $e');
+      debugPrint('Error fetching meals: $e');
       throw Exception('An error occurred while fetching meals: $e');
     }
   }
@@ -252,7 +253,7 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
     final userId = prefs.getInt('user_id');
     if (userId == null) {
       setState(() => _isLoadingUserDetails = false);
-      print("No user ID found in SharedPreferences.");
+      debugPrint("No user ID found in SharedPreferences.");
       return;
     }
     final url =
@@ -281,20 +282,20 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
               _isLoadingUserDetails = false;
             });
           } else {
-            print("User details format unexpected or empty: $responseData");
+            debugPrint("User details format unexpected or empty: $responseData");
             setState(() => _isLoadingUserDetails = false);
           }
         } else {
-          print(
+          debugPrint(
               "Error fetching user details: ${response.statusCode} - ${response.reasonPhrase}");
           setState(() => _isLoadingUserDetails = false);
         }
       }
     } on TimeoutException {
-      print("Timeout fetching user details for ID: $userId");
+      debugPrint("Timeout fetching user details for ID: $userId");
       if (mounted) setState(() => _isLoadingUserDetails = false);
     } catch (error) {
-      print("Error fetching user details for ID $userId: $error");
+      debugPrint("Error fetching user details for ID $userId: $error");
       if (mounted) setState(() => _isLoadingUserDetails = false);
     }
   }
@@ -781,7 +782,7 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
     } else if (rawPath.startsWith('assets/')) {
       return rawPath;
     } else {
-      print("Invalid or unrecognized image path for $mealName: $rawPath");
+      debugPrint("Invalid or unrecognized image path for $mealName: $rawPath");
       return 'assets/images/mealimageplaceholder.png';
     }
   }
@@ -822,7 +823,7 @@ class _OnlymealsScreenState extends State<OnlymealsScreen>
         debugPrint('=== RETURNED FROM MEAL DETAIL ===');
       });
     } catch (e) {
-      print('Error navigating to meal detail: $e');
+      debugPrint('Error navigating to meal detail: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

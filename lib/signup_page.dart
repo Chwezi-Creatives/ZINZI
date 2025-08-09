@@ -1,5 +1,6 @@
 //cspell:disable
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart'; // Import for SystemChrome
 import 'package:google_fonts/google_fonts.dart'; // Import Google Fonts
 import 'package:http/http.dart' as http;
@@ -10,7 +11,7 @@ import 'dart:io';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 // import 'package:zinzi/user_metrics.dart';
 import 'package:zinzi/verification.dart'; // Import verification page
-import 'notifications/fcm_service.dart';
+import 'package:zinzi/services/notification_service.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 
@@ -161,7 +162,7 @@ class _UserSignUpPageState extends State<UserSignUpPage>
             ));
           }
         } catch (e) {
-          print("Image upload error: $e");
+          debugPrint("Image upload error: $e");
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
               content: Text('Image upload failed. You can try again or continue without an image.'),
@@ -179,7 +180,7 @@ class _UserSignUpPageState extends State<UserSignUpPage>
         }
       }
     } catch (e) {
-      print("Image picker error: $e");
+      debugPrint("Image picker error: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Failed to pick image. Please try again.'),
@@ -215,7 +216,7 @@ class _UserSignUpPageState extends State<UserSignUpPage>
         throw Exception('Imgur upload failed: Invalid response structure.');
       }
     } else {
-      print('Failed to upload image: ${responseData.body}');
+      debugPrint('Failed to upload image: ${responseData.body}');
       throw Exception(
           'Failed to upload image. Status Code: ${response.statusCode}');
     }
@@ -292,8 +293,19 @@ class _UserSignUpPageState extends State<UserSignUpPage>
           await prefs.setString('user_phone', phoneNumber);
         }
 
-        // Register FCM token with user info (async, do not await)
-        FCMService.registerTokenWithUserInfo();
+        // Initialize and register FCM token after successful signup
+        try {
+          final notificationService = NotificationService();
+          await notificationService.initialize();
+          final token = await notificationService.getFcmToken();
+          if (token != null) {
+            debugPrint('FCM token obtained during user signup, registering with backend...');
+            await notificationService.registerPendingFcmToken();
+          }
+        } catch (e) {
+          debugPrint('Error registering FCM token during user signup: $e');
+          // Continue with signup flow even if FCM registration fails
+        }
 
         // Navigate using the transition method
         Navigator.pushReplacement(
@@ -317,7 +329,7 @@ class _UserSignUpPageState extends State<UserSignUpPage>
               displayMessage = backendMessage;
             }
           } catch (e) {
-            print("Error parsing error response: $e");
+            debugPrint("Error parsing error response: $e");
           }
         }
 
@@ -327,7 +339,7 @@ class _UserSignUpPageState extends State<UserSignUpPage>
         ));
       }
     } catch (error) {
-      print("Signup Error: $error"); // Log the error
+      debugPrint("Signup Error: $error"); // Log the error
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('An error occurred. Please try again later.'),
         backgroundColor: errorColor,

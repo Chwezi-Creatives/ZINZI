@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/foundation.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';
 
@@ -87,7 +88,7 @@ class _WeightGraphState extends State<WeightGraph>
               weightData.add(FlSpot(convertedTime, weight));
             }
           } catch (e) {
-            print("Error parsing metric: $metric, Error: $e");
+            debugPrint("Error parsing metric: $metric, Error: $e");
           }
         }
 
@@ -97,11 +98,11 @@ class _WeightGraphState extends State<WeightGraph>
           _animationController.forward(); // Start the animation on data update
         });
       } else {
-        print("Failed to fetch metrics history: ${response.body}");
+        debugPrint("Failed to fetch metrics history: ${response.body}");
         throw Exception('Failed to fetch metrics history');
       }
     } catch (error) {
-      print("Error fetching metrics history: $error");
+      debugPrint("Error fetching metrics history: $error");
       setState(() {
         _isLoading = false;
       });

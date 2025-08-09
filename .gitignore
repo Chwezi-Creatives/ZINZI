@@ -5,9 +5,11 @@
 *.swp
 .DS_Store
 .atom/
+.build/
 .buildlog/
 .history
 .svn/
+.swiftpm/
 migrate_working_dir/
 
 # IntelliJ related
@@ -36,7 +38,7 @@ app.*.symbols
 
 # Obfuscation related
 app.*.map.json
-*.plist
+#*.plist
 
 # Android Studio will place build artifacts here
 /android/app/debug
@@ -67,6 +69,9 @@ Thumbs.db  # Windows thumbnail cache file
 *.ipr      # Project files
 *.iws      # Workspace files
 .idea/     # IntelliJ IDEA project directory
+
+# Cascade AI Memory Backups
+.cascade_memories/  # Local memory backups for Cascade AI
 
 # VSCode settings to ignore (uncomment to ignore)
 .vscode/   # VSCode project directory

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -101,7 +102,7 @@ class _LoginPageState extends State<LoginPage>
         );
       }
     } catch (error) {
-      print('Login error: $error');
+      debugPrint('Login error: $error');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
             content: Text('An error occurred. Please try again later.')),

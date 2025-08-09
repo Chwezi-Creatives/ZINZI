@@ -7,6 +7,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:intl/intl.dart'; // For date and currency formatting
 import 'dart:async'; // For TimeoutException
 import 'package:shimmer/shimmer.dart'; // For loading shimmer
+import 'package:flutter/foundation.dart';
 
 // --- Environment & API ---
 final String apiBaseUrl = dotenv.env['API_BASE_URL'] ??
@@ -155,14 +156,14 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
             }
           } else {
             // Handle cases where the expected structure isn't returned
-            print("Unexpected data format for order $orderId: $data");
+            debugPrint("Unexpected data format for order $orderId: $data");
           }
         } else {
           // Handle non-200 responses for individual orders if needed
-          print("Failed to fetch order $orderId: Status ${response.statusCode}");
+          debugPrint("Failed to fetch order $orderId: Status ${response.statusCode}");
         }
       } catch (e) {
-        print("Error fetching details for order $orderId: $e");
+        debugPrint("Error fetching details for order $orderId: $e");
       }
     }
   }

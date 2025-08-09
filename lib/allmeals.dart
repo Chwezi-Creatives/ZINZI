@@ -14,6 +14,9 @@ import 'package:zinzi/app_drawer_unified.dart';
 import 'package:zinzi/meal_detail.dart' as meal_detail;
 import 'package:zinzi/user_cache.dart';
 import 'package:zinzi/utils/image_utils.dart';
+import 'package:zinzi/features/payment/payment_service.dart';
+import 'package:intl/intl.dart';
+import 'package:flutter/foundation.dart';
 // Import CacheConfig
 
 // --- Re-add Color Constants (or import from a shared file) ---
@@ -54,6 +57,20 @@ class AllMealsScreen extends StatefulWidget {
 
   @override
   _AllMealsScreenState createState() => _AllMealsScreenState();
+
+  // Helper method to get the subscription status text
+  static Future<String> getSubscriptionStatus() async {
+    final hasPlan = await PaymentService.hasActivePlan();
+    if (!hasPlan) return 'No Active Plan';
+    
+    final planType = await PaymentService.getActivePlan();
+    final expiryDate = await PaymentService.getPlanExpiryDate();
+    
+    if (expiryDate == null) return 'Active Plan: ${planType ?? 'Unknown'}';
+    
+    final formatter = DateFormat('MMM d, y');
+    return '${planType?.replaceAll('_', ' ').toUpperCase()} • Expires ${formatter.format(expiryDate)}';
+  }
 }
 
 class _AllMealsScreenState extends State<AllMealsScreen>
@@ -75,11 +92,11 @@ class _AllMealsScreenState extends State<AllMealsScreen>
       if (cachedData != null && timestampData != null) {
         _mealsCache = List<Map<String, dynamic>>.from(cachedData);
         _mealsCacheTimestamp = DateTime.parse(timestampData);
-        print('[AllMeals] Cache loaded with ${_mealsCache.length} items');
+        debugPrint('[AllMeals] Cache loaded with ${_mealsCache.length} items');
         return _mealsCache.isNotEmpty;
       }
     } catch (e) {
-      print('[AllMeals] Error loading cache: $e');
+      debugPrint('[AllMeals] Error loading cache: $e');
     }
     _mealsCache = [];
     _mealsCacheTimestamp = null;
@@ -105,11 +122,11 @@ class _AllMealsScreenState extends State<AllMealsScreen>
 
       // If cache is valid, no need to refresh
       if (hasCache && !isCacheInvalid) {
-        print('[AllMeals] Using valid cache');
+        debugPrint('[AllMeals] Using valid cache');
         return false;
       }
 
-      print('[AllMeals] Cache invalid or empty, fetching fresh data...');
+      debugPrint('[AllMeals] Cache invalid or empty, fetching fresh data...');
 
       // Fetch fresh data
       final instance = _AllMealsScreenState();
@@ -124,10 +141,10 @@ class _AllMealsScreenState extends State<AllMealsScreen>
       await UserCache.saveData(
           _mealsCacheTimestampKey, _mealsCacheTimestamp!.toIso8601String());
 
-      print('[AllMeals] Successfully preloaded ${meals.length} meals');
+      debugPrint('[AllMeals] Successfully preloaded ${meals.length} meals');
       return true;
     } catch (e) {
-      print('[AllMeals] Error preloading meals: $e');
+      debugPrint('[AllMeals] Error preloading meals: $e');
       return false; // Return false to indicate we're using existing cache
     }
   }
@@ -203,11 +220,11 @@ class _AllMealsScreenState extends State<AllMealsScreen>
   /// Force refresh meals data, invalidating cache
   Future<void> _forceRefreshMeals() async {
     if (_isLoadingMeals) {
-      print('[AllMeals] Refresh already in progress, skipping duplicate request');
+      debugPrint('[AllMeals] Refresh already in progress, skipping duplicate request');
       return; // Prevent multiple simultaneous refreshes
     }
 
-    print('[AllMeals] Starting forced refresh of meals data...');
+    debugPrint('[AllMeals] Starting forced refresh of meals data...');
     
     // Store current data to restore if fetch fails
     final List<Map<String, dynamic>> currentMeals = List.from(_allMeals);
@@ -272,7 +289,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
       }
     } catch (e) {
       if (mounted) {
-        print('Error during force refresh: $e');
+        debugPrint('Error during force refresh: $e');
         
         // Restore previous data
         if (currentMeals.isNotEmpty) {
@@ -319,7 +336,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
     
     // If we have valid cache and data, no need to fetch
     if (hasValidCache && !hasNoData) {
-      print('[AllMeals] Using valid cache');
+      debugPrint('[AllMeals] Using valid cache');
       return;
     }
     
@@ -343,7 +360,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
     _fetchError = ''; // Reset error on new fetch
 
     try {
-      print('[AllMeals] Fetching fresh meals data...');
+      debugPrint('[AllMeals] Fetching fresh meals data...');
       final meals = await _fetchMeals();
       
       if (mounted) {
@@ -383,7 +400,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
       }
     } catch (e) {
       if (mounted) {
-        print('Error fetching new meals in background: $e');
+        debugPrint('Error fetching new meals in background: $e');
         
         // If we have no data at all, show error state
         if (hasNoData) {
@@ -394,7 +411,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
           });
         } else {
           // If we have cached data, just show a subtle error message
-          print('Using cached data due to fetch error');
+          debugPrint('Using cached data due to fetch error');
           if (mounted) {
             setState(() {
               _isLoadingMeals = false;
@@ -453,20 +470,20 @@ class _AllMealsScreenState extends State<AllMealsScreen>
             }));
           }
         }
-        print('Unexpected JSON format for meals: $decoded');
+        debugPrint('Unexpected JSON format for meals: $decoded');
         throw Exception(
             'Unexpected response format from server.'); // Throw specific error
       } else {
-        print('Error fetching meals: ${response.statusCode}');
+        debugPrint('Error fetching meals: ${response.statusCode}');
         throw Exception(
             'Failed to load meals (Status Code: ${response.statusCode})'); // Throw specific error
       }
     } on TimeoutException {
-      print('Error fetching meals: Request timed out.');
+      debugPrint('Error fetching meals: Request timed out.');
       throw Exception(
           'Could not connect to server. Please check your connection.');
     } catch (e) {
-      print('Error fetching meals: $e');
+      debugPrint('Error fetching meals: $e');
       // Re-throw the caught exception or a generic one
       throw Exception('An error occurred while fetching meals: $e');
     }
@@ -602,10 +619,37 @@ class _AllMealsScreenState extends State<AllMealsScreen>
     return Scaffold(
       backgroundColor: kColorBackground, // Use clean background color
       appBar: AppBar(
-        title: _buildSearchField(), // Use helper for search field
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('All Meals'),
+            FutureBuilder<String>(
+              future: AllMealsScreen.getSubscriptionStatus(),
+              builder: (context, snapshot) {
+                final status = snapshot.data ?? 'Loading...';
+                return Text(
+                  status,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.normal,
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
         backgroundColor: kColorPrimaryDark, // Consistent dark teal
         foregroundColor: kColorTextOnPrimary, // White icons/text
         elevation: 1.0, // Subtle elevation
+        bottom: AppBar(
+          backgroundColor: kColorPrimaryDark,
+          automaticallyImplyLeading: false,
+          titleSpacing: 0,
+          title: Padding(
+            padding: const EdgeInsets.only(bottom: 8.0),
+            child: _buildSearchField(),
+          ),
+        ),
         iconTheme: const IconThemeData(
             color: kColorTextOnPrimary), // Explicit drawer icon color
         actions: [
@@ -994,7 +1038,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
       return rawPath; // It's a valid asset path
     } else {
       // If it's not a recognized format, use placeholder
-      print("Invalid or unrecognized image path for $mealName: $rawPath");
+      debugPrint("Invalid or unrecognized image path for $mealName: $rawPath");
       return 'assets/images/mealimageplaceholder.png';
     }
   }
@@ -1006,7 +1050,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
       final fullMealData = _allMeals.firstWhere(
         (m) => m['Meal_id'] == mealFromGrid['Meal_id'],
         orElse: () {
-          print("Warning: Could not find full meal data for ID ${mealFromGrid['Meal_id']}. Using grid data.");
+          debugPrint("Warning: Could not find full meal data for ID ${mealFromGrid['Meal_id']}. Using grid data.");
           return mealFromGrid;
         },
       );
@@ -1050,7 +1094,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
         if (complementaryMeal != null && complementaryMeal['Image_link'] != null) {
           imageUrl = _processImagePath(complementaryMeal['Image_link'], dishName);
         } else {
-          print("Complementary dish '$dishName' or its image not found. Using placeholder.");
+          debugPrint("Complementary dish '$dishName' or its image not found. Using placeholder.");
         }
         
         // Get the price, defaulting to 0.0 if not found
@@ -1090,7 +1134,7 @@ class _AllMealsScreenState extends State<AllMealsScreen>
         ),
       );
     } catch (e) {
-      print('Error navigating to meal detail: $e');
+      debugPrint('Error navigating to meal detail: $e');
       // Show error to user
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

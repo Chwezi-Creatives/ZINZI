@@ -9,6 +9,7 @@ import 'package:zinzi/app_drawer_unified.dart'
 import 'package:google_fonts/google_fonts.dart';
 import 'package:zinzi/checkout.dart';
 import 'app_drawer_unified.dart'; // May be redundant if drawer.AppDrawer is used
+import 'package:flutter/foundation.dart';
 
 // ***************************************************************
 // *          SINGLE SOURCE OF TRUTH FOR CART & FAVORITES        *
@@ -104,18 +105,18 @@ class ShoppingCart {
     if (existingItemIndex != -1) {
       // Item exists - Update it completely
       items[existingItemIndex] = newItemData;
-      print("Updated item in cart: $title");
+      debugPrint("Updated item in cart: $title");
     } else {
       // Item is new - Add it
       items.add(newItemData);
-      print("Added new item to cart: $title");
+      debugPrint("Added new item to cart: $title");
     }
 
     // --- Notify listeners ---
     itemsNotifier.value = List.from(items);
 
     // Debug log
-    // print("Current Cart Titles: ${items.map((e) => e['title'] ?? e['gigDetails']?['gig_type'] ?? 'Unknown')} ");
+    // debugPrint("Current Cart Titles: ${items.map((e) => e['title'] ?? e['gigDetails']?['gig_type'] ?? 'Unknown')} ");
   }
 
   static List<Map<String, dynamic>> getItems() {
@@ -229,7 +230,7 @@ class ShoppingCart {
 
   static void clearCart() {
     items.clear();
-    print("Cart Cleared");
+    debugPrint("Cart Cleared");
     // --- Notify listeners ---
     itemsNotifier.value = List.from(items);
   }
@@ -255,12 +256,12 @@ class ShoppingCart {
       } else {
         itemIdentifier = 'Unknown Item';
       }
-      print("Removed item from cart at index $index: $itemIdentifier");
+      debugPrint("Removed item from cart at index $index: $itemIdentifier");
       // --- Notify listeners ---
       itemsNotifier.value = List.from(items);
-      // print("Current Cart Titles: ${items.map((e) => e['title'] ?? e['gigDetails']?['gig_type'] ?? 'Unknown')} ");
+      // debugPrint("Current Cart Titles: ${items.map((e) => e['title'] ?? e['gigDetails']?['gig_type'] ?? 'Unknown')} ");
     } else {
-      print("Attempted to remove item at invalid index: $index");
+      debugPrint("Attempted to remove item at invalid index: $index");
     }
   }
 
@@ -270,7 +271,7 @@ class ShoppingCart {
     if (existingItemIndex != -1) {
       if (newQuantity > 0) {
         items[existingItemIndex]['quantity'] = newQuantity;
-        print("Updated quantity for meal '$title' to $newQuantity");
+        debugPrint("Updated quantity for meal '$title' to $newQuantity");
         // --- Notify listeners ---
         itemsNotifier.value = List.from(items);
       } else {
@@ -291,17 +292,17 @@ class ShoppingCart {
     final producerName = gigDetails['producer_name'];
 
     if (userId == null) {
-      print("Error adding gig: User ID is missing.");
+      debugPrint("Error adding gig: User ID is missing.");
       return;
     }
     if ((chefId == null && producerId == null) ||
         (chefId != null && producerId != null)) {
-      print(
+      debugPrint(
           "Error adding gig: Exactly one of chef_id or producer_id must be provided.");
       return;
     }
     if (price == null || price is! num || price <= 0) {
-      print("Error adding gig: Valid price is missing.");
+      debugPrint("Error adding gig: Valid price is missing.");
       return;
     }
 
@@ -309,11 +310,11 @@ class ShoppingCart {
       'type': 'gig',
       'gigDetails': gigDetails,
     });
-    print(
+    debugPrint(
         "Added new gig to cart: ${gigDetails['gig_type']} with Chef: $chefName, Producer: $producerName");
     // --- Notify listeners ---
     itemsNotifier.value = List.from(items);
-    // print("Current Cart Titles: ${items.map((e) => e['title'] ?? e['gigDetails']?['gig_type'] ?? 'Unknown')} ");
+    // debugPrint("Current Cart Titles: ${items.map((e) => e['title'] ?? e['gigDetails']?['gig_type'] ?? 'Unknown')} ");
   }
 
   // Method to remove a specific list of items
@@ -340,12 +341,12 @@ class ShoppingCart {
     });
 
     if (removedCount > 0) {
-      print("Removed $removedCount item(s) from cart based on provided list.");
+      debugPrint("Removed $removedCount item(s) from cart based on provided list.");
       // --- Notify listeners ---
       itemsNotifier.value = List.from(items);
-      // print("Current Cart Titles: ${items.map((e) => e['title'] ?? e['gigDetails']?['gig_type'] ?? 'Unknown')} ");
+      // debugPrint("Current Cart Titles: ${items.map((e) => e['title'] ?? e['gigDetails']?['gig_type'] ?? 'Unknown')} ");
     } else {
-      print(
+      debugPrint(
           "No items removed. Items to remove might not have been found in the cart.");
     }
   }
@@ -365,7 +366,7 @@ class Favorites {
   static void addItem(String title, double price, String image) {
     if (!items.any((item) => item['title'] == title)) {
       items.add({'title': title, 'price': price, 'image': image});
-      print("Added item to favorites: $title");
+      debugPrint("Added item to favorites: $title");
       // --- Notify listeners ---
       favoritesNotifier.value = List.from(items);
     }
@@ -403,7 +404,7 @@ class Favorites {
 
   static void clearFavorites() {
     items.clear();
-    print("Favorites Cleared");
+    debugPrint("Favorites Cleared");
     // --- Notify listeners ---
     favoritesNotifier.value = List.from(items);
   }
@@ -412,7 +413,7 @@ class Favorites {
     int initialLength = items.length;
     items.removeWhere((item) => item['title'] == title);
     if (items.length < initialLength) {
-      print("Removed item from favorites: $title");
+      debugPrint("Removed item from favorites: $title");
       // --- Notify listeners ---
       favoritesNotifier.value = List.from(items);
     }
@@ -452,7 +453,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
     if (imageUrl.startsWith('http://'))
       return 'https://${imageUrl.substring(7)}';
     if (!imageUrl.startsWith('https://')) {
-      print(
+      debugPrint(
           "Warning: Formatting potentially invalid image URL in cart: $imageUrl");
       return 'assets/images/cover.png'; // Fallback
     }
@@ -467,7 +468,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
       builder: (context, cartItems, child) {
         final totalAmount =
             ShoppingCart.totalPrice; // Recalculate based on current items
-        print("Building Cart Screen with ${cartItems.length} items.");
+        debugPrint("Building Cart Screen with ${cartItems.length} items.");
 
         return Scaffold(
           drawer: const drawer.AppDrawer(), // Use prefixed import
@@ -1376,7 +1377,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
         ),
       );
     } else {
-      print("Proceeding to checkout with ${cartItems.length} items.");
+      debugPrint("Proceeding to checkout with ${cartItems.length} items.");
       // Pass the current cart items and total price to the CheckoutScreen
       Navigator.pushReplacement(
         // Use pushReplacement if you don't want users going back to the cart easily
@@ -1446,7 +1447,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     if (imageUrl.startsWith('http://'))
       return 'https://${imageUrl.substring(7)}';
     if (!imageUrl.startsWith('https://')) {
-      print(
+      debugPrint(
           "Warning: Formatting potentially invalid image URL in favorites: $imageUrl");
       return 'assets/images/cover.png'; // Fallback
     }

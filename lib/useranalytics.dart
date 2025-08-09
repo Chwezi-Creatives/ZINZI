@@ -13,6 +13,7 @@ import 'package:visibility_detector/visibility_detector.dart';
 import 'package:flutter/widgets.dart'; // For RouteAware, RouteObserver
 import 'package:zinzi/app_drawer_unified.dart'; // Unified app drawer for navigation
 import 'package:zinzi/utils/goal_utils.dart'; // For goal categorization
+import 'package:flutter/foundation.dart';
 
 // Create a RouteObserver instance at the top level
 final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
@@ -236,7 +237,7 @@ class _UserAnalyticsDashboardState extends State<UserAnalyticsDashboard>
             'Failed to fetch metrics (Status: ${response.statusCode})');
       }
     } catch (e, s) {
-      print('Error fetching data: $e\n$s');
+      debugPrint('Error fetching data: $e\n$s');
       if (mounted) {
         setState(() {
           _error = 'Error fetching data. Check connection/config.';

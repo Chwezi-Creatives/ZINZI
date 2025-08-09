@@ -10,11 +10,12 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:zinzi/app_drawer_unified.dart' as drawer;
-import 'package:zinzi/notifications/notification_widget.dart';
+import 'package:zinzi/notifications_UIs/notification_widget.dart';
 import 'package:zinzi/transooter_dash_before_mapbox.dart' show Payment;
 import 'package:zinzi/chef_verification_helper.dart';
 import 'package:zinzi/utils/image_utils.dart';
 import 'package:zinzi/utils/location_utils.dart';
+import 'package:flutter/foundation.dart';
 
 // --- Consistent Color Palette ---
 const Color primaryTeal = Color(0xFF00796B); // Teal 700
@@ -52,7 +53,7 @@ String get _apibaseurl {
   try {
     return dotenv.env['API_BASE_URL-intranet'] ?? 'https://api.example.com';
   } catch (e) {
-    print(
+    debugPrint(
         "Error accessing dotenv for API_BASE_URL-intranet. Ensure dotenv.load() was called. Using fallback. Error: $e");
     return 'https://api.example.com';
   }
@@ -162,7 +163,7 @@ class Order {
                 DateTime.now().toUtc())
             : DateTime.now().toUtc();
       } catch (e2) {
-        print("Error parsing date: ${json['order_date']} - $e - $e2");
+        debugPrint("Error parsing date: ${json['order_date']} - $e - $e2");
         parsedDate = DateTime.now().toUtc();
       }
     }
@@ -199,7 +200,7 @@ class Order {
       try {
         return List<Map<String, dynamic>>.from(value);
       } catch (e) {
-        print('Error parsing complementary meals: $e');
+        debugPrint('Error parsing complementary meals: $e');
         return null;
       }
     }
@@ -219,7 +220,7 @@ class Order {
           final decodedJson = jsonDecode(value) as Map<String, dynamic>;
           return BulkOrderDetails.fromJson(decodedJson);
         } catch (e) {
-          print('Error parsing bulk_order_details JSON string: $e');
+          debugPrint('Error parsing bulk_order_details JSON string: $e');
           return null;
         }
       }
@@ -410,7 +411,7 @@ class ApiService {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       return prefs.getString('chef_user_id');
     } catch (e) {
-      print("Error accessing SharedPreferences for chef_id: $e");
+      debugPrint("Error accessing SharedPreferences for chef_id: $e");
       return null;
     }
   }
@@ -421,7 +422,7 @@ class ApiService {
       throw Exception('Chef ID not found. Please log in again.');
     }
     final uri = Uri.parse('$_staticBaseUrl/rr/rchefs/$chefId');
-    print("[API] Fetching chef profile from: $uri");
+    debugPrint("[API] Fetching chef profile from: $uri");
 
     try {
       final response = await http.get(uri).timeout(const Duration(seconds: 15));
@@ -457,8 +458,8 @@ class ApiService {
       'Accept': 'application/json',
     };
 
-    print("[API] Updating chef stock for chef $chefId at $uri");
-    print("[API] Payload: ${jsonEncode(updateData)}");
+    debugPrint("[API] Updating chef stock for chef $chefId at $uri");
+    debugPrint("[API] Payload: ${jsonEncode(updateData)}");
 
     try {
       final response = await http.patch(
@@ -468,16 +469,16 @@ class ApiService {
       ).timeout(const Duration(seconds: 20));
 
       if (response.statusCode == 200) {
-        print("[API] Stock update successful: ${response.body}");
+        debugPrint("[API] Stock update successful: ${response.body}");
         return true;
       } else {
-        print("[API] Error updating stock: ${response.statusCode} ${response.body}");
+        debugPrint("[API] Error updating stock: ${response.statusCode} ${response.body}");
         return false;
       }
     } on TimeoutException {
       throw Exception("Request timed out. Please try again.");
     } catch (e) {
-      print("[API] Exception updating stock: $e");
+      debugPrint("[API] Exception updating stock: $e");
       rethrow;
     }
   }
@@ -491,7 +492,7 @@ class ApiService {
       } else if (responseData['data'] is Map) {
         return responseData['data'];
       } else {
-        print(
+        debugPrint(
             "API Warning: Response has 'data' key but value is not a List or Map.");
         return responseData['data'];
       }
@@ -499,14 +500,14 @@ class ApiService {
       if (responseData['All_Meals'] is List) {
         return responseData['All_Meals'];
       } else {
-        print(
+        debugPrint(
             "API Warning: Response has 'All_Meals' key but value is not a List.");
         return null;
       }
     } else if (responseData is Map && responseData.isNotEmpty) {
       return responseData;
     }
-    print(
+    debugPrint(
         "API Warning: Unhandled response format. Expected List or Map. Got: ${responseData.runtimeType}");
     return null;
   }
@@ -517,7 +518,7 @@ class ApiService {
       throw Exception('Chef ID not found. Please log in again.');
     }
     final Uri uri = Uri.parse('$_staticBaseUrl/rr/orders?chef_id=$chefId');
-    print("Fetching orders from: $uri");
+    debugPrint("Fetching orders from: $uri");
 
     try {
       final response = await http.get(uri).timeout(const Duration(seconds: 25));
@@ -531,7 +532,7 @@ class ApiService {
                 if (jsonItem is Map<String, dynamic>) {
                   return Order.fromMockJson(jsonItem);
                 } else {
-                  print(
+                  debugPrint(
                       "API Warning: Skipping non-map item in orders list: $jsonItem");
                   return null;
                 }
@@ -539,7 +540,7 @@ class ApiService {
               .whereType<Order>()
               .toList();
         } else {
-          print(
+          debugPrint(
               "Orders API response format unexpected. Got: ${ordersList?.runtimeType}");
           if (ordersList == null || (ordersList is Map && ordersList.isEmpty))
             return [];
@@ -547,15 +548,15 @@ class ApiService {
               'Failed to parse orders: Unexpected API response format (not a list)');
         }
       } else {
-        print("Error fetching orders: ${response.statusCode} ${response.body}");
+        debugPrint("Error fetching orders: ${response.statusCode} ${response.body}");
         throw Exception(
             'Failed to load orders (Status code: ${response.statusCode})');
       }
     } on TimeoutException {
-      print("Timeout fetching orders for chef $chefId");
+      debugPrint("Timeout fetching orders for chef $chefId");
       throw Exception('Failed to load orders: Request timed out.');
     } catch (e) {
-      print("Exception fetching orders: $e");
+      debugPrint("Exception fetching orders: $e");
       if (e is Exception) rethrow;
       throw Exception('Failed to load orders: $e');
     }
@@ -563,7 +564,7 @@ class ApiService {
 
   static Future<List<MealProduct>> fetchProducts() async {
     final Uri uri = Uri.parse('$_staticBaseUrl/rr/meals');
-    print("Fetching products/menu from: $uri");
+    debugPrint("Fetching products/menu from: $uri");
     try {
       final response =
           await http.get(uri).timeout(const Duration(seconds: 20));
@@ -588,7 +589,7 @@ class ApiService {
           if (handledData is List) {
             menuList = handledData;
           } else {
-            print(
+            debugPrint(
                 "Products API Warning: Response is not a recognized list format. Handling returned: ${handledData?.runtimeType}");
             menuList = null;
           }
@@ -601,7 +602,7 @@ class ApiService {
                 if (jsonItem is Map<String, dynamic>) {
                   return MealProduct.fromMockJson(jsonItem);
                 } else {
-                  print(
+                  debugPrint(
                       "API Warning: Skipping non-map item in menu/products list: $jsonItem");
                   return null;
                 }
@@ -609,22 +610,22 @@ class ApiService {
               .whereType<MealProduct>()
               .toList();
         } else {
-          print(
+          debugPrint(
               "Products API response format unexpected after all handling attempts. Raw data type: ${rawData.runtimeType}");
           throw Exception(
               'Failed to parse products: Unexpected API response format');
         }
       } else {
-        print(
+        debugPrint(
             "Error fetching products: ${response.statusCode} ${response.body}");
         throw Exception(
             'Failed to load products (Status code: ${response.statusCode})');
       }
     } on TimeoutException {
-      print("Timeout fetching products");
+      debugPrint("Timeout fetching products");
       throw Exception('Failed to load products: Request timed out.');
     } catch (e) {
-      print("Exception fetching products: $e");
+      debugPrint("Exception fetching products: $e");
       if (e is Exception) rethrow;
       throw Exception('Failed to load products: $e');
     }
@@ -664,7 +665,7 @@ class ApiService {
       if (response.statusCode == 200 || response.statusCode == 204) {
         return true;
       } else {
-        print(
+        debugPrint(
             "Error updating order status: ${response.statusCode} ${response.body}");
         String apiErrorMsg = "Failed to update order status.";
         try {
@@ -676,10 +677,10 @@ class ApiService {
         throw Exception(apiErrorMsg);
       }
     } on TimeoutException {
-      print("Timeout updating order $orderId status.");
+      debugPrint("Timeout updating order $orderId status.");
       throw Exception("Request timed out. Please try again.");
     } catch (e) {
-      print("Exception updating order status: $e");
+      debugPrint("Exception updating order status: $e");
       if (e is Exception &&
           e.toString().contains("Failed to update order status.")) rethrow;
       throw Exception("An error occurred: ${e.toString()}");
@@ -690,7 +691,7 @@ class ApiService {
       int orderId, int riderId, String newStatus) async {
     final Uri uri =
         Uri.parse('$_staticBaseUrl/rr/orders/$orderId/status');
-    print(
+    debugPrint(
         "Assigning order $orderId to rider $riderId, setting status to $newStatus");
 
     try {
@@ -713,11 +714,11 @@ class ApiService {
       if (response.statusCode == 200 || response.statusCode == 204) {
         return true;
       } else {
-        print("Error assigning order: ${response.statusCode} ${response.body}");
+        debugPrint("Error assigning order: ${response.statusCode} ${response.body}");
         return false;
       }
     } catch (e) {
-      print("Exception in assignOrderToRider: $e");
+      debugPrint("Exception in assignOrderToRider: $e");
       return false;
     }
   }
@@ -1093,7 +1094,7 @@ class CachedImageWithShimmer extends StatelessWidget {
                 ),
               ),
           errorWidget: (context, url, error) {
-            print("CachedNetworkImage Error: Failed to load $url - $error");
+            debugPrint("CachedNetworkImage Error: Failed to load $url - $error");
             return _buildErrorWidget(context, shimmerBase, shimmerHighlight);
           });
     }
@@ -1254,12 +1255,12 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen>
         }
       }
       if (!didRefresh) {
-        print(
+        debugPrint(
             "Warning: Could not trigger refresh for tab ${_tabController.index}. Using fallback delay.");
         await Future.delayed(const Duration(milliseconds: 900));
       }
     } catch (e) {
-      print("Error during refresh propagation: $e");
+      debugPrint("Error during refresh propagation: $e");
     } finally {
       if (mounted) {
         _refreshIconController.reset();
@@ -1330,9 +1331,9 @@ class OrdersTab extends StatefulWidget {
 extension OrdersTabRefreshExtension on _OrdersTabState {
   Future<void> manualRefreshFromAppBar() async {
     if (!mounted) return;
-    print("OrdersTab: manualRefreshFromAppBar triggered.");
+    debugPrint("OrdersTab: manualRefreshFromAppBar triggered.");
     await _loadOrders(); // Await the full refresh
-    print("OrdersTab: manualRefreshFromAppBar completed.");
+    debugPrint("OrdersTab: manualRefreshFromAppBar completed.");
   }
 }
 
@@ -1537,7 +1538,7 @@ class _OrdersTabState extends State<OrdersTab>
           .toList();
       _mealOrders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
     } on TimeoutException {
-      print("Timeout fetching orders.");
+      debugPrint("Timeout fetching orders.");
       if (mounted) {
         _showErrorSnackbar(
             'Request timed out. Please check your connection and try again.');
@@ -1545,7 +1546,7 @@ class _OrdersTabState extends State<OrdersTab>
         _mealOrders = [];
       }
     } catch (error, stackTrace) {
-      print("Error in _loadOrders (OrdersTab): $error\n$stackTrace");
+      debugPrint("Error in _loadOrders (OrdersTab): $error\n$stackTrace");
       if (mounted) {
         _showErrorSnackbar('Error loading orders: ${error.toString()}');
         _allFetchedOrders = [];
@@ -1569,7 +1570,7 @@ class _OrdersTabState extends State<OrdersTab>
           _RiderSelectionDialog(orderId: order.orderId),
     );
     if (!mounted || result == null) {
-      if (result == null) print('Rider assignment cancelled or dialog closed.');
+      if (result == null) debugPrint('Rider assignment cancelled or dialog closed.');
       return;
     }
 
@@ -1850,7 +1851,7 @@ class _OrdersTabState extends State<OrdersTab>
 
   int _findOrderIndex(int orderId) {
     final index = _mealOrders.indexWhere((o) => o.orderId == orderId);
-    if (index == -1) print("Warning: Order $orderId not found in _mealOrders.");
+    if (index == -1) debugPrint("Warning: Order $orderId not found in _mealOrders.");
     return index;
   }
 
@@ -2869,12 +2870,12 @@ class GigsTab extends StatefulWidget {
 extension GigsTabRefreshExtension on _GigsTabState {
   Future<void> manualRefreshFromAppBar() async {
     if (!mounted) return;
-    print("GigsTab: manualRefreshFromAppBar triggered.");
+    debugPrint("GigsTab: manualRefreshFromAppBar triggered.");
     _loadOrders();
     while (mounted && _isLoadingGigs) {
       await Future.delayed(const Duration(milliseconds: 100));
     }
-    print("GigsTab: manualRefreshFromAppBar completed.");
+    debugPrint("GigsTab: manualRefreshFromAppBar completed.");
   }
 }
 
@@ -3067,7 +3068,7 @@ class _GigsTabState extends State<GigsTab>
           _RiderSelectionDialog(orderId: order.orderId),
     );
     if (!mounted || result == null) {
-      if (result == null) print('Staff assignment cancelled for Gig.');
+      if (result == null) debugPrint('Staff assignment cancelled for Gig.');
       return;
     }
     if (result is Rider) {
@@ -4369,12 +4370,12 @@ class ProductsTab extends StatefulWidget {
 extension ProductsTabRefreshExtension on _ProductsTabState {
   Future<void> manualRefreshFromAppBar() async {
     if (!mounted) return;
-    print("ProductsTab: manualRefreshFromAppBar triggered.");
+    debugPrint("ProductsTab: manualRefreshFromAppBar triggered.");
     _loadData();
     while (mounted && (_isLoadingProducts || _isUpdatingStock)) {
       await Future.delayed(const Duration(milliseconds: 100));
     }
-    print("ProductsTab: manualRefreshFromAppBar completed.");
+    debugPrint("ProductsTab: manualRefreshFromAppBar completed.");
   }
 }
 
@@ -4450,7 +4451,7 @@ class _ProductsTabState extends State<ProductsTab>
         _isLoadingProducts = false;
       });
     } catch (e, stackTrace) {
-      print("Error loading products/stock: $e\n$stackTrace");
+      debugPrint("Error loading products/stock: $e\n$stackTrace");
       if (mounted) {
         setState(() {
           _isLoadingProducts = false;

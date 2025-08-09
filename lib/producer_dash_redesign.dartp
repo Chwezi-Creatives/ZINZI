@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 
@@ -89,7 +90,7 @@ class _ProducerProfileOverviewState extends State<ProducerProfileOverview> {
           .get(Uri.parse('$apibaseurl/rr/rproducers?producer_id=$producerId'));
       if (response.statusCode == 200) {
         final profileData = json.decode(response.body);
-        print(
+        debugPrint(
             'DEBUG: Producer Profile Response -> $profileData'); // Debug print
         setState(() {
           if (profileData is Map && profileData.containsKey('data')) {
@@ -246,7 +247,7 @@ class _ProductManagementState extends State<ProductManagement> {
           .get(Uri.parse('$apibaseurl/rr/produce?producer_id=$producerId'));
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        print('DEBUG: Products Response -> $responseData'); // Debug print
+        debugPrint('DEBUG: Products Response -> $responseData'); // Debug print
         setState(() {
           if (responseData is List) {
             products.addAll(responseData.cast<Map<String, dynamic>>());
@@ -452,7 +453,7 @@ class _SupplyRequestListState extends State<SupplyRequestList> {
       final response = await http.get(uri);
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        print('DEBUG: Orders Response -> $responseData'); // Debug print
+        debugPrint('DEBUG: Orders Response -> $responseData'); // Debug print
         setState(() {
           if (responseData is Map && responseData.containsKey('data')) {
             final data = responseData['data'];

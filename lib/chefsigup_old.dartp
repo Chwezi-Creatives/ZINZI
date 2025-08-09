@@ -8,6 +8,7 @@ import 'dart:io'; // For File
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi/verification.dart'; // Assuming this is your verification page
+import 'package:flutter/foundation.dart';
 
 // --- Hardcoded Colors ---
 const Color primaryTeal = Color(0xFF00796B); // Teal 700
@@ -82,7 +83,7 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setString('chef_user_id', userId);
     await prefs.setString('chef_user_type', userType);
-    print('Chef details saved: ID $userId, Type $userType'); // Debug log
+    debugPrint('Chef details saved: ID $userId, Type $userType'); // Debug log
   }
 
   // --- Image Picking ---
@@ -105,7 +106,7 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
         _uploadToImgur();
       }
     } catch (e) {
-      print("Image picking error: $e");
+      debugPrint("Image picking error: $e");
       _showSnackBar("Failed to pick image. Please try again.", isError: true);
     }
   }
@@ -150,7 +151,7 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
     if (_profileImageFile == null) return;
     if (imgurClientId == null || imgurClientId!.isEmpty) {
       _showSnackBar("Image upload configuration missing.", isError: true);
-      print("Warning: Imgur Client ID not configured in .env");
+      debugPrint("Warning: Imgur Client ID not configured in .env");
       return;
     }
 
@@ -191,10 +192,10 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
             'Imgur upload failed: ${response.statusCode} ${response.body}');
       }
     } on TimeoutException catch (_) {
-      print("Imgur upload timeout");
+      debugPrint("Imgur upload timeout");
       _showSnackBar("Image upload timed out. Please try again.", isError: true);
     } catch (e) {
-      print("Imgur upload error: $e");
+      debugPrint("Imgur upload error: $e");
       _showSnackBar("Failed to upload image. Please try again.", isError: true);
     } finally {
       // Ensure loading state is turned off even if setting URL fails
@@ -299,13 +300,13 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
           _humanReadableAddress = data['display_name'] ?? 'Address not found';
         } else {
           _humanReadableAddress = 'Could not fetch address';
-          print("Reverse geocode error: ${response.statusCode}");
+          debugPrint("Reverse geocode error: ${response.statusCode}");
           _showSnackBar('Could not fetch readable address. Using coordinates.',
               isError: true);
         }
       } catch (e) {
         _humanReadableAddress = 'Could not fetch address';
-        print("Reverse geocode exception: $e");
+        debugPrint("Reverse geocode exception: $e");
         _showSnackBar('Could not fetch readable address. Using coordinates.',
             isError: true);
       }
@@ -328,7 +329,7 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
         _locationDisplayController.text = 'Failed to get location';
       });
     } catch (e) {
-      print("Location error: $e");
+      debugPrint("Location error: $e");
       _showSnackBar('Error getting location. Please try again.', isError: true);
       _stopLocationHintAnimation();
       setState(() {
@@ -406,7 +407,7 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
                 builder: (context) => const EmailVerificationPage()),
           );
         } else {
-          print(
+          debugPrint(
               "Error: Missing 'id' or 'type' in response body: ${response.body}");
           _showSnackBar(
               'Sign up partially successful, but failed to retrieve user details.',
@@ -421,7 +422,7 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
         } catch (_) {
           errorMessage =
               'Sign up failed (Code: ${response.statusCode}). Please try again.';
-          print(
+          debugPrint(
               "Signup failed with status code ${response.statusCode}. Response: ${response.body}");
         }
         _showSnackBar(errorMessage, isError: true);
@@ -431,7 +432,7 @@ class _ChefSignUpPageState extends State<ChefSignUpPage> {
           'The request timed out. Please check your connection and try again.',
           isError: true);
     } catch (error) {
-      print("Signup exception: $error");
+      debugPrint("Signup exception: $error");
       _showSnackBar(
           'An unexpected error occurred during sign up. Please try again later.',
           isError: true);

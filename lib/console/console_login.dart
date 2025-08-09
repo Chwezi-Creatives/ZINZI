@@ -1,5 +1,7 @@
-// lib/login_page.dart
+// lib/console/console_login.dart
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../services/notification_service.dart';
 import 'console_api_service.dart';
 import 'console.dart';
 
@@ -22,35 +24,78 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
   final _apiService = ApiService();
   bool _isLoading = false;
 
-  void _login() async {
+  Future<void> _login() async {
     setState(() => _isLoading = true);
-    final result = await _apiService.login(
-      _usernameController.text,
-      _passwordController.text,
-    );
-    setState(() => _isLoading = false);
-
-    if (!mounted) return;
-
-    if (result.success) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const AdminConsolePage()),
+    try {
+      final result = await _apiService.login(
+        _usernameController.text,
+        _passwordController.text,
       );
-    } else {
-      // Build the error message including the retry after duration if available
-      final errorMessage = result.error ?? 'Login failed. Please try again.';
-      final retryMessage = result.retryAfter != null 
-          ? '\n${result.formattedRetryAfter}'
-          : '';
-          
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: Colors.redAccent,
-          content: Text('$errorMessage$retryMessage'),
-          duration: const Duration(seconds: 5), // Longer duration to read the message
-          showCloseIcon: true,
-        ),
-      );
+
+      if (!mounted) return;
+
+      if (result.success) {
+        // Save admin login state
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('user_type', 'admin');
+        await prefs.setBool('is_logged_in', true);
+        
+        // Initialize and register FCM token in background
+        Future.microtask(() async {
+          try {
+            final notificationService = NotificationService();
+            await notificationService.initialize();
+            final token = await notificationService.getFcmToken();
+            if (token != null) {
+              debugPrint('FCM token obtained for admin, registering with backend...');
+              await notificationService.registerPendingFcmToken();
+              debugPrint('FCM token registered with user info');
+            }
+          } catch (e) {
+            debugPrint('Error registering FCM token: $e');
+            // Continue with login even if FCM registration fails
+          }
+        });
+        
+        if (mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const AdminConsolePage()),
+          );
+        }
+      } else {
+        // Build the error message including the retry after duration if available
+        final errorMessage = result.error ?? 'Login failed. Please try again.';
+        final retryMessage = result.retryAfter != null 
+            ? '\n${result.formattedRetryAfter}'
+            : '';
+            
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.redAccent,
+              content: Text('$errorMessage$retryMessage'),
+              duration: const Duration(seconds: 5), // Longer duration to read the message
+              showCloseIcon: true,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Error during login: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Colors.redAccent,
+            content: Text('An error occurred. Please try again.'),
+            duration: Duration(seconds: 5),
+            showCloseIcon: true,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
   

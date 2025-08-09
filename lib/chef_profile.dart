@@ -16,6 +16,7 @@ import 'package:zinzi/user_cache.dart'; // Assuming this path is correct
 import 'package:zinzi/cache_config.dart'; // Assuming this path is correct
 import 'package:zinzi/utils/image_utils.dart'; // Assuming this path is correct
 import 'package:flutter/services.dart'; // For SystemUiOverlayStyle
+import 'package:flutter/foundation.dart';
 
 // --- Consistent Color Palette (from chefsignup222.dart) ---
 const Color primaryTeal = Color(0xFF00796B); // Teal 700
@@ -131,7 +132,7 @@ String get _apibaseurl {
   try {
     return dotenv.env['API_BASE_URL-intranet'] ?? 'https://api.example.com';
   } catch (e) {
-    print(
+    debugPrint(
         "Error accessing dotenv for API_BASE_URL-intranet. Ensure dotenv.load() was called. Using fallback. Error: $e");
     return 'https://api.example.com';
   }
@@ -317,7 +318,7 @@ class ApiService {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       return prefs.getString('chef_user_id');
     } catch (e) {
-      print("Error accessing SharedPreferences for chef_id: $e");
+      debugPrint("Error accessing SharedPreferences for chef_id: $e");
       return null;
     }
   }
@@ -331,20 +332,20 @@ class ApiService {
       } else if (responseData['data'] is Map) {
         return responseData['data'];
       } else {
-        print("API Warning: Response has 'data' key but value is not a List or Map.");
+        debugPrint("API Warning: Response has 'data' key but value is not a List or Map.");
         return responseData['data'];
       }
     } else if (responseData is Map && responseData.containsKey('All_Meals')) {
       if (responseData['All_Meals'] is List) {
         return responseData['All_Meals'];
       } else {
-        print("API Warning: Response has 'All_Meals' key but value is not a List.");
+        debugPrint("API Warning: Response has 'All_Meals' key but value is not a List.");
         return null;
       }
     } else if (responseData is Map && responseData.isNotEmpty) {
       return responseData;
     }
-    print("API Warning: Unhandled response format. Expected List or Map. Got: ${responseData.runtimeType}");
+    debugPrint("API Warning: Unhandled response format. Expected List or Map. Got: ${responseData.runtimeType}");
     return null;
   }
 
@@ -354,7 +355,7 @@ class ApiService {
       throw Exception('Chef ID not found. Please log in again.');
     }
     final Uri uri = Uri.parse('$_baseUrl/rr/rchefs/$chefId');
-    print("Fetching profile from: $uri");
+    debugPrint("Fetching profile from: $uri");
 
     try {
       final response = await http.get(uri).timeout(const Duration(seconds: 23));
@@ -386,14 +387,14 @@ class ApiService {
         }
         return ChefProfile.fromMockJson(profileMap);
       } else {
-        print("Error fetching profile: ${response.statusCode} ${response.body}");
+        debugPrint("Error fetching profile: ${response.statusCode} ${response.body}");
         throw Exception('Failed to load chef profile (Status code: ${response.statusCode})');
       }
     } on TimeoutException {
-      print("Timeout fetching profile for chef $chefId");
+      debugPrint("Timeout fetching profile for chef $chefId");
       throw Exception('Failed to load chef profile: Request timed out.');
     } catch (e) {
-      print("Exception fetching profile: $e");
+      debugPrint("Exception fetching profile: $e");
       if (e is Exception) rethrow;
       throw Exception('Failed to load chef profile: $e');
     }
@@ -401,7 +402,7 @@ class ApiService {
 
   Future<bool> updateChefProfile(int chefId, Map<String, dynamic> profileData) async {
     final Uri uri = Uri.parse('$_baseUrl/rr/chefs/$chefId');
-    print("Updating profile for chef $chefId at: $uri with data: ${jsonEncode(profileData)}");
+    debugPrint("Updating profile for chef $chefId at: $uri with data: ${jsonEncode(profileData)}");
 
     try {
       final response = await http.patch(
@@ -411,17 +412,17 @@ class ApiService {
       ).timeout(const Duration(seconds: 25));
 
       if (response.statusCode == 200 || response.statusCode == 204) {
-        print("Profile update successful for chef $chefId");
+        debugPrint("Profile update successful for chef $chefId");
         return true;
       } else {
-        print("Error updating chef profile for $chefId: ${response.statusCode} ${response.body}");
+        debugPrint("Error updating chef profile for $chefId: ${response.statusCode} ${response.body}");
         return false;
       }
     } on TimeoutException {
-      print("Timeout updating profile for chef $chefId");
+      debugPrint("Timeout updating profile for chef $chefId");
       return false;
     } catch (e) {
-      print("Exception updating chef profile: $e");
+      debugPrint("Exception updating chef profile: $e");
       return false;
     }
   }
@@ -430,7 +431,7 @@ class ApiService {
     try {
       final imgurUrl = await uploadImageToImgur(imageFile);
       if (imgurUrl == null) {
-        print('Failed to upload image to Imgur.');
+        debugPrint('Failed to upload image to Imgur.');
         return null;
       }
       final Uri uri = Uri.parse('$_baseUrl/rr/chefs/$chefId');
@@ -441,14 +442,14 @@ class ApiService {
         body: jsonEncode(payload),
       ).timeout(const Duration(seconds: 25));
       if (response.statusCode == 200 || response.statusCode == 204) {
-        print('Profile image updated successfully with Imgur link.');
+        debugPrint('Profile image updated successfully with Imgur link.');
         return imgurUrl;
       } else {
-        print('Failed to update chef profile with Imgur link: ${response.statusCode} ${response.body}');
+        debugPrint('Failed to update chef profile with Imgur link: ${response.statusCode} ${response.body}');
         return null;
       }
     } catch (e) {
-      print('Error in updateChefProfileImage: $e');
+      debugPrint('Error in updateChefProfileImage: $e');
       return null;
     }
   }
@@ -456,7 +457,7 @@ class ApiService {
   Future<String?> uploadImageToImgur(File imageFile) async {
     final String? imgurClientId = dotenv.env['IMGUR_CLIENT_ID'];
     if (imgurClientId == null || imgurClientId.isEmpty) {
-      print('Imgur Client ID missing in .env');
+      debugPrint('Imgur Client ID missing in .env');
       return null;
     }
     try {
@@ -474,15 +475,15 @@ class ApiService {
             responseData['data'].containsKey('link')) {
           return responseData['data']['link'] as String?;
         } else {
-          print('Imgur upload succeeded but link not found in response.');
+          debugPrint('Imgur upload succeeded but link not found in response.');
           return null;
         }
       } else {
-        print('Imgur upload failed: ${response.statusCode} ${response.body}');
+        debugPrint('Imgur upload failed: ${response.statusCode} ${response.body}');
         return null;
       }
     } catch (e) {
-      print('Imgur upload error: $e');
+      debugPrint('Imgur upload error: $e');
       return null;
     }
   }
@@ -506,11 +507,11 @@ class ApiService {
       if (response.statusCode == 200 || response.statusCode == 204) {
         return true;
       } else {
-        print("Error updating profile status: ${response.statusCode} ${response.body}");
+        debugPrint("Error updating profile status: ${response.statusCode} ${response.body}");
         return false;
       }
     } catch (e) {
-      print("Exception updating profile status: $e");
+      debugPrint("Exception updating profile status: $e");
       return false;
     }
   }
@@ -565,7 +566,7 @@ class CachedImageWithShimmer extends StatelessWidget {
         height: height,
         fit: fit,
         errorBuilder: (context, error, stackTrace) {
-          print("Error loading local file: ${localFile!.path} - $error");
+          debugPrint("Error loading local file: ${localFile!.path} - $error");
           return _buildErrorWidget(context, shimmerBase, shimmerHighlight,
               isLocalFileError: true);
         },
@@ -593,7 +594,7 @@ class CachedImageWithShimmer extends StatelessWidget {
                   ),
                 ),
             errorWidget: (context, url, error) {
-              print("CachedNetworkImage Error: Failed to load $url - $error");
+              debugPrint("CachedNetworkImage Error: Failed to load $url - $error");
               return _buildErrorWidget(context, shimmerBase, shimmerHighlight);
             });
       }
@@ -647,9 +648,9 @@ class ProfileTab extends StatefulWidget {
 extension ProfileTabRefreshExtension on _ProfileTabState {
   Future<void> manualRefreshFromAppBar() async {
     if (!mounted) return;
-    print("ProfileTab: manualRefreshFromAppBar triggered.");
+    debugPrint("ProfileTab: manualRefreshFromAppBar triggered.");
     await _refreshProfile(); 
-    print("ProfileTab: manualRefreshFromAppBar completed.");
+    debugPrint("ProfileTab: manualRefreshFromAppBar completed.");
   }
 }
 
@@ -669,15 +670,15 @@ class _ProfileTabState extends State<ProfileTab> with AutomaticKeepAliveClientMi
           _profileCache = ChefProfile.fromMockJson(cachedData);
           _profileCacheTimestamp = DateTime.tryParse(timestampData);
           if (_profileCacheTimestamp == null) {
-            print("ProfileTab: Failed to parse cached timestamp. Clearing cache.");
+            debugPrint("ProfileTab: Failed to parse cached timestamp. Clearing cache.");
             _profileCache = null;
             await UserCache.removeData(_profileCacheKey);
             await UserCache.removeData(_profileCacheTimestampKey);
           } else {
-            print("ProfileTab: Loaded profile from cache.");
+            debugPrint("ProfileTab: Loaded profile from cache.");
           }
         } catch (e) {
-          print("Error parsing cached profile data: $e. Clearing cache.");
+          debugPrint("Error parsing cached profile data: $e. Clearing cache.");
           _profileCache = null;
           _profileCacheTimestamp = null;
           await UserCache.removeData(_profileCacheKey);
@@ -686,10 +687,10 @@ class _ProfileTabState extends State<ProfileTab> with AutomaticKeepAliveClientMi
       } else {
         _profileCache = null;
         _profileCacheTimestamp = null;
-        print("ProfileTab: No valid profile cache found in prefs.");
+        debugPrint("ProfileTab: No valid profile cache found in prefs.");
       }
     } catch (e) {
-      print("Error loading profile cache from UserCache: $e");
+      debugPrint("Error loading profile cache from UserCache: $e");
       _profileCache = null;
       _profileCacheTimestamp = null;
     }
@@ -704,9 +705,9 @@ class _ProfileTabState extends State<ProfileTab> with AutomaticKeepAliveClientMi
 
       _profileCache = profile;
       _profileCacheTimestamp = now;
-      print("ProfileTab: Saved profile to cache.");
+      debugPrint("ProfileTab: Saved profile to cache.");
     } catch (e) {
-      print("Error saving profile cache to UserCache: $e");
+      debugPrint("Error saving profile cache to UserCache: $e");
     }
   }
 
@@ -799,7 +800,7 @@ class _ProfileTabState extends State<ProfileTab> with AutomaticKeepAliveClientMi
           now.difference(_profileCacheTimestamp!) < CacheConfig.profileCacheDuration;
 
       if (cacheIsValid) {
-        print("ProfileTab: Displaying valid cached profile.");
+        debugPrint("ProfileTab: Displaying valid cached profile.");
         setState(() {
           _currentProfile = _profileCache;
           if (_currentProfile != null) _updateControllersFromProfile(_currentProfile!);
@@ -807,7 +808,7 @@ class _ProfileTabState extends State<ProfileTab> with AutomaticKeepAliveClientMi
           _profileFuture = Future.value(_currentProfile);
         });
       } else {
-        print("ProfileTab: Cached profile expired or timestamp missing.");
+        debugPrint("ProfileTab: Cached profile expired or timestamp missing.");
         setState(() {
           _currentProfile = _profileCache; 
           if (_currentProfile != null) _updateControllersFromProfile(_currentProfile!);
@@ -817,7 +818,7 @@ class _ProfileTabState extends State<ProfileTab> with AutomaticKeepAliveClientMi
         await _fetchProfileAndUpdate(); 
       }
     } else if (mounted) {
-      print("ProfileTab: No cached profile found, fetching...");
+      debugPrint("ProfileTab: No cached profile found, fetching...");
       setState(() {
         _isLoadingProfile = true;
         _profileFuture = null;
@@ -828,7 +829,7 @@ class _ProfileTabState extends State<ProfileTab> with AutomaticKeepAliveClientMi
 
   Future<void> _fetchProfileAndUpdate() async {
     if (_profileFuture != null && _isLoadingProfile && _currentProfile != null) {
-      print("ProfileTab: Background fetch already in progress or future assigned.");
+      debugPrint("ProfileTab: Background fetch already in progress or future assigned.");
       return;
     }
 
@@ -844,7 +845,7 @@ class _ProfileTabState extends State<ProfileTab> with AutomaticKeepAliveClientMi
     try {
       final profile = await fetchFuture;
       if (mounted) {
-        print("ProfileTab: Fetched fresh profile data successfully.");
+        debugPrint("ProfileTab: Fetched fresh profile data successfully.");
         await _saveProfileCacheToPrefs(profile);
         setState(() {
           _currentProfile = profile;
@@ -854,7 +855,7 @@ class _ProfileTabState extends State<ProfileTab> with AutomaticKeepAliveClientMi
         });
       }
     } catch (error, stackTrace) {
-      print("Error fetching fresh profile: $error\n$stackTrace");
+      debugPrint("Error fetching fresh profile: $error\n$stackTrace");
       if (mounted) {
         final errorMsg = 'Failed to load profile: ${error.toString()}';
         if (_currentProfile == null) {
@@ -1064,7 +1065,7 @@ class _ProfileTabState extends State<ProfileTab> with AutomaticKeepAliveClientMi
         }
       }
     } catch (e) {
-      print("Error picking image: $e");
+      debugPrint("Error picking image: $e");
       if (mounted) _showErrorSnackbar("Could not pick image: ${e.toString()}");
     }
   }
@@ -1119,7 +1120,7 @@ class _ProfileTabState extends State<ProfileTab> with AutomaticKeepAliveClientMi
         }
       }
     } catch (e) {
-      print("Error saving profile: $e");
+      debugPrint("Error saving profile: $e");
       if (mounted) _showErrorSnackbar('An error occurred while saving.');
     } finally {
       if (mounted) setState(() => _isSaving = false);

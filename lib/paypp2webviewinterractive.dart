@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter/foundation.dart';
 
 class PaymentScreen222 extends StatefulWidget {
   @override
@@ -52,7 +53,7 @@ class _PaymentScreen222State extends State<PaymentScreen222> {
         throw Exception('Failed to create payment: ${response.body}');
       }
     } catch (e) {
-      print('Error initiating payment: $e');
+      debugPrint('Error initiating payment: $e');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text("Error initiating payment. Please try again."),
       ));
@@ -195,7 +196,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
         ));
       }
     } catch (e) {
-      print('Error executing payment: $e');
+      debugPrint('Error executing payment: $e');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text("Error completing payment. Please try again."),
       ));

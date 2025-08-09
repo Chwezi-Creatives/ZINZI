@@ -10,7 +10,8 @@ import 'dart:io'; // For File
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:zinzi/verification.dart'; // Import verification page
-import 'notifications/fcm_service.dart'; // Import FCM service
+import 'package:zinzi/services/notification_service.dart'; // Import notification service
+import 'package:flutter/foundation.dart';
 
 // --- Consistent Color Palette ---
 const Color primaryTeal = Color(0xFF00796B); // Teal 700
@@ -277,7 +278,7 @@ class _ChefSignUpPageBetterNewState extends State<ChefSignUpPageBetterNew> {
         throw Exception('Imgur upload failed: Invalid response structure.');
       }
     } else {
-      print("Imgur Upload Error: ${response.body}");
+      debugPrint("Imgur Upload Error: ${response.body}");
       throw Exception(
           'Failed to upload image. Status Code: ${response.statusCode}');
     }
@@ -349,13 +350,13 @@ class _ChefSignUpPageBetterNewState extends State<ChefSignUpPageBetterNew> {
           // Use the fetched address if available and valid
           displayAddress = data['display_name'] ?? displayAddress;
         } else {
-          print("Reverse geocode error: ${response.statusCode}");
+          debugPrint("Reverse geocode error: ${response.statusCode}");
           // Keep displayAddress as coordinates, show snackbar
           _showSnackBar('Could not fetch readable address.', isError: true);
         }
       } catch (e) {
         // Keep displayAddress as coordinates, show snackbar
-        print("Reverse geocode exception: $e");
+        debugPrint("Reverse geocode exception: $e");
         // ERROR LINE REMOVED FROM HERE
         _showSnackBar('Could not fetch readable address.', isError: true);
       }
@@ -468,7 +469,7 @@ class _ChefSignUpPageBetterNewState extends State<ChefSignUpPageBetterNew> {
       final key100plus = perGigCategoryKeys['100+ people']!;
       if (perGigPriceControllers[key50plus]!.text.isNotEmpty ||
           perGigPriceControllers[key100plus]!.text.isNotEmpty) {
-        print("Clearing large group pricing for Individual chef.");
+        debugPrint("Clearing large group pricing for Individual chef.");
         perGigPriceControllers[key50plus]?.clear();
         perGigPriceControllers[key100plus]?.clear();
       }
@@ -546,12 +547,12 @@ class _ChefSignUpPageBetterNewState extends State<ChefSignUpPageBetterNew> {
     // --- API Call ---
     final String apiUrl = '$apibaseurl/rr/signup_chef';
     try {
-      print("Sending data to $apiUrl...");
+      debugPrint("Sending data to $apiUrl...");
       final response = await http.post(Uri.parse(apiUrl),
           headers: {"Content-Type": "application/json"},
           body: json.encode(chefData));
 
-      print("API Response Status: ${response.statusCode}");
+      debugPrint("API Response Status: ${response.statusCode}");
 
       if (response.statusCode == 201) {
         final responseData = json.decode(response.body);
@@ -572,9 +573,24 @@ class _ChefSignUpPageBetterNewState extends State<ChefSignUpPageBetterNew> {
             await prefs.setString('user_phone', phoneNumber);
           }
           
-          // Register FCM token with user info (async, do not await)
-          FCMService.registerTokenWithUserInfo();
-          print('Saved ChefID: $chefID, UserType: $userType, Phone: $phoneNumber');
+          // Initialize and register FCM token in background after successful signup
+          Future.microtask(() async {
+            try {
+              final notificationService = NotificationService();
+              await notificationService.initialize();
+              final token = await notificationService.getFcmToken();
+              if (token != null) {
+                debugPrint('FCM token obtained during chef signup, registering with backend...');
+                await notificationService.registerPendingFcmToken();
+                debugPrint('FCM token registered for chef');
+              }
+            } catch (e) {
+              debugPrint('Error registering FCM token during chef signup: $e');
+              // Continue with signup flow even if FCM registration fails
+            }
+          });
+          
+          debugPrint('Saved ChefID: $chefID, UserType: $userType, Phone: $phoneNumber');
         }
 
         _showSnackBar('Chef registration successful!', isError: false);
@@ -603,7 +619,7 @@ class _ChefSignUpPageBetterNewState extends State<ChefSignUpPageBetterNew> {
         _showSnackBar(errorMessage, isError: true);
       }
     } catch (error) {
-      print("Submission Error: $error");
+      debugPrint("Submission Error: $error");
       _showSnackBar('An error occurred: $error', isError: true);
     } finally {
       if (mounted) setState(() => _isLoading = false);

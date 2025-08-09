@@ -20,7 +20,7 @@ class MyHttpOverrides extends io.HttpOverrides {
     try {
       securityContext.setTrustedCertificatesBytes(certificate);
     } catch (e) {
-      print('Error setting trusted certificates: $e');
+      debugPrint('Error setting trusted certificates: $e');
     }
 
     // Create an HttpClient using the customized SecurityContext
@@ -29,7 +29,7 @@ class MyHttpOverrides extends io.HttpOverrides {
     // Accept self-signed certificates
     client.badCertificateCallback =
         (io.X509Certificate cert, String host, int port) {
-      print('Accepting self-signed certificate from $host:$port');
+      debugPrint('Accepting self-signed certificate from $host:$port');
       return true;
     };
 

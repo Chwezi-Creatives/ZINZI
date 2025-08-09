@@ -7,7 +7,8 @@ import 'package:zinzi/onboard.dart';
 import 'dashboard_page.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'Profile.dart';
-import 'notifications/fcm_service.dart';
+import 'package:zinzi/services/notification_service.dart';
+import 'package:flutter/foundation.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 
@@ -89,8 +90,22 @@ class _LoginPageState extends State<LoginPage>
             await prefs.setString('user_phone', phoneNumber);
           }
           
-          // Register FCM token with user info (async, do not await)
-          FCMService.registerTokenWithUserInfo();
+          // Initialize and register FCM token in background
+          Future.microtask(() async {
+            try {
+              final notificationService = NotificationService();
+              await notificationService.initialize();
+              final token = await notificationService.getFcmToken();
+              if (token != null) {
+                debugPrint('FCM token obtained, registering with backend...');
+                await notificationService.registerPendingFcmToken();
+                debugPrint('FCM token registered with user info');
+              }
+            } catch (e) {
+              debugPrint('Error registering FCM token: $e');
+              // Continue with login even if FCM registration fails
+            }
+          });
 
           // Navigate to the landing page with consistent transition
           Navigator.pushReplacement(
@@ -108,7 +123,7 @@ class _LoginPageState extends State<LoginPage>
         );
       }
     } catch (error) {
-      print('Login error: $error');
+      debugPrint('Login error: $error');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
             content: Text('An error occurred. Please try again later.')),

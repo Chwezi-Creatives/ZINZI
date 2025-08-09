@@ -2,76 +2,156 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDevelopmentRegion</key>
-	<string>$(DEVELOPMENT_LANGUAGE)</string>
-	<key>CFBundleDisplayName</key>
-	<string>Zinzi</string>
-	<key>CFBundleExecutable</key>
-	<string>$(EXECUTABLE_NAME)</string>
-	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
-	<key>CFBundleName</key>
-	<string>zinzi</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleShortVersionString</key>
-	<string>$(FLUTTER_BUILD_NAME)</string>
-	<key>CFBundleSignature</key>
-	<string>????</string>
-	<key>CFBundleVersion</key>
-	<string>$(FLUTTER_BUILD_NUMBER)</string>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
-	<key>UILaunchStoryboardName</key>
-	<string>LaunchScreen</string>
-	<key>UIMainStoryboardFile</key>
-	<string>Main</string>
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>CADisableMinimumFrameDurationOnPhone</key>
-	<true/>
-	<key>UIApplicationSupportsIndirectInputEvents</key>
-	<true/>
-	
-	<!-- Existing Permissions -->
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Zinzi needs location to show you a map</string>
-	<key>FirebaseAppDelegateProxyEnabled</key>
-	<false/>
-	<key>UIBackgroundModes</key>
-	<array>
-	    <string>fetch</string>
-	    <string>remote-notification</string>
-	</array>
-	<key>NSPushNotificationUsageDescription</key>
-	<string>Zinzi uses notifications to keep you updated on your orders and activity.</string>
-	<key>NSUserNotificationAlertUsageDescription</key>
-	<string>Zinzi uses notifications to keep you updated on your orders and activity.</string>
+    <!-- Basic App Information -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleDisplayName</key>
+    <string>Zinzi</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>zinzi</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(FLUTTER_BUILD_NAME)</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundleVersion</key>
+    <string>$(FLUTTER_BUILD_NUMBER)</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
 
-	<!-- ✅ ADDED REQUIRED USAGE DESCRIPTIONS -->
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Zinzi uses the microphone to record audio input voice commands when talking to sensei.</string>
+    <!-- App Interface -->
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+    <key>UIMainStoryboardFile</key>
+    <string>Main</string>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
 
-	<key>NSCameraUsageDescription</key>
-	<string>Zinzi needs the camera to allow users to take or upload profile pictures or images.</string>
+    <!-- Performance & System -->
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
+    <key>UIApplicationSupportsIndirectInputEvents</key>
+    <true/>
 
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Zinzi uses basic text to speech to eable you chat with sensei.</string>
+    <!-- Notifications & Background Processing -->
+    <key>FirebaseAppDelegateProxyEnabled</key>
+    <false/>
+    
+    <!-- Background Modes -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>fetch</string>
+        <string>remote-notification</string>
+        <string>processing</string>
+    </array>
+    
+    <!-- Notification Descriptions -->
+    <key>NSPushNotificationUsageDescription</key>
+    <string>Get instant updates about your orders and important account activities with notifications.</string>
+    
+    <!-- Required for iOS 10+ -->
+    <key>NSUserNotificationAlertStyle</key>
+    <string>alert</string>
+    
+    <!-- Required for iOS 10+ -->
+    <key>UNNotificationDefaultActionIdentifier</key>
+    <string>OPEN_APP_ACTION</string>
+    
+    <!-- Required for iOS 12+ -->
+    <key>UNNotificationCategory</key>
+    <array>
+        <string>MESSAGE_CATEGORY</string>
+    </array>
+    
+    <!-- Required for iOS 10+ -->
+    <key>UNNotificationDefaultActionTitle</key>
+    <string>View</string>
+    
+    <!-- Required for iOS 10+ -->
+    <key>UNNotificationDefaultActionIdentifier</key>
+    <string>DEFAULT_ACTION</string>
+    
+    <!-- Required for iOS 10+ -->
+    <key>UNNotificationCategory</key>
+    <string>MESSAGE_CATEGORY</string>
+    
+    <!-- Required for iOS 10+ -->
+    <key>UNNotificationCategoryActions</key>
+    <array>
+        <dict>
+            <key>identifier</key>
+            <string>REPLY_ACTION</string>
+            <key>title</key>
+            <string>Reply</string>
+            <key>behavior</key>
+            <string>textInput</string>
+            <key>parameters</key>
+            <dict>
+                <key>UIUserNotificationActionBehaviorTextInput</key>
+                <true/>
+            </dict>
+        </dict>
+    </array>
 
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Zinzi uses your location to load more personalized content even when the app is in the background.</string>
+    <!-- Location Services -->
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>We use your location to show nearby services and personalize your experience on the map.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>Zinzi can show you relevant content based on your location, even when you're not using the app.</string>
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>We'll keep your experience smooth by updating your location in the background when needed.</string>
+
+    <!-- Camera & Photos -->
+    <key>NSCameraUsageDescription</key>
+    <string>Take and upload profile pictures or share moments with the Zinzi community.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Select photos to share on your profile or with other Zinzi members.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Save your favorite images from Zinzi directly to your photo library.</string>
+
+    <!-- Network & Security -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <false/>
+        <key>NSExceptionDomains</key>
+        <dict>
+            <!-- Add your domains here if needed -->
+        </dict>
+    </dict>
+
+    <!-- Privacy Controls -->
+    <key>NSAppleMusicUsageDescription</key>
+    <string>Play notification sounds to keep you informed about important updates.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>Add events to your calendar for your Zinzi appointments and bookings.</string>
+    <key>NSContactsUsageDescription</key>
+    <string>Find and connect with friends who are already using Zinzi.</string>
+
+    <!-- App-Specific Features -->
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>armv7</string>
+    </array>
+    <key>UIRequiresFullScreen</key>
+    <true/>
 </dict>
 </plist>

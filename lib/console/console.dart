@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'console_api_service.dart';
 import 'console_data_models.dart';
+import 'package:flutter/foundation.dart';
 
 // --- Color Constants ---
 const kTealColor = Colors.teal;
@@ -604,8 +605,8 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
       }
     } catch (e, stackTrace) {
       // Log the full error for debugging
-      print('Batch update error: $e');
-      print('Stack trace: $stackTrace');
+      debugPrint('Batch update error: $e');
+      debugPrint('Stack trace: $stackTrace');
       
       // Cancel the timer and close the controller in case of error
       timer.cancel();

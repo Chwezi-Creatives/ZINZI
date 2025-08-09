@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart'; // Add intl package: flutter pub add intl
+import 'package:flutter/foundation.dart';
 
 // --- Data Models ---
 
@@ -324,14 +325,14 @@ class MockApiService {
   static Future<bool> updateProfileStatus(int chefId, bool isActive) async {
     await _simulateDelay();
     // TODO: Implement API call to update chef active status
-    print("API CALL (Mock): Updating Chef $chefId status to $isActive");
+    debugPrint("API CALL (Mock): Updating Chef $chefId status to $isActive");
     return true; // Simulate success
   }
 
   static Future<bool> updateOrderStatus(int orderId, String newStatus) async {
     await _simulateDelay();
     // TODO: Implement API call to update order status
-    print("API CALL (Mock): Updating Order $orderId status to $newStatus");
+    debugPrint("API CALL (Mock): Updating Order $orderId status to $newStatus");
     return true; // Simulate success
   }
 
@@ -339,7 +340,7 @@ class MockApiService {
       Map<String, dynamic> productData) async {
     await _simulateDelay();
     // TODO: Implement API call to ADD a new product
-    print("API CALL (Mock): Adding new product: ${productData['meal_name']}");
+    debugPrint("API CALL (Mock): Adding new product: ${productData['meal_name']}");
     // Simulate returning the newly created product with an ID
     productData['meal_id'] = 'M${DateTime.now().millisecondsSinceEpoch}';
     productData['price'] =
@@ -351,14 +352,14 @@ class MockApiService {
       String mealId, Map<String, dynamic> productData) async {
     await _simulateDelay();
     // TODO: Implement API call to UPDATE product with mealId
-    print("API CALL (Mock): Updating product $mealId");
+    debugPrint("API CALL (Mock): Updating product $mealId");
     return true; // Simulate success
   }
 
   static Future<bool> deleteProduct(String mealId) async {
     await _simulateDelay();
     // TODO: Implement API call to DELETE product with mealId
-    print("API CALL (Mock): Deleting product $mealId");
+    debugPrint("API CALL (Mock): Deleting product $mealId");
     return true; // Simulate success
   }
 }
@@ -1182,7 +1183,7 @@ class _ProductsTabState extends State<ProductsTab> {
     // Similar dialog as add, pre-filled with product data
     // On save, call MockApiService.updateProduct(...)
     // Update the _products list upon success
-    print("Placeholder: Show edit dialog for ${product.mealName}");
+    debugPrint("Placeholder: Show edit dialog for ${product.mealName}");
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('TODO: Implement Edit for ${product.mealName}')),
     );

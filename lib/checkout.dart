@@ -141,7 +141,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   @override
   void initState() {
     super.initState();
-    print('cartItems: ' + widget.items.toString());
+    debugPrint('cartItems: ' + widget.items.toString());
     _scaleFactor = 1.0;
     _startAnimation();
     _initializeLocation(); // New method to handle location initialization
@@ -310,7 +310,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         return;
       }
     } catch (e) {
-      print('Error getting user ID: $e');
+      debugPrint('Error getting user ID: $e');
       _showSnackBar('Failed to get user information. Please try again.');
       if (mounted) setState(() => _isLoading = false);
       return;
@@ -369,12 +369,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           }
           
           // Debug output
-          print('Price breakdown for $quantity x ${item['title']}:');
-          print('- Base price: $basePrice');
-          print('- Chef price: $chefPrice');
-          print('- Complementary total: $complementaryTotal');
-          print('- Price per unit: $pricePerSingleUnit');
-          print('- Total: $itemTotalPrice');
+          debugPrint('Price breakdown for $quantity x ${item['title']}:');
+          debugPrint('- Base price: $basePrice');
+          debugPrint('- Chef price: $chefPrice');
+          debugPrint('- Complementary total: $complementaryTotal');
+          debugPrint('- Price per unit: $pricePerSingleUnit');
+          debugPrint('- Total: $itemTotalPrice');
       }
 
       Map<String, dynamic> itemPayload;
@@ -409,9 +409,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           'notes': _notesController.text.trim(),
         };
         
-        print('Gig price breakdown:');
-        print('- Base price: $gigPrice');
-        print('- Total: $itemTotalPrice');
+        debugPrint('Gig price breakdown:');
+        debugPrint('- Base price: $gigPrice');
+        debugPrint('- Total: $itemTotalPrice');
       } else {
         // Assume meal type
         final meal = item['meal'] as Map<String, dynamic>? ?? {};
@@ -506,11 +506,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         };
       }
 
-      print('Submitting order for item: ${item['title'] ?? item['gigDetails']?['gig_type'] ?? 'Unknown Item'}');
-      print('Order Payload: ' + orderPayload.toString());
+      debugPrint('Submitting order for item: ${item['title'] ?? item['gigDetails']?['gig_type'] ?? 'Unknown Item'}');
+      debugPrint('Order Payload: ' + orderPayload.toString());
 
       // Log the payload for debugging
-      print('Submitting order with payload: ${jsonEncode(orderPayload)}');
+      debugPrint('Submitting order with payload: ${jsonEncode(orderPayload)}');
 
       // Make the API call
       final response = await http.post(
@@ -522,7 +522,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       ).timeout(Duration(seconds: 30));
 
       // Log the response for debugging
-      print('Order submission response: ${response.statusCode} - ${response.body}');
+      debugPrint('Order submission response: ${response.statusCode} - ${response.body}');
 
       if (response.statusCode == 201) {
         final responseData = json.decode(response.body);
@@ -532,12 +532,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         // Update total processed price using the itemTotalPrice we already calculated
         totalProcessedPrice += itemTotalPrice;
         
-        print('Successfully submitted order $orderId for item: ${item['title'] ?? 'Gig'}');
-        print('Price breakdown - Base: $basePrice, Chef: $chefPrice, Complements: $complementaryTotal, Total: $itemTotalPrice');
+        debugPrint('Successfully submitted order $orderId for item: ${item['title'] ?? 'Gig'}');
+        debugPrint('Price breakdown - Base: $basePrice, Chef: $chefPrice, Complements: $complementaryTotal, Total: $itemTotalPrice');
         ShoppingCart.removeItems([item]);
       } else {
         final errorMessage = jsonDecode(response.body)?['detail'] ?? response.reasonPhrase ?? 'Unknown error';
-        print('Failed to place order: ${response.statusCode} - $errorMessage');
+        debugPrint('Failed to place order: ${response.statusCode} - $errorMessage');
         
         // Show more specific error messages for validation issues
         if (response.statusCode == 400) {

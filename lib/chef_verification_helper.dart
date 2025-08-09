@@ -1,5 +1,6 @@
 //cspell:disable
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -160,7 +161,7 @@ class ChefVerificationHelper {
         throw Exception('Failed to verify code: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error verifying gig code: $e');
+      debugPrint('Error verifying gig code: $e');
       throw Exception('Verification failed: ${e.toString()}');
     }
   }
@@ -218,7 +219,7 @@ class ChefVerificationHelper {
         throw Exception('Failed to update status: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error updating order status: $e');
+      debugPrint('Error updating order status: $e');
       throw Exception('Status update failed: ${e.toString()}');
     }
   }

@@ -22,6 +22,7 @@ import 'package:zinzi/create_gig_screen.dart'; // <-- MAKE SURE THIS PATH IS COR
 import 'package:zinzi/cart.dart'; // <-- MAKE SURE THIS PATH IS CORRECT
 import 'package:zinzi/onboard.dart'; // <-- MAKE SURE THIS PATH IS CORRECT (Replace with your actual home/landing page import)
 import 'package:zinzi/signup_or_login.dart'; // Import SignUpOrLoginPage - Added from Source
+import 'package:flutter/foundation.dart';
 
 // --- Color System --- (Using Target's Colors)
 const Color kColorPrimaryDarkest = Color(0xFF00352C);
@@ -99,7 +100,7 @@ class ChooseChefNetwork extends StatefulWidget {
           await UserCache.saveData(kCacheKeyChefs, dataList);
           await UserCache.saveData(kCacheKeyTimestamp, now.toIso8601String());
         }
-      } catch (e) { print('[Splash][ChefNet] preload error: $e'); }
+      } catch (e) { debugPrint('[Splash][ChefNet] preload error: $e'); }
     }
   }
   const ChooseChefNetwork({super.key});
@@ -165,7 +166,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
       final dateWithOffset = '${dateString}Z';
       return DateTime.tryParse(dateWithOffset) ?? DateTime.tryParse(dateString);
     } catch (e) {
-      print('[ChefNet] Error parsing date: $e');
+      debugPrint('[ChefNet] Error parsing date: $e');
       return null;
     }
   }
@@ -181,29 +182,29 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
     final prefs = await SharedPreferences.getInstance();
     final String? cachedData = prefs.getString(kCacheKeyChefs);
     final String? cachedTimestampString = prefs.getString(kCacheKeyTimestamp);
-    print('[ChefNet] Cached timestamp string: $cachedTimestampString');
+    debugPrint('[ChefNet] Cached timestamp string: $cachedTimestampString');
     
     if (cachedData != null && cachedTimestampString != null) {
-      print('[ChefNet] Cache found, checking validity...');
+      debugPrint('[ChefNet] Cache found, checking validity...');
       DateTime? cachedTimestamp = _parseDate(cachedTimestampString);
       if (cachedTimestamp == null) {
-        print('[ChefNet] Invalid cache timestamp: $cachedTimestampString, error: FormatException');
+        debugPrint('[ChefNet] Invalid cache timestamp: $cachedTimestampString, error: FormatException');
       }
       if (cachedTimestamp != null) {
-        print('[ChefNet] Cache timestamp: $cachedTimestamp');
+        debugPrint('[ChefNet] Cache timestamp: $cachedTimestamp');
         final DateTime now = DateTime.now();
-        print('[ChefNet] Now: $now');
+        debugPrint('[ChefNet] Now: $now');
         if (now.difference(cachedTimestamp) < kCacheDuration) {
-          print("Cache valid, loading chefs from cache.");
+          debugPrint("Cache valid, loading chefs from cache.");
           try {
             final List<dynamic> cachedListRaw = json.decode(cachedData);
             if (cachedListRaw is List) {
               List<Map<String, dynamic>> cachedList =
                   List<Map<String, dynamic>>.from(
                       cachedListRaw.whereType<Map<String, dynamic>>());
-              print('[ChefNet] Loaded ${cachedList.length} chefs from cache');
+              debugPrint('[ChefNet] Loaded ${cachedList.length} chefs from cache');
               if (cachedList.isNotEmpty) {
-                print('[ChefNet] First chef from cache: ' + cachedList.first.toString());
+                debugPrint('[ChefNet] First chef from cache: ' + cachedList.first.toString());
               }
               _sortChefList(cachedList); // Sort cached data
 
@@ -223,22 +224,22 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
                       true); // Always fetch in background if cache is valid
               return; // Exit after loading from cache
             } else {
-              print(
+              debugPrint(
                   "Cached data format error: Expected a List, got ${cachedListRaw.runtimeType}");
               await _clearCache(prefs); // Clear corrupted cache
             }
           } catch (e) {
-            print("Error decoding or processing cached chefs: $e");
+            debugPrint("Error decoding or processing cached chefs: $e");
             await _clearCache(prefs); // Clear potentially corrupted cache
           }
         } else {
-          print("Cache expired, fetching fresh data.");
+          debugPrint("Cache expired, fetching fresh data.");
         }
       } else {
-        print("Cache timestamp missing or invalid, fetching fresh data.");
+        debugPrint("Cache timestamp missing or invalid, fetching fresh data.");
       }
     } else {
-      print("No cache found, fetching fresh data.");
+      debugPrint("No cache found, fetching fresh data.");
     }
 
     // If cache is invalid or not found, show loading and fetch fresh data
@@ -264,23 +265,23 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
           json.encode(sortedList); // Store the sorted list
       await prefs.setString(kCacheKeyChefs, dataToStore);
       await prefs.setString(kCacheKeyTimestamp, DateTime.now().toIso8601String());
-      print("Sorted chefs data saved to cache.");
+      debugPrint("Sorted chefs data saved to cache.");
     } catch (e) {
-      print("Error saving chefs to cache: $e");
+      debugPrint("Error saving chefs to cache: $e");
     }
   }
 
   Future<void> _clearCache(SharedPreferences prefs) async {
     await prefs.remove(kCacheKeyChefs);
     await prefs.remove(kCacheKeyTimestamp);
-    print("Chef cache cleared.");
+    debugPrint("Chef cache cleared.");
   }
 
   // --- Sorting Logic (Copied from Source) ---
   void _sortChefList(List<Map<String, dynamic>> listToSort) {
     if (listToSort.isEmpty) return; // Nothing to sort
     
-    print('[ChefNet] _sortChefList called. List length: ${listToSort.length}');
+    debugPrint('[ChefNet] _sortChefList called. List length: ${listToSort.length}');
     
     try {
       listToSort.sort((a, b) {
@@ -308,7 +309,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
         return dateB.compareTo(dateA);
       });
     } catch (e) {
-      print('[ChefNet] Error sorting chefs: $e');
+      debugPrint('[ChefNet] Error sorting chefs: $e');
       // In case of error, don't sort rather than crashing
     }
   }
@@ -339,7 +340,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
     }
 
     final url = '$apiBaseUrl/rr/rchefs';
-    print("Fetching Chefs from URL: $url (Background: $isBackground)");
+    debugPrint("Fetching Chefs from URL: $url (Background: $isBackground)");
 
     try {
       final response = await http
@@ -370,9 +371,9 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
               chefs = validChefs; // Assign sorted list
               allFetchedChefs =
                   List.from(chefs); // Keep a copy of the latest fetch
-              print('[ChefNet] Loaded ${chefs.length} chefs from API');
+              debugPrint('[ChefNet] Loaded ${chefs.length} chefs from API');
               if (chefs.isNotEmpty) {
-                print('[ChefNet] First chef from API: ' + chefs.first.toString());
+                debugPrint('[ChefNet] First chef from API: ' + chefs.first.toString());
               }
               _extractCuisineTypes(); // Re-extract cuisines from fresh data
               _applyFilters(); // Apply filters to fresh data
@@ -391,7 +392,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
         throw Exception('Request failed (Status: ${response.statusCode})');
       }
     } on TimeoutException {
-      print('Error fetching chefs: Request timed out.');
+      debugPrint('Error fetching chefs: Request timed out.');
       if (mounted) {
         setState(() {
           fetchError = "Server connection timed out.";
@@ -399,7 +400,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
         });
       }
     } catch (e) {
-      print('Error fetching chefs: $e');
+      debugPrint('Error fetching chefs: $e');
       if (mounted) {
         setState(() {
           // Only show error if it's a foreground fetch or if there's no cached data
@@ -408,7 +409,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
             if (!isBackground) isLoading = false;
           } else {
             // Keep showing cached data on background fetch error
-            print("Background fetch failed, keeping cached data.");
+            debugPrint("Background fetch failed, keeping cached data.");
           }
         });
       }
@@ -469,7 +470,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
 
   // Applies search query and active category filter to the 'chefs' list (Copied from Source)
   void _applyFilters() {
-    print('[ChefNet] _applyFilters called. Query: ' +
+    debugPrint('[ChefNet] _applyFilters called. Query: ' +
         _searchController.text +
         ', ActiveFilter: ' +
         activeFilter);
@@ -478,20 +479,20 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
     // otherwise filter the full list from last fetch/cache.
     // Both 'chefs' and 'allFetchedChefs' should be sorted now.
     final listToFilter = chefs.isNotEmpty ? chefs : allFetchedChefs;
-    print('[ChefNet] Filtering list. chefs.length: ${chefs.length}, allFetchedChefs.length: ${allFetchedChefs.length}');
+    debugPrint('[ChefNet] Filtering list. chefs.length: ${chefs.length}, allFetchedChefs.length: ${allFetchedChefs.length}');
 
     if (!context.mounted) return;
 
     setState(() {
-      print('[ChefNet] Setting filteredChefs for display. Query empty: ${query.isEmpty}, ActiveFilter: $activeFilter');
+      debugPrint('[ChefNet] Setting filteredChefs for display. Query empty: ${query.isEmpty}, ActiveFilter: $activeFilter');
       if (query.isEmpty && activeFilter == 'All') {
         // No filters active, show all chefs from the current source
         filteredChefs = List.from(listToFilter);
-        print('[ChefNet] FilteredChefs updated. Count: ${filteredChefs.length}');
+        debugPrint('[ChefNet] FilteredChefs updated. Count: ${filteredChefs.length}');
         if (filteredChefs.isNotEmpty) {
-          print('[ChefNet] First filtered chef: ' + filteredChefs.first.toString());
+          debugPrint('[ChefNet] First filtered chef: ' + filteredChefs.first.toString());
         } else {
-          print('[ChefNet] FilteredChefs is empty after filtering.');
+          debugPrint('[ChefNet] FilteredChefs is empty after filtering.');
         }
       } else {
         // Apply filters
@@ -543,17 +544,17 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
   }
 
   void _applyCategoryFilter(String category) {
-  print('[ChefNet] _applyCategoryFilter called with: $category');
+  debugPrint('[ChefNet] _applyCategoryFilter called with: $category');
     if (!context.mounted) return;
     setState(() {
       activeFilter = category;
-      print('[ChefNet] Category filter set to: $category');
+      debugPrint('[ChefNet] Category filter set to: $category');
       _applyFilters(); // Re-apply all filters (search + new category)
     });
   }
 
   void _clearFiltersAndSearch() {
-  print('[ChefNet] _clearFiltersAndSearch called');
+  debugPrint('[ChefNet] _clearFiltersAndSearch called');
     if (!context.mounted) return;
     _searchController
         .clear(); // This will trigger the listener -> _applyFilters
@@ -764,7 +765,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
   // --- Build Widgets for Different States (Kept from Target) ---
 
   Widget _buildLoadingShimmerList() {
-    print('[ChefNet] Showing loading shimmer list');
+    debugPrint('[ChefNet] Showing loading shimmer list');
     return Shimmer.fromColors(
         baseColor: kShimmerBaseColor,
         highlightColor: kShimmerHighlightColor,
@@ -825,7 +826,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
   }
 
   Widget _buildErrorState(String message) {
-    print('[ChefNet] Showing error state: ' + message);
+    debugPrint('[ChefNet] Showing error state: ' + message);
     return Center(
         child: Padding(
             padding: const EdgeInsets.all(24.0),
@@ -870,7 +871,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
   }
 
   Widget _buildEmptyState() {
-    print('[ChefNet] Showing empty state (no chefs to display)');
+    debugPrint('[ChefNet] Showing empty state (no chefs to display)');
     final bool isFiltering = activeFilter != 'All' ||
         _searchController.text.isNotEmpty; // Uses state from source
     return Center(
@@ -927,7 +928,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
   }
 
   Widget _buildChefListView() {
-    print('[ChefNet] _buildChefListView called. filteredChefs.length: '
+    debugPrint('[ChefNet] _buildChefListView called. filteredChefs.length: '
         + filteredChefs.length.toString());
     // Uses filteredChefs which is updated by _applyFilters (derived from sorted 'chefs')
     return RefreshIndicator(
@@ -951,7 +952,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
   // Builds individual chef card (Kept from Target)
   Widget _buildChefCard(
       BuildContext context, Map<String, dynamic> chef, int index, Key key) {
-    print('[ChefNet] _buildChefCard: index=$index, chef=${chef['name'] ?? chef.toString()}');
+    debugPrint('[ChefNet] _buildChefCard: index=$index, chef=${chef['name'] ?? chef.toString()}');
     final chefName = chef['name']?.toString() ?? 'Unknown Chef';
     final chefImage = chef['image']?.toString(); // Keep as nullable string
     final chefId = chef['chefid']?.toString() ??
@@ -1011,7 +1012,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
                                 context);
                           }
                         } catch (e) {
-                          print("Precache error for $chefImage: $e");
+                          debugPrint("Precache error for $chefImage: $e");
                         }
                       }
                       // Navigate to detail screen (Target's navigation)
@@ -1241,7 +1242,7 @@ class _ChooseChefNetworkState extends State<ChooseChefNetwork>
           fit: BoxFit.cover, // Ensure asset covers the area
           // Optional: Add error handling for the asset itself
           errorBuilder: (context, error, stackTrace) {
-            print("Error loading placeholder asset: $error");
+            debugPrint("Error loading placeholder asset: $error");
             return Container(
                 // Fallback solid color if asset fails
                 color: kColorPrimaryLighter,
@@ -1285,7 +1286,7 @@ class ChefDetailScreen extends StatelessWidget {
     try {
       final prefs = await SharedPreferences.getInstance();
       final Object? rawUserId = prefs.get('user_id');
-      print('[ChefNet] _isUserLoggedIn: rawUserId= ${rawUserId.runtimeType}: $rawUserId');
+      debugPrint('[ChefNet] _isUserLoggedIn: rawUserId= ${rawUserId.runtimeType}: $rawUserId');
       if (rawUserId == null) return false;
       if (rawUserId is int) {
         return true;
@@ -1293,16 +1294,16 @@ class ChefDetailScreen extends StatelessWidget {
         if (rawUserId.isNotEmpty) {
           // Optionally check if string is int-like
           final parsed = int.tryParse(rawUserId);
-          print('[ChefNet] _isUserLoggedIn: user_id string parses to int? $parsed');
+          debugPrint('[ChefNet] _isUserLoggedIn: user_id string parses to int? $parsed');
           return true;
         }
         return false;
       } else {
-        print('[ChefNet] _isUserLoggedIn: user_id is unexpected type: ${rawUserId.runtimeType}');
+        debugPrint('[ChefNet] _isUserLoggedIn: user_id is unexpected type: ${rawUserId.runtimeType}');
         return false;
       }
     } catch (e) {
-      print("Error checking login status: $e");
+      debugPrint("Error checking login status: $e");
       return false; // Assume not logged in on error
     }
   }
@@ -1401,7 +1402,7 @@ class ChefDetailScreen extends StatelessWidget {
       try {
         pricingData = json.decode(pricingRaw);
       } catch (e) {
-        print("Error decoding pricing JSON string: $e");
+        debugPrint("Error decoding pricing JSON string: $e");
         pricingData = null; // Set to null if decoding fails
       }
     } else if (pricingRaw is Map<String, dynamic>) {
@@ -1750,7 +1751,7 @@ class ChefDetailScreen extends StatelessWidget {
                   // 2. Navigate to the CreateGigScreen and wait for result
                   if (!context.mounted)
                     return; // Check context before navigation
-                  print(
+                  debugPrint(
                       "Navigating to Create Gig Screen for Chef: ${chef['name']}");
                   final gigAddedSuccessfully = await Navigator.push(
                     context,
@@ -1764,7 +1765,7 @@ class ChefDetailScreen extends StatelessWidget {
                   if (gigAddedSuccessfully == true) {
                     if (!context.mounted)
                       return; // Check context before navigation
-                    print(
+                    debugPrint(
                         "Returned from CreateGigScreen. Gig added successfully. Navigating to Cart.");
                     // Navigate directly to the ShoppingCartScreen
                     Navigator.push(
@@ -1772,7 +1773,7 @@ class ChefDetailScreen extends StatelessWidget {
                       MaterialPageRoute(builder: (_) => ShoppingCartScreen()),
                     );
                   } else {
-                    print(
+                    debugPrint(
                         "Returned from CreateGigScreen. Gig not added (cancelled or failed).");
                     // Optionally show a message if needed, e.g., booking cancelled
                     // if (mounted) {
@@ -1794,7 +1795,7 @@ class ChefDetailScreen extends StatelessWidget {
           kPlaceholderChefAsset, // Use the defined constant
           fit: BoxFit.cover, // Ensure asset covers the area
           errorBuilder: (context, error, stackTrace) {
-            print("Error loading placeholder asset (Detail): $error");
+            debugPrint("Error loading placeholder asset (Detail): $error");
             return Container(
                 // Fallback solid color if asset fails
                 color: kColorPrimaryLighter,
@@ -1907,7 +1908,7 @@ class CreateGigScreen extends StatelessWidget {
              ElevatedButton(
                 onPressed: () async {
                     // Simulate adding to cart or booking logic
-                    print("Simulating successful gig booking...");
+                    debugPrint("Simulating successful gig booking...");
                     // bool success = await ShoppingCart.addGig(...); // Your actual logic
                     bool success = true; // Assume success for example
                     Navigator.pop(context, success); // Return true on success

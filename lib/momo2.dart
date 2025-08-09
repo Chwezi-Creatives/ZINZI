@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/foundation.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';
 
@@ -26,7 +27,7 @@ class _Momo2screenState extends State<Momo2screen> {
       final phoneNumber = _phoneNumberController.text;
 
       // Debug: Check the values before sending the request
-      print("Making payment with amount: $amount, phoneNumber: $phoneNumber");
+      debugPrint("Making payment with amount: $amount, phoneNumber: $phoneNumber");
 
       // Assuming your Flask API endpoint is '/rr/request_momo_payment'
       final url = Uri.parse('$apibaseurl/rr/request_momo_payment');
@@ -50,8 +51,8 @@ class _Momo2screenState extends State<Momo2screen> {
         final response = await http.post(url, headers: headers, body: body);
 
         // Debug: Log the response status and body
-        print("Response status: ${response.statusCode}");
-        print("Response body: ${response.body}");
+        debugPrint("Response status: ${response.statusCode}");
+        debugPrint("Response body: ${response.body}");
 
         if (response.statusCode == 200) {
           final responseData = jsonDecode(response.body);
@@ -72,7 +73,7 @@ class _Momo2screenState extends State<Momo2screen> {
         }
       } catch (e) {
         // Handle error
-        print("Error: $e"); // Debug: Log the error
+        debugPrint("Error: $e"); // Debug: Log the error
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('An error occurred. Please try again.')),
         );
@@ -105,8 +106,8 @@ class _Momo2screenState extends State<Momo2screen> {
       final response = await http.post(url, headers: headers, body: body);
 
       // Debug: Log the response status and body for transaction status check
-      print("Transaction status response status: ${response.statusCode}");
-      print("Transaction status response body: ${response.body}");
+      debugPrint("Transaction status response status: ${response.statusCode}");
+      debugPrint("Transaction status response body: ${response.body}");
 
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
@@ -122,7 +123,7 @@ class _Momo2screenState extends State<Momo2screen> {
         );
       }
     } catch (e) {
-      print("Error checking transaction status: $e"); // Debug: Log the error
+      debugPrint("Error checking transaction status: $e"); // Debug: Log the error
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('An error occurred. Please try again.')),
       );

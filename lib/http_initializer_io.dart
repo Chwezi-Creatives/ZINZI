@@ -2,6 +2,7 @@
 // lib/http_initializer_io.dart
 import 'dart:io';
 import 'dart:typed_data'; // For Uint8List
+import 'package:flutter/foundation.dart';
 
 // This class is only used on non-web platforms
 class _MyHttpOverrides extends HttpOverrides {
@@ -18,7 +19,7 @@ class _MyHttpOverrides extends HttpOverrides {
       // If your .crt file is a single PEM certificate, this should be okay.
       securityContext.setTrustedCertificatesBytes(certificateBytes);
     } catch (e) {
-      print('Error setting trusted certificates: $e');
+      debugPrint('Error setting trusted certificates: $e');
       // Potentially re-throw or handle more gracefully
     }
 
@@ -29,7 +30,7 @@ class _MyHttpOverrides extends HttpOverrides {
       // IMPORTANT: Only return true for specific hosts you trust.
       // Returning true for all self-signed certs is a security risk.
       // Example: if (host == 'your-self-signed-server.com') return true;
-      print('Accepting self-signed certificate from $host:$port');
+      debugPrint('Accepting self-signed certificate from $host:$port');
       return true; // Be very careful with this line in production
     };
     return client;
@@ -38,5 +39,5 @@ class _MyHttpOverrides extends HttpOverrides {
 
 void initializeHttpOverrides(Uint8List certificateBytes) {
   HttpOverrides.global = _MyHttpOverrides(certificateBytes);
-  print("HTTP Overrides set (IO implementation).");
+  debugPrint("HTTP Overrides set (IO implementation).");
 }

@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi/utils/overlay_utils.dart';
 import 'package:zinzi/utils/location_utils.dart';
 import 'producer_selector_bottom_sheet.dart';
+import 'package:flutter/foundation.dart';
 
 const Color primaryColor = Color(0xFF0B5345); // Dark teal
 const Color accentColor = Color(0xFF1A7968); // Medium teal
@@ -45,7 +46,7 @@ class Nutri_DetailPage extends StatefulWidget {
           await UserCache.saveData(producersCacheKey, dataList);
           await UserCache.saveData(producersCacheTimestampKey, now.toIso8601String());
         }
-      } catch (e) { print('[Splash][NutriDetail] preload producers error: $e'); }
+      } catch (e) { debugPrint('[Splash][NutriDetail] preload producers error: $e'); }
     }
   }
   static final GlobalKey<_Nutri_DetailPageState> globalKey = GlobalKey<_Nutri_DetailPageState>();
@@ -125,7 +126,7 @@ class _Nutri_DetailPageState extends State<Nutri_DetailPage>
               _isCacheValid = true;
             });
           }
-          print('[NutriDetail] Cache hit: Loaded producers from valid cache');
+          debugPrint('[NutriDetail] Cache hit: Loaded producers from valid cache');
           return;
         }
       }
@@ -145,9 +146,9 @@ class _Nutri_DetailPageState extends State<Nutri_DetailPage>
           _isCacheValid = true;
         });
       }
-      print('[NutriDetail] Preloaded producers (cache was invalid or missing)');
+      debugPrint('[NutriDetail] Preloaded producers (cache was invalid or missing)');
     } catch (e) {
-      print('[NutriDetail] Error checking cache: $e');
+      debugPrint('[NutriDetail] Error checking cache: $e');
       if (mounted) {
         setState(() {
           _isLoadingProducers = false;
@@ -308,12 +309,12 @@ class _Nutri_DetailPageState extends State<Nutri_DetailPage>
             cachedTs != null &&
             DateTime.now().difference(DateTime.parse(cachedTs)) < Duration(minutes: 5)) {
           if (mounted) {
-            print(
+            debugPrint(
                 '[NutriDetail] Loaded producers from cache for location: $locationParamValue');
             return List<Map<String, dynamic>>.from(cachedData);
           }
         } else if (cachedData != null) {
-          print('[NutriDetail] Cache expired for $cacheKey');
+          debugPrint('[NutriDetail] Cache expired for $cacheKey');
         }
       }
       
@@ -355,7 +356,7 @@ class _Nutri_DetailPageState extends State<Nutri_DetailPage>
         return producersList;
       }
     } catch (e) {
-      print('[NutriDetail] Error fetching producers: $e');
+      debugPrint('[NutriDetail] Error fetching producers: $e');
     }
     return [];
   }

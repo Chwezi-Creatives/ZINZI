@@ -21,6 +21,7 @@ import 'package:zinzi/cache_config.dart'; // Import CacheConfig
 import 'package:zinzi/utils/image_utils.dart'; // Import ImageUtils
 import 'package:zinzi/utils/location_utils.dart'; // Import location utilities
 import 'package:intl/intl.dart';
+import 'package:flutter/foundation.dart';
 
 // Assuming dotenv is initialized elsewhere in your main.dart or similar
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
@@ -85,11 +86,11 @@ class MealDetailScreen extends StatefulWidget {
 
     if (cachedData != null && timestampData != null) {
       try {
-        print('[MealDetail] Cache hit: Loaded chefs from cache for location: $locationKey');
+        debugPrint('[MealDetail] Cache hit: Loaded chefs from cache for location: $locationKey');
         _chefsCache[locationKey] = List<dynamic>.from(cachedData);
         _chefsCacheTimestamps[locationKey] = DateTime.parse(timestampData);
       } catch (e) {
-        print('[MealDetail] Error loading chefs cache: $e');
+        debugPrint('[MealDetail] Error loading chefs cache: $e');
         _chefsCache.remove(locationKey);
         _chefsCacheTimestamps.remove(locationKey);
       }
@@ -111,7 +112,7 @@ class MealDetailScreen extends StatefulWidget {
     await UserCache.saveData(cacheKey, chefs);
     await UserCache.saveData(timestampKey, DateTime.now().toIso8601String());
 
-    print('[MealDetail] Saved chefs cache for location: $locationKey (${chefs.length} items)');
+    debugPrint('[MealDetail] Saved chefs cache for location: $locationKey (${chefs.length} items)');
   }
 
   // Load producer cache from UserCache for a specific location
@@ -125,20 +126,20 @@ class MealDetailScreen extends StatefulWidget {
 
     if (cachedData != null && timestampData != null) {
       try {
-        print('[MealDetail Cache] Raw producers data from UserCache.getData for location $locationKey');
+        debugPrint('[MealDetail Cache] Raw producers data from UserCache.getData for location $locationKey');
         _producersCache[locationKey] = List<dynamic>.from(cachedData);
         _producersCacheTimestamps[locationKey] = DateTime.parse(timestampData);
 
         if (_producersCache[locationKey]?.isNotEmpty ?? false) {
-          print('[MealDetail Cache] First producer in _producersCache for location $locationKey');
+          debugPrint('[MealDetail Cache] First producer in _producersCache for location $locationKey');
           final firstProducerCached = _producersCache[locationKey]!.first as Map<String, dynamic>;
-          print('[MealDetail Cache] is_email_verified for first cached producer: ${firstProducerCached['is_email_verified']}');
+          debugPrint('[MealDetail Cache] is_email_verified for first cached producer: ${firstProducerCached['is_email_verified']}');
         } else {
-          print('[MealDetail Cache] _producersCache is empty for location $locationKey');
+          debugPrint('[MealDetail Cache] _producersCache is empty for location $locationKey');
         }
       } catch (e, s) {
-        print('[MealDetail Cache] Error processing data from UserCache for producers: $e');
-        print('[MealDetail Cache] Stacktrace: $s');
+        debugPrint('[MealDetail Cache] Error processing data from UserCache for producers: $e');
+        debugPrint('[MealDetail Cache] Stacktrace: $s');
         _producersCache.remove(locationKey);
         _producersCacheTimestamps.remove(locationKey);
       }
@@ -160,7 +161,7 @@ class MealDetailScreen extends StatefulWidget {
     await UserCache.saveData(cacheKey, producers);
     await UserCache.saveData(timestampKey, DateTime.now().toIso8601String());
 
-    print('[MealDetail] Saved producers cache for location: $locationKey (${producers.length} items)');
+    debugPrint('[MealDetail] Saved producers cache for location: $locationKey (${producers.length} items)');
   }
 
   @override
@@ -276,10 +277,10 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                   'image': images.length > i ? images[i] : '',
               },
               );
-              print("Initialized 'bestservedwith' structure.");
+              debugPrint("Initialized 'bestservedwith' structure.");
           } else {
                widget.meal['bestservedwith'] = []; // Initialize as empty list if no dishes
-               print("Initialized 'bestservedwith' as empty list (no dishes).");
+               debugPrint("Initialized 'bestservedwith' as empty list (no dishes).");
           }
      } else {
           // Ensure existing items have the correct keys (name, price, image)
@@ -294,7 +295,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                }
                return {'name': 'Invalid Item', 'price': '0', 'image': ''}; // Fallback for non-map items
            }).toList();
-           // print("Validated existing 'bestservedwith' structure.");
+           // debugPrint("Validated existing 'bestservedwith' structure.");
      }
   }
 
@@ -353,7 +354,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
         // Ensure _selectedComplementaries has the correct length first
         if (_selectedComplementaries.length != currentBestServedWith.length) {
            _selectedComplementaries = List<bool>.filled(currentBestServedWith.length, false);
-           print("Warning: Corrected _selectedComplementaries length during init.");
+           debugPrint("Warning: Corrected _selectedComplementaries length during init.");
         }
         // Now populate based on cart data
         for (int i = 0; i < currentBestServedWith.length; i++) {
@@ -441,9 +442,9 @@ class _MealDetailScreenState extends State<MealDetailScreen>
             // Log the state variable 'producers' immediately after assignment
             if (producers.isNotEmpty) {
               final firstProducerInState = producers.first as Map<String, dynamic>;
-              print('[MealDetail] First producer in state after cache load: $firstProducerInState');
+              debugPrint('[MealDetail] First producer in state after cache load: $firstProducerInState');
             } else {
-              print('[MealDetail] Producers list is empty after cache load.');
+              debugPrint('[MealDetail] Producers list is empty after cache load.');
             }
             // Only set loading false if cache is valid or not forcing refresh
             if (producersCacheValid && !forceRefresh) isLoadingProducers = false;
@@ -457,13 +458,13 @@ class _MealDetailScreenState extends State<MealDetailScreen>
     // Fetch new data in the background if cache is invalid or force refresh
     List<Future<void>> fetchFutures = [];
     if (forceRefresh || !chefsCacheValid) {
-      print("Fetching chefs (Cache invalid/empty or forced refresh)");
+      debugPrint("Fetching chefs (Cache invalid/empty or forced refresh)");
        if(mounted) setState(() => isLoadingChefs = true); // Show loading before fetch starts
       fetchFutures.add(fetchChefs());
     }
 
     if (forceRefresh || !producersCacheValid) {
-      print("Fetching producers (Cache invalid/empty or forced refresh)");
+      debugPrint("Fetching producers (Cache invalid/empty or forced refresh)");
        if(mounted) setState(() => isLoadingProducers = true); // Show loading before fetch starts
       fetchFutures.add(fetchProducers());
     }
@@ -473,7 +474,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
       try {
           await Future.wait(fetchFutures);
       } catch (e) {
-          print("Error during background data fetch: $e");
+          debugPrint("Error during background data fetch: $e");
           if (mounted) {
                showCustomSnackBar(context, "Error fetching data. Please try refreshing.", isError: true);
           }
@@ -496,7 +497,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
   // --- Manual Refresh Logic ---
   Future<void> _handleRefresh() async {
      _startRefreshAnimation();
-    print("Manual refresh triggered.");
+    debugPrint("Manual refresh triggered.");
     // Set loading states immediately for visual feedback
     if (mounted) {
         setState(() {
@@ -508,7 +509,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
         await _loadData(forceRefresh: true);
         if(mounted) showCustomSnackBar(context, 'Data refreshed!');
     } catch (e) {
-        print("Error during manual refresh: $e");
+        debugPrint("Error during manual refresh: $e");
         if(mounted) showCustomSnackBar(context, 'Refresh failed. Check connection.', isError: true);
     } finally {
          _stopRefreshAnimation();
@@ -558,7 +559,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
         } else if (responseData is Map<String, dynamic> && responseData['data'] is List) {
           chefsList = (responseData['data'] as List).asMap().entries.map((entry) => _mapChefData(entry.value, entry.key)).toList();
         } else {
-          print('Unexpected response format for chefs: $responseData');
+          debugPrint('Unexpected response format for chefs: $responseData');
         }
 
         if (mounted) {
@@ -566,28 +567,28 @@ class _MealDetailScreenState extends State<MealDetailScreen>
             chefs = chefsList;
           });
           await MealDetailScreen.saveChefsCacheToUserCache(chefsList, locationParam);
-          print('[MealDetail] Updated chefs cache for location: $locationKey (${chefsList.length} items)');
+          debugPrint('[MealDetail] Updated chefs cache for location: $locationKey (${chefsList.length} items)');
         }
       } else {
-        print('Failed to load chefs. Status code: ${response.statusCode}.');
+        debugPrint('Failed to load chefs. Status code: ${response.statusCode}.');
       }
 
       // If the fetch failed and we have no chefs to show, use the static fallback list.
       if (!fetchSucceeded && mounted && chefs.isEmpty) {
-        print('Fetch failed for chefs. Using default list.');
+        debugPrint('Fetch failed for chefs. Using default list.');
         setState(() {
           chefs = ChefData.chefs;
         });
         showCustomSnackBar(context, 'Failed to load chefs. Showing defaults.', isError: true);
       }
     } on TimeoutException {
-      print('Chef fetch timed out.');
+      debugPrint('Chef fetch timed out.');
       if (mounted && chefs.isEmpty) {
         setState(() => chefs = ChefData.chefs);
         showCustomSnackBar(context, 'Chef request timed out. Showing defaults.', isError: true);
       }
     } on Exception catch (e) {
-      print('Error fetching chefs: $e');
+      debugPrint('Error fetching chefs: $e');
       if (mounted && chefs.isEmpty) {
         setState(() => chefs = ChefData.chefs);
         showCustomSnackBar(context, 'Unable to load chefs. Showing defaults.', isError: true);
@@ -606,7 +607,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
   Map<String, dynamic> _mapChefData(dynamic chef, int index) {
     // Ensure chef is a Map
     if (chef is! Map<String, dynamic>) {
-      print('Warning: Expected chef data to be a Map, but got ${chef.runtimeType}');
+      debugPrint('Warning: Expected chef data to be a Map, but got ${chef.runtimeType}');
       // Use fallback data
       var fallbackChef = ChefData.chefs.firstWhere(
           (c) => c['name'] == 'Default Chef',
@@ -656,7 +657,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
 
   // --- Fetch Producers Logic ---
    Future<void> fetchProducers() async {
-    print('=== Starting fetchProducers ===');
+    debugPrint('=== Starting fetchProducers ===');
     if (_isFetchingProducers || !mounted) return;
 
     if(mounted) {
@@ -695,21 +696,21 @@ class _MealDetailScreenState extends State<MealDetailScreen>
       List<dynamic> producerRawList = [];
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        print('[MealDetail] Raw Producer Response Data: $responseData'); // Log raw response
+        debugPrint('[MealDetail] Raw Producer Response Data: $responseData'); // Log raw response
 
         if (responseData is List) {
           producerRawList = responseData;
-          print('[MealDetail] Producers: Parsed as direct list.');
+          debugPrint('[MealDetail] Producers: Parsed as direct list.');
         } else if (responseData is Map<String, dynamic>) {
           bool listFound = false;
           if (responseData['data'] is List) {
             producerRawList = responseData['data'];
             listFound = true;
-            print('[MealDetail] Producers: Parsed list from "data" key.');
+            debugPrint('[MealDetail] Producers: Parsed list from "data" key.');
           } else if (responseData['producers'] is List) {
             producerRawList = responseData['producers'];
             listFound = true;
-            print('[MealDetail] Producers: Parsed list from "producers" key.');
+            debugPrint('[MealDetail] Producers: Parsed list from "producers" key.');
           }
 
           if (!listFound) {
@@ -718,7 +719,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
               if (responseData[key] is List) {
                 producerRawList = responseData[key];
                 listFound = true;
-                print('[MealDetail] Producers: Parsed list from generic map key "$key".');
+                debugPrint('[MealDetail] Producers: Parsed list from generic map key "$key".');
                 break;
               }
             }
@@ -729,37 +730,37 @@ class _MealDetailScreenState extends State<MealDetailScreen>
             if (responseData['data'] is Map<String, dynamic>) {
               producerRawList = [responseData['data']];
               listFound = true;
-              print('[MealDetail] Producers: "data" was single map, wrapped in list.');
+              debugPrint('[MealDetail] Producers: "data" was single map, wrapped in list.');
             } else if (responseData['producers'] is Map<String, dynamic>) {
               producerRawList = [responseData['producers']];
               listFound = true;
-              print('[MealDetail] Producers: "producers" was single map, wrapped in list.');
+              debugPrint('[MealDetail] Producers: "producers" was single map, wrapped in list.');
             }
           }
 
           if (!listFound) {
-            print('[MealDetail] Producers: No known list key (data, producers) or generic list found in Map response. Keys: ${responseData.keys}');
+            debugPrint('[MealDetail] Producers: No known list key (data, producers) or generic list found in Map response. Keys: ${responseData.keys}');
           }
         } else {
-          print('[MealDetail] Producers: Unexpected response format (not List or Map): ${responseData.runtimeType}');
+          debugPrint('[MealDetail] Producers: Unexpected response format (not List or Map): ${responseData.runtimeType}');
         }
 
         final mappedProducers = producerRawList.map((item) {
           Map<String, dynamic> producerData;
           if (item is Map<String, dynamic> && item['data'] is Map<String, dynamic>) {
             producerData = item['data'] as Map<String, dynamic>;
-            print('[MealDetail] Producer item has a nested "data" field. Using item["data"].');
+            debugPrint('[MealDetail] Producer item has a nested "data" field. Using item["data"].');
           } else if (item is Map<String, dynamic>) {
             producerData = item;
-            print('[MealDetail] Producer item is a direct map. Using item directly.');
+            debugPrint('[MealDetail] Producer item is a direct map. Using item directly.');
           } else {
-            print('[MealDetail] Warning: Expected producer item to be a Map, got ${item.runtimeType}. Skipping.');
+            debugPrint('[MealDetail] Warning: Expected producer item to be a Map, got ${item.runtimeType}. Skipping.');
             return {'producer_id': DateTime.now().millisecondsSinceEpoch + producerRawList.indexOf(item), 'name': 'Invalid Data Structure', 'image': 'assets/images/producerHolder.png', 'Location': 'N/A', 'Rating': 0.0, 'is_email_verified': null};
           }
 
-          print('[MealDetail] Processing producer data: $producerData');
+          debugPrint('[MealDetail] Processing producer data: $producerData');
           if (producerData['name'] == null && producerData['producer_id'] == null) {
-             print('[MealDetail] Warning: Producer data seems empty or malformed after unwrapping. Original item: $item');
+             debugPrint('[MealDetail] Warning: Producer data seems empty or malformed after unwrapping. Original item: $item');
           }
 
           final name = producerData['name']?.toString().trim() ?? '';
@@ -769,7 +770,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
           final id = producerData['producer_id'] ?? DateTime.now().millisecondsSinceEpoch + producerRawList.indexOf(item);
 
           dynamic rawVerified = producerData['is_email_verified'];
-          print('[MealDetail] Producer "${name}": Raw "is_email_verified" value is "$rawVerified", type is ${rawVerified.runtimeType}');
+          debugPrint('[MealDetail] Producer "${name}": Raw "is_email_verified" value is "$rawVerified", type is ${rawVerified.runtimeType}');
           bool? isVerified;
           if (rawVerified is bool) {
             isVerified = rawVerified;
@@ -789,7 +790,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
             'is_email_verified': isVerified,
             '_distance_km': producerData['_distance_km'], // Add the distance field
           };
-          print('Mapped producer data: $mappedProducer');
+          debugPrint('Mapped producer data: $mappedProducer');
           return mappedProducer;
         }).toList();
 
@@ -798,23 +799,23 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                 producers = mappedProducers;
             });
             await MealDetailScreen.saveProducersCacheToUserCache(mappedProducers, locationParam);
-            print('[MealDetail] Updated producers cache for location: $locationKey (${mappedProducers.length} items)');
+            debugPrint('[MealDetail] Updated producers cache for location: $locationKey (${mappedProducers.length} items)');
         }
 
       } else {
-        print('Failed to load producers. Status code: ${response.statusCode}.');
+        debugPrint('Failed to load producers. Status code: ${response.statusCode}.');
          if (mounted && producers.isEmpty) {
             showCustomSnackBar(context, 'Failed to load producers. Please try again.', isError: true);
         }
       }
     } on TimeoutException {
-      print('Producer fetch timed out.');
+      debugPrint('Producer fetch timed out.');
       if (mounted && producers.isEmpty) {
         showCustomSnackBar(context, 'Producer request timed out.', isError: true);
       }
     } catch (e, s) {
-      print('Error fetching producers: $e');
-      print('Stacktrace: $s');
+      debugPrint('Error fetching producers: $e');
+      debugPrint('Stacktrace: $s');
       if (mounted && producers.isEmpty) {
         showCustomSnackBar(context, 'Unable to load producers. An error occurred.', isError: true);
       }
@@ -874,7 +875,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
         chefWithId['chefid'] = chefWithId['id'];
       } else if (!chefWithId.containsKey('chefid')) {
         chefWithId['chefid'] = DateTime.now().millisecondsSinceEpoch; // Fallback ID
-        print("Warning: Chef missing 'chefid', assigned temporary ID.");
+        debugPrint("Warning: Chef missing 'chefid', assigned temporary ID.");
       }
 
       selectedChef = chefWithId;
@@ -913,7 +914,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
         producerWithId['producer_id'] = producerWithId['id'];
       } else if (!producerWithId.containsKey('producer_id')) {
         producerWithId['producer_id'] = DateTime.now().millisecondsSinceEpoch; // Fallback ID
-        print("Warning: Producer missing 'producer_id', assigned temporary ID.");
+        debugPrint("Warning: Producer missing 'producer_id', assigned temporary ID.");
       }
 
       selectedProducer = producerWithId;
@@ -965,7 +966,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                  _quantityPerDay = 1;
               });
           }
-          print("Warning: _toggleCart called for removal, but item '$mealTitle' not found in cart.");
+          debugPrint("Warning: _toggleCart called for removal, but item '$mealTitle' not found in cart.");
       }
     } else {
       // --- Add to Cart ---
@@ -981,13 +982,13 @@ class _MealDetailScreenState extends State<MealDetailScreen>
 
     final bestServedWithList = widget.meal['bestservedwith'];
     if (bestServedWithList == null || bestServedWithList is! List || index < 0 || index >= bestServedWithList.length) {
-       print("Error: Invalid index or 'bestservedwith' data for _toggleComplementary. Index: $index");
+       debugPrint("Error: Invalid index or 'bestservedwith' data for _toggleComplementary. Index: $index");
        return;
     }
 
      // Ensure selection list matches data length before modification
      if (_selectedComplementaries.length != bestServedWithList.length) {
-          print("Warning: Correcting _selectedComplementaries length in _toggleComplementary.");
+          debugPrint("Warning: Correcting _selectedComplementaries length in _toggleComplementary.");
           _selectedComplementaries = List<bool>.filled(bestServedWithList.length, false);
           // Re-initialize might be needed here, or just proceed carefully
           // _initializeData(); // Could cause issues if called mid-build cycle
@@ -995,7 +996,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
 
      // Check index bounds again after potential resize
      if (index >= _selectedComplementaries.length) {
-         print("Error: Index $index still out of bounds after correction.");
+         debugPrint("Error: Index $index still out of bounds after correction.");
          return;
      }
 
@@ -1016,7 +1017,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
   void _updateCartWithSelections() {
     final mealTitle = widget.meal['Meal_name'] ?? 'Unknown Meal';
     if (!isInCart || ShoppingCart.findItemIndex(mealTitle) == -1) {
-        print("Warning: _updateCartWithSelections called but item '$mealTitle' is not in cart.");
+        debugPrint("Warning: _updateCartWithSelections called but item '$mealTitle' is not in cart.");
         // Correct local state if needed
         if (isInCart && mounted) setState(() => isInCart = false);
         return; // Should not be called if main item is not in cart
@@ -1076,7 +1077,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                    }
                }
            } else {
-                print("Warning: _selectedComplementaries length mismatch in _getSelectedComplementariesData. Returning empty.");
+                debugPrint("Warning: _selectedComplementaries length mismatch in _getSelectedComplementariesData. Returning empty.");
            }
        }
        return selectedData;
@@ -1287,7 +1288,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                               child: CircularProgressIndicator(
                                   color: kColorPrimary)),
                           errorWidget: (context, url, error) {
-                             print("Error loading image: $url, Error: $error");
+                             debugPrint("Error loading image: $url, Error: $error");
                              return Image.asset(
                               'assets/images/cover.png', // Fallback
                               fit: BoxFit.cover);
@@ -1530,7 +1531,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
           .toList();
     }
     // If it's neither a List nor a String, return empty
-     print("Warning: Could not parse data into List<String>: $data");
+     debugPrint("Warning: Could not parse data into List<String>: $data");
     return [];
   }
 
@@ -1547,9 +1548,9 @@ class _MealDetailScreenState extends State<MealDetailScreen>
 
     // Ensure selection list matches data length (Crucial check)
     if (_selectedComplementaries.length != bestServedWithData.length) {
-         print("Error: Mismatch between _selectedComplementaries (${_selectedComplementaries.length}) and bestServedWithData (${bestServedWithData.length}) in buildBestServedWith. Hiding section.");
+         debugPrint("Error: Mismatch between _selectedComplementaries (${_selectedComplementaries.length}) and bestServedWithData (${bestServedWithData.length}) in buildBestServedWith. Hiding section.");
          // Log detailed info for debugging
-         // print("Widget Meal Data: ${widget.meal}");
+         // debugPrint("Widget Meal Data: ${widget.meal}");
          // Return empty box to prevent build errors
          return SizedBox.shrink();
     }
@@ -1575,7 +1576,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                 final itemData = bestServedWithData[index];
                  // Defensive check for item data type
                 if (itemData is! Map<String, dynamic>) {
-                  print("Warning: Item at index $index is not a Map: $itemData");
+                  debugPrint("Warning: Item at index $index is not a Map: $itemData");
                   return SizedBox.shrink();
                 }
 
@@ -1630,7 +1631,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
                                           strokeWidth: 2, color: kColorPrimary)),
                                 ),
                                 errorWidget: (context, url, error) {
-                                   print("Error loading complementary image: $url, Error: $error");
+                                   debugPrint("Error loading complementary image: $url, Error: $error");
                                    return Image.asset(
                                     'assets/images/cover.png', // Fallback
                                     height: 75.0,
@@ -2188,7 +2189,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
         final chef = chefsToDisplay[index];
          // Defensive check: Ensure chef is a Map
         if (chef is! Map<String, dynamic>) {
-            print("Warning: Invalid chef data at index $index: $chef");
+            debugPrint("Warning: Invalid chef data at index $index: $chef");
             return SizedBox.shrink(); // Skip invalid item
         }
 
@@ -2201,7 +2202,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
 
          // Defensive check: Ensure chefId is not null
          if (chefId == null) {
-            print("Warning: Chef data missing 'chefid': $chef");
+            debugPrint("Warning: Chef data missing 'chefid': $chef");
             return SizedBox.shrink(); // Skip item without ID
         }
 
@@ -2527,7 +2528,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
         final producer = producersToDisplay[index];
          // Defensive check: Ensure producer is a Map
         if (producer is! Map<String, dynamic>) {
-            print("Warning: Invalid producer data at index $index: $producer");
+            debugPrint("Warning: Invalid producer data at index $index: $producer");
             return SizedBox.shrink(); // Skip invalid item
         }
 
@@ -2540,7 +2541,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
 
          // Defensive check: Ensure producerId is not null
         if (producerId == null) {
-            print("Warning: Producer data missing 'producer_id': $producer");
+            debugPrint("Warning: Producer data missing 'producer_id': $producer");
             return SizedBox.shrink(); // Skip item without ID
         }
 
@@ -2704,7 +2705,7 @@ class _MealDetailScreenState extends State<MealDetailScreen>
 
      // --- Safety Checks ---
     if (data is! Map<String, dynamic>) {
-         print("Warning: Invalid selectedChef/selectedProducer data: $data");
+         debugPrint("Warning: Invalid selectedChef/selectedProducer data: $data");
          // Clear invalid selection
          if (mounted) {
              setState(() {
@@ -3513,7 +3514,7 @@ void showCustomSnackBar(BuildContext context, String message, {bool isError = fa
 
   final scaffoldMessenger = ScaffoldMessenger.maybeOf(context);
   if (scaffoldMessenger == null) {
-    print("Warning: Could not find ScaffoldMessenger to show SnackBar.");
+    debugPrint("Warning: Could not find ScaffoldMessenger to show SnackBar.");
     return;
   }
 

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'console_data_models.dart';
+import 'package:flutter/foundation.dart';
 
 class BatchUpdateResult {
   final bool success;
@@ -104,7 +105,7 @@ class ApiService {
         return LoginResult(success: false, error: 'Login failed with status code: ${response.statusCode}');
       }
     } catch (e) {
-      print('Login failed: $e');
+      debugPrint('Login failed: $e');
       return LoginResult(success: false, error: 'Network error. Please check your connection.');
     }
   }
@@ -127,7 +128,7 @@ class ApiService {
         throw Exception('Failed to load items from $endpoint');
       }
     } catch (e) {
-      print('Error fetching $endpoint: $e');
+      debugPrint('Error fetching $endpoint: $e');
       return []; // Return empty list on error
     }
   }
@@ -184,7 +185,7 @@ class ApiService {
         );
       }
     } catch (e) {
-      print('Batch update failed: $e');
+      debugPrint('Batch update failed: $e');
       return BatchUpdateResult(
         success: false,
         successCount: 0,
@@ -207,7 +208,7 @@ class ApiService {
       );
       return response.statusCode == 200;
     } catch (e) {
-      print('Error updating price for $id in $endpoint: $e');
+      debugPrint('Error updating price for $id in $endpoint: $e');
       return false;
     }
   }

@@ -10,7 +10,8 @@ import 'dart:io'; // For File
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi/verification.dart';
-import 'notifications/fcm_service.dart';
+import 'package:zinzi/services/notification_service.dart';
+import 'package:flutter/foundation.dart';
 
 // --- Hardcoded Colors ---
 const Color primaryTeal = Color(0xFF00796B); // Teal 700
@@ -98,7 +99,7 @@ class _ProducerSignUpPageState extends State<ProducerSignUpPage> {
         _uploadToImgur();
       }
     } catch (e) {
-      print("Image picking error: $e");
+      debugPrint("Image picking error: $e");
       _showSnackBar("Failed to pick image. Please try again.", isError: true);
     }
   }
@@ -182,7 +183,7 @@ class _ProducerSignUpPageState extends State<ProducerSignUpPage> {
             'Imgur upload failed: ${response.statusCode} ${response.body}');
       }
     } catch (e) {
-      print("Imgur upload error: $e");
+      debugPrint("Imgur upload error: $e");
       setState(() => _isUploadingImage = false);
       _showSnackBar("Failed to upload image. Please try again.", isError: true);
     }
@@ -250,13 +251,13 @@ class _ProducerSignUpPageState extends State<ProducerSignUpPage> {
           _humanReadableAddress = data['display_name'] ?? 'Address not found';
         } else {
           _humanReadableAddress = 'Could not fetch address';
-          print("Reverse geocode error: ${response.statusCode}");
+          debugPrint("Reverse geocode error: ${response.statusCode}");
           _showSnackBar('Could not fetch readable address. Using coordinates.',
               isError: true); // Added snackbar
         }
       } catch (e) {
         _humanReadableAddress = 'Could not fetch address';
-        print("Reverse geocode exception: $e");
+        debugPrint("Reverse geocode exception: $e");
         _showSnackBar('Could not fetch readable address. Using coordinates.',
             isError: true); // Added snackbar
       }
@@ -275,7 +276,7 @@ class _ProducerSignUpPageState extends State<ProducerSignUpPage> {
           isError: true);
       setState(() => _isFetchingLocation = false);
     } catch (e) {
-      print("Location error: $e");
+      debugPrint("Location error: $e");
       _showSnackBar('Error getting location: $e', isError: true);
       setState(() {
         _isFetchingLocation = false;
@@ -402,8 +403,22 @@ class _ProducerSignUpPageState extends State<ProducerSignUpPage> {
             await prefs.setString('user_phone', phoneNumber);
           }
           
-          // Register FCM token with user info (async, do not await)
-          FCMService.registerTokenWithUserInfo();
+          // Initialize and register FCM token in background after successful signup
+          Future.microtask(() async {
+            try {
+              final notificationService = NotificationService();
+              await notificationService.initialize();
+              final token = await notificationService.getFcmToken();
+              if (token != null) {
+                debugPrint('FCM token obtained during producer signup, registering with backend...');
+                await notificationService.registerPendingFcmToken();
+                debugPrint('FCM token registered for producer');
+              }
+            } catch (e) {
+              debugPrint('Error registering FCM token during producer signup: $e');
+              // Continue with signup flow even if FCM registration fails
+            }
+          });
 
           _showSnackBar('Sign up successful!', isError: false);
 
@@ -434,7 +449,7 @@ class _ProducerSignUpPageState extends State<ProducerSignUpPage> {
           _showErrorSnackBar(errorMessage);
         }
       } catch (e) {
-        print("Signup exception: $e");
+        debugPrint("Signup exception: $e");
         setState(() => _isLoading = false);
         _showSnackBar('An error occurred during sign up: $e', isError: true);
       }

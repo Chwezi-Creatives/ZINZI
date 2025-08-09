@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi/cart.dart' as cart; // Use prefix
 import 'package:zinzi/utils/overlay_utils.dart';
 import 'dart:convert'; // For json.decode
+import 'package:flutter/foundation.dart';
 
 // Re-use color constants (or import from a central theme file)
 const Color kColorPrimaryDark = Color(0xFF004D40);
@@ -62,7 +63,7 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
   void initState() {
     super.initState();
     _extractPricingOptions();
-    print("CreateGigScreen received chefData: ${widget.chefData}");
+    debugPrint("CreateGigScreen received chefData: ${widget.chefData}");
   }
 
   @override
@@ -78,7 +79,7 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
     final dynamic pricingRaw = widget.chefData['pricing'];
     if (pricingRaw is String) {
       try { pricingData = json.decode(pricingRaw); }
-      catch (e) { print("Error decoding pricing JSON string in CreateGigScreen: $e"); pricingData = null; }
+      catch (e) { debugPrint("Error decoding pricing JSON string in CreateGigScreen: $e"); pricingData = null; }
     } else if (pricingRaw is Map<String, dynamic>) {
       pricingData = pricingRaw;
     } else { pricingData = null; }
@@ -90,7 +91,7 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
         final numB = int.tryParse(b.split('_').first) ?? 0;
         return numA.compareTo(numB);
       });
-    } else { print("Warning: 'per_gig' pricing data is missing or empty for this chef."); _numberOfPeopleOptions = []; }
+    } else { debugPrint("Warning: 'per_gig' pricing data is missing or empty for this chef."); _numberOfPeopleOptions = []; }
   }
 
   // --- Date Picker --- (Keep existing _selectDate logic - unchanged)
@@ -126,7 +127,7 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
     if (selectedKey == null || _perGigPricing == null || !_perGigPricing!.containsKey(selectedKey)) {
       setState(() { _calculatedPrice = null; }); return; }
     setState(() { _calculatedPrice = (_perGigPricing![selectedKey] as num?)?.toDouble(); });
-    print("Calculated Price: $_calculatedPrice for key: $selectedKey");
+    debugPrint("Calculated Price: $_calculatedPrice for key: $selectedKey");
   }
 
   // Show error message using OverlayUtils
@@ -151,7 +152,7 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
 
   // --- Form Submission ---
   Future<void> _submitGig() async {
-    print("DEBUG: _submitGig started.");
+    debugPrint("DEBUG: _submitGig started.");
 
     // 1. Validate Form Fields FIRST
     final bool formIsValid = _formKey.currentState!.validate();
@@ -177,7 +178,7 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
 
     // 3. Check if ALL validations passed
     if (!formIsValid || !dateIsValid || !timeIsValid || !priceIsValid) {
-      print("DEBUG: Validation failed. Form: $formIsValid, Date: $dateIsValid, Time: $timeIsValid, Price: $priceIsValid");
+      debugPrint("DEBUG: Validation failed. Form: $formIsValid, Date: $dateIsValid, Time: $timeIsValid, Price: $priceIsValid");
        if (!priceIsValid && formIsValid && dateIsValid && timeIsValid) {
          _showErrorSnackBar("Could not calculate price. Please select number of guests.");
        } else {
@@ -187,23 +188,23 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
     }
 
     // --- ALL VALIDATIONS PASSED ---
-    print("DEBUG: All validations passed. Proceeding with submission.");
+    debugPrint("DEBUG: All validations passed. Proceeding with submission.");
     if (mounted) setState(() { _isLoading = true; });
 
     try {
-      print("DEBUG: Getting SharedPreferences...");
+      debugPrint("DEBUG: Getting SharedPreferences...");
       final prefs = await SharedPreferences.getInstance();
       final Object? rawUserId = prefs.get('user_id');
-      print("DEBUG: Read 'user_id'. Type:  ${rawUserId.runtimeType}, Value: $rawUserId");
+      debugPrint("DEBUG: Read 'user_id'. Type:  ${rawUserId.runtimeType}, Value: $rawUserId");
       int? userId;
       if (rawUserId is int) {
         userId = rawUserId;
       } else if (rawUserId is String) {
         userId = int.tryParse(rawUserId);
-        print("DEBUG: Parsed user_id string to int: $userId");
+        debugPrint("DEBUG: Parsed user_id string to int: $userId");
       }
       if (userId == null) {
-        print("DEBUG: User ID is null or could not be parsed. Aborting submission.");
+        debugPrint("DEBUG: User ID is null or could not be parsed. Aborting submission.");
         if (mounted) {
           setState(() { _isLoading = false; });
           _showErrorSnackBar("Login error. Please log in again.", showLoginAction: true);
@@ -215,7 +216,7 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
       final chefName = widget.chefData['name'] ?? 'Unknown Chef';
 
       if (chefId == null) {
-        print("DEBUG: Chef ID is missing in chefData. Aborting.");
+        debugPrint("DEBUG: Chef ID is missing in chefData. Aborting.");
         if (mounted) {
           setState(() { _isLoading = false; });
           _showErrorSnackBar("Error retrieving chef details. Cannot book gig.");
@@ -226,16 +227,16 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
       // Check if user is trying to book themselves
       final userType = prefs.getString('user_type')?.toLowerCase();
       if (userType == 'chef' && chefId.toString() == rawUserId.toString()) {
-        print("DEBUG: Chef cannot book themselves. Aborting.");
+        debugPrint("DEBUG: Chef cannot book themselves. Aborting.");
         if (mounted) {
           setState(() { _isLoading = false; });
           _showErrorSnackBar("You cannot book yourself. Please select a different chef.");
         }
         return;
       }
-       print("DEBUG: Chef ID: $chefId, Chef Name: $chefName");
+       debugPrint("DEBUG: Chef ID: $chefId, Chef Name: $chefName");
 
-      print("DEBUG: Constructing gigDetails map...");
+      debugPrint("DEBUG: Constructing gigDetails map...");
       // Construct Gig Details Map - INCLUDING CHEF NAME
       final gigDetails = {
         'user_id': userId,
@@ -251,11 +252,11 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
         'price': _calculatedPrice,
         'detailed_description': _descriptionController.text.trim(),
       };
-      print("DEBUG: gigDetails map constructed: $gigDetails");
+      debugPrint("DEBUG: gigDetails map constructed: $gigDetails");
 
-      print("DEBUG: Calling ShoppingCart.addGig...");
+      debugPrint("DEBUG: Calling ShoppingCart.addGig...");
       cart.ShoppingCart.addGig(gigDetails); // Add to cart
-      print("DEBUG: ShoppingCart.addGig called successfully.");
+      debugPrint("DEBUG: ShoppingCart.addGig called successfully.");
 
       // Show Success and Navigate Back
       if (mounted) {
@@ -267,13 +268,13 @@ class _CreateGigScreenState extends State<CreateGigScreen> {
       }
 
     } catch (e, stackTrace) {
-      print("DEBUG: Error caught in _submitGig: $e");
-      print("Stack trace: $stackTrace");
+      debugPrint("DEBUG: Error caught in _submitGig: $e");
+      debugPrint("Stack trace: $stackTrace");
       if (mounted) _showErrorSnackBar("An unexpected error occurred. Please try again.");
     } finally {
       if (mounted) {
         setState(() { _isLoading = false; });
-        print("DEBUG: _submitGig finished.");
+        debugPrint("DEBUG: _submitGig finished.");
       }
       return;
     }

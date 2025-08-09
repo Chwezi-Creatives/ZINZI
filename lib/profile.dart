@@ -1,6 +1,7 @@
 //cspell:disable
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'widgets/custom_group_container.dart';
 import 'dart:async'; // Import for TimeoutException
 import 'package:http/http.dart' as http;
@@ -14,7 +15,7 @@ import 'package:zinzi/signup_or_Login.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:zinzi/user_cache.dart'; // Import UserCache
-import 'package:zinzi/notifications/fcm_service.dart'; // Import FCMService
+//import 'package:zinzi/notifications/fcm_service.dart'; // Import FCMService
 import 'package:zinzi/app_drawer_unified.dart';
 import 'package:zinzi/cache_config.dart'; // Import CacheConfig
 import 'package:shimmer/shimmer.dart'; // For loading effect
@@ -62,7 +63,7 @@ class ProfilePage extends StatefulWidget {
     final userId = prefs.getInt('user_id');
     
     if (userId == null) {
-      print('[Splash][Profile] preload skipped: No user ID found.');
+      debugPrint('[Splash][Profile] preload skipped: No user ID found.');
       return;
     }
     
@@ -104,18 +105,18 @@ class ProfilePage extends StatefulWidget {
             await UserCache.saveUserData('user_details_cache', cacheUserMap, userId: userId.toString());
             await prefs.setInt('user_details_cache_${userId}_timestamp',
                 DateTime.now().millisecondsSinceEpoch);
-            print('[Splash][Profile] preload cache updated for user $userId.');
+            debugPrint('[Splash][Profile] preload cache updated for user $userId.');
           } else {
-            print('[Splash][Profile] preload skipped: Failed to parse user data from response.');
+            debugPrint('[Splash][Profile] preload skipped: Failed to parse user data from response.');
           }
         } else {
-          print('[Splash][Profile] preload skipped: API error ${response.statusCode}');
+          debugPrint('[Splash][Profile] preload skipped: API error ${response.statusCode}');
         }
       } catch (e) {
-        print('[Splash][Profile] preload error: $e');
+        debugPrint('[Splash][Profile] preload error: $e');
       }
     } else {
-      print('[Splash][Profile] preload skipped: Cache still valid for user $userId.');
+      debugPrint('[Splash][Profile] preload skipped: Cache still valid for user $userId.');
     }
   }
 
@@ -381,7 +382,7 @@ class _ProfilePageState extends State<ProfilePage>
               CacheConfig.profileCacheDuration;
 
       if (isCacheValid && isUserDetailsCacheComplete(cachedData)) {
-        print("[Profile] Using cached user details.");
+        debugPrint("[Profile] Using cached user details.");
         _updateStateWithUserDetails(cachedData!);
         setState(() {
           _isLoading = false;
@@ -391,7 +392,7 @@ class _ProfilePageState extends State<ProfilePage>
         _fetchMetrics();
         _fetchPreferences();
       } else {
-        print(
+        debugPrint(
             "[Profile] Cache incomplete or invalid. Fetching fresh user details.");
         await _fetchData(); // Fetches all details, metrics, prefs
       }
@@ -421,7 +422,7 @@ class _ProfilePageState extends State<ProfilePage>
     _userId =
         userIdStr != null ? int.tryParse(userIdStr) : prefs.getInt('user_id');
     _userType = prefs.getString('user_type');
-    print("Loaded User ID: $_userId, User Type: $_userType");
+    debugPrint("Loaded User ID: $_userId, User Type: $_userType");
   }
 
   Future<void> _fetchData() async {
@@ -443,7 +444,7 @@ class _ProfilePageState extends State<ProfilePage>
       ]);
     } catch (e) {
       if (mounted) {
-        print("Error during concurrent data fetch: $e");
+        debugPrint("Error during concurrent data fetch: $e");
         setState(() {
           _fetchError = "Failed to load profile data. Please try again.";
           _isLoadingUserDetails = false;
@@ -471,11 +472,11 @@ class _ProfilePageState extends State<ProfilePage>
     }
     final prefs = await SharedPreferences.getInstance();
     final url = '$apiBaseUrl/rr/rusers/$_userId';
-    print('[Profile] API fetch: Fetching user details... from URL: $url');
+    debugPrint('[Profile] API fetch: Fetching user details... from URL: $url');
     try {
       final response =
           await http.get(Uri.parse(url)).timeout(const Duration(seconds: 20));
-      print("User Details Response: ${response.statusCode} - ${response.body}");
+      debugPrint("User Details Response: ${response.statusCode} - ${response.body}");
       if (!mounted) return;
 
       if (response.statusCode == 200) {
@@ -493,12 +494,12 @@ class _ProfilePageState extends State<ProfilePage>
           await prefs.setInt('user_details_cache_${_userId}_timestamp',
               DateTime.now().millisecondsSinceEpoch);
         } else {
-          print(
+          debugPrint(
               'Failed to parse user details from API response: $responseData');
           _userDetails = {}; // Clear or set to default on parse failure
         }
       } else {
-        print('Failed to fetch user details. Status: ${response.statusCode}');
+        debugPrint('Failed to fetch user details. Status: ${response.statusCode}');
         _userDetails = {}; // Clear or set to default on API error
         if (response.statusCode == 401 || response.statusCode == 403) {
           _fetchError = "Unauthorized. Please log in again.";
@@ -506,10 +507,10 @@ class _ProfilePageState extends State<ProfilePage>
         }
       }
     } on TimeoutException {
-      print("Timeout fetching user details.");
+      debugPrint("Timeout fetching user details.");
       if (mounted) _userDetails = {};
     } catch (error) {
-      print("Error fetching user details: $error");
+      debugPrint("Error fetching user details: $error");
       if (mounted) _userDetails = {};
     } finally {
       if (mounted) setState(() => _isLoadingUserDetails = false);
@@ -569,15 +570,15 @@ class _ProfilePageState extends State<ProfilePage>
         cachedTimestamp != null &&
         now.difference(DateTime.fromMillisecondsSinceEpoch(cachedTimestamp)) <
             CacheConfig.metricsCacheDuration) {
-      print("Using cached metrics data");
-      print(
+      debugPrint("Using cached metrics data");
+      debugPrint(
           "Metrics Data Structure (from cache): ${json.encode(cachedMetrics)}");
       _updateStateWithMetrics(cachedMetrics);
       if (mounted) setState(() => _isLoadingMetrics = false);
       return;
     }
 
-    print('[Profile] API fetch: Fetching user metrics...');
+    debugPrint('[Profile] API fetch: Fetching user metrics...');
     final url = '$apiBaseUrl/rr/metrics/$_userId';
     try {
       final response =
@@ -586,7 +587,7 @@ class _ProfilePageState extends State<ProfilePage>
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        print(
+        debugPrint(
             "Metrics Data Structure (from API): ${json.encode(responseData)}");
 
         // Extract metrics from response - handle the nested 'metrics' array structure
@@ -596,7 +597,7 @@ class _ProfilePageState extends State<ProfilePage>
             responseData['metrics'].isNotEmpty) {
           // Get the first metrics entry from the array
           metricsMap = Map<String, dynamic>.from(responseData['metrics'][0]);
-          print("Extracted metrics: ${json.encode(metricsMap)}");
+          debugPrint("Extracted metrics: ${json.encode(metricsMap)}");
           _updateStateWithMetrics(metricsMap);
           await UserCache.saveData('user_metrics_cache', metricsMap);
           await prefs.setInt(
@@ -608,19 +609,19 @@ class _ProfilePageState extends State<ProfilePage>
           await prefs.setInt(
               'user_metrics_cache_timestamp', now.millisecondsSinceEpoch);
         } else {
-          print(
+          debugPrint(
               "Metrics Data Structure (from API): ${json.encode(responseData)}");
           _updateStateWithMetrics(responseData);
         }
       } else {
-        print('Failed to fetch metrics. Status: ${response.statusCode}');
+        debugPrint('Failed to fetch metrics. Status: ${response.statusCode}');
         _userMetrics = {}; // Default or clear
       }
     } on TimeoutException {
-      print("Timeout fetching metrics.");
+      debugPrint("Timeout fetching metrics.");
       if (mounted) _userMetrics = {};
     } catch (error) {
-      print("Error fetching metrics: $error");
+      debugPrint("Error fetching metrics: $error");
       if (mounted) _userMetrics = {};
     } finally {
       if (mounted) setState(() => _isLoadingMetrics = false);
@@ -698,15 +699,15 @@ class _ProfilePageState extends State<ProfilePage>
         cachedTimestamp != null &&
         now.difference(DateTime.fromMillisecondsSinceEpoch(cachedTimestamp)) <
             CacheConfig.preferencesCacheDuration) {
-      print("[Profile] Using cached user preferences.");
-      print(
+      debugPrint("[Profile] Using cached user preferences.");
+      debugPrint(
           "Preferences Data Structure (from cache): ${json.encode(cachedPrefs)}");
       _updateStateWithPreferences(cachedPrefs);
       if (mounted) setState(() => _isLoadingPreferences = false);
       return;
     }
 
-    print('[Profile] API fetch: Fetching user preferences...');
+    debugPrint('[Profile] API fetch: Fetching user preferences...');
     final url = '$apiBaseUrl/rr/preferences/$_userId';
     try {
       final response =
@@ -715,7 +716,7 @@ class _ProfilePageState extends State<ProfilePage>
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        print(
+        debugPrint(
             "Preferences Data Structure (from API): ${json.encode(responseData)}");
 
         // Extract preferences from response - handle the nested 'preferences' array structure
@@ -725,7 +726,7 @@ class _ProfilePageState extends State<ProfilePage>
             responseData['preferences'].isNotEmpty) {
           // Get the first preferences entry from the array
           prefsMap = Map<String, dynamic>.from(responseData['preferences'][0]);
-          print("Extracted preferences: ${json.encode(prefsMap)}");
+          debugPrint("Extracted preferences: ${json.encode(prefsMap)}");
           _updateStateWithPreferences(prefsMap);
           await UserCache.saveData('user_preferences_cache', prefsMap);
           await prefs.setInt(
@@ -737,19 +738,19 @@ class _ProfilePageState extends State<ProfilePage>
           await prefs.setInt(
               'user_preferences_cache_timestamp', now.millisecondsSinceEpoch);
         } else {
-          print(
+          debugPrint(
               "Preferences Data Structure (from API): ${json.encode(responseData)}");
           _updateStateWithPreferences(responseData);
         }
       } else {
-        print('Failed to fetch preferences. Status: ${response.statusCode}');
+        debugPrint('Failed to fetch preferences. Status: ${response.statusCode}');
         _userPreferences = {};
       }
     } on TimeoutException {
-      print("Timeout fetching preferences.");
+      debugPrint("Timeout fetching preferences.");
       if (mounted) _userPreferences = {};
     } catch (error) {
-      print("Error fetching preferences: $error");
+      debugPrint("Error fetching preferences: $error");
       if (mounted) _userPreferences = {};
     } finally {
       if (mounted) setState(() => _isLoadingPreferences = false);
@@ -834,7 +835,7 @@ class _ProfilePageState extends State<ProfilePage>
         await _uploadImage(imageFile);
       }
     } catch (e) {
-      print("Error picking image: $e");
+      debugPrint("Error picking image: $e");
       if (mounted) _showErrorSnackBar('Error picking image: $e');
     }
   }
@@ -880,10 +881,10 @@ class _ProfilePageState extends State<ProfilePage>
     } on TimeoutException {
       _showErrorSnackBar('Image upload timed out. Please try again.');
     } on http.ClientException catch (e) {
-      print('Network error during image upload: $e');
+      debugPrint('Network error during image upload: $e');
       _showErrorSnackBar('Network error. Please check your connection.');
     } catch (e) {
-      print('Error uploading image: $e');
+      debugPrint('Error uploading image: $e');
       _showErrorSnackBar('Failed to upload image. Please try again.');
     }
   }
@@ -908,7 +909,7 @@ class _ProfilePageState extends State<ProfilePage>
       final response = await http.Response.fromStream(streamedResponse);
       final responseData = jsonDecode(response.body);
       
-      print('Imgur upload response: ${response.statusCode} ${response.body}');
+      debugPrint('Imgur upload response: ${response.statusCode} ${response.body}');
       
       if (response.statusCode == 200 && 
           responseData['success'] == true && 
@@ -916,11 +917,11 @@ class _ProfilePageState extends State<ProfilePage>
         return responseData['data']['link'].toString();
       } else {
         final error = responseData['data']?['error'] ?? 'Unknown Imgur error';
-        print('Imgur upload failed: $error');
+        debugPrint('Imgur upload failed: $error');
         return null;
       }
     } catch (e) {
-      print('Error in _uploadToImgur: $e');
+      debugPrint('Error in _uploadToImgur: $e');
       return null;
     }
   }
@@ -988,7 +989,7 @@ class _ProfilePageState extends State<ProfilePage>
       };
       dataToUpdate.removeWhere((key, value) => value == null);
 
-      print("Sending metrics update: ${json.encode(dataToUpdate)}");
+      debugPrint("Sending metrics update: ${json.encode(dataToUpdate)}");
       setState(() => _isEditingMetrics = false);
 
     } else if (_isEditingPreferences) {
@@ -1019,13 +1020,13 @@ class _ProfilePageState extends State<ProfilePage>
         _isEditingPreferences = false;
       });
     } else {
-      print("Save requested but no section is being edited.");
+      debugPrint("Save requested but no section is being edited.");
       return;
     }
 
     if (endpointPath.isNotEmpty && dataToUpdate.isNotEmpty) {
       final url = '$apiBaseUrl$endpointPath';
-      print(
+      debugPrint(
           "Attempting to PATCH data to $url with body: ${json.encode(dataToUpdate)}");
       try {
         final response = await http
@@ -1052,7 +1053,7 @@ class _ProfilePageState extends State<ProfilePage>
           if (sectionBeingSaved == 'metrics') await _fetchMetrics(forceRefresh: true);
           if (sectionBeingSaved == 'preferences') await _fetchPreferences(forceRefresh: true);
         } else {
-          print(
+          debugPrint(
               "Failed to update profile section. Status: ${response.statusCode}, Body: ${response.body}");
           _showErrorSnackBar(
               'Failed to update. Server error: ${response.statusCode}');
@@ -1069,7 +1070,7 @@ class _ProfilePageState extends State<ProfilePage>
           if (sectionBeingSaved == 'preferences') await _fetchPreferences(forceRefresh: true);
         }
       } catch (e) {
-        print("Error saving profile data: $e");
+        debugPrint("Error saving profile data: $e");
         if (mounted) {
           _showErrorSnackBar('An error occurred while saving: $e');
           if (sectionBeingSaved == 'details') await _fetchUserDetails();
@@ -1079,10 +1080,10 @@ class _ProfilePageState extends State<ProfilePage>
       }
     } else {
       if (endpointPath.isEmpty) {
-        print("No valid endpoint path determined for saving.");
+        debugPrint("No valid endpoint path determined for saving.");
       }
       if (dataToUpdate.isEmpty) {
-        print("No changes detected to save. Exiting edit mode.");
+        debugPrint("No changes detected to save. Exiting edit mode.");
         setState(() {
           _isEditingUserDetails = false;
           _isEditingMetrics = false;
@@ -1357,7 +1358,7 @@ class _ProfilePageState extends State<ProfilePage>
 
   // --- Logout ---
   Future<void> _logout() async {
-    await FCMService.deactivateTokenWithBackend();
+    // NotificationService handles token management automatically
     final prefs = await SharedPreferences.getInstance();
     await UserCache.clearAllData(); // Clears all UserCache entries
 
@@ -1382,7 +1383,7 @@ class _ProfilePageState extends State<ProfilePage>
     for (final key in keysToRemove) {
       await prefs.remove(key);
     }
-    print("Logged out, removed keys: $keysToRemove");
+    debugPrint("Logged out, removed keys: $keysToRemove");
 
     if (mounted) {
       Navigator.pushAndRemoveUntil(
@@ -1759,7 +1760,7 @@ class _ProfilePageState extends State<ProfilePage>
                 backgroundColor: kColorPrimaryLightest,
                 backgroundImage: displayImage,
                 onBackgroundImageError: (exception, stackTrace) {
-                  print(
+                  debugPrint(
                       "Error loading profile image from provider: $exception");
                   // Optionally, set to a default image directly in state if error occurs
                 },
@@ -1956,7 +1957,7 @@ class _ProfilePageState extends State<ProfilePage>
       return DateFormat('MMM d, yyyy').format(dateTime);
     } catch (e) {
       // Fallback for other potential date formats if needed, or just return original
-      print("Error parsing date '$dateString': $e. Returning as is.");
+      debugPrint("Error parsing date '$dateString': $e. Returning as is.");
       return dateString; // Or handle more gracefully
     }
   }
@@ -2042,10 +2043,10 @@ class _ProfilePageState extends State<ProfilePage>
             displayAddress = geocodeData['display_name'];
           }
         } else {
-          print('Reverse geocoding failed: ${geocodeResponse.statusCode}');
+          debugPrint('Reverse geocoding failed: ${geocodeResponse.statusCode}');
         }
       } catch (e) {
-        print('Error during reverse geocoding: $e');
+        debugPrint('Error during reverse geocoding: $e');
         // Falls back to Lat/Lon display
       }
 

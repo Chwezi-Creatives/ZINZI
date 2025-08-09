@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Push Notifications -->
+    <key>aps-environment</key>
+    <string>development</string>
+    
+    <!-- Background Modes -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    </array>
+    
+    <!-- Keychain Sharing (if needed) -->
+    <key>keychain-access-groups</key>
+    <array>
+        <string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    </array>
+    
+    <!-- Required for background fetch -->
+    <key>com.apple.developer.backgroundmodes</key>
+    <array>
+        <string>remote-notification</string>
+        <string>fetch</string>
+    </array>
+    
+    <!-- Required for push notifications -->
+    <key>com.apple.developer.push-to-talk</key>
+    <array/>
+    
+    <!-- Required for background processing -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <key>com.apple.security.network.server</key>
+    <true/>
+</dict>
+</plist>

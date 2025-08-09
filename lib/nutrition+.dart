@@ -14,6 +14,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'nutri_detail.dart'; // Assuming this exists
+import 'package:flutter/foundation.dart';
 // import 'package:zinzi/nutri_detail.dart'; // Duplicate import, removed one
 
 const Color primaryTeal = Color(0xFF00796B);
@@ -260,7 +261,7 @@ class NutritionPage extends StatefulWidget {
     final apiBaseUrl = dotenv.env['API_BASE_URL'];
 
     if (apiBaseUrl == null) {
-      print('[Splash][Nutrition+] API_BASE_URL is null. Cannot preload data.');
+      debugPrint('[Splash][Nutrition+] API_BASE_URL is null. Cannot preload data.');
       return;
     }
 
@@ -285,18 +286,18 @@ class NutritionPage extends StatefulWidget {
               final List<dynamic> itemsList = decodedResponse['data'] as List<dynamic>;
               await UserCache.saveData(cacheKey, itemsList); // Store only the list
               await UserCache.saveData(cacheTsKey, now.toIso8601String());
-              print('[Splash][Nutrition+] Preloaded and cached $categoryName.');
+              debugPrint('[Splash][Nutrition+] Preloaded and cached $categoryName.');
             } else {
-              print('[Splash][Nutrition+] Preload $categoryName error: API response format unexpected. Expected Map with "data" as List. Received: ${decodedResponse.runtimeType}');
+              debugPrint('[Splash][Nutrition+] Preload $categoryName error: API response format unexpected. Expected Map with "data" as List. Received: ${decodedResponse.runtimeType}');
             }
           } else {
-            print('[Splash][Nutrition+] Preload $categoryName error: API request failed with status ${response.statusCode}.');
+            debugPrint('[Splash][Nutrition+] Preload $categoryName error: API request failed with status ${response.statusCode}.');
           }
         } catch (e, s) {
-          print('[Splash][Nutrition+] Preload $categoryName error: $e\n$s');
+          debugPrint('[Splash][Nutrition+] Preload $categoryName error: $e\n$s');
         }
       } else {
-        print('[Splash][Nutrition+] $categoryName data is already cached and valid.');
+        debugPrint('[Splash][Nutrition+] $categoryName data is already cached and valid.');
       }
     }
 
@@ -416,7 +417,7 @@ class _NutritionPageState extends State<NutritionPage>
 
   Future<void> _fetchSpices({bool forceRefresh = false}) async {
     if (!mounted) return;
-    print('[Nutrition+] Fetching spices (API fetch started)...');
+    debugPrint('[Nutrition+] Fetching spices (API fetch started)...');
     setState(() {
       spicesLoading = true;
       spicesError = null;
@@ -437,7 +438,7 @@ class _NutritionPageState extends State<NutritionPage>
           if (cacheTime != null &&
               now.difference(cacheTime) < CacheConfig.allMealsCacheDuration) {
             if (cachedData is List) {
-              print('[Nutrition+] Loaded spices from cache.');
+              debugPrint('[Nutrition+] Loaded spices from cache.');
               if (mounted) {
                 setState(() {
                   fetchedSpices = (cachedData as List)
@@ -449,7 +450,7 @@ class _NutritionPageState extends State<NutritionPage>
               }
               return;
             } else {
-              print('[Nutrition+] Cached spices data is not a List (type: ${cachedData.runtimeType}). Fetching from API.');
+              debugPrint('[Nutrition+] Cached spices data is not a List (type: ${cachedData.runtimeType}). Fetching from API.');
               await UserCache.removeData(cacheKey); // Clear malformed cache
               await UserCache.removeData(cacheTsKey);
             }
@@ -460,7 +461,7 @@ class _NutritionPageState extends State<NutritionPage>
       final String baseUrl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
       final response = await http.get(Uri.parse('$baseUrl/rr/spices'));
 
-      print('[Nutrition+] Spices API response: status=${response.statusCode}');
+      debugPrint('[Nutrition+] Spices API response: status=${response.statusCode}');
       if (response.statusCode == 200) {
         final decodedApiResponse = json.decode(response.body);
         
@@ -479,7 +480,7 @@ class _NutritionPageState extends State<NutritionPage>
             });
           }
         } else {
-          print('[Nutrition+] Spices API: Unexpected response format. Expected Map with "data" as List, received ${decodedApiResponse.runtimeType}');
+          debugPrint('[Nutrition+] Spices API: Unexpected response format. Expected Map with "data" as List, received ${decodedApiResponse.runtimeType}');
           if (mounted) {
             setState(() {
               spicesError = 'Failed to load spices: Invalid data format.';
@@ -496,7 +497,7 @@ class _NutritionPageState extends State<NutritionPage>
         }
       }
     } catch (e, s) {
-      print('[Nutrition+] Spices API error: $e\n$s');
+      debugPrint('[Nutrition+] Spices API error: $e\n$s');
       if (mounted) {
         setState(() {
           spicesError = 'Error: ' + e.toString();
@@ -512,7 +513,7 @@ class _NutritionPageState extends State<NutritionPage>
 
   Future<void> _fetchHerbals({bool forceRefresh = false}) async {
     if (!mounted) return;
-    print('[Nutrition+] Fetching herbals (API fetch started)...');
+    debugPrint('[Nutrition+] Fetching herbals (API fetch started)...');
     setState(() {
       herbalsLoading = true;
       herbalsError = null;
@@ -532,7 +533,7 @@ class _NutritionPageState extends State<NutritionPage>
           if (cacheTime != null &&
               now.difference(cacheTime) < CacheConfig.allMealsCacheDuration) {
             if (cachedData is List) {
-              print('[Nutrition+] Loaded herbals from cache.');
+              debugPrint('[Nutrition+] Loaded herbals from cache.');
               if (mounted) {
                 setState(() {
                   fetchedHerbals = (cachedData as List)
@@ -543,7 +544,7 @@ class _NutritionPageState extends State<NutritionPage>
               }
               return;
             } else {
-              print('[Nutrition+] Cached herbals data is not a List (type: ${cachedData.runtimeType}). Fetching from API.');
+              debugPrint('[Nutrition+] Cached herbals data is not a List (type: ${cachedData.runtimeType}). Fetching from API.');
                await UserCache.removeData(cacheKey);
                await UserCache.removeData(cacheTsKey);
             }
@@ -554,7 +555,7 @@ class _NutritionPageState extends State<NutritionPage>
       final String baseUrl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
       final response = await http.get(Uri.parse('$baseUrl/rr/rherbals'));
 
-      print('[Nutrition+] Herbals API response: status=${response.statusCode}');
+      debugPrint('[Nutrition+] Herbals API response: status=${response.statusCode}');
       if (response.statusCode == 200) {
         final decodedApiResponse = json.decode(response.body);
         
@@ -573,7 +574,7 @@ class _NutritionPageState extends State<NutritionPage>
             });
           }
         } else {
-          print('[Nutrition+] Herbals API: Unexpected response format. Expected Map with "data" as List, received ${decodedApiResponse.runtimeType}');
+          debugPrint('[Nutrition+] Herbals API: Unexpected response format. Expected Map with "data" as List, received ${decodedApiResponse.runtimeType}');
           if (mounted) {
             setState(() {
               herbalsError = 'Failed to load herbals: Invalid data format.';
@@ -590,7 +591,7 @@ class _NutritionPageState extends State<NutritionPage>
         }
       }
     } catch (e, s) {
-      print('[Nutrition+] Herbals API error: $e\n$s');
+      debugPrint('[Nutrition+] Herbals API error: $e\n$s');
       if (mounted) {
         setState(() {
           herbalsError = 'Error: ' + e.toString();
@@ -602,7 +603,7 @@ class _NutritionPageState extends State<NutritionPage>
 
   Future<void> _fetchSupplements({bool forceRefresh = false}) async {
     if (!mounted) return;
-    print('[Nutrition+] Fetching supplements (API fetch started)...');
+    debugPrint('[Nutrition+] Fetching supplements (API fetch started)...');
     setState(() {
       supplementsLoading = true;
       supplementsError = null;
@@ -622,7 +623,7 @@ class _NutritionPageState extends State<NutritionPage>
           if (cacheTime != null &&
               now.difference(cacheTime) < CacheConfig.allMealsCacheDuration) {
             if (cachedData is List) {
-              print('[Nutrition+] Loaded supplements from cache.');
+              debugPrint('[Nutrition+] Loaded supplements from cache.');
               if (mounted) {
                 setState(() {
                   fetchedSupplements = (cachedData as List)
@@ -633,7 +634,7 @@ class _NutritionPageState extends State<NutritionPage>
               }
               return;
             } else {
-               print('[Nutrition+] Cached supplements data is not a List (type: ${cachedData.runtimeType}). Fetching from API.');
+               debugPrint('[Nutrition+] Cached supplements data is not a List (type: ${cachedData.runtimeType}). Fetching from API.');
                await UserCache.removeData(cacheKey);
                await UserCache.removeData(cacheTsKey);
             }
@@ -644,7 +645,7 @@ class _NutritionPageState extends State<NutritionPage>
       final String baseUrl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
       final response = await http.get(Uri.parse('$baseUrl/rr/supplements'));
 
-      print('[Nutrition+] Supplements API response: status=${response.statusCode}');
+      debugPrint('[Nutrition+] Supplements API response: status=${response.statusCode}');
       if (response.statusCode == 200) {
         final decodedApiResponse = json.decode(response.body);
 
@@ -663,7 +664,7 @@ class _NutritionPageState extends State<NutritionPage>
             });
           }
         } else {
-           print('[Nutrition+] Supplements API: Unexpected response format. Expected Map with "data" as List, received ${decodedApiResponse.runtimeType}');
+           debugPrint('[Nutrition+] Supplements API: Unexpected response format. Expected Map with "data" as List, received ${decodedApiResponse.runtimeType}');
            if (mounted) {
             setState(() {
               supplementsError = 'Failed to load supplements: Invalid data format.';
@@ -680,7 +681,7 @@ class _NutritionPageState extends State<NutritionPage>
         }
       }
     } catch (e, s) {
-      print('[Nutrition+] Supplements API error: $e\n$s');
+      debugPrint('[Nutrition+] Supplements API error: $e\n$s');
       if (mounted) {
         setState(() {
           supplementsError = 'Error: ' + e.toString();
@@ -692,7 +693,7 @@ class _NutritionPageState extends State<NutritionPage>
 
   Future<void> _fetchGadgets({bool forceRefresh = false}) async {
     if (!mounted) return;
-    print('[Nutrition+] Fetching gadgets (API fetch started)...');
+    debugPrint('[Nutrition+] Fetching gadgets (API fetch started)...');
     setState(() {
       gadgetsLoading = true;
       gadgetsError = null;
@@ -712,7 +713,7 @@ class _NutritionPageState extends State<NutritionPage>
           if (cacheTime != null &&
               now.difference(cacheTime) < CacheConfig.allMealsCacheDuration) {
             if (cachedData is List) {
-              print('[Nutrition+] Loaded gadgets from cache.');
+              debugPrint('[Nutrition+] Loaded gadgets from cache.');
               if (mounted) {
                 setState(() {
                   fetchedGadgets = (cachedData as List)
@@ -723,7 +724,7 @@ class _NutritionPageState extends State<NutritionPage>
               }
               return;
             } else {
-              print('[Nutrition+] Cached gadgets data is not a List (type: ${cachedData.runtimeType}). Fetching from API.');
+              debugPrint('[Nutrition+] Cached gadgets data is not a List (type: ${cachedData.runtimeType}). Fetching from API.');
               await UserCache.removeData(cacheKey);
               await UserCache.removeData(cacheTsKey);
             }
@@ -734,7 +735,7 @@ class _NutritionPageState extends State<NutritionPage>
       final String baseUrl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
       final response = await http.get(Uri.parse('$baseUrl/rr/gadgets'));
 
-      print('[Nutrition+] Gadgets API response: status=${response.statusCode}');
+      debugPrint('[Nutrition+] Gadgets API response: status=${response.statusCode}');
       if (response.statusCode == 200) {
         final decodedApiResponse = json.decode(response.body);
 
@@ -753,7 +754,7 @@ class _NutritionPageState extends State<NutritionPage>
             });
           }
         } else {
-          print('[Nutrition+] Gadgets API: Unexpected response format. Expected Map with "data" as List, received ${decodedApiResponse.runtimeType}');
+          debugPrint('[Nutrition+] Gadgets API: Unexpected response format. Expected Map with "data" as List, received ${decodedApiResponse.runtimeType}');
           if (mounted) {
             setState(() {
               gadgetsError = 'Failed to load gadgets: Invalid data format.';
@@ -770,7 +771,7 @@ class _NutritionPageState extends State<NutritionPage>
         }
       }
     } catch (e, s) {
-      print('[Nutrition+] Gadgets API error: $e\n$s');
+      debugPrint('[Nutrition+] Gadgets API error: $e\n$s');
       if (mounted) {
         setState(() {
           gadgetsError = 'Error: ' + e.toString();
@@ -1103,7 +1104,7 @@ class _NutritionPageState extends State<NutritionPage>
                 decodedImageWidget = Image.memory(bytes, fit: BoxFit.cover, width: double.infinity, height: 110);
               } catch (e) {
                 decodedImageWidget = null;
-                 print("Error decoding base64 image: $e");
+                 debugPrint("Error decoding base64 image: $e");
               }
             }
 

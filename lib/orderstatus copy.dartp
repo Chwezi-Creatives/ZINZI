@@ -8,6 +8,7 @@ import 'package:intl/intl.dart'; // For date formatting
 import 'dart:async'; // For TimeoutException
 // import 'package:shimmer/shimmer.dart'; // Shimmer not currently used
 import 'package:zinzi/widgets/app_drawer.dart'; // Import the AppDrawer
+import 'package:flutter/foundation.dart';
 
 // Assuming API_BASE_URL-intranet is set in your .env file
 final String apiBaseUrl = dotenv.env['API_BASE_URL'] ?? dotenv.env['API_BASE_URL-intranet'] ??
@@ -61,9 +62,9 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
   @override
   void initState() {
     super.initState();
-    print("DEBUG: OrderStatusScreen initState - Fetching for User: ${widget.userId}");
+    debugPrint("DEBUG: OrderStatusScreen initState - Fetching for User: ${widget.userId}");
     // Ensure API URL is loaded
-    print("DEBUG: Using API Base URL: $apiBaseUrl");
+    debugPrint("DEBUG: Using API Base URL: $apiBaseUrl");
     _orderDetailsFuture = _fetchOrderDetails();
   }
 
@@ -81,7 +82,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        print('RAW API Response for User ID ${widget.userId}: ${response.body}');
+        debugPrint('RAW API Response for User ID ${widget.userId}: ${response.body}');
 
         // Expecting the API to return a list of order objects directly
         // or a map containing a list under a key like 'data' or 'orders'.
@@ -89,30 +90,30 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
 
         if (data is List) {
           orderList = data;
-          print("DEBUG: Parsed order data directly from List response.");
+          debugPrint("DEBUG: Parsed order data directly from List response.");
         } else if (data is Map<String, dynamic>) {
            // Common patterns: check for 'data', 'orders', or similar keys
            if (data.containsKey('data') && data['data'] is List) {
              orderList = data['data'];
-             print("DEBUG: Parsed order data from Map response (data['data']).");
+             debugPrint("DEBUG: Parsed order data from Map response (data['data']).");
            } else if (data.containsKey('orders') && data['orders'] is List) {
              orderList = data['orders'];
-             print("DEBUG: Parsed order data from Map response (data['orders']).");
+             debugPrint("DEBUG: Parsed order data from Map response (data['orders']).");
            } else {
               // Maybe the map itself is a single order? Less likely for a list endpoint.
               // Or maybe the structure is unexpected.
-              print("DEBUG: Unexpected Map structure received from list endpoint: $data");
+              debugPrint("DEBUG: Unexpected Map structure received from list endpoint: $data");
               // If only one order was placed, the API *might* incorrectly return a single object map?
               // Let's try adding it directly if it looks like an order.
               if (data.containsKey('order_id')) { // Heuristic check
-                 print("DEBUG: Attempting to treat Map response as a single order list.");
+                 debugPrint("DEBUG: Attempting to treat Map response as a single order list.");
                  orderList = [data];
               } else {
                  throw Exception('API response is a map, but does not contain a recognized list key (e.g., "data", "orders") or order details.');
               }
            }
         } else {
-           print("DEBUG: Unexpected API response type: ${data.runtimeType}");
+           debugPrint("DEBUG: Unexpected API response type: ${data.runtimeType}");
            throw Exception('Unexpected API response format. Expected List or Map containing a list.');
         }
 
@@ -121,7 +122,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
             .whereType<Map<String, dynamic>>() // Filter out non-maps
             .toList();
 
-        print("DEBUG: Successfully fetched and parsed ${fetchedOrders.length} orders for User ID ${widget.userId}.");
+        debugPrint("DEBUG: Successfully fetched and parsed ${fetchedOrders.length} orders for User ID ${widget.userId}.");
 
         return fetchedOrders;
 
@@ -180,11 +181,11 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
         future: _orderDetailsFuture,
         builder: (context, AsyncSnapshot<List<Map<String, dynamic>>> snapshot) {
           final textTheme = Theme.of(context).textTheme;
-          print("DEBUG: FutureBuilder builder entered. ConnectionState: ${snapshot.connectionState}");
+          debugPrint("DEBUG: FutureBuilder builder entered. ConnectionState: ${snapshot.connectionState}");
 
           // Handle Loading State
           if (snapshot.connectionState == ConnectionState.waiting) {
-            print("DEBUG: FutureBuilder waiting.");
+            debugPrint("DEBUG: FutureBuilder waiting.");
             return const Center(
               child: CircularProgressIndicator(
                 valueColor: AlwaysStoppedAnimation<Color>(kColorPrimary),
@@ -194,21 +195,21 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
 
           // Handle Error State
           if (snapshot.hasError) {
-             print("DEBUG: FutureBuilder snapshot has error: ${snapshot.error}");
-             print("DEBUG: Error StackTrace: ${snapshot.stackTrace}");
+             debugPrint("DEBUG: FutureBuilder snapshot has error: ${snapshot.error}");
+             debugPrint("DEBUG: Error StackTrace: ${snapshot.stackTrace}");
              final error = snapshot.error ?? 'Order data is unavailable.';
              return _buildErrorWidget(context, error, textTheme);
           }
 
           // Handle No Data State (After successful fetch but empty result)
           if (!snapshot.hasData || snapshot.data!.isEmpty) {
-             print("DEBUG: FutureBuilder snapshot has no data or is empty (after fetch completed).");
+             debugPrint("DEBUG: FutureBuilder snapshot has no data or is empty (after fetch completed).");
              return _buildErrorWidget(context, "No order details found for the provided IDs.", textTheme);
           }
 
           // Handle Success State (Data is available)
           final orders = snapshot.data!;
-          print("DEBUG: FutureBuilder snapshot has data. Number of orders: ${orders.length}");
+          debugPrint("DEBUG: FutureBuilder snapshot has data. Number of orders: ${orders.length}");
 
           return SafeArea(
             top: false,
@@ -220,10 +221,10 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
               ),
               itemCount: orders.length + 1, // +1 for the header
               itemBuilder: (context, index) {
-                print("DEBUG: ListView.builder itemBuilder called for index: $index");
+                debugPrint("DEBUG: ListView.builder itemBuilder called for index: $index");
 
                 if (index == 0) {
-                  print("DEBUG: Building header (index 0)");
+                  debugPrint("DEBUG: Building header (index 0)");
                   return Padding(
                     padding: const EdgeInsets.only(bottom: _sectionSpacing),
                     child: _buildSuccessHeader(context, textTheme, orderCount: orders.length),
@@ -232,11 +233,11 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
 
                 final orderIndex = index - 1;
                  if (orderIndex < 0 || orderIndex >= orders.length) {
-                   print("DEBUG: Invalid orderIndex $orderIndex derived from index $index. Skipping.");
+                   debugPrint("DEBUG: Invalid orderIndex $orderIndex derived from index $index. Skipping.");
                    return const SizedBox.shrink();
                  }
 
-                print("DEBUG: Building order card for orderIndex: $orderIndex (Order ID: ${orders[orderIndex]['order_id']})");
+                debugPrint("DEBUG: Building order card for orderIndex: $orderIndex (Order ID: ${orders[orderIndex]['order_id']})");
                 final order = orders[orderIndex];
 
                 return Padding(
@@ -292,7 +293,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
               icon: const Icon(Icons.refresh_rounded, size: 18),
               label: const Text('Retry'),
               onPressed: () {
-                  print("DEBUG: Retry button pressed.");
+                  debugPrint("DEBUG: Retry button pressed.");
                   setState(() { _orderDetailsFuture = _fetchOrderDetails(); });
               },
               style: ElevatedButton.styleFrom(
@@ -349,7 +350,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
             final dateTime = DateTime.parse(orderDateStr).toLocal();
             formattedDate = DateFormat('MMM d, yyyy hh:mm a').format(dateTime);
         } catch (e) {
-            print("DEBUG: Error parsing order_date '$orderDateStr': $e");
+            debugPrint("DEBUG: Error parsing order_date '$orderDateStr': $e");
             formattedDate = orderDateStr;
         }
     }
@@ -513,30 +514,30 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
       final String? mealName = order['meal_name']?.toString();
       final List<dynamic>? items = order['items'] as List<dynamic>?;
 
-      print("DEBUG: Building item card section. OrderType: '$orderType', MealName: '$mealName'");
+      debugPrint("DEBUG: Building item card section. OrderType: '$orderType', MealName: '$mealName'");
 
       if (orderType.toLowerCase() == 'gig') {
-           print("DEBUG: Building GigItemCard.");
+           debugPrint("DEBUG: Building GigItemCard.");
           return _buildGigItemCard(context, order, textTheme);
       }
       else if (orderType.toLowerCase() == 'meal' || (mealName != null && mealName.isNotEmpty)) {
-          print("DEBUG: Building OrderItemCard (Meal).");
+          debugPrint("DEBUG: Building OrderItemCard (Meal).");
           return _buildOrderItemCard(context, order, textTheme);
       }
       else if (items != null && items.isNotEmpty) {
-           print("DEBUG: Order type unknown/other, but 'items' list found. Building generic item card based on items[0].");
+           debugPrint("DEBUG: Order type unknown/other, but 'items' list found. Building generic item card based on items[0].");
            final firstItem = items[0] as Map<String, dynamic>? ?? {};
            if(firstItem.containsKey('meal_name') && firstItem['meal_name'] != null) {
                return _buildOrderItemCard(context, order, textTheme);
            } else if (firstItem.containsKey('gig_type') && firstItem['gig_type'] != null) {
                return _buildGigItemCard(context, order, textTheme);
            } else {
-              print("DEBUG: Items list present, but first item has no recognized keys (meal_name, gig_type). Building placeholder.");
+              debugPrint("DEBUG: Items list present, but first item has no recognized keys (meal_name, gig_type). Building placeholder.");
               return _buildPlaceholderItemCard(context, textTheme, "Details for this item type are not available.");
            }
       }
       else {
-          print("DEBUG: No recognizable order type or item details found. Building placeholder.");
+          debugPrint("DEBUG: No recognizable order type or item details found. Building placeholder.");
           return _buildPlaceholderItemCard(context, textTheme, "Specific item details not available for this order.");
       }
   }
@@ -627,7 +628,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
            final parts = numPeopleKey.split('_');
            numPeopleDisplay = parts.first + (numPeopleKey.contains('plus') ? '+' : '');
          } catch (e) {
-            print("DEBUG: Error parsing numPeopleKey '$numPeopleKey': $e");
+            debugPrint("DEBUG: Error parsing numPeopleKey '$numPeopleKey': $e");
             numPeopleDisplay = numPeopleKey;
          }
       }
@@ -728,11 +729,11 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
     return Center(
       child: ElevatedButton(
         onPressed: () {
-           print("DEBUG: Done button pressed.");
+           debugPrint("DEBUG: Done button pressed.");
           if (Navigator.canPop(context)) {
              Navigator.pop(context);
           } else {
-             print("WARN: Cannot pop OrderStatusScreen.");
+             debugPrint("WARN: Cannot pop OrderStatusScreen.");
           }
         },
         style: ElevatedButton.styleFrom(
@@ -757,7 +758,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
        final cleanedValue = value.replaceAll(RegExp(r'[$,]'), '');
        return double.tryParse(cleanedValue);
      }
-     print("WARN: Could not parse '$value' as double.");
+     debugPrint("WARN: Could not parse '$value' as double.");
      return null;
   }
 

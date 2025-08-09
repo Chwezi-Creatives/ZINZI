@@ -14,6 +14,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi/cache_config.dart'; // <<< IMPORT CacheConfig
 import 'package:zinzi/user_cache.dart'; // <<< IMPORT UserCache
+import 'package:flutter/foundation.dart';
 
 // --- UI Constants ---
 const Color primaryTeal = Color(0xFF00796B);
@@ -152,12 +153,12 @@ class ProducerProfile {
             return decoded.whereType<Map<String, dynamic>>().toList();
           }
         } catch (e) {
-          print("[ProducerProfile] Error decoding stock JSON string: $e");
+          debugPrint("[ProducerProfile] Error decoding stock JSON string: $e");
         }
       } else if (value is List) {
         return value.whereType<Map<String, dynamic>>().toList();
       }
-      print("[ProducerProfile] Warning: Unexpected stock format: ${value.runtimeType}. Returning null.");
+      debugPrint("[ProducerProfile] Warning: Unexpected stock format: ${value.runtimeType}. Returning null.");
       return null;
     }
 
@@ -166,7 +167,7 @@ class ProducerProfile {
       try {
         return DateTime.parse(dateString);
       } catch (e) {
-        print("[ProducerProfile] Error parsing date string '$dateString': $e");
+        debugPrint("[ProducerProfile] Error parsing date string '$dateString': $e");
         return null;
       }
     }
@@ -247,10 +248,10 @@ class ProducerProfileApiService {
       if (decoded is List || decoded is Map) {
         return decoded;
       }
-      print("[ProducerProfileApiService] API response format warning: Decoded type is ${decoded.runtimeType}");
+      debugPrint("[ProducerProfileApiService] API response format warning: Decoded type is ${decoded.runtimeType}");
       return null;
     } catch (e) {
-      print("[ProducerProfileApiService] API response JSON decoding error: $e");
+      debugPrint("[ProducerProfileApiService] API response JSON decoding error: $e");
       return null;
     }
   }
@@ -263,7 +264,7 @@ class ProducerProfileApiService {
       if (token != null && token.isNotEmpty) {
         headers['Authorization'] = 'Bearer $token';
       } else {
-        print("[ProducerProfileApiService] Warning: Auth required for read but no access token found.");
+        debugPrint("[ProducerProfileApiService] Warning: Auth required for read but no access token found.");
       }
     }
     return headers;
@@ -280,7 +281,7 @@ class ProducerProfileApiService {
       if (token != null && token.isNotEmpty) {
         headers['Authorization'] = 'Bearer $token';
       } else {
-        print("[ProducerProfileApiService] Warning: Auth required but no access token found.");
+        debugPrint("[ProducerProfileApiService] Warning: Auth required but no access token found.");
       }
     }
     return headers;
@@ -289,11 +290,11 @@ class ProducerProfileApiService {
   static Future<ProducerProfile> fetchProducerProfile() async {
     final producerId = await _getProducerId();
     if (producerId == null) {
-      print('[ProducerProfileApiService] No producer ID found.');
+      debugPrint('[ProducerProfileApiService] No producer ID found.');
       throw Exception('Producer session expired or not logged in. Please log in again.');
     }
     final Uri uri = Uri.parse('$_apibaseurl/rr/rproducers/$producerId');
-    print("[ProducerProfileApiService] Fetching profile: $uri");
+    debugPrint("[ProducerProfileApiService] Fetching profile: $uri");
     try {
       final response = await http.get(uri, headers: await _getReadHeaders(requiresAuth: true));
       if (response.statusCode == 200) {
@@ -320,14 +321,14 @@ class ProducerProfileApiService {
         throw Exception('Failed to fetch producer profile (Status: ${response.statusCode}). Body: ${response.body}');
       }
     } catch (e, stack) {
-      print('[ProducerProfileApiService] Profile fetch error: $e\n$stack');
+      debugPrint('[ProducerProfileApiService] Profile fetch error: $e\n$stack');
       rethrow;
     }
   }
 
   static Future<bool> updateProducerStatus(int producerId, bool isActive) async {
     final Uri uri = Uri.parse('$_apibaseurl/rr/producers/$producerId/status');
-    print("[ProducerProfileApiService] Updating status for $producerId to $isActive at $uri");
+    debugPrint("[ProducerProfileApiService] Updating status for $producerId to $isActive at $uri");
     try {
       final response = await http.patch(
         uri,
@@ -336,14 +337,14 @@ class ProducerProfileApiService {
       );
       return response.statusCode == 200 || response.statusCode == 204;
     } catch (e) {
-      print("[ProducerProfileApiService] Exception updating status: $e");
+      debugPrint("[ProducerProfileApiService] Exception updating status: $e");
       return false;
     }
   }
 
   static Future<bool> updateProducerProfileFields(int producerId, {Map<String, dynamic>? changedFields}) async {
     if (changedFields == null || changedFields.isEmpty) {
-      print("[ProducerProfileApiService] No fields to update");
+      debugPrint("[ProducerProfileApiService] No fields to update");
       return true; // No changes to make
     }
     
@@ -353,7 +354,7 @@ class ProducerProfileApiService {
     final payload = Map<String, dynamic>.from(changedFields)
       ..removeWhere((key, value) => value == null);
     
-    print("[ProducerProfileApiService] Updating profile fields for $producerId at $uri. Payload: ${jsonEncode(payload)}");
+    debugPrint("[ProducerProfileApiService] Updating profile fields for $producerId at $uri. Payload: ${jsonEncode(payload)}");
     try {
       final response = await http.patch(
         uri, 
@@ -362,14 +363,14 @@ class ProducerProfileApiService {
       );
       return response.statusCode == 200 || response.statusCode == 204;
     } catch (e) {
-      print("[ProducerProfileApiService] Exception updating profile fields: $e");
+      debugPrint("[ProducerProfileApiService] Exception updating profile fields: $e");
       return false;
     }
   }
 
   static Future<String?> updateProducerProfileImage(int producerId, File imageFile) async {
     final Uri uri = Uri.parse('$_apibaseurl/rr/producers/$producerId/image');
-    print("[ProducerProfileApiService] Uploading profile image for $producerId to $uri");
+    debugPrint("[ProducerProfileApiService] Uploading profile image for $producerId to $uri");
     try {
       var request = http.MultipartRequest('POST', uri);
       request.headers.addAll(await _getWriteHeaders());
@@ -379,26 +380,26 @@ class ProducerProfileApiService {
       if (response.statusCode == 200 || response.statusCode == 201) {
         final responseData = json.decode(response.body);
         final newImageUrl = responseData['imageUrl'] ?? responseData['image'];
-        print("[ProducerProfileApiService] Image upload successful. New URL: $newImageUrl");
+        debugPrint("[ProducerProfileApiService] Image upload successful. New URL: $newImageUrl");
         return newImageUrl;
       } else {
-        print("[ProducerProfileApiService] Error uploading image: ${response.statusCode} ${response.body}");
+        debugPrint("[ProducerProfileApiService] Error uploading image: ${response.statusCode} ${response.body}");
         return null;
       }
     } catch (e) {
-      print("[ProducerProfileApiService] Exception uploading image: $e");
+      debugPrint("[ProducerProfileApiService] Exception uploading image: $e");
       return null;
     }
   }
     /// Preload producer profile cache
   static Future<void> preloadCacheForSplash() async {
-    print('[Splash][ProducerProfile] Starting profile cache preload...');
+    debugPrint('[Splash][ProducerProfile] Starting profile cache preload...');
     final stopwatch = Stopwatch()..start();
     try {
       await fetchProducerProfile(); // This will use its own caching if implemented inside
-      print('[Splash][ProducerProfile] Profile cache preloaded in ${stopwatch.elapsedMilliseconds}ms');
+      debugPrint('[Splash][ProducerProfile] Profile cache preloaded in ${stopwatch.elapsedMilliseconds}ms');
     } catch (e) {
-      print('[Splash][ProducerProfile] Profile preload error: $e');
+      debugPrint('[Splash][ProducerProfile] Profile preload error: $e');
     }
   }
 }
@@ -470,7 +471,7 @@ class _ProducerProfileTabState extends State<ProducerProfileTab> with AutomaticK
           now.difference(_profileCacheTimestamp!) < CacheConfig.profileCacheDuration;
 
       if (cacheIsValid && !forceRefresh) {
-        print("ProducerProfileTab: Displaying valid cached profile.");
+        debugPrint("ProducerProfileTab: Displaying valid cached profile.");
         setState(() {
           _profile = _profileCache;
           if (_profile != null) _updateControllersFromProfile(_profile!);
@@ -478,7 +479,7 @@ class _ProducerProfileTabState extends State<ProducerProfileTab> with AutomaticK
         });
         shouldFetchFresh = false;
       } else {
-        print("ProducerProfileTab: Cached profile ${forceRefresh ? 'ignored' : 'expired'}, will fetch fresh.");
+        debugPrint("ProducerProfileTab: Cached profile ${forceRefresh ? 'ignored' : 'expired'}, will fetch fresh.");
         setState(() {
           _profile = _profileCache; 
           if (_profile != null) _updateControllersFromProfile(_profile!);
@@ -507,7 +508,7 @@ class _ProducerProfileTabState extends State<ProducerProfileTab> with AutomaticK
         });
       }
     } catch (error) {
-      print("[ProducerProfileTab] Error fetching profile: $error");
+      debugPrint("[ProducerProfileTab] Error fetching profile: $error");
       if (mounted) {
         final errorMsg = 'Failed to load profile. Please check your connection.';
         setState(() {

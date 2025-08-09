@@ -13,7 +13,8 @@ import 'package:zinzi/verification.dart';
 // Placeholder for verification page if the above is wrong:
 import 'package:flutter/cupertino.dart'; // Using Cupertino for placeholder
 import 'package:shared_preferences/shared_preferences.dart';
-import 'notifications/fcm_service.dart';
+import 'package:zinzi/services/notification_service.dart';
+import 'package:flutter/foundation.dart';
 
 // Assuming API_BASE_URL-intranet is set, provide a fallback
 final apibaseurl =
@@ -345,10 +346,24 @@ class _StakeholderSignUpPageState extends State<StakeholderSignUpPage> {
             await prefs.setString('user_phone', phoneNumber);
           }
           
-          // Register FCM token with user info (async, do not await)
-          FCMService.registerTokenWithUserInfo();
+          // Initialize and register FCM token in background after successful signup
+          Future.microtask(() async {
+            try {
+              final notificationService = NotificationService();
+              await notificationService.initialize();
+              final token = await notificationService.getFcmToken();
+              if (token != null) {
+                debugPrint('FCM token obtained during stakeholder signup, registering with backend...');
+                await notificationService.registerPendingFcmToken();
+                debugPrint('FCM token registered for stakeholder');
+              }
+            } catch (e) {
+              debugPrint('Error registering FCM token during stakeholder signup: $e');
+              // Continue with signup flow even if FCM registration fails
+            }
+          });
           
-          print("Stakeholder ID saved: $stakeholderId"); // Optional: for debugging
+          debugPrint("Stakeholder ID saved: $stakeholderId"); // Optional: for debugging
           _showSnackbar("Sign up successful!", success: true);
           // Navigate to verification page
           Navigator.pushReplacement(

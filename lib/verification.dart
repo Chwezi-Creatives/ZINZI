@@ -9,6 +9,7 @@ import 'user_metrics.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'chef_dash8888.dart'; // Import for Chef Dashboard
 import 'produ_dash22.dart'; // Import for Producer Dashboard
+import 'package:flutter/foundation.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ??
     'https://default.url'; // Ensure API base URL is available
@@ -43,7 +44,7 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
   }
 
   Future<void> _loadUserData() async {
-    print('🔍 Loading user data from SharedPreferences...');
+    debugPrint('🔍 Loading user data from SharedPreferences...');
     try {
       final prefs = await SharedPreferences.getInstance();
       
@@ -56,10 +57,10 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
           final userIdInt = prefs.getInt('user_id');
           if (userIdInt != null) {
             userIdString = userIdInt.toString();
-            print('🔍 Converted int user_id to string: $userIdString');
+            debugPrint('🔍 Converted int user_id to string: $userIdString');
           }
         } catch (e) {
-          print('⚠️ Error reading user_id as int: $e');
+          debugPrint('⚠️ Error reading user_id as int: $e');
         }
       }
       
@@ -67,16 +68,16 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
       final userType = prefs.getString('user_type');
       final transporterId = prefs.getString('transporter_id');
 
-      print('📥 Loaded user data:');
-      print('   - User ID: $userIdString');
-      print('   - User Type: $userType');
-      print('   - Transporter ID: $transporterId');
+      debugPrint('📥 Loaded user data:');
+      debugPrint('   - User ID: $userIdString');
+      debugPrint('   - User Type: $userType');
+      debugPrint('   - Transporter ID: $transporterId');
 
       // Validate required fields
       if (userIdString == null || userIdString.isEmpty) {
-        print('❌ user_id is null or empty in SharedPreferences');
+        debugPrint('❌ user_id is null or empty in SharedPreferences');
       } else {
-        print('✅ Valid user ID: $userIdString');
+        debugPrint('✅ Valid user ID: $userIdString');
       }
 
       setState(() {
@@ -87,11 +88,11 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
         _isUserDataLoaded = true; // Mark as loaded to prevent infinite loading
       });
       
-      print('✅ User data loading completed');
+      debugPrint('✅ User data loading completed');
     } catch (e, stackTrace) {
-      print('❌ Error loading user data:');
-      print('   - Error: $e');
-      print('   - Stack trace: $stackTrace');
+      debugPrint('❌ Error loading user data:');
+      debugPrint('   - Error: $e');
+      debugPrint('   - Stack trace: $stackTrace');
       setState(() {
         _isUserDataLoaded = true; // Still mark as loaded to avoid infinite loading
       });
@@ -99,27 +100,27 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
   }
 
   Future<void> _verifyEmail() async {
-    print('🔐 Starting email verification...');
-    print('   - _isUserDataLoaded: $_isUserDataLoaded');
-    print('   - _userId: $_userId');
-    print('   - _userType: $_userType');
-    print('   - Code entered: ${_codeController.text.trim()}');
+    debugPrint('🔐 Starting email verification...');
+    debugPrint('   - _isUserDataLoaded: $_isUserDataLoaded');
+    debugPrint('   - _userId: $_userId');
+    debugPrint('   - _userType: $_userType');
+    debugPrint('   - Code entered: ${_codeController.text.trim()}');
     
     // Check form validation
     final isFormValid = _formKey.currentState?.validate() ?? false;
-    print('   - Form validation: $isFormValid');
+    debugPrint('   - Form validation: $isFormValid');
     
     // Ensure user data and form state are valid before proceeding
     if (!_isUserDataLoaded || _userId == null || _userType == null || !isFormValid) {
-      print('❌ Validation failed:');
-      if (!_isUserDataLoaded) print('      - User data not loaded');
-      if (_userId == null) print('      - User ID is null');
-      if (_userType == null) print('      - User type is null');
-      if (!isFormValid) print('      - Form validation failed');
+      debugPrint('❌ Validation failed:');
+      if (!_isUserDataLoaded) debugPrint('      - User data not loaded');
+      if (_userId == null) debugPrint('      - User ID is null');
+      if (_userType == null) debugPrint('      - User type is null');
+      if (!isFormValid) debugPrint('      - Form validation failed');
       
       // Reload user data in case it failed to load previously
       if (!_isUserDataLoaded || _userId == null || _userType == null) {
-        print('🔄 Attempting to reload user data...');
+        debugPrint('🔄 Attempting to reload user data...');
         await _loadUserData();
       }
       
@@ -130,7 +131,7 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
       return;
     }
     
-    print('✅ All validations passed, proceeding with verification...');
+    debugPrint('✅ All validations passed, proceeding with verification...');
 
     setState(() {
       _isLoading = true; // Set loading state
@@ -141,7 +142,7 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
       final userIdInt = int.tryParse(_userId!);
 
       if (userIdInt == null) {
-        print('❌ Invalid user ID format: "$_userId"');
+        debugPrint('❌ Invalid user ID format: "$_userId"');
         throw Exception('Invalid user ID format. Expected a number but got: $_userId');
       }
 
@@ -151,8 +152,8 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
         'user_type': _userType,
       };
       
-      print('📤 Sending verification request to: $apibaseurl/rr/verify_user');
-      print('   - Request body: $requestBody');
+      debugPrint('📤 Sending verification request to: $apibaseurl/rr/verify_user');
+      debugPrint('   - Request body: $requestBody');
       
       final response = await http.post(
         Uri.parse('$apibaseurl/rr/verify_user'),
@@ -162,9 +163,9 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
         body: jsonEncode(requestBody),
       );
       
-      print('📥 Received response:');
-      print('   - Status code: ${response.statusCode}');
-      print('   - Body: ${response.body}');
+      debugPrint('📥 Received response:');
+      debugPrint('   - Status code: ${response.statusCode}');
+      debugPrint('   - Body: ${response.body}');
 
       if (response.statusCode == 200) {
         // Navigate based on user type and whether it's a new user
@@ -219,9 +220,9 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
         ));
       }
     } catch (error, stackTrace) {
-      print('❌ Error during verification:');
-      print('   - Error: $error');
-      print('   - Stack trace: $stackTrace');
+      debugPrint('❌ Error during verification:');
+      debugPrint('   - Error: $error');
+      debugPrint('   - Stack trace: $stackTrace');
       
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Error: ${error.toString()}'),
@@ -235,13 +236,13 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
   }
 
   Future<void> _resendVerificationCode() async {
-    print('🔄 Starting verification code resend process...');
+    debugPrint('🔄 Starting verification code resend process...');
     
     if (!_isUserDataLoaded || _userId == null || _userType == null) {
       final errorMsg = '❌ User information not available. ' +
           'isUserDataLoaded: $_isUserDataLoaded, ' +
           'userId: $_userId, userType: $_userType';
-      print(errorMsg);
+      debugPrint(errorMsg);
       
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('User information not available. Please try again.'),
@@ -249,10 +250,10 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
       return;
     }
 
-    print('🔍 User data loaded:');
-    print('   - User ID: $_userId (type: ${_userId.runtimeType})');
-    print('   - User Type: $_userType (type: ${_userType.runtimeType})');
-    print('   - Transporter ID: $_transporterId');
+    debugPrint('🔍 User data loaded:');
+    debugPrint('   - User ID: $_userId (type: ${_userId.runtimeType})');
+    debugPrint('   - User Type: $_userType (type: ${_userType.runtimeType})');
+    debugPrint('   - Transporter ID: $_transporterId');
 
     setState(() {
       _isLoading = true;
@@ -271,16 +272,16 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
       };
 
       // Detailed debug logging
-      print('📤 Preparing verification code resend request:');
-      print('   - Endpoint: $apibaseurl/rr/resend_verification_email');
-      print('   - Headers: {Content-Type: application/json}');
-      print('   - Request body:');
-      print('     - user_id: $userIdInt (type: ${userIdInt.runtimeType})');
-      print('     - user_type: "$_userType" (type: ${_userType.runtimeType})');
-      print('   - Full JSON payload: ${jsonEncode(requestBody)}');
+      debugPrint('📤 Preparing verification code resend request:');
+      debugPrint('   - Endpoint: $apibaseurl/rr/resend_verification_email');
+      debugPrint('   - Headers: {Content-Type: application/json}');
+      debugPrint('   - Request body:');
+      debugPrint('     - user_id: $userIdInt (type: ${userIdInt.runtimeType})');
+      debugPrint('     - user_type: "$_userType" (type: ${_userType.runtimeType})');
+      debugPrint('   - Full JSON payload: ${jsonEncode(requestBody)}');
       
       final stopwatch = Stopwatch()..start();
-      print('   - Sending request...');
+      debugPrint('   - Sending request...');
       
       final response = await http.post(
         Uri.parse('$apibaseurl/rr/resend_verification_email'),
@@ -291,20 +292,20 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
       );
 
       stopwatch.stop();
-      print('📥 Received response:');
-      print('   - Status code: ${response.statusCode}');
-      print('   - Response time: ${stopwatch.elapsedMilliseconds}ms');
-      print('   - Headers: ${response.headers}');
-      print('   - Response body:');
-      print('     ${response.body}');
+      debugPrint('📥 Received response:');
+      debugPrint('   - Status code: ${response.statusCode}');
+      debugPrint('   - Response time: ${stopwatch.elapsedMilliseconds}ms');
+      debugPrint('   - Headers: ${response.headers}');
+      debugPrint('   - Response body:');
+      debugPrint('     ${response.body}');
       
       // Log the raw response for debugging
       if (response.body.isNotEmpty) {
         try {
           final jsonResponse = jsonDecode(response.body);
-          print('   - Parsed JSON response: $jsonResponse');
+          debugPrint('   - Parsed JSON response: $jsonResponse');
         } catch (e) {
-          print('   - Could not parse response as JSON: $e');
+          debugPrint('   - Could not parse response as JSON: $e');
         }
       }
 
@@ -322,14 +323,14 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
         throw Exception(responseData['message'] ?? 'Failed to resend verification code');
       }
     } catch (error, stackTrace) {
-      print('❌ Error resending verification code:');
-      print('   - Error type: ${error.runtimeType}');
-      print('   - Error message: $error');
+      debugPrint('❌ Error resending verification code:');
+      debugPrint('   - Error type: ${error.runtimeType}');
+      debugPrint('   - Error message: $error');
       if (error is http.ClientException) {
-        print('   - Request URI: ${error.uri}');
-        print('   - Request method: ${error.message}');
+        debugPrint('   - Request URI: ${error.uri}');
+        debugPrint('   - Request method: ${error.message}');
       }
-      print('   - Stack trace: $stackTrace');
+      debugPrint('   - Stack trace: $stackTrace');
       
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Error: ${error.toString()}'),

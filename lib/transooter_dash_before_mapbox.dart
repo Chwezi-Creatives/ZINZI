@@ -18,6 +18,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:zinzi/Transporter_login.dart'; // For logout navigation
 import 'package:zinzi/user_cache.dart'; // <<< IMPORT UserCache
 import 'package:zinzi/chef_verification_helper.dart'; // For verification dialog
+import 'package:flutter/foundation.dart';
 // Removed unused import // <<< IMPORT CacheConfig
 // import 'package:zinzi/app_drawer.dart'; // If you reuse the drawer from old code
 
@@ -94,7 +95,7 @@ DateTime? parseDateSafe(dynamic value) {
           .parseUtc(value.toString())
           .toLocal();
     } catch (e) {
-      print("Could not parse date: $value - Error: $e");
+      debugPrint("Could not parse date: $value - Error: $e");
       return null; // Return null if both fail
     }
   }
@@ -174,7 +175,7 @@ LatLng? _parseLocationToLatLng(String? locationString) {
   }
 
   // If all parsing fails
-  print('Warning: Could not parse LatLng from location string: "$locationString"');
+  debugPrint('Warning: Could not parse LatLng from location string: "$locationString"');
   return null;
 }
 
@@ -381,7 +382,7 @@ class Order {
         return addrMap['desc'] ?? addrMap['display_name'] ?? rawAddress;
       }
     } catch (e) {
-      print("Error parsing simplified address: $e");
+      debugPrint("Error parsing simplified address: $e");
     }
     // Fallback to the raw string
     return rawAddress;
@@ -404,7 +405,7 @@ class Order {
               .join(', ');
         }
       } catch (e) {
-        print("Error parsing simplified pickup address: $e");
+        debugPrint("Error parsing simplified pickup address: $e");
       }
       // Fallback to raw pickup location string if parsing fails or format is different
       return pickupLocation!;
@@ -495,7 +496,7 @@ class Order {
         }
         return DateTime.parse(dateString).toLocal();
       } catch (e) {
-        print("Warning: Could not parse order date '$dateString': $e");
+        debugPrint("Warning: Could not parse order date '$dateString': $e");
         return DateTime.now(); // Fallback to current time
       }
     }
@@ -701,18 +702,18 @@ class TransporterApiService {
   // Helper to handle common API response structure (from new code, refined)
   static dynamic _handleStaticApiResponse(dynamic responseData,
       {String endpointContext = 'unknown'}) {
-    print(
+    debugPrint(
         "Handling API response for $endpointContext: Type=${responseData.runtimeType}"); // Log type
 
     // Case 1: Response is already a List (e.g., direct array of orders)
     if (responseData is List) {
-      // print("API Response is List: $responseData"); // Can be verbose
+      // debugPrint("API Response is List: $responseData"); // Can be verbose
       return responseData;
     }
 
     // Case 2: Response is a Map
     if (responseData is Map<String, dynamic>) {
-      // print("API Response is Map: $responseData"); // Can be verbose
+      // debugPrint("API Response is Map: $responseData"); // Can be verbose
       // Check for common keys containing the list data
       const List<String> dataKeys = [
         'data',
@@ -723,29 +724,29 @@ class TransporterApiService {
       ]; // Add expected keys
       for (String key in dataKeys) {
         if (responseData.containsKey(key) && responseData[key] is List) {
-          print("Found data list under key '$key'");
+          debugPrint("Found data list under key '$key'");
           return responseData[key];
         }
         // Handle case where the key contains the single object (like profile)
         if (responseData.containsKey(key) &&
             responseData[key] is Map<String, dynamic>) {
-          print("Found data object under key '$key'");
+          debugPrint("Found data object under key '$key'");
           return responseData[key];
         }
       }
 
       // Case 2b: If no list found under known keys, maybe the Map itself is the data (e.g., single profile)
-      print(
+      debugPrint(
           "API Warning: Response is a Map but no known list key found. Returning the Map itself for $endpointContext.");
       return responseData; // Return the map itself
 
       // Original error throwing:
-      // print("API Error: Response is a Map but no valid list/object found under known keys (checked: ${dataKeys.join(', ')}). Keys present: ${responseData.keys}");
+      // debugPrint("API Error: Response is a Map but no valid list/object found under known keys (checked: ${dataKeys.join(', ')}). Keys present: ${responseData.keys}");
       // throw Exception('Unexpected API response format for $endpointContext: Expected a List or Map with known data key containing a List/Map, got Map with keys ${responseData.keys}');
     }
 
     // Case 3: Unexpected type
-    print(
+    debugPrint(
         "API Error: Unhandled response format for $endpointContext. Got: ${responseData.runtimeType}");
     throw Exception(
         'Unexpected API response type for $endpointContext: ${responseData.runtimeType}');
@@ -770,7 +771,7 @@ class TransporterApiService {
       throw Exception('Transporter ID provided is empty.');
     }
     final Uri uri = Uri.parse('$apibaseurl/rr/transporters/$transporterId');
-    print("Fetching transporter profile from: $uri");
+    debugPrint("Fetching transporter profile from: $uri");
     try {
       final response =
           await http.get(uri, headers: _getWriteHeaders(requiresAuth: true));
@@ -785,23 +786,23 @@ class TransporterApiService {
         } else if (handledData is List &&
             handledData.isNotEmpty &&
             handledData[0] is Map<String, dynamic>) {
-          print("Warning: Profile API returned a List, using the first item.");
+          debugPrint("Warning: Profile API returned a List, using the first item.");
           return TransporterProfile.fromJson(handledData[0]);
         } else {
           // This case might occur if _handleApiResponse returns null or unexpected type
-          print(
+          debugPrint(
               "Error: Handled data is not Map or List<Map>: ${handledData?.runtimeType}");
           throw Exception(
               'Failed to parse profile: Expected a Map or List<Map> but received ${handledData?.runtimeType}');
         }
       } else {
-        print(
+        debugPrint(
             "Error fetching transporter profile: ${response.statusCode} ${response.body}");
         throw Exception(
             'Failed to load transporter profile (Code: ${response.statusCode}) - ${response.reasonPhrase}');
       }
     } catch (e) {
-      print("Exception fetching transporter profile: $e");
+      debugPrint("Exception fetching transporter profile: $e");
       throw Exception('Failed to load transporter profile: ${e.toString()}');
     }
   }
@@ -814,7 +815,7 @@ class TransporterApiService {
     }
     final Uri uri =
         Uri.parse('$apibaseurl/rr/orders?transporter_id=$transporterId');
-    print("Fetching all orders for transporter $transporterId from: $uri");
+    debugPrint("Fetching all orders for transporter $transporterId from: $uri");
     try {
       final response =
           await http.get(uri, headers: _getWriteHeaders(requiresAuth: true));
@@ -828,18 +829,18 @@ class TransporterApiService {
               .map((item) => Order.fromJson(item))
               .toList();
         } else {
-          print(
+          debugPrint(
               "All orders API response format unexpected: Expected List, got ${ordersList?.runtimeType}");
           return []; // Return empty list on format error
         }
       } else {
-        print(
+        debugPrint(
             "Error fetching all orders: ${response.statusCode} ${response.body}");
         throw Exception(
             'Failed to load orders (Code: ${response.statusCode}) - ${response.reasonPhrase}');
       }
     } catch (e) {
-      print("Exception fetching all orders: $e");
+      debugPrint("Exception fetching all orders: $e");
       throw Exception('Failed to load orders: ${e.toString()}');
     }
   }
@@ -852,7 +853,7 @@ class TransporterApiService {
     }
     final Uri uri = Uri.parse(
         '$apibaseurl/rr/disbursements/transporter?transporter_id=$transporterId');
-    print("Fetching payments for transporter $transporterId from: $uri");
+    debugPrint("Fetching payments for transporter $transporterId from: $uri");
     try {
       final response =
           await http.get(uri, headers: _getWriteHeaders(requiresAuth: true));
@@ -868,18 +869,18 @@ class TransporterApiService {
               .map((item) => Payment.fromJson(item))
               .toList();
         } else {
-          print(
+          debugPrint(
               "Payments API response format unexpected: Expected List, got ${paymentsList?.runtimeType}");
           return []; // Return empty list on format error
         }
       } else {
-        print(
+        debugPrint(
             "Error fetching payments: ${response.statusCode} ${response.body}");
         throw Exception(
             'Failed to load payments (Code: ${response.statusCode}) - ${response.reasonPhrase}');
       }
     } catch (e) {
-      print("Exception fetching payments: $e");
+      debugPrint("Exception fetching payments: $e");
       throw Exception('Failed to load payments: ${e.toString()}');
     }
   }
@@ -888,7 +889,7 @@ class TransporterApiService {
   static Future<bool> updateOrderStatusByTransporter(
       int orderId, String newStatus) async {
     final Uri uri = Uri.parse('$apibaseurl/rr/orders/$orderId/status');
-    print(
+    debugPrint(
         "Updating order $orderId status by transporter to $newStatus via $uri");
     try {
       final response = await http.patch(
@@ -897,11 +898,11 @@ class TransporterApiService {
         body: jsonEncode({'order_status': newStatus}), // Key from new code
       );
       if (response.statusCode == 200 || response.statusCode == 204) {
-        print(
+        debugPrint(
             "Order status updated successfully for order $orderId to $newStatus");
         return true;
       } else {
-        print(
+        debugPrint(
             "Error updating order status (Transporter): ${response.statusCode} ${response.body}");
         String errorMessage = 'Failed to update status.';
         try {
@@ -913,7 +914,7 @@ class TransporterApiService {
             'Failed to update order status (Code: ${response.statusCode}) - $errorMessage');
       }
     } catch (e) {
-      print("Exception updating order status (Transporter): $e");
+      debugPrint("Exception updating order status (Transporter): $e");
       throw Exception('Failed to update order status: ${e.toString()}');
     }
   }
@@ -925,7 +926,7 @@ class TransporterApiService {
       throw Exception('Transporter ID provided is empty.');
     final Uri uri = Uri.parse(
         '$apibaseurl/rr/transporters/$transporterId'); // Use general profile endpoint
-    print(
+    debugPrint(
         "Updating transporter $transporterId active status to $isActive via $uri (PATCH)");
     try {
       final response = await http.patch(
@@ -934,16 +935,16 @@ class TransporterApiService {
         body: jsonEncode({'is_active': isActive}), // Key from models
       );
       if (response.statusCode == 200 || response.statusCode == 204) {
-        print("Transporter active status updated successfully.");
+        debugPrint("Transporter active status updated successfully.");
         return true;
       } else {
-        print(
+        debugPrint(
             "Error updating transporter active status: ${response.statusCode} ${response.body}");
         throw Exception(
             'Failed to update active status (Code: ${response.statusCode}) - ${response.reasonPhrase}');
       }
     } catch (e) {
-      print("Exception updating transporter active status: $e");
+      debugPrint("Exception updating transporter active status: $e");
       throw Exception('Failed to update active status: ${e.toString()}');
     }
   }
@@ -961,10 +962,10 @@ class TransporterApiService {
         value == null /* || (value is String && value.isEmpty) */);
 
     if (updateData.isEmpty) {
-      print("Update profile called with no data to update.");
+      debugPrint("Update profile called with no data to update.");
       return true; // Nothing to update
     }
-    print(
+    debugPrint(
         "Updating transporter profile $transporterId with data: ${jsonEncode(updateData)}");
     try {
       final response = await http.patch(
@@ -973,10 +974,10 @@ class TransporterApiService {
         body: jsonEncode(updateData),
       );
       if (response.statusCode == 200 || response.statusCode == 204) {
-        print("Transporter profile updated successfully.");
+        debugPrint("Transporter profile updated successfully.");
         return true;
       } else {
-        print(
+        debugPrint(
             "Error updating transporter profile: ${response.statusCode} ${response.body}");
         String errorMessage = 'Failed to update profile.';
         try {
@@ -988,7 +989,7 @@ class TransporterApiService {
             'Failed to update profile (Code: ${response.statusCode}) - $errorMessage');
       }
     } catch (e) {
-      print("Exception updating transporter profile: $e");
+      debugPrint("Exception updating transporter profile: $e");
       throw Exception('Failed to update profile: ${e.toString()}');
     }
   }
@@ -996,11 +997,11 @@ class TransporterApiService {
   // Upload image to Imgur
   static Future<String?> uploadImageToImgur(File imageFile) async {
     if (imgurClientId == null || imgurClientId!.isEmpty) {
-      print("Imgur Client ID missing in .env");
+      debugPrint("Imgur Client ID missing in .env");
       throw Exception("Image upload configuration missing.");
     }
     final Uri imgurUri = Uri.parse('https://api.imgur.com/3/image');
-    print("Uploading image to Imgur...");
+    debugPrint("Uploading image to Imgur...");
     try {
       var request = http.MultipartRequest('POST', imgurUri);
       request.headers['Authorization'] = 'Client-ID $imgurClientId';
@@ -1014,21 +1015,21 @@ class TransporterApiService {
         final responseData = json.decode(response.body);
         if (responseData['success'] == true &&
             responseData['data']?['link'] != null) {
-          print("Imgur upload successful: ${responseData['data']['link']}");
+          debugPrint("Imgur upload successful: ${responseData['data']['link']}");
           return responseData['data']['link'];
         } else {
           String errorMsg = responseData['data']?['error']?.toString() ??
               'Invalid response structure';
-          print("Imgur upload failed: $errorMsg");
+          debugPrint("Imgur upload failed: $errorMsg");
           throw Exception('Imgur upload failed: $errorMsg');
         }
       } else {
-        print("Imgur upload failed: ${response.statusCode} ${response.body}");
+        debugPrint("Imgur upload failed: ${response.statusCode} ${response.body}");
         throw Exception(
             'Imgur upload failed with status code ${response.statusCode}');
       }
     } catch (e) {
-      print("Imgur upload error: $e");
+      debugPrint("Imgur upload error: $e");
       throw Exception("Failed to upload image: ${e.toString()}");
     }
   }
@@ -1037,7 +1038,7 @@ class TransporterApiService {
   static Future<bool> acceptOrder(int orderId, String transporterId) async {
     final Uri uri = Uri.parse(
         '$apibaseurl/rr/orders/$orderId/status'); // Using the status update endpoint
-    print("Accepting order $orderId for transporter $transporterId via $uri");
+    debugPrint("Accepting order $orderId for transporter $transporterId via $uri");
     try {
       // Parse transporterId to int
       final int? transporterIdInt = int.tryParse(transporterId);
@@ -1045,7 +1046,7 @@ class TransporterApiService {
         throw Exception('Invalid transporter ID format');
       }
 
-      print("Sending PATCH request to update order status to 'picked up'...");
+      debugPrint("Sending PATCH request to update order status to 'picked up'...");
       final response = await http
           .patch(
             uri,
@@ -1059,8 +1060,8 @@ class TransporterApiService {
           )
           .timeout(const Duration(seconds: 30)); // Add timeout for the request
 
-      print("Response status: ${response.statusCode}");
-      print("Response body: ${response.body}");
+      debugPrint("Response status: ${response.statusCode}");
+      debugPrint("Response body: ${response.body}");
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         // Success - check if response contains updated status
@@ -1070,22 +1071,22 @@ class TransporterApiService {
               responseBody.containsKey('order_status')) {
             final updatedStatus =
                 responseBody['order_status']?.toString().toLowerCase();
-            print(
+            debugPrint(
                 "Order $orderId status updated successfully. New status: $updatedStatus");
           } else {
             // No status in response, but still successful
-            print(
+            debugPrint(
                 "Order $orderId update successful. No status returned in response.");
           }
           return true;
         } catch (e) {
           // If we can't parse the response but got a success status code, still consider it a success
-          print(
+          debugPrint(
               "Order $orderId update successful. Could not parse response: $e");
           return true;
         }
       } else {
-        print(
+        debugPrint(
             "Error accepting order: ${response.statusCode} ${response.body}");
         String errorMessage = 'Failed to accept order.';
         try {
@@ -1097,17 +1098,17 @@ class TransporterApiService {
             'Failed to accept order (Code: ${response.statusCode}) - $errorMessage');
       }
     } on TimeoutException catch (e) {
-      print("Timeout while waiting for order status update: $e");
+      debugPrint("Timeout while waiting for order status update: $e");
       throw Exception('Request timed out while updating order status');
     } catch (e) {
-      print("Exception accepting order: $e");
+      debugPrint("Exception accepting order: $e");
       rethrow; // Re-throw to preserve the original stack trace
     }
   }
 
   // Reject an available order (Optional - depends on API)
   static Future<bool> rejectOrder(int orderId, String transporterId) async {
-    print(
+    debugPrint(
         "Rejecting order $orderId (Transporter $transporterId) - Assuming no API call needed, handled locally.");
     // Simulate success as usually this is just ignoring the order in the app
     await Future.delayed(Duration(milliseconds: 50)); // Tiny delay
@@ -1127,7 +1128,7 @@ class TransporterDashNew extends StatefulWidget {
   /// Preload transporter dashboard cache for splash screen (no UI, no context needed)
   static Future<void> preloadCacheForSplash(String transporterId) async {
     if (transporterId.isEmpty) {
-      print('[Splash][TransporterDash] Error: Empty transporter ID provided');
+      debugPrint('[Splash][TransporterDash] Error: Empty transporter ID provided');
       return;
     }
 
@@ -1154,12 +1155,12 @@ class TransporterDashNew extends StatefulWidget {
             await TransporterApiService.fetchTransporterProfile(transporterId);
         await UserCache.saveData(profileKey, profile.toJson());
         await UserCache.saveData(profileTsKey, now.toIso8601String());
-        print('[Splash][TransporterDash] Profile cache updated');
+        debugPrint('[Splash][TransporterDash] Profile cache updated');
       } catch (e) {
-        print('[Splash][TransporterDash] Profile preload error: $e');
+        debugPrint('[Splash][TransporterDash] Profile preload error: $e');
       }
     } else {
-      print(
+      debugPrint(
           '[Splash][TransporterDash] Profile preload skipped: Cache still valid');
     }
 
@@ -1186,12 +1187,12 @@ class TransporterDashNew extends StatefulWidget {
 
         await UserCache.saveData(ordersKey, serializedOrders);
         await UserCache.saveData(ordersTsKey, now.toIso8601String());
-        print('[Splash][TransporterDash] Orders cache updated');
+        debugPrint('[Splash][TransporterDash] Orders cache updated');
       } catch (e) {
-        print('[Splash][TransporterDash] Orders preload error: $e');
+        debugPrint('[Splash][TransporterDash] Orders preload error: $e');
       }
     } else {
-      print(
+      debugPrint(
           '[Splash][TransporterDash] Orders preload skipped: Cache still valid');
     }
   }
@@ -1328,7 +1329,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         _autoNavigate = prefs.getBool('autoNavigate') ?? true;
       });
     } catch (e) {
-      print("Error loading preferences: $e");
+      debugPrint("Error loading preferences: $e");
       // Use defaults if loading fails
     }
   }
@@ -1342,9 +1343,9 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
       try {
         _profileCache = TransporterProfile.fromJson(cachedData);
         _profileCacheTimestamp = DateTime.tryParse(timestampData)?.toLocal();
-        print("Loaded profile from cache. Timestamp: $_profileCacheTimestamp");
+        debugPrint("Loaded profile from cache. Timestamp: $_profileCacheTimestamp");
       } catch (e) {
-        print("Error parsing cached transporter profile (new): $e");
+        debugPrint("Error parsing cached transporter profile (new): $e");
         _profileCache = null;
         _profileCacheTimestamp = null;
         await UserCache.removeData(
@@ -1352,7 +1353,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         await UserCache.removeData(_profileCacheTimestampKey);
       }
     } else {
-      print("No valid profile cache found in prefs.");
+      debugPrint("No valid profile cache found in prefs.");
       _profileCache = null;
       _profileCacheTimestamp = null;
     }
@@ -1385,23 +1386,23 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             });
           }
 
-          print(
+          debugPrint(
               "Loaded ${orders.length} orders from cache. Timestamp: $_ordersCacheTimestamp");
           return true;
         } else {
-          print("Orders cache expired. Cache time: $cacheTime");
+          debugPrint("Orders cache expired. Cache time: $cacheTime");
           _ordersCache = null;
           _ordersCacheTimestamp = null;
         }
       } catch (e) {
-        print("Error parsing cached orders: $e");
+        debugPrint("Error parsing cached orders: $e");
         _ordersCache = null;
         _ordersCacheTimestamp = null;
         await UserCache.removeData(_ordersCacheKey);
         await UserCache.removeData(_ordersCacheTimestampKey);
       }
     } else {
-      print("No valid orders cache found in prefs.");
+      debugPrint("No valid orders cache found in prefs.");
       _ordersCache = null;
       _ordersCacheTimestamp = null;
     }
@@ -1422,17 +1423,17 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
 
       _ordersCache = orders;
       _ordersCacheTimestamp = now;
-      print(
+      debugPrint(
           "Saved ${orders.length} orders to cache. Timestamp: $_ordersCacheTimestamp");
     } catch (e) {
-      print("Error saving orders to cache: $e");
+      debugPrint("Error saving orders to cache: $e");
     }
   }
 
   // Refresh payments data
   Future<void> refreshPayments() async {
     try {
-      print('Refreshing payments data...');
+      debugPrint('Refreshing payments data...');
       final paymentsResult =
           await TransporterApiService.fetchTransporterPayments(
                   widget.transporterId)
@@ -1444,15 +1445,15 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           // Update cache timestamp to prevent immediate refetch
           _lastPaymentsFetchTime = DateTime.now();
         });
-        print('Successfully refreshed ${paymentsResult.length} payments');
+        debugPrint('Successfully refreshed ${paymentsResult.length} payments');
       }
     } on TimeoutException {
-      print('Timeout while refreshing payments');
+      debugPrint('Timeout while refreshing payments');
       if (mounted) {
         _showErrorSnackBar('Connection timeout. Earnings may be out of date.');
       }
     } catch (e) {
-      print('Error refreshing payments: $e');
+      debugPrint('Error refreshing payments: $e');
       if (mounted) {
         _showErrorSnackBar('Failed to refresh earnings. Pull down to retry.');
       }
@@ -1470,9 +1471,9 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           _profileCacheTimestampKey, now.toIso8601String());
       _profileCache = profile; // Update in-memory cache
       _profileCacheTimestamp = now;
-      print("Saved profile to cache. Timestamp: $_profileCacheTimestamp");
+      debugPrint("Saved profile to cache. Timestamp: $_profileCacheTimestamp");
     } catch (e) {
-      print("Error saving profile to cache: $e");
+      debugPrint("Error saving profile to cache: $e");
     }
   }
 
@@ -1514,9 +1515,9 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
       // Update state only if profile isn't set yet or if cache is valid (to refresh potentially stale UI)
       if (_transporterProfile == null || cacheIsValid) {
         if (cacheIsValid) {
-          print("TransporterDashNew: Displaying valid cached profile.");
+          debugPrint("TransporterDashNew: Displaying valid cached profile.");
         } else {
-          print(
+          debugPrint(
               "TransporterDashNew: Displaying expired cached profile while fetching.");
         }
         setStateIfMounted(() {
@@ -1529,13 +1530,13 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           _isLoadingProfile = !cacheIsValid;
         });
       } else {
-        print(
+        debugPrint(
             "TransporterDashNew: Valid profile already in state, proceeding to fetch.");
         // Ensure loading indicates background activity
         setStateIfMounted(() => _isLoadingProfile = true);
       }
     } else if (mounted) {
-      print("TransporterDashNew: No cached profile found, fetching...");
+      debugPrint("TransporterDashNew: No cached profile found, fetching...");
       setStateIfMounted(
           () => _isLoadingProfile = true); // Ensure loading is shown
     }
@@ -1554,7 +1555,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           (_transporterProfile == null ||
               profile.toJson().toString() !=
                   _transporterProfile!.toJson().toString())) {
-        print("TransporterDashNew: Fetched fresh transporter profile data.");
+        debugPrint("TransporterDashNew: Fetched fresh transporter profile data.");
         await _saveProfileCacheToPrefs(profile); // Save fresh data to cache
         setStateIfMounted(() {
           _transporterProfile = profile;
@@ -1566,7 +1567,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         });
       } else if (mounted) {
         // Data hasn't changed, just ensure loading indicators are off
-        print(
+        debugPrint(
             "TransporterDashNew: Fetched profile data is same as current state.");
         setStateIfMounted(() {
           _isLoadingProfile = false;
@@ -1574,7 +1575,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         });
       }
     } catch (error, stackTrace) {
-      print(
+      debugPrint(
           "Error fetching fresh transporter profile (new): $error\n$stackTrace");
       if (mounted) {
         // Only show error prominently if there's no cached data at all
@@ -1588,7 +1589,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           });
         } else {
           // Keep showing cached data, log error silently or show subtle indicator
-          print(
+          debugPrint(
               "TransporterDashNew: Failed to fetch fresh profile, showing cached version. Error: $error");
           setStateIfMounted(() {
             _isLoadingProfile = false; // Ensure loading indicator stops
@@ -1641,7 +1642,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         }
       }
     } catch (e, stackTrace) {
-      print(
+      debugPrint(
           "Error loading initial data (orders/payments): $e\n$stackTrace");
       if (mounted && !loadedOrdersFromCache) {
         setStateIfMounted(() {
@@ -1693,7 +1694,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     _pollingTimer = Timer.periodic(pollInterval, (timer) {
       _pollForNewOrders();
     });
-    print(
+    debugPrint(
         '[Polling] Started polling for new orders every ${pollInterval.inSeconds} seconds.');
   }
 
@@ -1701,7 +1702,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     if (_pollingTimer?.isActive ?? false) {
       _pollingTimer!.cancel();
       _pollingTimer = null;
-      print('[Polling] Stopped.');
+      debugPrint('[Polling] Stopped.');
     }
   }
 
@@ -1747,14 +1748,14 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
 
       // If new orders were found, notify the user and update the cache
       if (newAvailableOrders.isNotEmpty) {
-        print(
+        debugPrint(
             '[Polling] Found ${newAvailableOrders.length} new available order(s).');
         await _saveOrdersCacheToPrefs(updatedList); // Update cache
         _showNewOrderNotification(newAvailableOrders.length);
       }
     } catch (e) {
       // Fail silently to not bother the user with constant errors during polling
-      print('[Polling] Error fetching new orders: $e');
+      debugPrint('[Polling] Error fetching new orders: $e');
     } finally {
       if (mounted) {
         setStateIfMounted(() => _isPolling = false);
@@ -1804,7 +1805,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
     if (_soundAlerts) {
       // This is where you would add a sound playing library call
       // e.g., audioPlayer.play(AssetSource('sounds/new_order_alert.mp3'));
-      print('[Polling] Sound alert would play here.');
+      debugPrint('[Polling] Sound alert would play here.');
     }
   }
   // --- END: Polling Methods ---
@@ -1908,7 +1909,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                   (_transporterProfile?.profileImageUrl != null &&
                           _transporterProfile!.profileImageUrl!.isNotEmpty)
                       ? (_, __) {
-                          print(
+                          debugPrint(
                               "Error loading profile image: ${_transporterProfile?.profileImageUrl}");
                         }
                       : null,
@@ -1976,7 +1977,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                   (_transporterProfile?.profileImageUrl != null &&
                           _transporterProfile!.profileImageUrl!.isNotEmpty)
                       ? (_, __) {
-                          print(
+                          debugPrint(
                               "Error loading drawer image: ${_transporterProfile?.profileImageUrl}");
                         }
                       : null,
@@ -2143,7 +2144,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           );
         }
       } catch (e) {
-        print("Error during sign out: $e");
+        debugPrint("Error during sign out: $e");
         _showErrorSnackBar("Could not sign out properly: $e");
         // Still attempt navigation
         if (mounted) {
@@ -2510,7 +2511,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
       }
     } catch (e) {
       _dismissLoadingSnackbar();
-      print("Failed to toggle online status: $e");
+      debugPrint("Failed to toggle online status: $e");
       if (mounted) {
         _showErrorSnackBar('Error updating status: ${e.toString()}');
       }
@@ -3106,7 +3107,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         }
       }
     } catch (e) {
-      print('Error launching Google Maps: $e');
+      debugPrint('Error launching Google Maps: $e');
       _showErrorSnackBar('Failed to open navigation: ${e.toString()}');
     }
   }
@@ -3233,7 +3234,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                         _parseLocationToLatLng(order.deliveryAddress);
 
                     if (destination != null) {
-                      print(
+                      debugPrint(
                           "Attempting to navigate to: Lat=${destination.latitude}, Lng=${destination.longitude}");
                       _launchGoogleMapsNavigation(destination, order: order);
                     } else {
@@ -3327,7 +3328,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             orElse: () => null,
           );
     } catch (e) {
-      print('Error fetching order details: $e');
+      debugPrint('Error fetching order details: $e');
       return null;
     }
   }
@@ -3369,7 +3370,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
         }
       } catch (e) {
         _dismissLoadingSnackbar();
-        print("Failed to accept order: $e");
+        debugPrint("Failed to accept order: $e");
         if (mounted)
           _showErrorSnackBar('Failed to accept order: ${e.toString()}');
       }
@@ -3378,7 +3379,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
 
   Future<void> _handleRejectOrder(Order order) async {
     // Same as provided (local removal assumes reject API isn't needed)
-    print("Rejecting order ${order.orderId}");
+    debugPrint("Rejecting order ${order.orderId}");
     try {
       // bool success = await TransporterApiService.rejectOrder(order.orderId, widget.transporterId); // Call API if needed
       // if (success) {
@@ -3389,7 +3390,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
           isError: false); // Use normal snackbar
       // } else { throw Exception("Reject order API failed."); }
     } catch (e) {
-      print("Failed to reject order: $e");
+      debugPrint("Failed to reject order: $e");
       if (mounted)
         _showErrorSnackBar('Failed to reject order: ${e.toString()}');
     }
@@ -3471,7 +3472,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
                           : null),
                   onBackgroundImageError: (_, __) {
                     // Handle image load errors
-                    print(
+                    debugPrint(
                         "Error loading profile header image: ${_transporterProfile?.profileImageUrl}");
                     // Optionally display placeholder icon here if needed
                   },
@@ -3755,7 +3756,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
 
       // 3. Call API to update profile if data changed
       if (updateData.isNotEmpty) {
-        print("Sending profile update data: $updateData");
+        debugPrint("Sending profile update data: $updateData");
         bool success = await TransporterApiService.updateTransporterProfile(
             widget.transporterId, updateData);
         if (!success)
@@ -3774,7 +3775,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             isError: false); // Inform user
       }
     } catch (e) {
-      print("Failed to save personal changes: $e");
+      debugPrint("Failed to save personal changes: $e");
       _dismissLoadingSnackbar(); // Ensure loading indicator dismissed on error
       if (mounted)
         _showErrorSnackBar('Failed to save profile: ${e.toString()}');
@@ -3929,7 +3930,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
 
     try {
       if (updateData.isNotEmpty) {
-        print("Sending vehicle update data: $updateData");
+        debugPrint("Sending vehicle update data: $updateData");
         bool success = await TransporterApiService.updateTransporterProfile(
             widget.transporterId, updateData);
         if (!success)
@@ -3943,7 +3944,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
       }
     } catch (e) {
       _dismissLoadingSnackbar();
-      print("Failed to save vehicle changes: $e");
+      debugPrint("Failed to save vehicle changes: $e");
       if (mounted)
         _showErrorSnackBar('Failed to save vehicle info: ${e.toString()}');
     } finally {
@@ -4094,7 +4095,7 @@ class _TransporterDashNewState extends State<TransporterDashNew> {
             isError: false);
       }
     } catch (e) {
-      print("Image picking error: $e");
+      debugPrint("Image picking error: $e");
       if (mounted) _showErrorSnackBar('Failed to pick image: ${e.toString()}');
     }
   }
@@ -4362,7 +4363,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
     String? nextStatus = _getNextStatus();
     if (nextStatus == null) {
-      print(
+      debugPrint(
           "No further status update available for ${_currentOrder.orderStatus}");
       _showSnackBar(
           "Order is already ${_getDetailedStatusText(_currentOrder.orderStatus)}.",
@@ -4466,7 +4467,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       }
     } catch (e) {
       _dismissLoadingSnackbar();
-      print("Verification failed: $e");
+      debugPrint("Verification failed: $e");
       if (mounted) {
         _showErrorSnackBar(
             'Verification failed: ${e.toString().replaceAll('Exception: ', '')}');
@@ -4483,7 +4484,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       final apiBaseUrl =
           dotenv.env['API_BASE_URL-intranet'] ?? 'https://api.example.com';
 
-      print('Fetching latest order details for order $orderId...');
+      debugPrint('Fetching latest order details for order $orderId...');
       final response = await http
           .get(
             Uri.parse('$apiBaseUrl/rr/orders?order_id=$orderId'),
@@ -4498,7 +4499,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           )
           .timeout(Duration(seconds: 10));
 
-      print('Order details response: ${response.statusCode}');
+      debugPrint('Order details response: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -4517,18 +4518,18 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
         if (orderData != null) {
           final updatedOrder = Order.fromJson(orderData);
-          print('Fetched updated order status: ${updatedOrder.orderStatus}');
+          debugPrint('Fetched updated order status: ${updatedOrder.orderStatus}');
           return updatedOrder;
         } else {
-          print('Invalid response format for single order: ${response.body}');
+          debugPrint('Invalid response format for single order: ${response.body}');
         }
       } else {
-        print(
+        debugPrint(
             'Failed to fetch order details: ${response.statusCode} ${response.body}');
       }
       return null;
     } catch (e) {
-      print('Error fetching order details: $e');
+      debugPrint('Error fetching order details: $e');
       return null;
     }
   }
@@ -4550,7 +4551,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       // Add a delay to allow backend to process the order status update
       // This helps ensure the payment data is ready when we fetch it
       const delayDuration = Duration(seconds: 10);
-      print(
+      debugPrint(
           'Waiting $delayDuration before refreshing earnings to allow backend processing...');
       await Future.delayed(delayDuration);
 
@@ -4573,14 +4574,14 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           _dismissLoadingSnackbar();
           _showSnackBar('Earnings updated', isError: false);
         }
-        print('Earnings refresh completed after order status change');
+        debugPrint('Earnings refresh completed after order status change');
       } else {
         _dismissLoadingSnackbar();
-        print('Parent state not found or not mounted, using callback only');
+        debugPrint('Parent state not found or not mounted, using callback only');
       }
     } catch (e) {
       _dismissLoadingSnackbar();
-      print('Error triggering earnings refresh: $e');
+      debugPrint('Error triggering earnings refresh: $e');
       if (mounted) {
         _showErrorSnackBar(
             'Earnings will update shortly. Pull down to refresh if needed.');
@@ -4655,7 +4656,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       }
     } catch (e) {
       _dismissLoadingSnackbar();
-      print("Failed to update order status to $newStatus: $e");
+      debugPrint("Failed to update order status to $newStatus: $e");
       if (mounted)
         _showErrorSnackBar('Failed to update status: ${e.toString()}');
     } finally {
@@ -4732,7 +4733,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   final LatLng? destination =
                       _parseLocationToLatLng(_currentOrder.deliveryAddress);
                   if (destination != null) {
-                    print(
+                    debugPrint(
                         "Attempting to navigate to: Lat=${destination.latitude}, Lng=${destination.longitude}");
                     setState(() {
                       _navigationTriggered = true;
@@ -5055,7 +5056,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                               _currentOrder.deliveryAddress);
 
                           if (destination != null) {
-                            print(
+                            debugPrint(
                                 "Attempting to navigate to: Lat=${destination.latitude}, Lng=${destination.longitude}");
                             setState(() {
                               _navigationTriggered = true;

@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:zinzi/signup_or_Login.dart';
+import 'package:flutter/foundation.dart';
 
 // --- Reusing Color Palette (from previous examples) ---
 const Color kColorPrimary = Color(0xFF00796B); // Teal Primary
@@ -41,7 +42,7 @@ class StakeholderApiService {
       // Use the key set during login/signup
       return prefs.getString('stakeholder_user_id');
     } catch (e) {
-      print("Error accessing SharedPreferences for stakeholder ID: $e");
+      debugPrint("Error accessing SharedPreferences for stakeholder ID: $e");
       return null;
     }
   }
@@ -55,7 +56,7 @@ class StakeholderApiService {
      if (responseData is List) return responseData;
      if (responseData is Map && responseData.containsKey('data')) return responseData['data'];
      if (responseData is Map) return responseData; // Return map if no 'data' key
-     print("API Warning: Unhandled stakeholder response format. Got: ${responseData.runtimeType}");
+     debugPrint("API Warning: Unhandled stakeholder response format. Got: ${responseData.runtimeType}");
      return null;
    }
 
@@ -149,7 +150,7 @@ class _stakeholderdas2222State extends State<stakeholderdas2222> {
       if (stakeholderId == null || stakeholderId.isEmpty) {
         throw Exception('Stakeholder ID not found. Please log in again.');
       }
-      print("Fetching data for Stakeholder ID: $stakeholderId");
+      debugPrint("Fetching data for Stakeholder ID: $stakeholderId");
 
       // TODO: Call API service methods here using the stakeholderId
       // e.g., final profile = await StakeholderApiService.fetchStakeholderProfile(stakeholderId);
@@ -165,11 +166,11 @@ class _stakeholderdas2222State extends State<stakeholderdas2222> {
 
       // Simulate API call delay for now
       await Future.delayed(const Duration(seconds: 1));
-      print("Dummy data fetch complete.");
+      debugPrint("Dummy data fetch complete.");
 
 
     } catch (e) {
-      print("Error fetching dashboard data: $e");
+      debugPrint("Error fetching dashboard data: $e");
       setState(() {
         _errorMessage = "Failed to load dashboard data: ${e.toString()}";
       });

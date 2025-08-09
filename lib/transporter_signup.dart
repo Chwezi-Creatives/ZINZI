@@ -13,7 +13,8 @@ import 'package:shimmer/shimmer.dart';
 // import 'package:zinzi/Transporter_login.dart';
 // import 'package:zinzi/transooter_dash_before_mapbox.dart';
 import 'package:zinzi/verification.dart'; // Import verification page
-import 'notifications/fcm_service.dart';
+import 'package:zinzi/services/notification_service.dart';
+import 'package:flutter/foundation.dart';
 
 // --- Hardcoded Colors ---
 const Color primaryTeal = Color(0xFF00796B);
@@ -176,7 +177,7 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
             'Imgur upload failed: ${response.statusCode} ${response.body}');
       }
     } catch (e) {
-      print("Imgur upload error: $e");
+      debugPrint("Imgur upload error: $e");
       if (mounted) _showSnackBar("Failed to upload image.", isError: true);
     } finally {
       if (mounted) setState(() => _isUploadingImage = false);
@@ -223,10 +224,10 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
       _locationController.text = _humanReadableAddress.isNotEmpty
           ? "$_humanReadableAddress ($_locationCoordinates)"
           : _locationCoordinates;
-      print("Optional location fetched: $_locationCoordinates");
+      debugPrint("Optional location fetched: $_locationCoordinates");
       if (mounted) _showSnackBar("Location approximated.", isError: false);
     } catch (e) {
-      print("Optional location fetch error: $e");
+      debugPrint("Optional location fetch error: $e");
     } finally {
       if (mounted) setState(() => _isFetchingLocation = false);
     }
@@ -317,7 +318,7 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
       };
       
       // Debug print to verify location data
-      print('Sending location data: ${signupData['location']}');
+      debugPrint('Sending location data: ${signupData['location']}');
 
       // --- Actual API Call ---
       try {
@@ -350,9 +351,22 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
               await prefs.setString('user_phone', phoneNumber);
             }
 
-            await Future.delayed(const Duration(milliseconds: 100));
-            // Register FCM token with user info (async, do not await)
-            FCMService.registerTokenWithUserInfo();
+            // Initialize and register FCM token in background after successful signup
+            Future.microtask(() async {
+              try {
+                final notificationService = NotificationService();
+                await notificationService.initialize();
+                final token = await notificationService.getFcmToken();
+                if (token != null) {
+                  debugPrint('FCM token obtained during transporter signup, registering with backend...');
+                  await notificationService.registerPendingFcmToken();
+                  debugPrint('FCM token registered for transporter');
+                }
+              } catch (e) {
+                debugPrint('Error registering FCM token during transporter signup: $e');
+                // Continue with signup flow even if FCM registration fails
+              }
+            });
           }
           if (!mounted) return; // Check mount status again after delay
           _showSnackBar('Signup successful!',
@@ -385,7 +399,7 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
           _showErrorSnackBar(errorMessage);
         }
       } catch (e) {
-        print("Signup exception: $e");
+        debugPrint("Signup exception: $e");
         if (mounted) {
           setState(() => _isLoading = false);
           _showErrorSnackBar('An error occurred during sign up: $e');
@@ -423,7 +437,7 @@ class _TransporterSignUpPageState extends State<TransporterSignUpPage> {
           _showErrorSnackBar(errorMessage);
         }
       } catch (e) {
-        print("Signup exception: $e");
+        debugPrint("Signup exception: $e");
         if (mounted) {
            setState(() => _isLoading = false);
            _showErrorSnackBar('An error occurred during sign up: $e');

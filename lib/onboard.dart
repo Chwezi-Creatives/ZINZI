@@ -1,6 +1,7 @@
 //cspell:disable
 import 'package:flutter/material.dart';
 import 'package:zinzi/allmeals.dart';
+import 'package:zinzi/features/payment/payment_plan_gate.dart';
 import 'package:zinzi/chef.dartp';
 import 'package:zinzi/chef_net.dart';
 //import 'package:zinzi/producer_network_testing.dart';
@@ -108,8 +109,21 @@ class LandingPage extends StatelessWidget {
                 children: [
                   _buildChoiceCard(context, 'Hire a Chef', ChooseChefNetwork(),
                       'assets/images/Chef22.png'),
-                  _buildChoiceCard(context, 'Meals', AllMealsScreen(),
-                      'assets/images/MealsRG.png'),
+                  _buildChoiceCard(
+                    context,
+                    'Meals',
+                    PaymentPlanGate(
+                      child: AllMealsScreen(),
+                      requirePlan: true,
+                      onPlanVerified: () {
+                        // This will be called after successful plan verification
+                        Navigator.of(context).pushReplacement(
+                          MaterialPageRoute(builder: (context) => AllMealsScreen()),
+                        );
+                      },
+                    ),
+                    'assets/images/MealsRG.png',
+                  ),
                 ],
               ),
               SizedBox(height: 20),

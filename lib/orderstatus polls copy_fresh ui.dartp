@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter/foundation.dart';
 
 // --- Environment & API ---
 final String apiBaseUrl = dotenv.env['API_BASE_URL'] ??
@@ -88,7 +89,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
           }
         }
       } catch (e) {
-        print("Error fetching details for order $orderId: $e");
+        debugPrint("Error fetching details for order $orderId: $e");
       }
     }
   }

@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:zinzi/dashboard_page.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/foundation.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL'] ?? 'https://default.url';
 
@@ -77,7 +78,7 @@ class _PaymentScreenppState extends State<PaymentScreenpp> {
         throw Exception('Failed to create payment: ${response.body}');
       }
     } catch (e) {
-      print('Error initiating payment: $e');
+      debugPrint('Error initiating payment: $e');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text("Error initiating payment. Please try again."),
       ));
@@ -213,7 +214,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
         ));
       }
     } catch (e) {
-      print('Error executing payment: $e');
+      debugPrint('Error executing payment: $e');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text("Error completing payment. Please try again."),
       ));

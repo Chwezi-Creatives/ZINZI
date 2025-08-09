@@ -10,6 +10,7 @@ import 'package:zinzi/useranalytics.dart';
 import 'package:zinzi/cart.dart';
 import 'package:zinzi/blogview.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart';
 
 final apibaseurl = dotenv.env['API_BASE_URL-intranet'] ?? 'https://default.url';
 
@@ -49,7 +50,7 @@ class _Recommend_Meals_ScreenState extends State<Recommend_Meals_Screen> {
           final decoded = json.decode(response.body);
           
           // Log the decoded response for debugging
-          print('Decoded response: $decoded');
+          debugPrint('Decoded response: $decoded');
 
           // Check for key and type
           if (decoded is Map<String, dynamic> && decoded.containsKey('recommended_meals')) {
@@ -97,7 +98,7 @@ class _Recommend_Meals_ScreenState extends State<Recommend_Meals_Screen> {
         throw Exception('User ID not found in Shared Preferences');
       }
     } catch (e) {
-      print('Error fetching meals: $e');
+      debugPrint('Error fetching meals: $e');
       setState(() {
         _meals = [];
         _filteredMeals = [];

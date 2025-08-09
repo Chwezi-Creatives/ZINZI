@@ -16,10 +16,11 @@ import 'package:provider/provider.dart';
 // import 'package:zinzi/cache_config.dart'; // Moved to producer_profile.dart
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zinzi/app_drawer_unified.dart' as drawer;
-import 'package:zinzi/notifications/notification_provider.dart';
+import 'package:zinzi/notifications_UIs/notification_provider.dart';
 import 'package:zinzi/user_cache.dart'; 
 import 'package:zinzi/utils/route_observer.dart';
 import 'package:zinzi/utils/location_utils.dart';
+import 'package:flutter/foundation.dart';
 
 // --- UI Constants ---
 const Color primaryTeal = Color(0xFF00796B); 
@@ -193,7 +194,7 @@ class Order {
         final apiDateFormat = DateFormat("E, dd MMM yyyy HH:mm:ss 'GMT'", 'en_US');
         parsedDate = apiDateFormat.parseUtc(json['order_date'] as String).toLocal();
       } catch (e2) {
-        print("[ProducerDash] Error parsing date: ${json['order_date']} - $e - $e2. Using current time.");
+        debugPrint("[ProducerDash] Error parsing date: ${json['order_date']} - $e - $e2. Using current time.");
         parsedDate = DateTime.now(); 
       }
     }
@@ -203,7 +204,7 @@ class Order {
       try {
         return List<Map<String, dynamic>>.from(value);
       } catch (e) {
-        print('Error parsing complementary meals: $e');
+        debugPrint('Error parsing complementary meals: $e');
         return null;
       }
     }
@@ -215,7 +216,7 @@ class Order {
           final decodedJson = jsonDecode(value) as Map<String, dynamic>;
           return BulkOrderDetails.fromJson(decodedJson);
         } catch (e) {
-          print('[ProducerDash] Error parsing bulk_order_details JSON string: $e');
+          debugPrint('[ProducerDash] Error parsing bulk_order_details JSON string: $e');
           return null;
         }
       }
@@ -244,7 +245,7 @@ class Order {
       );
       return order;
     } catch (e, stack) {
-      print('[ProducerDash] Order parsing error: $e\n$stack');
+      debugPrint('[ProducerDash] Order parsing error: $e\n$stack');
       rethrow;
     }
   }
@@ -315,7 +316,7 @@ class Product {
       );
       return product;
     } catch (e, stack) {
-      print('[ProducerDash] Product parsing error: $e\n$stack');
+      debugPrint('[ProducerDash] Product parsing error: $e\n$stack');
       rethrow; 
     }
   }
@@ -644,7 +645,7 @@ class Rider {
     final riderId = _parseIntNullable(json['rider_id'] ?? json['transporter_id'] ?? json['id']);
     final riderName = _getStringSafe(json['name'] ?? json['rider_name'] ?? json['transporter_name']);
     if (riderId == null || riderId == 0) {
-      print("[ProducerDash] Warning: Rider ID is missing or invalid in JSON: $json");
+      debugPrint("[ProducerDash] Warning: Rider ID is missing or invalid in JSON: $json");
     }
     
     // Parse distance if available (can be from _distance_km or distance_km)
@@ -679,10 +680,10 @@ class ProducerApiService {
       final decoded = jsonDecode(responseBody);
       if (decoded is Map && decoded.containsKey('data')) return decoded['data'];
       if (decoded is List || decoded is Map) return decoded;
-      print("[ProducerDash] API response format warning: Decoded type is ${decoded.runtimeType}");
+      debugPrint("[ProducerDash] API response format warning: Decoded type is ${decoded.runtimeType}");
       return null;
     } catch (e) {
-      print("[ProducerDash] API response JSON decoding error: $e");
+      debugPrint("[ProducerDash] API response JSON decoding error: $e");
       return null;
     }
   }
@@ -693,7 +694,7 @@ class ProducerApiService {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('access_token');
       if (token != null && token.isNotEmpty) headers['Authorization'] = 'Bearer $token';
-      else print("[ProducerDash] Warning: Auth required for read but no access token found.");
+      else debugPrint("[ProducerDash] Warning: Auth required for read but no access token found.");
     }
     return headers;
   }
@@ -706,7 +707,7 @@ class ProducerApiService {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('access_token');
       if (token != null && token.isNotEmpty) headers['Authorization'] = 'Bearer $token';
-      else print("[ProducerDash] Warning: Auth required but no access token found.");
+      else debugPrint("[ProducerDash] Warning: Auth required but no access token found.");
     }
     return headers;
   }
@@ -717,32 +718,32 @@ class ProducerApiService {
     final producerId = await _getProducerId();
     if (producerId == null) throw Exception('Producer ID not found. Please log in again.');
     final Uri uri = Uri.parse('$_apibaseurl/rr/orders?producer_id=$producerId');
-    print("[ProducerDash] Fetching orders: $uri");
+    debugPrint("[ProducerDash] Fetching orders: $uri");
     try {
       final response = await http.get(uri, headers: await _getReadHeaders(requiresAuth: true));
       if (response.statusCode == 200) {
         final dynamic handledData = _handleApiResponse(response.body);
         if (handledData is List) {
           final List<Order> orders = handledData.map<Order>((orderJson) => Order.fromJson(orderJson)).toList();
-          print("[ProducerDash] Fetched ${orders.length} orders");
+          debugPrint("[ProducerDash] Fetched ${orders.length} orders");
           return orders;
         } else {
-          print('[ProducerDash] Orders response format error: expected List, got ${handledData?.runtimeType}. Body: ${response.body}');
+          debugPrint('[ProducerDash] Orders response format error: expected List, got ${handledData?.runtimeType}. Body: ${response.body}');
           throw Exception('API response for orders was not a list. Body: ${response.body}');
         }
       } else {
         throw Exception('Failed to load orders (Status: ${response.statusCode}). Body: ${response.body}');
       }
     } catch (e, stack) {
-      print('[ProducerDash] Orders fetch error: $e\n$stack');
+      debugPrint('[ProducerDash] Orders fetch error: $e\n$stack');
       rethrow;
     }
   }
 
   static Future<bool> updateOrderStatus(int orderId, String newStatus) async {
     final Uri uri = Uri.parse('$_apibaseurl/rr/orders/$orderId/status');
-    print('[ProducerDash][API] Updating order $orderId status to $newStatus');
-    print('[ProducerDash][API] Endpoint: $uri');
+    debugPrint('[ProducerDash][API] Updating order $orderId status to $newStatus');
+    debugPrint('[ProducerDash][API] Endpoint: $uri');
     
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -753,10 +754,10 @@ class ProducerApiService {
         if (userPhone != null) 'restaurant_phone': userPhone,
       };
       
-      print('[ProducerDash][API] Request body: $requestBody');
+      debugPrint('[ProducerDash][API] Request body: $requestBody');
       
       final headers = await _getWriteHeaders();
-      print('[ProducerDash][API] Headers: $headers');
+      debugPrint('[ProducerDash][API] Headers: $headers');
       
       final response = await http.patch(
         uri, 
@@ -764,33 +765,33 @@ class ProducerApiService {
         body: jsonEncode(requestBody)
       ).timeout(const Duration(seconds: 30));
       
-      print('[ProducerDash][API] Response status: ${response.statusCode}');
-      print('[ProducerDash][API] Response body: ${response.body}');
+      debugPrint('[ProducerDash][API] Response status: ${response.statusCode}');
+      debugPrint('[ProducerDash][API] Response body: ${response.body}');
       
       if (response.statusCode == 200 || response.statusCode == 204) {
-        print('[ProducerDash][API] Status update successful');
+        debugPrint('[ProducerDash][API] Status update successful');
         return true;
       } else {
-        print('[ProducerDash][API] Status update failed with status: ${response.statusCode}');
+        debugPrint('[ProducerDash][API] Status update failed with status: ${response.statusCode}');
         return false;
       }
     } on TimeoutException catch (e) {
-      print('[ProducerDash][API] Request timed out: $e');
+      debugPrint('[ProducerDash][API] Request timed out: $e');
       return false;
     } on SocketException catch (e) {
-      print('[ProducerDash][API] Network error: $e');
+      debugPrint('[ProducerDash][API] Network error: $e');
       return false;
     } catch (e, stackTrace) {
-      print('[ProducerDash][API] Unexpected error:');
-      print('Error: $e');
-      print('Stack trace: $stackTrace');
+      debugPrint('[ProducerDash][API] Unexpected error:');
+      debugPrint('Error: $e');
+      debugPrint('Stack trace: $stackTrace');
       return false;
     }
   }
 
   static Future<bool> assignOrderToRider(int orderId, int riderId, String newStatus) async {
     final Uri uri = Uri.parse('$_apibaseurl/rr/orders/$orderId/status');
-    print("[ProducerDash] Assigning order $orderId to rider $riderId, status $newStatus at $uri");
+    debugPrint("[ProducerDash] Assigning order $orderId to rider $riderId, status $newStatus at $uri");
     try {
       final prefs = await SharedPreferences.getInstance();
       final userPhone = prefs.getString('user_phone');
@@ -809,7 +810,7 @@ class ProducerApiService {
       
       return response.statusCode == 200 || response.statusCode == 204;
     } catch (e) {
-      print("[ProducerDash] Exception assigning order: $e");
+      debugPrint("[ProducerDash] Exception assigning order: $e");
       return false;
     }
   }
@@ -924,7 +925,7 @@ class ProducerApiService {
           ? _apibaseurl.substring(0, _apibaseurl.length - 1) 
           : _apibaseurl;
       final url = '$baseUrl/rr/disbursements/producer?producer_id=$producerId';
-      print('[ProducerDash] Fetching payments from: $url');
+      debugPrint('[ProducerDash] Fetching payments from: $url');
       
       final headers = await _getReadHeaders(requiresAuth: true); // Auth is likely needed
       final response = await http.get(
@@ -932,7 +933,7 @@ class ProducerApiService {
         headers: headers,
       ).timeout(const Duration(seconds: 30));
       
-      print('[ProducerDash] Response status: ${response.statusCode}');
+      debugPrint('[ProducerDash] Response status: ${response.statusCode}');
       
       // Check for HTML response (usually means an error page)
       final contentType = response.headers['content-type']?.toLowerCase() ?? '';
@@ -948,7 +949,7 @@ class ProducerApiService {
           // Handle both array response and single object
           final List<dynamic> paymentsJson = data is List ? data : [data];
           
-          print('[ProducerDash] Found ${paymentsJson.length} payments');
+          debugPrint('[ProducerDash] Found ${paymentsJson.length} payments');
           
           // Convert each JSON object to ProducerPayment
           final payments = <ProducerPayment>[];
@@ -958,27 +959,27 @@ class ProducerApiService {
                 payments.add(ProducerPayment.fromJson(json));
               }
             } catch (e) {
-              print('[ProducerDash] Error parsing payment: $e');
+              debugPrint('[ProducerDash] Error parsing payment: $e');
               continue;
             }
           }
           
           return payments;
         } catch (e) {
-          print('[ProducerDash] Error processing payments: $e');
+          debugPrint('[ProducerDash] Error processing payments: $e');
           throw Exception('Failed to process payment data');
         }
       } else {
         throw Exception('Failed to load payments. Status: ${response.statusCode}');
       }
     } on SocketException catch (e) {
-      print('[ProducerDash] Network error: $e');
+      debugPrint('[ProducerDash] Network error: $e');
       throw Exception('No internet connection');
     } on TimeoutException {
-      print('[ProducerDash] Request timed out');
+      debugPrint('[ProducerDash] Request timed out');
       throw Exception('Request timed out. Please try again.');
     } catch (e) {
-      print('[ProducerDash] Unexpected error: $e');
+      debugPrint('[ProducerDash] Unexpected error: $e');
       throw Exception('An error occurred. Please try again.');
     }
   }
@@ -992,56 +993,56 @@ class ProducerApiService {
         if (cacheTime != null && DateTime.now().difference(cacheTime).inDays < _cacheExpiryDays) {
           try {
             final List<Product> products = (cachedProduce as List).map((item) => Product.fromJson(item as Map<String, dynamic>)).toList();
-            print("[ProducerDash] Using cached produce list (${products.length} items)");
+            debugPrint("[ProducerDash] Using cached produce list (${products.length} items)");
             return products;
           } catch (e) {
-            print("[ProducerDash] Error parsing cached produce: $e");
+            debugPrint("[ProducerDash] Error parsing cached produce: $e");
           }
         }
       }
     }
     
     final Uri uri = Uri.parse('$_apibaseurl/rr/produce');
-    print("[ProducerDash] Fetching fresh master produce list: $uri");
+    debugPrint("[ProducerDash] Fetching fresh master produce list: $uri");
     try {
       final response = await http.get(uri, headers: await _getReadHeaders(requiresAuth: true));
       if (response.statusCode == 200) {
         final dynamic handledData = _handleApiResponse(response.body);
         if (handledData is List) {
           final List<Product> produce = handledData.map<Product>((prodJson) => Product.fromJson(prodJson)).toList();
-          print("[ProducerDash] Fetched ${produce.length} produce items from API");
+          debugPrint("[ProducerDash] Fetched ${produce.length} produce items from API");
           try {
             final produceJson = produce.map((p) => p.toJson()).toList();
             await UserCache.saveData(_produceCacheKey, produceJson);
             await UserCache.saveData(_produceCacheTimestampKey, DateTime.now().toIso8601String());
-            print("[ProducerDash] Cached ${produce.length} produce items");
+            debugPrint("[ProducerDash] Cached ${produce.length} produce items");
           } catch (e) {
-            print("[ProducerDash] Error caching produce: $e");
+            debugPrint("[ProducerDash] Error caching produce: $e");
           }
           return produce;
         } else {
-          print('[ProducerDash] Produce response format error: expected List, got ${handledData?.runtimeType}. Body: ${response.body}');
+          debugPrint('[ProducerDash] Produce response format error: expected List, got ${handledData?.runtimeType}. Body: ${response.body}');
           throw Exception('API response for produce was not a list. Body: ${response.body}');
         }
       } else {
         throw Exception('Failed to fetch produce (Status: ${response.statusCode}). Body: ${response.body}');
       }
     } catch (e, stack) {
-      print('[ProducerDash] Produce fetch error: $e\n$stack');
+      debugPrint('[ProducerDash] Produce fetch error: $e\n$stack');
       rethrow;
     }
   }
 
   static Future<bool> updateProducerStock(int producerId, List<Map<String, dynamic>> stockList) async {
     final Uri uri = Uri.parse('$_apibaseurl/rr/producers/$producerId');
-    print("[ProducerDash] Updating stock for producer $producerId at $uri");
+    debugPrint("[ProducerDash] Updating stock for producer $producerId at $uri");
     final payload = jsonEncode({"stock": stockList});
-    print("[ProducerDash] Stock update payload: $payload");
+    debugPrint("[ProducerDash] Stock update payload: $payload");
     try {
       final response = await http.patch(uri, headers: await _getWriteHeaders(), body: payload);
       return response.statusCode == 200 || response.statusCode == 204;
     } catch (e) {
-      print("Exception updating stock: $e");
+      debugPrint("Exception updating stock: $e");
       return false;
     }
   }
@@ -1070,7 +1071,7 @@ class ProducerDash22 extends StatefulWidget {
         'bulk_order_details': order.bulkOrderDetails != null ? jsonEncode(order.bulkOrderDetails) : null,
       };
     }
-    print("[ProducerDash] Warning: Could not serialize order of type ${order.runtimeType}");
+    debugPrint("[ProducerDash] Warning: Could not serialize order of type ${order.runtimeType}");
     return {};
   }
 
@@ -1085,22 +1086,22 @@ class ProducerDash22 extends StatefulWidget {
         'unit_grams': product.unitGrams, 'source': product.source,
       };
     }
-    print("[ProducerDash] Warning: Could not serialize product of type ${product.runtimeType}");
+    debugPrint("[ProducerDash] Warning: Could not serialize product of type ${product.runtimeType}");
     return {};
   }
 
   static Future<void> preloadCacheForSplash() async {
-    print('[Splash][ProducerDash-Dashboard] Starting cache preload...');
+    debugPrint('[Splash][ProducerDash-Dashboard] Starting cache preload...');
     final stopwatch = Stopwatch()..start();
     try {
       // Profile preload is handled by producer_profile.dart's own static method.
       await ProducerApiService.fetchProducerOrders();
-      print('[Splash][ProducerDash-Dashboard] Orders cache preloaded');
+      debugPrint('[Splash][ProducerDash-Dashboard] Orders cache preloaded');
       await ProducerApiService.fetchProducerProduce();
-      print('[Splash][ProducerDash-Dashboard] Produce cache preloaded');
-      print('[Splash][ProducerDash-Dashboard] Cache preload completed in ${stopwatch.elapsedMilliseconds}ms');
+      debugPrint('[Splash][ProducerDash-Dashboard] Produce cache preloaded');
+      debugPrint('[Splash][ProducerDash-Dashboard] Cache preload completed in ${stopwatch.elapsedMilliseconds}ms');
     } catch (e) {
-      print('[Splash][ProducerDash-Dashboard] Error during cache preload: $e');
+      debugPrint('[Splash][ProducerDash-Dashboard] Error during cache preload: $e');
     }
   }
 
@@ -1143,14 +1144,14 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
   // Fetch payments for the producer
   Future<void> _fetchPayments() async {
     if (_isLoadingPayments) {
-      print('[ProducerDash] Fetch already in progress, skipping');
+      debugPrint('[ProducerDash] Fetch already in progress, skipping');
       return;
     }
     
-    print('[ProducerDash] Starting to fetch payments');
+    debugPrint('[ProducerDash] Starting to fetch payments');
     
     if (!mounted) {
-      print('[ProducerDash] Widget not mounted, aborting');
+      debugPrint('[ProducerDash] Widget not mounted, aborting');
       return;
     }
     
@@ -1161,10 +1162,10 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     });
     
     try {
-      print('[ProducerDash] Getting producer ID');
+      debugPrint('[ProducerDash] Getting producer ID');
       final producerId = await ProducerApiService._getProducerIdInt();
       if (producerId == null) {
-        print('[ProducerDash] No producer ID found');
+        debugPrint('[ProducerDash] No producer ID found');
         if (!mounted) return;
         setState(() {
           _hasPaymentError = true;
@@ -1173,13 +1174,13 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
         return;
       }
       
-      print('[ProducerDash] Fetching payments for producer ID: $producerId');
+      debugPrint('[ProducerDash] Fetching payments for producer ID: $producerId');
       final payments = await ProducerApiService.fetchProducerPayments(producerId);
       
-      print('[ProducerDash] Received ${payments.length} payments');
+      debugPrint('[ProducerDash] Received ${payments.length} payments');
       
       if (!mounted) {
-        print('[ProducerDash] Widget disposed during fetch, ignoring results');
+        debugPrint('[ProducerDash] Widget disposed during fetch, ignoring results');
         return;
       }
       
@@ -1189,10 +1190,10 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
         _error = '';
       });
       
-      print('[ProducerDash] Payments updated in state');
+      debugPrint('[ProducerDash] Payments updated in state');
       
     } catch (e, stack) {
-      print('[ProducerDash] Error fetching payments: $e\n$stack');
+      debugPrint('[ProducerDash] Error fetching payments: $e\n$stack');
       if (!mounted) return;
       setState(() {
         _hasPaymentError = true;
@@ -1204,7 +1205,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
           _isLoadingPayments = false;
         });
       }
-      print('[ProducerDash] Finished fetch payments operation');
+      debugPrint('[ProducerDash] Finished fetch payments operation');
     }
   }
 
@@ -1279,7 +1280,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
   }
 
   void _handleNotificationRefresh() {
-    print("[ProducerDash] Received notification refresh trigger.");
+    debugPrint("[ProducerDash] Received notification refresh trigger.");
     if (!_isRefreshing && mounted) _fetchAllData(forceRefresh: true);
   }
 
@@ -1355,11 +1356,11 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     _pollingTimer?.cancel();
     _pollingTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
       if (mounted && _currentIndex == 0 && _isRouteActive && !_isRefreshing) {
-        print("[ProducerDash] Polling for new orders...");
+        debugPrint("[ProducerDash] Polling for new orders...");
         _pollOrders();
       }
     });
-    print("[ProducerDash] Started polling for orders");
+    debugPrint("[ProducerDash] Started polling for orders");
   }
 
   Future<void> _fetchAllData({bool forceRefresh = false}) async {
@@ -1454,7 +1455,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
 
 
   Future<void> _fetchOrdersAndProduce({bool forceRefresh = false}) async {
-    print('[ProducerDash][DEBUG] Starting _fetchOrdersAndProduce. Force refresh: $forceRefresh');
+    debugPrint('[ProducerDash][DEBUG] Starting _fetchOrdersAndProduce. Force refresh: $forceRefresh');
     const String ordersKey = 'producer_orders';
     const String ordersTsKey = 'producer_orders_cache_timestamp';
     const String produceKey = 'producer_produce';
@@ -1473,7 +1474,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     List<Product>? cachedProduceData;
 
     if (!forceRefresh) {
-      print('[ProducerDash][CACHE] Attempting to load from cache...');
+      debugPrint('[ProducerDash][CACHE] Attempting to load from cache...');
       try {
         final cachedOrdersJson = await UserCache.getData(ordersKey);
         final cachedOrdersTs = await UserCache.getData(ordersTsKey);
@@ -1485,19 +1486,19 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
           final cacheTime = DateTime.tryParse(cachedOrdersTs);
           if (cacheTime != null) {
             try {
-              print('[ProducerDash][CACHE] Parsing cached orders...');
+              debugPrint('[ProducerDash][CACHE] Parsing cached orders...');
               cachedOrdersData = (cachedOrdersJson).map<Order>((orderJson) {
                 try {
                   return Order.fromJson(orderJson as Map<String, dynamic>);
                 } catch (e) {
-                  print('[ProducerDash][CACHE] Error parsing order: $e');
+                  debugPrint('[ProducerDash][CACHE] Error parsing order: $e');
                   rethrow;
                 }
               }).toList();
               ordersCacheValid = true;
-              print('[ProducerDash][CACHE] Successfully parsed ${cachedOrdersData.length} orders from cache');
+              debugPrint('[ProducerDash][CACHE] Successfully parsed ${cachedOrdersData.length} orders from cache');
             } catch (e) { 
-              print('[ProducerDash][CACHE] Error parsing cached orders: $e'); 
+              debugPrint('[ProducerDash][CACHE] Error parsing cached orders: $e'); 
             }
           }
         }
@@ -1506,53 +1507,53 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
           final cacheTime = DateTime.tryParse(cachedProduceTs);
           if (cacheTime != null) {
             try {
-              print('[ProducerDash][CACHE] Parsing cached produce...');
+              debugPrint('[ProducerDash][CACHE] Parsing cached produce...');
               cachedProduceData = (cachedProduceJson).map<Product>((prodJson) {
                 try {
                   return Product.fromJson(prodJson as Map<String, dynamic>);
                 } catch (e) {
-                  print('[ProducerDash][CACHE] Error parsing product: $e');
+                  debugPrint('[ProducerDash][CACHE] Error parsing product: $e');
                   rethrow;
                 }
               }).toList();
               produceCacheValid = true;
-              print('[ProducerDash][CACHE] Successfully parsed ${cachedProduceData.length} products from cache');
+              debugPrint('[ProducerDash][CACHE] Successfully parsed ${cachedProduceData.length} products from cache');
             } catch (e) { 
-              print('[ProducerDash][CACHE] Error parsing cached produce: $e'); 
+              debugPrint('[ProducerDash][CACHE] Error parsing cached produce: $e'); 
             }
           }
         }
 
         if (mounted && (ordersCacheValid || produceCacheValid)) {
-          print('[ProducerDash][CACHE] Updating UI with cached data');
+          debugPrint('[ProducerDash][CACHE] Updating UI with cached data');
           setState(() {
             if (ordersCacheValid && cachedOrdersData != null) { 
               _orders.clear();
               _orders.addAll(cachedOrdersData!);
               _sortOrders(); 
-              print('[ProducerDash][CACHE] Updated ${_orders.length} orders in UI');
+              debugPrint('[ProducerDash][CACHE] Updated ${_orders.length} orders in UI');
             }
             if (produceCacheValid && cachedProduceData != null) { 
               _produce.clear();
               _produce.addAll(cachedProduceData!);
               _produce.sort((a,b) => a.produceName.toLowerCase().compareTo(b.produceName.toLowerCase()));
-              print('[ProducerDash][CACHE] Updated ${_produce.length} products in UI');
+              debugPrint('[ProducerDash][CACHE] Updated ${_produce.length} products in UI');
             }
             _isLoadingOrders = !ordersCacheValid; 
             _isLoadingProduce = !produceCacheValid;
           });
           loadedFromCache = ordersCacheValid && produceCacheValid;
-          print('[ProducerDash][CACHE] Loaded from cache: $loadedFromCache');
+          debugPrint('[ProducerDash][CACHE] Loaded from cache: $loadedFromCache');
         }
       } catch (e) {
-        print('[ProducerDash][CACHE] Error during cache processing: $e');
+        debugPrint('[ProducerDash][CACHE] Error during cache processing: $e');
       }
     } else {
-      print('[ProducerDash][CACHE] Skipping cache - force refresh requested');
+      debugPrint('[ProducerDash][CACHE] Skipping cache - force refresh requested');
     }
 
     try {
-      print('[ProducerDash][API] Fetching fresh data from server...');
+      debugPrint('[ProducerDash][API] Fetching fresh data from server...');
       final results = await Future.wait([
         ProducerApiService.fetchProducerOrders(),
         ProducerApiService.fetchProducerProduce(),
@@ -1562,7 +1563,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
         final fetchedOrders = results[0] as List<Order>;
         final fetchedProduce = results[1] as List<Product>;
         
-        print('[ProducerDash][API] Fetched ${fetchedOrders.length} orders and ${fetchedProduce.length} products');
+        debugPrint('[ProducerDash][API] Fetched ${fetchedOrders.length} orders and ${fetchedProduce.length} products');
         
         setState(() {
           _orders.clear();
@@ -1576,22 +1577,22 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
         });
         
         try {
-          print('[ProducerDash][CACHE] Saving data to cache...');
+          debugPrint('[ProducerDash][CACHE] Saving data to cache...');
           await Future.wait([
             UserCache.saveData(ordersKey, fetchedOrders.map((o) => ProducerDash22._serializeOrder(o)).toList()),
             UserCache.saveData(ordersTsKey, now.toIso8601String()),
             UserCache.saveData(produceKey, fetchedProduce.map((p) => ProducerDash22._serializeProduct(p)).toList()),
             UserCache.saveData(produceTsKey, now.toIso8601String()),
           ]);
-          print('[ProducerDash][CACHE] Data saved to cache');
+          debugPrint('[ProducerDash][CACHE] Data saved to cache');
         } catch (e) {
-          print('[ProducerDash][CACHE] Error saving to cache: $e');
+          debugPrint('[ProducerDash][CACHE] Error saving to cache: $e');
         }
       }
     } catch (e, stackTrace) {
-      print('[ProducerDash][API] Error fetching data:');
-      print('Error: $e');
-      print('Stack trace: $stackTrace');
+      debugPrint('[ProducerDash][API] Error fetching data:');
+      debugPrint('Error: $e');
+      debugPrint('Stack trace: $stackTrace');
       
       if (mounted) {
         setState(() {
@@ -1611,7 +1612,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
         }
       }
     } finally {
-      print('[ProducerDash] Finished _fetchOrdersAndProduce');
+      debugPrint('[ProducerDash] Finished _fetchOrdersAndProduce');
     }
   }
 
@@ -1628,16 +1629,16 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
         previousStatus != newStatus;
     
     if (isNewlyCompleted) {
-      print('[ProducerDash] Order $orderId status changed to $newStatus, refreshing earnings...');
+      debugPrint('[ProducerDash] Order $orderId status changed to $newStatus, refreshing earnings...');
       _fetchPayments();
     }
   }
 
   Future<void> _updateSimpleOrderStatus(Order order, String newStatus) async {
-    print('[ProducerDash][DEBUG] Starting order status update. Order ID: ${order.orderId}, New Status: $newStatus');
+    debugPrint('[ProducerDash][DEBUG] Starting order status update. Order ID: ${order.orderId}, New Status: $newStatus');
     final orderIndex = _findOrderIndex(order.orderId);
     if (orderIndex == -1) {
-      print('[ProducerDash][ERROR] Order not found in local list: ${order.orderId}');
+      debugPrint('[ProducerDash][ERROR] Order not found in local list: ${order.orderId}');
       return;
     }
     
@@ -1648,7 +1649,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     final originalRiderId = _orders[orderIndex].assignedRiderId;
     final originalRiderName = _orders[orderIndex].assignedRiderName;
     
-    print('[ProducerDash][DEBUG] Current status: $originalStatus, Will update to: $newStatus');
+    debugPrint('[ProducerDash][DEBUG] Current status: $originalStatus, Will update to: $newStatus');
     
     if (!_previousOrderStatuses.containsKey(order.orderId)) {
       _previousOrderStatuses[order.orderId] = order.orderStatus;
@@ -1659,7 +1660,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     setState(() {
       _orders[orderIndex].orderStatus = newStatus;
       if ([Order.STATUS_ACCEPTED, Order.STATUS_PREPARING, Order.STATUS_CANCELLED].contains(newStatus)) {
-        print('[ProducerDash][DEBUG] Clearing rider assignment for status: $newStatus');
+        debugPrint('[ProducerDash][DEBUG] Clearing rider assignment for status: $newStatus');
         _orders[orderIndex] = _orders[orderIndex].copyWith(
           assignedRiderId: () => null, 
           assignedRiderName: () => null
@@ -1671,23 +1672,23 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     _showLoadingSnackbar("Updating status to $newStatus...");
     
     try {
-      print('[ProducerDash][DEBUG] Calling API to update order status...');
+      debugPrint('[ProducerDash][DEBUG] Calling API to update order status...');
       bool success = await ProducerApiService.updateOrderStatus(order.orderId, newStatus);
       _dismissLoadingSnackbar();
       
       if (!mounted) {
-        print('[ProducerDash][DEBUG] Widget not mounted after API call, aborting');
+        debugPrint('[ProducerDash][DEBUG] Widget not mounted after API call, aborting');
         return;
       }
       
       if (success) {
-        print('[ProducerDash][SUCCESS] Order ${order.orderId} status updated to $newStatus');
+        debugPrint('[ProducerDash][SUCCESS] Order ${order.orderId} status updated to $newStatus');
         _showSuccessSnackbar('Order ${order.orderId} status updated to $newStatus.');
         _showOrderNextStepDialog(newStatus);
         
         _fetchOrdersAndProduce(forceRefresh: true);
       } else {
-        print('[ProducerDash][ERROR] API returned failure for order ${order.orderId}');
+        debugPrint('[ProducerDash][ERROR] API returned failure for order ${order.orderId}');
         _showErrorSnackBar('Failed to update order ${order.orderId} status.');
         
         setState(() {
@@ -1701,9 +1702,9 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
       }
     } catch (e, stackTrace) {
       _dismissLoadingSnackbar();
-      print('[ProducerDash][EXCEPTION] Error updating order status:');
-      print('Error: $e');
-      print('Stack trace: $stackTrace');
+      debugPrint('[ProducerDash][EXCEPTION] Error updating order status:');
+      debugPrint('Error: $e');
+      debugPrint('Stack trace: $stackTrace');
       
       if (mounted) {
         _showErrorSnackBar('An error occurred while updating status.');
@@ -1728,13 +1729,13 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     );
     if (!mounted) return;
     if (result is Rider) {
-      print("Rider ${result.name} selected for Order ${order.orderId}. Showing confirmation...");
+      debugPrint("Rider ${result.name} selected for Order ${order.orderId}. Showing confirmation...");
       await _showRiderAssignmentConfirmation(order, result);
     } else if (result == true) {
-      print("Marking Order ${order.orderId} as Ready for Pickup (Any Rider)");
+      debugPrint("Marking Order ${order.orderId} as Ready for Pickup (Any Rider)");
       await _markReadyForAnyRider(order);
     } else {
-      print("Rider assignment cancelled or dialog closed.");
+      debugPrint("Rider assignment cancelled or dialog closed.");
     }
   }
 
@@ -1759,10 +1760,10 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
     );
     if (confirm == true) {
       if (!mounted) return;
-      print("Confirmation received. Assigning Order ${order.orderId} to Rider ${rider.id} (${rider.name})");
+      debugPrint("Confirmation received. Assigning Order ${order.orderId} to Rider ${rider.id} (${rider.name})");
       await _assignSpecificRider(order, rider);
     } else {
-      print("Rider assignment cancelled by user.");
+      debugPrint("Rider assignment cancelled by user.");
       _showInfoSnackbar("Rider assignment cancelled.");
     }
   }
@@ -1794,7 +1795,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
       }
     } catch (e) {
       _dismissLoadingSnackbar();
-      print("[ProducerDash] Error assigning specific rider: $e");
+      debugPrint("[ProducerDash] Error assigning specific rider: $e");
       if (mounted) {
         _showErrorSnackBar('An error occurred while assigning the rider.');
         setState(() {
@@ -1832,7 +1833,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
       }
     } catch (e) {
       _dismissLoadingSnackbar();
-      print("[ProducerDash] Error marking ready for any rider: $e");
+      debugPrint("[ProducerDash] Error marking ready for any rider: $e");
       if (mounted) {
         _showErrorSnackBar('An error occurred while updating order status.');
         setState(() {
@@ -1861,7 +1862,7 @@ class _ProducerDash22State extends State<ProducerDash22> with SingleTickerProvid
 
   int _findOrderIndex(int orderId) {
     final index = _orders.indexWhere((o) => o.orderId == orderId);
-    if (index == -1) print("[ProducerDash] Warning: Order $orderId not found in _orders list for update.");
+    if (index == -1) debugPrint("[ProducerDash] Warning: Order $orderId not found in _orders list for update.");
     return index;
   }
 
@@ -2847,7 +2848,7 @@ class _RiderSelectionDialogState extends State<_RiderSelectionDialog> {
         setState(() { _allRiders = riders; _isLoading = false; });
       }
     } catch (e) {
-      print("[ProducerDash] Error fetching riders in dialog: $e");
+      debugPrint("[ProducerDash] Error fetching riders in dialog: $e");
       if (mounted) setState(() { _errorMessage = "Error fetching riders: ${e.toString().split('Body:')[0]}"; _isLoading = false; });
     }
   }

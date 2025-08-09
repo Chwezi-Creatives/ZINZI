@@ -1,6 +1,7 @@
 //cspell:disable
 import 'dart:io';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -21,6 +22,7 @@ import 'package:zinzi/orderhistory.dart';
 import 'package:zinzi/onboard.dart';
 import 'package:zinzi/user_cache.dart';
 import 'package:zinzi/feedback_screen.dart';
+import 'package:zinzi/debug/notification_test_screen.dart';
 
 // --- Color Constants ---
 const Color kColorPrimaryDark = Color(0xFF004D40);
@@ -149,7 +151,7 @@ class AppDrawer extends StatefulWidget {
         }
       }
     } catch (e) {
-      print("Error refreshing $userType details: $e");
+      debugPrint("Error refreshing $userType details: $e");
     }
   }
 
@@ -331,7 +333,7 @@ class _AppDrawerState extends State<AppDrawer> {
         if (mounted) setState(() => _isLoading = false);
       }
     } catch (e) {
-      print("Error fetching $_userType details: $e");
+      debugPrint("Error fetching $_userType details: $e");
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -416,9 +418,9 @@ class _AppDrawerState extends State<AppDrawer> {
         );
       }
       
-      print('User logged out successfully');
+      debugPrint('User logged out successfully');
     } catch (e) {
-      print('Error during logout: $e');
+      debugPrint('Error during logout: $e');
       // Even if there's an error, we should still try to navigate to login
       if (mounted) {
         Navigator.pushAndRemoveUntil(
@@ -547,6 +549,26 @@ class _AppDrawerState extends State<AppDrawer> {
       }),
     ]);
 
+    // Developer section - only show in debug mode
+    if (kDebugMode) {
+      tiles.add(const Divider(height: 1, color: kColorDivider));
+      tiles.add(ListTile(
+        title: Text('DEVELOPER', style: GoogleFonts.poppins(
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          color: Colors.grey[600],
+        )),
+        enabled: false,
+      ));
+      tiles.add(_buildDrawerTile(Icons.notifications_active, 'Test Notifications', () {
+        Navigator.pop(context);
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const NotificationTestScreen()),
+        );
+      }));
+    }
+    
     tiles.addAll([
       const Divider(height: 1, color: kColorDivider),
       _buildDrawerTile(Icons.help_outline, 'Help', () {
@@ -615,7 +637,7 @@ class _AppDrawerState extends State<AppDrawer> {
                   backgroundColor: kColorSurface.withOpacity(0.8),
                   backgroundImage: avatarImage,
                   onBackgroundImageError: (_, __) {
-                    print("Error loading profile picture in drawer.");
+                    debugPrint("Error loading profile picture in drawer.");
                   },
                   child: _isLoading &&
                           _profileImageUrl == null &&

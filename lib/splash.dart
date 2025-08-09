@@ -13,6 +13,7 @@ import 'package:zinzi/produ_dash22.dart';
 import 'package:zinzi/transooter_dash_before_mapbox.dart';
 import 'package:zinzi/stakeholderdash222.dart';
 import 'package:zinzi/allmeals.dart';
+import 'package:zinzi/features/payment/payment_plan_gate.dart';
 import 'package:zinzi/meal_detail.dart';
 import 'package:zinzi/orderhistory.dart'; // For preloading
 import 'package:zinzi/nutrition+.dart'; // For preloading
@@ -189,7 +190,19 @@ class _SplashScreenState extends State<SplashScreen>
           return; // Return early since we're handling navigation here
           break;
         default:
-          determinedNextScreen = AllMealsScreen();
+          // Wrap AllMealsScreen with PaymentPlanGate
+          determinedNextScreen = PaymentPlanGate(
+            child: AllMealsScreen(),
+            requirePlan: true,
+            onPlanVerified: () {
+              // This will be called after successful plan verification
+              if (mounted) {
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(builder: (context) => AllMealsScreen()),
+                );
+              }
+            },
+          );
           break;
       }
     } else {

@@ -8,6 +8,7 @@ import 'dart:io'; // Keep for Platform checks if needed elsewhere, otherwise rem
 // Assuming 'onboard.dart' exists and contains a LandingPage widget
 // If not, you might need to replace `LandingPage()` with a relevant widget or remove the back navigation.
 import 'onboard.dart'; // Make sure this import points to your actual landing page file
+import 'package:flutter/foundation.dart';
 
 // Main App Widgethi 
 class NutritionChatApp extends StatefulWidget {
@@ -140,7 +141,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _controller = TextEditingController();
   final List<ChatMessage> _messages = [];
   final ScrollController _scrollController = ScrollController();
-  // Removed TTS, STT, AudioPlayer instances
+  // Chat state management
   bool _isLoading = false;
   final String webhookUrl =
       'https://chwezi.app.n8n.cloud/webhook/fc1e9b92-2a76-4496-90a1-f590c3fcbc53'; // Replace with your actual webhook URL
@@ -154,7 +155,7 @@ class _ChatScreenState extends State<ChatScreen> {
           'Hi, i am Sensei your Wellness Coach, ask me anything !',
       isUser: false,
     ));
-    // Removed TTS/STT initialization calls
+    // Initialize chat state
   }
 
   // Send message to webhook and handle response
@@ -162,7 +163,7 @@ class _ChatScreenState extends State<ChatScreen> {
     message = message.trim();
     if (message.isEmpty) return;
 
-    // Removed TTS stop logic
+    // Process user message
 
     final userMessage = ChatMessage(text: message, isUser: true);
 
@@ -174,7 +175,7 @@ class _ChatScreenState extends State<ChatScreen> {
       });
     }
 
-    // Removed sending sound playback
+    // Scroll to show the latest message
     _scrollToBottom(); // Scroll to show the latest message
 
     try {
@@ -214,7 +215,7 @@ class _ChatScreenState extends State<ChatScreen> {
               } else {
                 botResponseText =
                     'Received unclear data structure from server.';
-                print("Server Response format unexpected: $responseBody");
+                debugPrint("Server Response format unexpected: $responseBody");
               }
             }
           } else {
@@ -226,22 +227,22 @@ class _ChatScreenState extends State<ChatScreen> {
           if (responseBody.isNotEmpty) {
             botResponseText =
                 responseBody; // Treat non-JSON response as plain text
-            print("Response was not JSON, treated as plain text.");
+            debugPrint("Response was not JSON, treated as plain text.");
           } else {
             botResponseText = 'Error processing server response.';
-            print("Response Processing Error: $e");
-            print("Received Body (raw): ${response.body}"); // Log raw body
+            debugPrint("Response Processing Error: $e");
+            debugPrint("Received Body (raw): ${response.body}"); // Log raw body
           }
         }
       } else {
         // Handle HTTP errors
         botResponseText = 'Oops! Server error. Status: ${response.statusCode}.';
-        print("Server Error: ${response.statusCode}, Body: ${response.body}");
+        debugPrint("Server Error: ${response.statusCode}, Body: ${response.body}");
       }
       // Add bot message only if component is still mounted
       if (mounted) _addBotMessage(botResponseText);
     } catch (e) {
-      print("Network/Timeout Error: $e");
+      debugPrint("Network/Timeout Error: $e");
       // Add error message only if component is still mounted
       if (mounted)
         _addBotMessage(
@@ -263,7 +264,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _messages.add(ChatMessage(text: text, isUser: false));
     });
 
-    // Removed TTS queue logic
+    // Add bot message to chat
 
     _scrollToBottom();
   }
@@ -292,7 +293,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // Dispose controllers
     _controller.dispose();
     _scrollController.dispose();
-    // Removed STT/TTS/AudioPlayer dispose calls
+    // Clean up controllers
     super.dispose();
   }
 
@@ -581,11 +582,11 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
     final numberedBulletPattern =
         RegExp(r'^\s*(\d+\.)\s*\*\*(.+?)\*\*[:]?\s*(.*)');
 
-    // print("Processing text: '''$text'''"); // Debugging
+    // debugPrint("Processing text: '''$text'''"); // Debugging
 
     for (int i = 0; i < lines.length; i++) {
       final line = lines[i];
-      // print('  Line $i: "$line"'); // Debugging
+      // debugPrint('  Line $i: "$line"'); // Debugging
 
       // --- Try matching patterns ---
       final hyphenMatch = hyphenBulletPattern.firstMatch(line);
@@ -601,7 +602,7 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
         // --- Format as HYPHEN bullet ---
         final title = hyphenMatch.group(1)?.trim() ?? '';
         final description = hyphenMatch.group(2)?.trim() ?? '';
-        // print('    -> Matched HYPHEN! Title: "$title", Desc: "$description"'); // Debugging
+        // debugPrint('    -> Matched HYPHEN! Title: "$title", Desc: "$description"'); // Debugging
 
         contentWidgets.add(
           Padding(
@@ -636,7 +637,7 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
         final number = numberedMatch.group(1)?.trim() ?? '';
         final title = numberedMatch.group(2)?.trim() ?? '';
         final description = numberedMatch.group(3)?.trim() ?? '';
-        // print('    -> Matched NUMBERED! Num: "$number", Title: "$title", Desc: "$description"'); // Debugging
+        // debugPrint('    -> Matched NUMBERED! Num: "$number", Title: "$title", Desc: "$description"'); // Debugging
 
         contentWidgets.add(
           Padding(
@@ -668,7 +669,7 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
         );
       } else if (line.trim().isNotEmpty) {
         // --- Format as NORMAL text ---
-        // print('    -> Not a bullet or empty.'); // Debugging
+        // debugPrint('    -> Not a bullet or empty.'); // Debugging
         contentWidgets.add(
           Padding(
             padding:
@@ -684,7 +685,7 @@ class _AnimatedChatBubbleState extends State<AnimatedChatBubble>
     }
 
     if (contentWidgets.isEmpty) {
-      // print('  -> No content widgets generated.'); // Debugging
+      // debugPrint('  -> No content widgets generated.'); // Debugging
       return SizedBox.shrink();
     }
 

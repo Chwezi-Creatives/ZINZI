@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart';
 
 class ChefDashboard extends StatelessWidget {
   @override
@@ -38,7 +39,7 @@ class _ChefProfileOverviewState extends State<ChefProfileOverview> {
           await http.get(Uri.parse('$apibaseurl/rr/rchefs?chef_id=$chefId'));
       if (response.statusCode == 200) {
         final profileData = json.decode(response.body);
-        print('DEBUG: Chef Profile Response -> $profileData'); // Debug print
+        debugPrint('DEBUG: Chef Profile Response -> $profileData'); // Debug print
         setState(() {
           chefProfile =
               handleApiResponse(profileData); // Handle dynamic response
@@ -169,7 +170,7 @@ class _MenuManagementState extends State<MenuManagement> {
           await http.get(Uri.parse('$apibaseurl/rr/menu?chef_id=$chefId'));
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        print('DEBUG: Menu Items Response -> $responseData'); // Debug print
+        debugPrint('DEBUG: Menu Items Response -> $responseData'); // Debug print
         setState(() {
           menuItems =
               handleApiResponse(responseData); // Handle dynamic response
@@ -271,7 +272,7 @@ class _OrdersListState extends State<OrdersList> {
           await http.get(Uri.parse('$apibaseurl/rr/orders?chef_id=$chefId'));
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        print('DEBUG: Orders Response -> $responseData'); // Debug print
+        debugPrint('DEBUG: Orders Response -> $responseData'); // Debug print
         setState(() {
           orders = handleApiResponse(responseData); // Handle dynamic response
           isLoading = false;
