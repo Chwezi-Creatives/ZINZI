@@ -832,72 +832,45 @@ class NotificationService:
 
     async def store_fcm_token(self, user_id: int, token: str, platform: str, user_type: str, app_version: Optional[str] = None):
         """
-        Store a new FCM token for a user in the 'fcm_tokens' table.
-        Each user_id/user_type combination can have multiple active tokens across different platforms.
+        Store or update an FCM token for a user in the 'fcm_tokens' table.
+        Only one active token is allowed per (user_id, user_type, platform) combination.
         
         Args:
             user_id: The ID of the user
             token: The FCM token to store
-            platform: The platform (e.g., 'android', 'ios', 'web')
+            platform: The platform (e.g., 'android', 'ios', 'web', 'windows', 'macos')
             user_type: The type of user (e.g., 'user', 'chef', 'producer')
             app_version: Optional app version string (e.g., '1.2.22+28')
         """
         try:
+            # Normalize platform to lowercase to ensure case-insensitive matching
+            platform = platform.lower()
+            
+            # Validate platform
+            valid_platforms = {'android', 'ios', 'web', 'windows', 'macos'}
+            if platform not in valid_platforms:
+                raise ValueError(f"Invalid platform: {platform}. Must be one of: {', '.join(valid_platforms)}")
+            
             async with self.db_pool.acquire() as conn:
-                # Insert new token record
-                # First check if the token already exists for this user
-                existing = await conn.fetchrow(
-                    """SELECT id FROM fcm_tokens WHERE user_id = $1 AND token = $2""",
-                    user_id, token
-                )
-                
-                if existing:
-                    # Update existing token
-                    await conn.execute(
-                        """
-                        UPDATE fcm_tokens SET
-                            user_type = $1,
-                            platform = $2,
-                            app_version = $3,
-                            is_active = TRUE,
-                            updated_at = NOW()
-                        WHERE user_id = $4 AND token = $5
-                        """,
-                        user_type, platform, app_version, user_id, token
-                    )
-                else:
-                    # Insert new token
-                    await conn.execute(
-                        """
-                        INSERT INTO fcm_tokens (
-                            user_id, user_type, token, platform, app_version,
-                            is_active
-                        )
-                        VALUES (
-                            $1, $2, $3, $4, $5,
-                            TRUE
-                        )
-                        """,
-                        user_id, user_type, token, platform, app_version
-                    )
-                
-                # If this is a new token, deactivate any older tokens for this user_id/user_type combination
-                # that haven't been updated in the last 30 days
+                # Use the upsert_fcm_token database function to handle the insert/update
                 await conn.execute(
                     """
-                    UPDATE fcm_tokens 
-                    SET is_active = FALSE
-                    WHERE user_id = $1 
-                    AND user_type = $2
-                    AND token != $3
-                    AND updated_at < NOW() - INTERVAL '30 days'
+                    SELECT upsert_fcm_token(
+                        $1::integer,  -- user_id
+                        $2::text,    -- token
+                        $3::varchar, -- platform
+                        $4::varchar, -- user_type
+                        $5::text     -- app_version (can be NULL)
+                    )
                     """,
-                    user_id, user_type, token
+                    user_id, token, platform, user_type, app_version
                 )
                 
-                logger.info(f"FCM token stored for user {user_id} ({user_type}) on {platform}")
+                logger.info(f"FCM token upserted for user {user_id} ({user_type}) on {platform}")
+                
         except Exception as e:
             logger.error(f"Error storing FCM token: {str(e)}", exc_info=True)
+            raise  # Re-raise the exception to be handled by the caller
             return False
 
     async def get_fcm_tokens(self, user_id: int, platform: Optional[str] = None, user_type: Optional[str] = None):
