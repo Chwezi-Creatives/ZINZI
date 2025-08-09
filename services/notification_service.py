@@ -830,10 +830,17 @@ class NotificationService:
 
     # --- Methods from the second file, adapted for self.db_pool and logger ---
 
-    async def store_fcm_token(self, user_id: int, token: str, platform: str, user_type: str):
+    async def store_fcm_token(self, user_id: int, token: str, platform: str, user_type: str, app_version: Optional[str] = None):
         """
         Store a new FCM token for a user in the 'fcm_tokens' table.
         Each user_id/user_type combination can have multiple active tokens across different platforms.
+        
+        Args:
+            user_id: The ID of the user
+            token: The FCM token to store
+            platform: The platform (e.g., 'android', 'ios', 'web')
+            user_type: The type of user (e.g., 'user', 'chef', 'producer')
+            app_version: Optional app version string (e.g., '1.2.22+28')
         """
         try:
             async with self.db_pool.acquire() as conn:
@@ -851,26 +858,27 @@ class NotificationService:
                         UPDATE fcm_tokens SET
                             user_type = $1,
                             platform = $2,
+                            app_version = $3,
                             is_active = TRUE,
                             updated_at = NOW()
-                        WHERE user_id = $3 AND token = $4
+                        WHERE user_id = $4 AND token = $5
                         """,
-                        user_type, platform, user_id, token
+                        user_type, platform, app_version, user_id, token
                     )
                 else:
                     # Insert new token
                     await conn.execute(
                         """
                         INSERT INTO fcm_tokens (
-                            user_id, user_type, token, platform,
+                            user_id, user_type, token, platform, app_version,
                             is_active
                         )
                         VALUES (
-                            $1, $2, $3, $4,
+                            $1, $2, $3, $4, $5,
                             TRUE
                         )
                         """,
-                        user_id, user_type, token, platform
+                        user_id, user_type, token, platform, app_version
                     )
                 
                 # If this is a new token, deactivate any older tokens for this user_id/user_type combination

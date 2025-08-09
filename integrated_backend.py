@@ -26,6 +26,9 @@ import re  # For regular expressions
 import paypalrestsdk # Keep sync for now
 import stripe # Keep sync for now
 import requests # Keep sync for now
+from enum import Enum
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field, validator
 
 # --- FastAPI Imports ---
 from services.fcm_service import FirebaseMessagingService
@@ -274,7 +277,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # --- CORS Middleware ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], #ALLOWED_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -282,9 +285,14 @@ app.add_middleware(
     max_age=600  # 10 minutes
 )
 
+# --- Subscription Endpoints ---
+# (Moved after SubscriptionService class definition)
+
 # --- Database Dependency ---
 async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
     """FastAPI dependency to get a database connection from the pool."""
+    # ... (rest of the code remains the same)
+    ...
     if db_pool is None:
         logger.error("Attempted to acquire DB connection, but pool is not available.")
         raise HTTPException(
@@ -2434,7 +2442,8 @@ class AuthenticationAndUsers(BaseRepository):
                 # Keep cuisine_preferences as string, don't deserialize
                 processed.append(p_pref)
             return processed
-async def list_calorie_history(self, conn: asyncpg.Connection, user_id: int) -> List[Dict[str, Any]]:
+            
+    async def list_calorie_history(self, conn: asyncpg.Connection, user_id: int) -> List[Dict[str, Any]]:
         """Lists calorie history entries for a given user ID."""
         logger.info(f"Fetching calorie history for user ID: {user_id}")
         sql = "SELECT calories, last_updated FROM calories_history WHERE user_id = $1 ORDER BY last_updated DESC"
@@ -2450,9 +2459,113 @@ async def list_calorie_history(self, conn: asyncpg.Connection, user_id: int) -> 
             logger.info(f"Fetched {len(processed_history)} calorie history entries for user ID: {user_id}")
             return processed_history
         except Exception as e:
-            logger.error(f"Error fetching calorie history for user {user_id}: {e}", exc_info=True)
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error fetching calorie history.")
-        return []
+            logger.error(f"Error fetching calorie history for user {user_id}: {str(e)}")
+            raise
+
+# Import subscription service at the top with other imports
+from services.subscription_service import SubscriptionService, SubscriptionStatus, PlanStatusResponse
+
+# Initialize subscription service
+subscription_service = SubscriptionService()
+
+# --- Subscription Endpoints ---
+
+@app.get("/api/subscription/plans", response_model=List[Dict[str, Any]])
+async def list_subscription_plans(conn: asyncpg.Connection = Depends(get_db)):
+    """
+    Get all active subscription plans
+    """
+    try:
+        return await subscription_service.get_subscription_plans(conn)
+    except Exception as e:
+        logger.error(f"Error fetching subscription plans: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch subscription plans"
+        )
+
+@app.get("/api/subscription/status", response_model=PlanStatusResponse)
+async def get_subscription_status(
+    user_id: int = Query(..., description="User ID to check subscription status for"),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Get the current subscription status for a user
+    """
+    try:
+        return await subscription_service.get_subscription_status(conn, user_id)
+    except Exception as e:
+        logger.error(f"Error getting subscription status for user {user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get subscription status"
+        )
+
+@app.post("/api/subscription/subscribe", response_model=Dict[str, Any])
+async def subscribe(
+    subscription_data: Dict[str, Any] = Body(...),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Subscribe a user to a plan
+    
+    Request body should contain:
+    - user_id: int - ID of the user subscribing
+    - plan_id: int - ID of the plan to subscribe to
+    - payment_transaction_id: str (optional) - ID of the payment transaction
+    """
+    try:
+        user_id = subscription_data.get('user_id')
+        plan_id = subscription_data.get('plan_id')
+        payment_transaction_id = subscription_data.get('payment_transaction_id')
+        
+        if not user_id or not plan_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="user_id and plan_id are required"
+            )
+            
+        async with conn.transaction():
+            subscription = await subscription_service.create_subscription(
+                conn, user_id, plan_id, payment_transaction_id
+            )
+            return {"success": True, "subscription": subscription}
+            
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error creating subscription: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create subscription"
+        )
+
+@app.post("/api/subscription/cancel", response_model=Dict[str, Any])
+async def cancel_subscription(
+    user_id: int = Body(..., embed=True, description="ID of the user whose subscription to cancel"),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Cancel a user's active subscription
+    """
+    try:
+        async with conn.transaction():
+            success = await subscription_service.cancel_subscription(conn, user_id)
+            if not success:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="No active subscription found to cancel"
+                )
+            return {"success": True, "message": "Subscription cancelled successfully"}
+            
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error cancelling subscription for user {user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to cancel subscription"
+        )
 
 # --- Other Classes (Chefs, Producers, etc. Updated for asyncpg pool) ---
 # Repeat the pattern for ALL classes that interact with the database:
@@ -6149,42 +6262,69 @@ async def register_fcm_token(
     Register or update an FCM token for a user.
     
     Args:
-        token_data: {"token": str, "platform": str}
+        token_data: {"token": str, "platform": str, "user_type": str, "user_id": str/int}
         conn: Database connection
     
     Returns:
         dict: Success message
     """
     try:
+        logger.info(f"Received FCM token registration request: {token_data}")
+        
         token = token_data.get('token')
         platform = token_data.get('platform')
         user_type = token_data.get('user_type')
         user_id = token_data.get('user_id')
+        app_version = token_data.get('app_version')  # Optional field
 
         if not all([token, platform, user_type, user_id]):
-            raise HTTPException(status_code=400, detail="Missing required fields: token, platform, user_type, user_id")
-
-        logger.info(f"Processing FCM token registration for user_id: {user_id}, platform: {platform}, user_type: {user_type}")
-        
-        # Get and initialize notification service
-        notification_service = get_notification_service()
+            error_msg = f"Missing required fields in token registration. " \
+                       f"Token: {bool(token)}, Platform: {platform}, " \
+                       f"User Type: {user_type}, User ID: {user_id}"
+            logger.error(error_msg)
+            raise HTTPException(
+                status_code=400, 
+                detail="Missing required fields. Please provide token, platform, user_type, and user_id."
+            )
         
         # Convert user_id to integer
-        user_id_int = int(user_id)
+        try:
+            user_id_int = int(user_id)
+        except (ValueError, TypeError) as e:
+            error_msg = f"Invalid user_id format: {user_id}. Must be a number."
+            logger.error(f"{error_msg} Error: {str(e)}")
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        logger.info(f"Storing FCM token for user_id: {user_id_int}, type: {user_type}, platform: {platform}")
         
         # Store the token
-        await notification_service.store_fcm_token(
-            user_id_int,
-            token,
-            platform,
-            user_type
-        )
-        
-        logger.info(f"FCM token successfully registered for user_id: {user_id}")
-        return {"message": "Token registered successfully"}
+        try:
+            # Get the notification service instance
+            notification_service = get_notification_service()
+            await notification_service.store_fcm_token(
+                user_id=user_id_int,
+                token=token,
+                platform=platform,
+                user_type=user_type,
+                app_version=app_version  # Pass the optional app_version
+            )
+            
+            logger.info(f"FCM token successfully registered for user_id: {user_id_int}")
+            return {"message": "Token registered successfully"}
+        except HTTPException as http_err:
+            logger.error(f"HTTP error in store_fcm_token: {str(http_err)}")
+            raise
+        except Exception as e:
+            error_msg = f"Failed to store FCM token: {str(e)}"
+            logger.error(error_msg, exc_info=True)  # Include full traceback
+            raise HTTPException(status_code=500, detail=error_msg)
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
-        logger.error(f"Error registering FCM token: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = f"Unexpected error during FCM token registration: {str(e)}"
+        logger.error(error_msg, exc_info=True)  # Include full traceback
+        raise HTTPException(status_code=500, detail=error_msg)
 
 @app.get("/rr/notifications/tokens")
 async def get_fcm_tokens(

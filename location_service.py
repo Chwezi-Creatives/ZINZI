@@ -3,7 +3,16 @@ Location Service for handling geofencing and distance calculations.
 """
 import os
 import logging
+import sys
 from typing import List, Dict, Any, Optional, Tuple, TypeVar, Generic, Callable
+
+# Configure logging to output to console
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
+)
+logger = logging.getLogger(__name__)
 
 import math
 import re
@@ -36,7 +45,10 @@ class LocationService:
             Tuple of (latitude, longitude) or None if not found
         """
         if not address:
+            logger.warning("No address provided to _extract_coordinates")
             return None
+            
+        logger.info(f"Extracting coordinates from: {address}")
             
         # Check cache first in a thread-safe way
         async with cls._coord_cache_lock:
@@ -44,18 +56,22 @@ class LocationService:
                 return cls._coord_cache[address]
         
         # Try to extract coordinates from various formats
-        # 1. Direct coordinate pair: "-1.2921, 36.8219"
-        coord_match = re.search(r'(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)', address)
+        # 1. Direct coordinate pair: "-1.2921, 36.8219" or inside parentheses like "(0.3375104, 32.571392)"
+        coord_match = re.search(r'(?:\(|\b)(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)(?:\)|\b)', address)
         if coord_match:
             try:
                 lat = float(coord_match.group(1))
                 lng = float(coord_match.group(2))
+                logger.info(f"Found coordinates in pattern 1: lat={lat}, lng={lng}")
                 if -90 <= lat <= 90 and -180 <= lng <= 180:
                     result = (lat, lng)
                     async with cls._coord_cache_lock:
                         cls._coord_cache[address] = result
                     return result
-            except (ValueError, IndexError):
+                else:
+                    logger.warning(f"Coordinates out of valid range: lat={lat}, lng={lng}")
+            except (ValueError, IndexError) as e:
+                logger.warning(f"Error parsing coordinates: {e}")
                 pass
                 
         # 2. DMS format: "1°17'31.6\"S 36°49'18.8\"E"
@@ -155,9 +171,10 @@ class LocationService:
         # Get radius from environment variable if not provided
         if radius_km is None:
             try:
-                radius_km = float(os.getenv('GEO_RADIUS', '5'))
+                # Using 'geo_radius' to match the .env file
+                radius_km = float(os.getenv('geo_radius', '90000'))
             except (ValueError, TypeError):
-                radius_km = 5.0  # Default to 5km if not set or invalid
+                radius_km = 90000.0  # Default to 90000km if not set or invalid
         
         # Extract user coordinates
         user_coords = await cls._extract_coordinates(user_location)
