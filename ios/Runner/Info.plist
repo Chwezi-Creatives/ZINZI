@@ -113,7 +113,7 @@
 
     <!-- Location Services -->
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>We use your location to show nearby services and personalize your experience on the map.</string>
+    <string>We use location to show nearby services and personalize your experience .</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>Zinzi can show you relevant content based on your location, even when you're not using the app.</string>
     <key>NSLocationAlwaysUsageDescription</key>
@@ -123,7 +123,7 @@
     <key>NSCameraUsageDescription</key>
     <string>Take and upload profile pictures or share moments with the Zinzi community.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>Select photos to share on your profile or with other Zinzi members.</string>
+    <string>Select photos to pick your profile picture.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Save your favorite images from Zinzi directly to your photo library.</string>
 
