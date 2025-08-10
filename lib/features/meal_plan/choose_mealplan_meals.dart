@@ -39,6 +39,8 @@ class ChooseMealPlanMealsScreen extends StatefulWidget {
 
 class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
     with TickerProviderStateMixin {
+  // Flag to control dropdown border visibility
+  static const bool _showDropdownBorder = false; // Set to false to hide border
   // Animation controller for tap effects
   late final AnimationController _animationController;
 
@@ -65,8 +67,16 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
         _filteredMeals = List.from(_allMeals);
       } else {
         _filteredMeals = _allMeals.where((meal) {
-          return (meal['Meal_name']?.toString().toLowerCase().contains(searchTerm) ?? false) ||
-                 (meal['Meal_description']?.toString().toLowerCase().contains(searchTerm) ?? false);
+          return (meal['Meal_name']
+                      ?.toString()
+                      .toLowerCase()
+                      .contains(searchTerm) ??
+                  false) ||
+              (meal['Meal_description']
+                      ?.toString()
+                      .toLowerCase()
+                      .contains(searchTerm) ??
+                  false);
         }).toList();
       }
     });
@@ -376,33 +386,51 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
       child: DropdownButtonFormField<String>(
         value: _selectedChefId,
         isDense: true,
+        dropdownColor: Colors.white,
+        iconEnabledColor: Colors.teal,
         decoration: InputDecoration(
           labelText: 'Chef',
-          labelStyle: const TextStyle(fontSize: 13, height: 1.0),
+          labelStyle:
+              const TextStyle(fontSize: 13, height: 1.0, color: Colors.teal),
           floatingLabelBehavior: FloatingLabelBehavior.never,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8.0),
-            borderSide: BorderSide.none,
-          ),
+          border: _showDropdownBorder
+              ? OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8.0),
+                  borderSide: BorderSide(color: Colors.teal.shade300),
+                )
+              : InputBorder.none,
+          enabledBorder: _showDropdownBorder
+              ? OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8.0),
+                  borderSide: BorderSide(color: Colors.teal.shade300),
+                )
+              : InputBorder.none,
+          focusedBorder: _showDropdownBorder
+              ? OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8.0),
+                  borderSide: BorderSide(color: Colors.teal, width: 2),
+                )
+              : InputBorder.none,
           filled: true,
-          fillColor: Colors.grey[100],
+          fillColor: Colors.grey[100], // Match search field color
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           isDense: true,
         ),
-        style: const TextStyle(fontSize: 13, height: 1.2),
+        style: const TextStyle(fontSize: 13, height: 1.2, color: Colors.teal),
         icon: const Icon(Icons.arrow_drop_down, size: 20),
         items: [
           const DropdownMenuItem<String>(
             value: null,
-            child: Text('All Chefs', style: TextStyle(fontSize: 13)),
+            child: Text('All Chefs',
+                style: TextStyle(fontSize: 13, color: Colors.teal)),
           ),
           ..._chefs.map<DropdownMenuItem<String>>((chef) {
             return DropdownMenuItem<String>(
               value: chef['chefid']?.toString(),
               child: Text(
                 chef['name']?.toString() ?? 'Unnamed Chef',
-                style: const TextStyle(fontSize: 13),
+                style: const TextStyle(fontSize: 13, color: Colors.teal),
               ),
             );
           }).toList(),
@@ -748,13 +776,15 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
       floatingActionButton: _selectedMealIds.isNotEmpty
           ? Container(
               height: 40, // Reduced height
-              margin: const EdgeInsets.only(bottom: 16), // Add some bottom margin
+              margin:
+                  const EdgeInsets.only(bottom: 16), // Add some bottom margin
               child: FloatingActionButton.extended(
                 onPressed: _isSaving ? null : _saveMealPlan,
                 backgroundColor: kColorPrimary,
                 elevation: 4,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20), // More compact border radius
+                  borderRadius:
+                      BorderRadius.circular(20), // More compact border radius
                 ),
                 label: _isSaving
                     ? const SizedBox(
@@ -762,7 +792,8 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
                         height: 20,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(Colors.white),
                         ),
                       )
                     : Text(
@@ -776,7 +807,8 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
                       ),
                 icon: _isSaving
                     ? const SizedBox.shrink()
-                    : const Icon(Icons.check, size: 18, color: Colors.white), // White icon
+                    : const Icon(Icons.check,
+                        size: 18, color: Colors.white), // White icon
               ),
             )
           : null,
