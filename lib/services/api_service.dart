@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class ApiService {
   final String baseUrl;
@@ -9,7 +11,19 @@ class ApiService {
     'Accept': 'application/json',
   };
 
-  ApiService({String? baseUrl}) : baseUrl = baseUrl ?? 'http://localhost:5000';
+  ApiService({String? baseUrl}) : baseUrl = baseUrl ?? _getBaseUrl();
+  
+  static String _getBaseUrl() {
+    try {
+      final env = dotenv.env;
+      final url = env['API_BASE_URL'] ?? 'http://localhost:5000';
+      debugPrint('Using API_BASE_URL: $url');
+      return url.endsWith('/') ? url.substring(0, url.length - 1) : url;
+    } catch (e) {
+      debugPrint('Error getting API_BASE_URL: $e');
+      return 'http://localhost:5000';
+    }
+  }
 
   // Helper method to handle GET requests
   Future<http.Response> get(

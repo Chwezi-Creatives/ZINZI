@@ -54,20 +54,49 @@ class _ChefPremiumPlansScreenState extends State<ChefPremiumPlansScreen> {
         final data = jsonDecode(responseBody);
         debugPrint('📊 [PremiumPlans] Parsed data type: ${data.runtimeType}');
         // Parse the meals field from JSON string to List<dynamic>
-        final parsedPlans = (data as List).map((plan) {
-          if (plan is Map<String, dynamic> && plan['meals'] is String) {
+        final parsedPlans = (data as List).where((plan) => plan != null).map((plan) {
+          if (plan is! Map<String, dynamic>) {
+            debugPrint('⚠️ [PremiumPlans] Invalid plan format: $plan');
+            return null;
+          }
+          
+          // Create a new map to avoid modifying the original
+          final processedPlan = Map<String, dynamic>.from(plan);
+          
+          // Parse meals if they exist and are in string format
+          if (processedPlan['meals'] is String) {
             try {
-              plan['meals'] = jsonDecode(plan['meals']);
+              processedPlan['meals'] = jsonDecode(processedPlan['meals']) ?? [];
             } catch (e) {
               debugPrint('⚠️ [PremiumPlans] Error parsing meals: $e');
-              plan['meals'] = [];
+              processedPlan['meals'] = [];
+            }
+          } else if (processedPlan['meals'] == null) {
+            processedPlan['meals'] = [];
+          }
+          
+          // Calculate duration from dates if not provided
+          if (processedPlan['start_date'] != null && processedPlan['end_date'] != null) {
+            try {
+              final start = DateTime.parse(processedPlan['start_date'].toString());
+              final end = DateTime.parse(processedPlan['end_date'].toString());
+              processedPlan['duration'] = end.difference(start).inDays + 1; // +1 to include both start and end dates
+            } catch (e) {
+              debugPrint('⚠️ [PremiumPlans] Error calculating duration: $e');
             }
           }
-          // Add fallbacks for missing fields
-          plan['status'] = plan['status'] ?? 'UNKNOWN'; // Fallback for status
-          plan['meal_count'] = plan['meal_count'] ?? plan['meals'].length; // Fallback for meal_count
-          plan['duration'] = plan['duration'] ?? 0; // Fallback for duration
-          return plan;
+          
+          // Set default values for required fields
+          processedPlan['status'] = _getValidStatus(processedPlan['status']);
+          processedPlan['meal_count'] = (processedPlan['meal_count'] ?? processedPlan['meals']?.length ?? 0).toInt();
+          processedPlan['duration'] = (processedPlan['duration'] ?? 0).toInt();
+          
+          // Ensure all required fields have values
+          processedPlan['plan_name'] ??= 'Unnamed Plan';
+          processedPlan['user_name'] ??= 'Unknown User';
+          processedPlan['customer'] ??= {};
+          
+          return processedPlan;
         }).toList();
         if (mounted) {
           setState(() {
@@ -399,6 +428,15 @@ class _ChefPremiumPlansScreenState extends State<ChefPremiumPlansScreen> {
   }
 
   String _getStatusText(String? status) {
-    return status?.toUpperCase() ?? 'UNKNOWN';
+    return _getValidStatus(status).toUpperCase();
+  }
+  
+  String _getValidStatus(String? status) {
+    if (status == null || status.trim().isEmpty) {
+      return 'unknown';
+    }
+    final validStatuses = ['active', 'pending', 'completed', 'cancelled', 'expired'];
+    final normalizedStatus = status.toLowerCase().trim();
+    return validStatuses.contains(normalizedStatus) ? normalizedStatus : 'unknown';
   }
 }
