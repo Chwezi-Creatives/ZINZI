@@ -1,19 +1,26 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:flutter/services.dart';
-import 'package:provider/provider.dart';
-import '../../features/subscription/subscription_provider.dart';
 
-// Color constants
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // For HapticFeedback
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+// Import the subscription provider
+import '../subscription/subscription_provider.dart';
+
+// App color constants
 const Color kColorPrimary = Color(0xFF00796B);
 const Color kColorPrimaryLight = Color(0xFF4DB6AC);
 const Color kColorBackground = Color(0xFFF8F8F8);
+const Color kColorTextPrimary = Color(0xFF212121);
+const Color kColorTextSecondary = Color(0xFF757575);
+const Color kColorAccent = Color(0xFF00BFA5);
+const Color kColorError = Color(0xFFD32F2F);
+const Color kColorSuccess = Color(0xFF388E3C);
 
 class ChooseMealPlanMealsScreen extends StatefulWidget {
   final int subscriptionId;
@@ -31,7 +38,12 @@ class ChooseMealPlanMealsScreen extends StatefulWidget {
 }
 
 class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
+  // Animation controller for tap effects
+  late final AnimationController _animationController;
+
+  // Animation controller for save button
+  late final AnimationController _saveButtonController;
   // API Configuration
   late final String apiBaseUrl;
   // Loading state
@@ -45,9 +57,56 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
   List<Map<String, dynamic>> _filteredMeals = [];
   final Set<String> _selectedMealIds = {};
 
+  void _filterMeals() {
+    final searchTerm = _searchController.text.toLowerCase();
+
+    setState(() {
+      if (searchTerm.isEmpty) {
+        _filteredMeals = List.from(_allMeals);
+      } else {
+        _filteredMeals = _allMeals.where((meal) {
+          return (meal['Meal_name']?.toString().toLowerCase().contains(searchTerm) ?? false) ||
+                 (meal['Meal_description']?.toString().toLowerCase().contains(searchTerm) ?? false);
+        }).toList();
+      }
+    });
+  }
+
   @override
   void initState() {
     super.initState();
+
+    // Initialize animation controllers
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 100),
+    )..addStatusListener((status) {
+        if (status == AnimationStatus.completed) {
+          _animationController.reverse();
+        }
+      });
+
+    _saveButtonController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 150),
+    );
+
+    // Animation for save button press effect
+    final saveButtonScaleAnimation = Tween<double>(
+      begin: 1.0,
+      end: 0.95,
+    ).animate(CurvedAnimation(
+      parent: _saveButtonController,
+      curve: Curves.easeInOut,
+    ));
+
+    // Add listener to handle button press animation
+    _saveButtonController.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        _saveButtonController.reverse();
+      }
+    });
+
     apiBaseUrl = dotenv.env['API_BASE_URL'] ?? 'https://api.zinzi.ug';
     _fetchChefs();
     _fetchMeals();
@@ -56,6 +115,8 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
   @override
   void dispose() {
     _searchController.dispose();
+    _animationController.dispose();
+    _saveButtonController.dispose();
     super.dispose();
   }
 
@@ -86,12 +147,10 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
 
         setState(() {
           _chefs = List<Map<String, dynamic>>.from(data);
-          if (_chefs.isNotEmpty) {
-            _selectedChefId = _chefs.first['chefid']?.toString() ?? '';
-            debugPrint(
-                'Fetched chefs: ${_chefs.map((c) => '${c['name']} (${c['chefid']})').toList()}');
-          } else {
-            _selectedChefId = null;
+          _selectedChefId = null; // No default selection
+          debugPrint(
+              'Fetched chefs: ${_chefs.map((c) => '${c['name']} (${c['chefid']})').toList()}');
+          if (_chefs.isEmpty) {
             debugPrint('No chefs available');
           }
         });
@@ -176,203 +235,210 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
     final mealId = meal['Meal_id']?.toString() ?? '';
     final isSelected = _selectedMealIds.contains(mealId);
     final imageUrl = _processImagePath(meal['Image_link']);
+    final mealName = meal['Meal_name']?.toString() ?? 'Unnamed Meal';
 
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: isSelected
-            ? const BorderSide(color: kColorPrimary, width: 2)
-            : BorderSide.none,
-      ),
-      child: InkWell(
-        onTap: () => _toggleMealSelection(mealId),
-        borderRadius: BorderRadius.circular(12),
-        child: Stack(
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Row(
-                children: [
-                  // Meal image with selection overlay
-                  Stack(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8.0),
-                        child: CachedNetworkImage(
-                          imageUrl: imageUrl,
-                          width: 100,
-                          height: 100,
-                          fit: BoxFit.cover,
-                          placeholder: (context, url) => Container(
-                            width: 100,
-                            height: 100,
-                            color: Colors.grey[200],
-                            child: const Center(
-                                child: CircularProgressIndicator()),
-                          ),
-                          errorWidget: (context, url, error) => Container(
-                            width: 100,
-                            height: 100,
-                            color: Colors.grey[200],
-                            child: const Icon(Icons.fastfood,
-                                size: 40, color: Colors.grey),
-                          ),
-                        ),
-                      ),
-                      if (isSelected)
-                        Container(
-                          width: 100,
-                          height: 100,
-                          decoration: BoxDecoration(
-                            color: kColorPrimary.withOpacity(0.7),
-                            borderRadius: BorderRadius.circular(8.0),
-                          ),
-                          child: const Icon(
-                            Icons.check_circle,
-                            color: Colors.white,
-                            size: 40,
-                          ),
-                        ),
-                    ],
+    // Animation controller for the card
+    return AnimatedBuilder(
+      animation: _animationController,
+      builder: (context, child) {
+        return GestureDetector(
+          onTapDown: (_) {
+            // Scale down animation when pressed
+            _animationController.forward();
+            _toggleMealSelection(mealId);
+          },
+          onTapUp: (_) => _animationController.reverse(),
+          onTapCancel: () => _animationController.reverse(),
+          child: Transform.scale(
+            scale: isSelected ? 0.95 : 1.0,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+              transform: Matrix4.identity()
+                ..scale(_animationController.value * 0.05 + 0.95),
+              transformAlignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(
+                        0.05 + (_animationController.value * 0.05)),
+                    blurRadius: 4 + (_animationController.value * 2),
+                    offset: const Offset(0, 2),
                   ),
-                  const SizedBox(width: 12),
+                ],
+                border: isSelected
+                    ? Border.all(color: kColorPrimary, width: 2)
+                    : null,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Image with selection overlay
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    child: Stack(
+                      fit: StackFit.expand,
                       children: [
-                        Text(
-                          meal['Meal_name'] ?? 'Unnamed Meal',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
+                        // Meal Image
+                        Hero(
+                          tag: 'meal-image-$mealId',
+                          child: ClipRRect(
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(10),
+                            ),
+                            child: CachedNetworkImage(
+                              imageUrl: imageUrl,
+                              fit: BoxFit.cover,
+                              placeholder: (context, url) => Container(
+                                color: Colors.grey[200],
+                                child: const Center(
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                        kColorPrimary),
+                                  ),
+                                ),
+                              ),
+                              errorWidget: (context, url, error) => Container(
+                                color: Colors.grey[200],
+                                child: const Icon(Icons.fastfood,
+                                    color: Colors.grey),
+                              ),
+                            ),
                           ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'UGX ${meal['Price'] ?? 0}',
-                          style: const TextStyle(
-                            color: kColorPrimary,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
+
+                        // Selection Overlay
+                        AnimatedOpacity(
+                          opacity: isSelected ? 1.0 : 0.0,
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeInOut,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: kColorPrimary.withOpacity(0.4),
+                              borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(10),
+                              ),
+                            ),
+                            child: const Center(
+                              child: Icon(
+                                Icons.check_circle,
+                                color: Colors.white,
+                                size: 36,
+                              ),
+                            ),
                           ),
                         ),
                       ],
                     ),
                   ),
+
+                  // Meal Name
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    child: AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 200),
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight:
+                            isSelected ? FontWeight.bold : FontWeight.w500,
+                        height: 1.2,
+                        color: isSelected
+                            ? kColorPrimary
+                            : const Color(0xFF424242),
+                      ),
+                      child: Text(
+                        mealName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
-            // Selection checkmark in top-right corner
-            if (isSelected)
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: const BoxDecoration(
-                    color: kColorPrimary,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.check_rounded,
-                    color: Colors.white,
-                    size: 16,
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
   Widget _buildChefDropdown() {
-    if (_isLoadingChefs) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
     if (_chefs.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-        child: Text('No chefs available'),
-      );
+      return const SizedBox.shrink();
     }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
       child: DropdownButtonFormField<String>(
         value: _selectedChefId,
+        isDense: true,
         decoration: InputDecoration(
-          labelText: 'Select Chef',
+          labelText: 'Chef',
+          labelStyle: const TextStyle(fontSize: 13, height: 1.0),
+          floatingLabelBehavior: FloatingLabelBehavior.never,
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8.0),
+            borderSide: BorderSide.none,
           ),
+          filled: true,
+          fillColor: Colors.grey[100],
           contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          isDense: true,
         ),
-        items: _chefs.map<DropdownMenuItem<String>>((chef) {
-          return DropdownMenuItem<String>(
-            value: chef['chefid']?.toString() ?? '',
-            child: Text(chef['name']?.toString() ?? 'Unnamed Chef'),
-          );
-        }).toList(),
+        style: const TextStyle(fontSize: 13, height: 1.2),
+        icon: const Icon(Icons.arrow_drop_down, size: 20),
+        items: [
+          const DropdownMenuItem<String>(
+            value: null,
+            child: Text('All Chefs', style: TextStyle(fontSize: 13)),
+          ),
+          ..._chefs.map<DropdownMenuItem<String>>((chef) {
+            return DropdownMenuItem<String>(
+              value: chef['chefid']?.toString(),
+              child: Text(
+                chef['name']?.toString() ?? 'Unnamed Chef',
+                style: const TextStyle(fontSize: 13),
+              ),
+            );
+          }).toList(),
+        ],
         onChanged: (value) {
           setState(() {
             _selectedChefId = value;
+            _filterMeals();
           });
-        },
-        validator: (value) {
-          if (value == null || value.isEmpty) {
-            return 'Please select a chef';
-          }
-          return null;
         },
       ),
     );
   }
 
   Widget _buildSearchField() {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
       child: TextField(
         controller: _searchController,
+        style: const TextStyle(fontSize: 13, height: 1.2),
         decoration: InputDecoration(
           hintText: 'Search meals...',
-          prefixIcon: const Icon(Icons.search),
+          hintStyle: const TextStyle(fontSize: 13),
+          prefixIcon: const Icon(Icons.search, size: 18),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30),
+            borderRadius: BorderRadius.circular(8.0),
             borderSide: BorderSide.none,
           ),
           filled: true,
-          fillColor: Colors.grey[200],
+          fillColor: Colors.grey[100],
           contentPadding:
-              const EdgeInsets.symmetric(vertical: 0, horizontal: 20),
+              const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+          isDense: true,
         ),
         onChanged: (value) {
-          setState(() {
-            if (value.isEmpty) {
-              _filteredMeals = List.from(_allMeals);
-            } else {
-              final searchLower = value.toLowerCase();
-              _filteredMeals = _allMeals.where((meal) {
-                return (meal['Meal_name']
-                            ?.toString()
-                            .toLowerCase()
-                            .contains(searchLower) ??
-                        false) ||
-                    (meal['Meal_description']
-                            ?.toString()
-                            .toLowerCase()
-                            .contains(searchLower) ??
-                        false);
-              }).toList();
-            }
-          });
+          _filterMeals();
         },
       ),
     );
@@ -388,29 +454,27 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
     }
 
     if (_filteredMeals.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(16.0),
-          child: Text('No meals found. Please try a different search.'),
-        ),
-      );
-    }
-
-    if (_filteredMeals.isEmpty) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search_off, size: 64, color: Colors.grey),
-            SizedBox(height: 16),
+            const Icon(Icons.search_off, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
             Text(
               'No meals found',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey[600],
+              ),
             ),
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             Text(
-              'Try adjusting your search',
-              style: TextStyle(color: Colors.grey),
+              'Try adjusting your search or filters',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[500],
+              ),
             ),
           ],
         ),
@@ -421,7 +485,7 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
       padding: const EdgeInsets.all(8.0),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
-        childAspectRatio: 0.8,
+        childAspectRatio: 0.75, // Slightly taller cards
         crossAxisSpacing: 8.0,
         mainAxisSpacing: 8.0,
       ),
@@ -433,15 +497,18 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
   }
 
   Future<void> _saveMealPlan() async {
-    if (_isSaving || _selectedMealIds.isEmpty) return;
+    if (_isSaving) return;
+
+    if (_selectedMealIds.isEmpty) {
+      await _showErrorFeedback();
+      return;
+    }
 
     // Validate chef selection
-    if (_selectedChefId == null || _selectedChefId!.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please select a chef')),
-        );
-      }
+    if (_selectedChefId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a chef')),
+      );
       return;
     }
 
@@ -517,9 +584,11 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
         throw Exception('Invalid chef ID');
       }
 
-      // Get subscription details to use the correct dates
-      final subscriptionProvider =
-          Provider.of<SubscriptionProvider>(context, listen: false);
+      // Get subscription provider from context
+      final subscriptionProvider = Provider.of<SubscriptionProvider>(
+        context,
+        listen: false,
+      );
       await subscriptionProvider.loadSubscriptionStatus();
 
       if (subscriptionProvider.subscriptionStatus == null ||
@@ -629,37 +698,116 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
     }
   }
 
+  Future<void> _showErrorFeedback() async {
+    final animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    );
+
+    // Trigger haptic feedback
+    HapticFeedback.lightImpact();
+
+    // Show error message
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Please select at least one meal'),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          margin: const EdgeInsets.all(16),
+        ),
+      );
+    }
+
+    // Play shake animation
+    await animationController.forward();
+    await animationController.reverse();
+    animationController.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Choose Your Meals'),
-        backgroundColor: kColorPrimary,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              _fetchMeals();
-              _fetchChefs();
-            },
+        title: const Text(
+          'Choose Meals',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
           ),
-        ],
+        ),
+        backgroundColor: kColorPrimary,
+        iconTheme: const IconThemeData(color: Colors.white, size: 20),
+        elevation: 0,
+        toolbarHeight: 48,
       ),
+      // Floating Action Button for saving
+      floatingActionButton: _selectedMealIds.isNotEmpty
+          ? Container(
+              height: 40, // Reduced height
+              margin: const EdgeInsets.only(bottom: 16), // Add some bottom margin
+              child: FloatingActionButton.extended(
+                onPressed: _isSaving ? null : _saveMealPlan,
+                backgroundColor: kColorPrimary,
+                elevation: 4,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20), // More compact border radius
+                ),
+                label: _isSaving
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : Text(
+                        'Save (${_selectedMealIds.length})',
+                        style: const TextStyle(
+                          color: Colors.white, // Explicit white text
+                          fontSize: 13, // Slightly smaller font
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                icon: _isSaving
+                    ? const SizedBox.shrink()
+                    : const Icon(Icons.check, size: 18, color: Colors.white), // White icon
+              ),
+            )
+          : null,
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       body: _isLoading || _isLoadingChefs
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                // Header Section (fixed height)
+                // Compact Header Section
                 Container(
-                  padding: const EdgeInsets.all(16.0),
+                  padding: const EdgeInsets.only(top: 4, bottom: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 2,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // Chef Selection Dropdown
-                      _buildChefDropdown(),
-                      const SizedBox(height: 16),
-                      // Search Field
-                      _buildSearchField(),
+                      Row(
+                        children: [
+                          Expanded(child: _buildChefDropdown()),
+                          const SizedBox(width: 8),
+                          Expanded(child: _buildSearchField()),
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -668,34 +816,6 @@ class _ChooseMealPlanMealsScreenState extends State<ChooseMealPlanMealsScreen>
                 Expanded(
                   child: _buildMealGrid(),
                 ),
-
-                // Save Button (fixed at bottom)
-                if (_selectedMealIds.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.all(16.0),
-                    child: ElevatedButton(
-                      onPressed: _isSaving ? null : _saveMealPlan,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kColorPrimary,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        minimumSize: const Size(double.infinity, 50),
-                      ),
-                      child: _isSaving
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(Colors.white),
-                              ),
-                            )
-                          : const Text(
-                              'Save Meal Plan',
-                              style: TextStyle(fontSize: 16),
-                            ),
-                    ),
-                  ),
               ],
             ),
     );

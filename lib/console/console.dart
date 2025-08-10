@@ -8,10 +8,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 // Assuming these are your actual import paths
 import 'package:zinzi/console/console_api_service.dart' as console_api; 
 import 'console_data_models.dart';   // Restored for clarity
-import 'console_plans.dart';         // New plan management tab
+import 'console_plans.dart';         // Plan management tab
+import 'console_subscriptions.dart';  // Subscription management tab
 import 'package:zinzi/services/api_service.dart' as zinzi_api; // Renamed to avoid conflict
 import 'package:zinzi/services/shared_prefs_storage.dart';
 import 'package:zinzi/features/subscription/services/plan_service.dart';
+import 'package:zinzi/features/subscription/subscription_service.dart';
 
 
 // --- Color Constants ---
@@ -22,8 +24,8 @@ const kBackgroundColor = Color(0xFFF5F5F5);
 const kDarkTextColor = Color(0xFF333333);
 const kSubtleTextColor = Colors.grey;
 
-// Added 'plans' to the enum
-enum Category { plans, meals, spices, herbals, gadgets, supplements }
+// Added 'plans' and 'subscriptions' to the enum
+enum Category { plans, subscriptions, meals, spices, herbals, gadgets, supplements }
 
 class AdminConsolePage extends StatefulWidget {
   const AdminConsolePage({super.key});
@@ -36,6 +38,7 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
   // Use the specific console API service for products
   final console_api.ApiService _productApiService = console_api.ApiService(); 
   late final PlanService _planService;
+  late final SubscriptionService _subscriptionService;
 
   Category _selectedCategory = Category.plans;
   List<Product> _items = [];
@@ -53,16 +56,17 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
   Future<void> _initializeServices() async {
     final prefs = await SharedPreferences.getInstance();
     final storageService = SharedPrefsStorage(prefs);
-    // Assuming zinzi_api.ApiService is what PlanService needs
+    // Initialize API services
     final apiService = zinzi_api.ApiService(); 
     _planService = PlanService(apiService: apiService, storageService: storageService);
+    _subscriptionService = SubscriptionService();
     // Fetch initial data for the default category
     await _fetchData();
   }
 
   Future<void> _fetchData() async {
-    // If plans tab is selected, do nothing as it handles its own state
-    if (_selectedCategory == Category.plans) {
+    // If plans or subscriptions tab is selected, do nothing as they handle their own state
+    if (_selectedCategory == Category.plans || _selectedCategory == Category.subscriptions) {
       if (mounted) setState(() => _isLoading = false);
       return;
     }
@@ -93,7 +97,8 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
           _items = await _productApiService.fetchItems('supplements', Supplement.fromJson);
           break;
         case Category.plans:
-           // This case is handled by the initial check, but here for completeness
+        case Category.subscriptions:
+          // These cases are handled by the initial check, but here for completeness
           _items = []; 
           break;
       }
@@ -121,35 +126,29 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: kBackgroundColor,
       appBar: AppBar(
-        title: const Text('Admin Price Console',
-            style: TextStyle(color: kWhiteColor, fontWeight: FontWeight.bold)),
+        title: const Text('Admin Console'),
         backgroundColor: kTealColor,
-        elevation: 2,
-        iconTheme: const IconThemeData(color: kWhiteColor),
+        foregroundColor: kWhiteColor,
       ),
-      body: FutureBuilder(
+      body: FutureBuilder<void>(
         future: _initServicesFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator(color: kTealColor));
+            return const Center(child: CircularProgressIndicator());
+          } else if (snapshot.hasError) {
+            return Center(child: Text('Error: ${snapshot.error}'));
+          } else {
+            return Column(
+              children: [
+                _buildCategorySelector(),
+                // Only show batch update for product categories (not for subscriptions or plans)
+                if (_selectedCategory != Category.subscriptions && _selectedCategory != Category.plans) _buildBatchUpdateCard(),
+                const Divider(height: 1),
+                Expanded(child: _buildContent()),
+              ],
+            );
           }
-          if (snapshot.hasError) {
-            return Center(child: Text("Error initializing services: ${snapshot.error}"));
-          }
-          // Services are initialized, build the main UI
-          return Column(
-            children: [
-              _buildCategorySelector(),
-              // Only show batch update for product categories
-              Visibility(
-                visible: _selectedCategory != Category.plans,
-                child: _buildBatchUpdateCard(),
-              ),
-              Expanded(child: _buildContent()),
-            ],
-          );
         },
       ),
     );
@@ -274,7 +273,11 @@ class _AdminConsolePageState extends State<AdminConsolePage> {
     if (_selectedCategory == Category.plans) {
       return ConsolePlansTab(planService: _planService);
     }
-    
+    // If 'subscriptions' is selected, show the dedicated widget
+    if (_selectedCategory == Category.subscriptions) {
+      return ConsoleSubscriptionsTab(subscriptionService: _subscriptionService);
+    }
+
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator(color: kTealColor));
     }

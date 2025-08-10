@@ -54,7 +54,7 @@ class _ConsolePlansTabState extends State<ConsolePlansTab> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Subscription Plans', 
+                    'Available Plans', 
                     style: TextStyle(
                       fontSize: 20, 
                       fontWeight: FontWeight.w600,
@@ -129,15 +129,27 @@ class _ConsolePlansTabState extends State<ConsolePlansTab> {
               )
             else
               Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 80), // Add padding for FAB
-                  itemCount: _plans.length,
-                  itemBuilder: (context, index) {
-                    final plan = _plans[index];
-                    return PlanCard(
-                      plan: plan,
-                      onEdit: () => _showPlanForm(plan: plan),
-                      onDelete: () => _deletePlan(plan),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Calculate crossAxisCount based on screen width
+                    final crossAxisCount = (constraints.maxWidth / 400).floor().clamp(1, 3);
+                    return GridView.builder(
+                      padding: const EdgeInsets.all(16.0),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        crossAxisSpacing: 16.0,
+                        mainAxisSpacing: 16.0,
+                        childAspectRatio: 0.75, // Adjust this to control card height
+                      ),
+                      itemCount: _plans.length,
+                      itemBuilder: (context, index) {
+                        final plan = _plans[index];
+                        return PlanCard(
+                          plan: plan,
+                          onEdit: () => _showPlanForm(plan: plan),
+                          onDelete: () => _deletePlan(plan),
+                        );
+                      },
                     );
                   },
                 ),
@@ -393,13 +405,21 @@ class _ConsolePlansTabState extends State<ConsolePlansTab> {
                             ),
                           ),
                           const SizedBox(height: 8),
-                          _buildFeatureChips(
-                            features,
-                            (feature) {
-                              // This will be handled by the _buildFeatureChips widget
-                              setState(() {
-                                features.remove(feature);
-                              });
+                          StatefulBuilder(
+                            builder: (context, setState) {
+                              return _buildFeatureChips(
+                                features,
+                                (feature) {
+                                  // Update the local state when a feature is deleted
+                                  setState(() {
+                                    features.remove(feature);
+                                  });
+                                  // Also update the parent state to ensure UI refreshes
+                                  if (mounted) {
+                                    setState(() {});
+                                  }
+                                },
+                              );
                             },
                           ),
                         ],
@@ -495,51 +515,65 @@ class _ConsolePlansTabState extends State<ConsolePlansTab> {
   }
 
   Widget _buildFeatureChips(List<String> features, Function(String) onDelete) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (features.isNotEmpty) ...[
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: features.map((feature) => Chip(
-              label: Text(feature),
-              backgroundColor: Colors.grey[50],
-              deleteIcon: const Icon(Icons.close, size: 16, color: Color(0xFF666666)),
-              onDeleted: () => onDelete(feature),
+    return StatefulBuilder(
+      builder: (context, setState) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (features.isNotEmpty) ...[
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: features.map((feature) => Chip(
+                  label: Text(feature),
+                  backgroundColor: Colors.grey[50],
+                  deleteIcon: const Icon(Icons.close, size: 16, color: Color(0xFF666666)),
+                  onDeleted: () {
+                    onDelete(feature);
+                    // Force a rebuild of the parent widget
+                    if (mounted) {
+                      setState(() {});
+                    }
+                  },
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: const BorderSide(color: Color(0xFFDDDDDD)),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                  labelPadding: const EdgeInsets.only(right: 4),
+                )).toList(),
+              ),
+              const SizedBox(height: 8),
+            ],
+            ActionChip(
+              label: const Text(
+                '+ Add Feature',
+                style: TextStyle(
+                  color: Color(0xFF1E88E5),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              backgroundColor: Colors.blue[50],
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
-                side: const BorderSide(color: Color(0xFFDDDDDD)),
+                side: const BorderSide(color: Color(0xFFBBDEFB)),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-              labelPadding: const EdgeInsets.only(right: 4),
-            )).toList(),
-          ),
-          const SizedBox(height: 8),
-        ],
-        ActionChip(
-          label: const Text(
-            '+ Add Feature',
-            style: TextStyle(
-              color: Color(0xFF1E88E5),
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
+              onPressed: () => _addNewFeature(context, (newFeature) {
+                if (newFeature.isNotEmpty) {
+                  setState(() {
+                    features.add(newFeature);
+                  });
+                  // Also update the parent state to ensure UI refreshes
+                  if (mounted) {
+                    setState(() {});
+                  }
+                }
+              }),
             ),
-          ),
-          backgroundColor: Colors.blue[50],
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Color(0xFFBBDEFB)),
-          ),
-          onPressed: () => _addNewFeature(context, (newFeature) {
-            if (newFeature.isNotEmpty) {
-              setState(() {
-                features.add(newFeature);
-              });
-            }
-          }),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 
@@ -589,7 +623,7 @@ class _ConsolePlansTabState extends State<ConsolePlansTab> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Plan'),
-        content: Text('Are you sure you want to delete ${plan.name}?'),
+        content: Text('Are you sure you want to delete "${plan.name}"? This action cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () {
@@ -610,18 +644,40 @@ class _ConsolePlansTabState extends State<ConsolePlansTab> {
     );
 
     if (confirmed == true) {
+      if (!mounted) return false;
+      
+      setState(() => _isLoading = true);
+      
       try {
         debugPrint('Deleting plan: ${plan.id}');
         await widget.planService.deletePlan(plan.id);
         debugPrint('PlansUI: Successfully deleted plan: ${plan.id}');
+        
         if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ Successfully deleted plan: ${plan.name}'),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+            ),
+          );
           _fetchPlans();
         }
       } catch (e) {
         debugPrint('PlansUI: ❌ Failed to delete plan: $e');
         if (mounted) {
+          final errorMessage = e.toString().contains('active subscriptions') 
+              ? 'Cannot delete plan: There are active subscribers. Please cancel all subscriptions firs or wait for them to expire.'
+              : 'Failed to delete plan. Please try again.';
+              
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to delete plan. Please try again.')),
+            SnackBar(
+              content: Text(errorMessage),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 6),
+            ),
           );
         }
         return false;
@@ -650,26 +706,131 @@ class PlanCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: ListTile(
-        title: Text(
-          plan.name,
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: plan.isActive ? null : Colors.grey,
+      margin: const EdgeInsets.all(8.0),
+      elevation: 2,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header with plan name and price
+          Container(
+            padding: const EdgeInsets.all(16.0),
+            decoration: BoxDecoration(
+              color: Theme.of(context).primaryColor.withOpacity(0.1),
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(4.0),
+                topRight: Radius.circular(4.0),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      plan.name,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (!plan.isActive)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[300],
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Text(
+                          'Inactive',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'UGX ${plan.priceAsDouble.toStringAsFixed(0)} / ${plan.billingCycle.displayName}',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    color: Color(0xFF00897B),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        subtitle: Text('UGX ${plan.price.toStringAsFixed(0)} / ${plan.billingCycle.displayName}'),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(icon: const Icon(Icons.edit), onPressed: onEdit),
-            IconButton(
-              icon: const Icon(Icons.delete, color: Colors.red),
-              onPressed: onDelete,
+          
+          // Plan description
+          if (plan.description?.isNotEmpty == true)
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text(
+                plan.description!,
+                style: const TextStyle(fontSize: 14, color: Colors.black87),
+              ),
+            ),
+          
+          // Features section
+          if (plan.features.isNotEmpty) ...[
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16.0, 0, 16.0, 8.0),
+              child: Text(
+                'Features:',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: plan.features.map((feature) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2.0),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.check_circle, size: 16, color: Color(0xFF00897B)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          feature,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
+                )).toList(),
+              ),
             ),
           ],
-        ),
+          
+          // Spacer to push buttons to bottom
+          const Spacer(),
+          
+          // Action buttons - Aligned to the left
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: [
+                TextButton.icon(
+                  icon: const Icon(Icons.edit, size: 18),
+                  label: const Text('Edit'),
+                  onPressed: onEdit,
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.blue,
+                  ),
+                ),
+                const SizedBox(width: 8.0),
+                TextButton.icon(
+                  icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                  label: const Text('Delete', style: TextStyle(color: Colors.red)),
+                  onPressed: onDelete,
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

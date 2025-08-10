@@ -23,6 +23,7 @@ import 'package:zinzi/onboard.dart';
 import 'package:zinzi/user_cache.dart';
 import 'package:zinzi/feedback_screen.dart';
 import 'package:zinzi/debug/notification_test_screen.dart';
+import 'package:zinzi/features/meal_plan/my_meal_plans_screen.dart';
 
 // --- Color Constants ---
 const Color kColorPrimaryDark = Color(0xFF004D40);
@@ -495,6 +496,16 @@ class _AppDrawerState extends State<AppDrawer> {
           MaterialPageRoute(
             builder: (context) => UserAnalyticsDashboard(),
             settings: RouteSettings(name: '/analytics'),
+          ),
+        );
+      }),
+      _buildDrawerTile(Icons.restaurant_menu_outlined, 'My Meal Plans', () {
+        Navigator.pop(context);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const MyMealPlansScreen(),
+            settings: const RouteSettings(name: '/my-meal-plans'),
           ),
         );
       }),

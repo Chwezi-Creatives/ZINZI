@@ -16,6 +16,7 @@ import 'package:zinzi/chef_verification_helper.dart';
 import 'package:zinzi/utils/image_utils.dart';
 import 'package:zinzi/utils/location_utils.dart';
 import 'package:flutter/foundation.dart';
+import 'package:zinzi/features/chef/chef_premium_plans_screen.dart';
 
 // --- Consistent Color Palette ---
 const Color primaryTeal = Color(0xFF00796B); // Teal 700
@@ -1161,7 +1162,7 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this); // Increased length to 5 for new tab
     _refreshIconController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
@@ -1299,13 +1300,14 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen>
           ),
         ],
         bottom: TabBar(
-          isScrollable: false,
+          isScrollable: true,
           controller: _tabController,
           tabs: const [
             Tab(icon: Icon(Icons.receipt_long_outlined), text: 'Orders'),
             Tab(icon: Icon(Icons.work_outline_rounded), text: 'Gigs'),
             Tab(icon: Icon(Icons.restaurant_menu_outlined), text: 'Menu/Stock'),
             Tab(icon: Icon(Icons.attach_money_outlined), text: 'Earnings'),
+            Tab(icon: Icon(Icons.star_border_rounded), text: 'Premium Plans'),
           ],
         ),
       ),
@@ -1316,6 +1318,7 @@ class _ChefDashboardScreenState extends State<ChefDashboardScreen>
           GigsTab(key: _gigsTabKey),
           ProductsTab(key: _productsTabKey),
           EarningsTab(key: _earningsTabKey),
+          const ChefPremiumPlansScreen(),
         ],
       ),
     );

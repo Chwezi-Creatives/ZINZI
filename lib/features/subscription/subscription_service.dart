@@ -139,6 +139,69 @@ class SubscriptionService {
     }
   }
 
+  // Get all subscriptions (admin only)
+  Future<List<Map<String, dynamic>>> getAllSubscriptions() async {
+    try {
+      print('📡 [SubscriptionService] Fetching all subscriptions...');
+      final response = await http.get(
+        Uri.parse('${_baseUrl}api/admin/subscriptions'),
+        headers: await _getHeaders(),
+      );
+
+      print('📥 [SubscriptionService] Response status: ${response.statusCode}');
+      
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> responseData = jsonDecode(response.body);
+        print('📊 [SubscriptionService] Response data keys: ${responseData.keys}');
+        
+        if (responseData.containsKey('subscriptions')) {
+          final List<dynamic> subscriptions = responseData['subscriptions'];
+          print('✅ [SubscriptionService] Found ${subscriptions.length} subscriptions');
+          return List<Map<String, dynamic>>.from(subscriptions);
+        } else if (responseData is List) {
+          print('⚠️ [SubscriptionService] Response is a list, converting to list of maps');
+          return List<Map<String, dynamic>>.from(
+            (responseData as List).map((item) => item as Map<String, dynamic>)
+          );
+        } else {
+          print('⚠️ [SubscriptionService] Unexpected response format, returning empty list');
+          return [];
+        }
+      } else {
+        final error = 'Failed to load subscriptions: ${response.statusCode}\n${response.body}';
+        print('❌ [SubscriptionService] $error');
+        throw Exception(error);
+      }
+    } catch (e, stackTrace) {
+      print('❌ [SubscriptionService] Error in getAllSubscriptions: $e');
+      print('📝 Stack trace: $stackTrace');
+      throw Exception('Error fetching subscriptions: $e');
+    }
+  }
+
+  // Update subscription status (admin only)
+  Future<Map<String, dynamic>> updateSubscriptionStatus({
+    required String subscriptionId,
+    required String status,
+  }) async {
+    try {
+      final response = await http.put(
+        Uri.parse('${_baseUrl}api/admin/subscriptions/$subscriptionId/status'),
+        headers: await _getHeaders(),
+        body: jsonEncode({'status': status.toLowerCase()}),
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        final error = jsonDecode(response.body)['detail'] ?? 'Failed to update subscription status';
+        throw Exception(error);
+      }
+    } catch (e) {
+      throw Exception('Error updating subscription status: $e');
+    }
+  }
+
   // Get current user's subscription status
   Future<Map<String, dynamic>> getSubscriptionStatus() async {
     try {
