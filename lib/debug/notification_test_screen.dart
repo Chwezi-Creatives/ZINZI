@@ -148,9 +148,15 @@ class _NotificationTestScreenState extends State<NotificationTestScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Notification Tester')),
+      backgroundColor: Colors.white, // Set background to white
+      appBar: AppBar(
+        title: const Text('Notification Tester', style: TextStyle(color: Colors.black)),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.teal),
+      ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: Colors.teal))
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -169,20 +175,41 @@ class _NotificationTestScreenState extends State<NotificationTestScreen> {
 
   Widget _buildInfoCard() {
     return Card(
+      color: Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        side: const BorderSide(color: Colors.teal, width: 1),
+        borderRadius: BorderRadius.circular(8),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Device Info', style: TextStyle(fontWeight: FontWeight.bold)),
-            const Divider(),
-            Text('Platform: ${UniversalPlatform.operatingSystem}'),
-            Text('Device: $_deviceInfo'),
+            const Text('Device Info',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.teal,
+                  fontSize: 16,
+                )),
+            Text('Platform: ${UniversalPlatform.operatingSystem}',
+                style: const TextStyle(color: Colors.black)),
+            Text('Device: $_deviceInfo',
+                style: const TextStyle(color: Colors.black)),
             const SizedBox(height: 8),
-            const Text('Status', style: TextStyle(fontWeight: FontWeight.bold)),
-            const Divider(),
-            Text('Permissions: ${_permissionsGranted ? 'Granted' : 'Not Granted'}'),
-            SelectableText('FCM Token: $_fcmToken'),
+            const Text('Status',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.teal,
+                  fontSize: 16,
+                )),
+            Text('Permissions: ${_permissionsGranted ? 'Granted' : 'Not Granted'}',
+                style: TextStyle(
+                  color: _permissionsGranted ? Colors.teal : Colors.black,
+                  fontWeight: FontWeight.w500,
+                )),
+            SelectableText('FCM Token: $_fcmToken',
+                style: const TextStyle(color: Colors.black, fontSize: 12)),
           ],
         ),
       ),
@@ -191,23 +218,43 @@ class _NotificationTestScreenState extends State<NotificationTestScreen> {
 
   Widget _buildActionsCard() {
     return Card(
+      color: Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        side: const BorderSide(color: Colors.teal, width: 1),
+        borderRadius: BorderRadius.circular(8),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Actions', style: TextStyle(fontWeight: FontWeight.bold)),
-            const Divider(),
+            const Text('Actions',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.teal,
+                  fontSize: 16,
+                )),
             ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
               onPressed: _permissionsGranted ? _sendTestNotification : null,
-              child: const Text('Send Test Notification'),
+              child: const Text('Send Test Notification',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
             ),
             if (!_permissionsGranted)
               const Padding(
                 padding: EdgeInsets.only(top: 8),
                 child: Text(
                   'Enable notifications in device settings',
-                  style: TextStyle(color: Colors.orange),
+                  style: TextStyle(color: Colors.black54, fontSize: 13),
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -219,16 +266,30 @@ class _NotificationTestScreenState extends State<NotificationTestScreen> {
 
   Widget _buildLastNotificationCard() {
     return Card(
+      color: Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        side: const BorderSide(color: Colors.teal, width: 1),
+        borderRadius: BorderRadius.circular(8),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Last Notification', style: TextStyle(fontWeight: FontWeight.bold)),
-            const Divider(),
+            const Text('Last Notification',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.teal,
+                  fontSize: 16,
+                )),
             SelectableText(
               _lastNotification,
-              style: const TextStyle(fontFamily: 'monospace'),
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                color: Colors.black,
+                fontSize: 13,
+              ),
             ),
           ],
         ),
@@ -236,3 +297,4 @@ class _NotificationTestScreenState extends State<NotificationTestScreen> {
     );
   }
 }
+    
