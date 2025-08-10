@@ -1,9 +1,15 @@
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List, Union, Tuple, AsyncGenerator
+from typing import Optional, Dict, Any, List, Union, Tuple, AsyncGenerator, Callable
 import asyncpg
-from fastapi import HTTPException, status
+from fastapi import status, HTTPException, Request
+from fastapi import status as http_status
+from functools import wraps
+import time
+
+# Import caching utilities
+from utils.cache import cached, invalidate_cache, clear_all_caches
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -65,6 +71,95 @@ class PlanUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class SubscriptionService:
+    
+    async def _check_rate_limit(
+        self, 
+        conn: asyncpg.Connection,
+        key: str,
+        limit: int = 5,
+        window: int = 60
+    ) -> Dict[str, Any]:
+        """
+        Check if a rate limit has been exceeded for the given key
+        
+        Args:
+            conn: Database connection
+            key: Rate limit key (e.g., 'sub_create:ip:user_id')
+            limit: Maximum number of allowed requests
+            window: Time window in seconds
+            
+        Returns:
+            Dict with 'allowed' (bool), 'remaining' (int), and 'retry_after' (int)
+        """
+        current_time = int(time.time())
+        window_start = current_time - window
+        
+        # Use database for rate limiting
+        cache_key = f"rate_limit:{key}"
+        
+        # Get existing timestamps for this key
+        query = """
+            SELECT value FROM cache 
+            WHERE key = $1 AND expires_at > NOW()
+        """
+        result = await conn.fetchval(query, cache_key)
+        
+        if result:
+            timestamps = json.loads(result)
+            # Filter out old timestamps outside the current window
+            timestamps = [ts for ts in timestamps if ts > window_start]
+        else:
+            timestamps = []
+        
+        # Check if we've exceeded the limit
+        if len(timestamps) >= limit:
+            # Calculate when the next request will be allowed
+            retry_after = (timestamps[0] + window) - current_time
+            return {
+                'allowed': False,
+                'remaining': 0,
+                'retry_after': max(1, retry_after)  # At least 1 second
+            }
+        
+        # Add current timestamp and update cache
+        timestamps.append(current_time)
+        
+        # Store updated timestamps
+        query = """
+            INSERT INTO cache (key, value, expires_at)
+            VALUES ($1, $2, NOW() + INTERVAL '1 hour')
+            ON CONFLICT (key) DO UPDATE 
+            SET value = EXCLUDED.value, 
+                expires_at = NOW() + INTERVAL '1 hour'
+        """
+        await conn.execute(query, cache_key, json.dumps(timestamps))
+        
+        return {
+            'allowed': True,
+            'remaining': limit - len(timestamps),
+            'retry_after': 0
+        }
+    
+    async def _invalidate_user_cache(self, user_id: int) -> None:
+        """
+        Invalidate cache entries for a specific user
+        
+        Args:
+            user_id: ID of the user whose cache to invalidate
+        """
+        # Invalidate user-specific cache entries
+        cache_keys = [
+            f"user_subscription:{user_id}",
+            f"user_plans:{user_id}",
+            f"user_meal_plans:{user_id}"
+        ]
+        
+        # Invalidate each key
+        for key in cache_keys:
+            invalidate_cache(key)
+        
+        # Also clear any cached plan data that might be user-specific
+        clear_all_caches()
     
     async def ensure_indexes_exist(self, conn: asyncpg.Connection) -> None:
         """
@@ -151,9 +246,10 @@ class SubscriptionService:
             print(f"❌ [PLAN SERVICE] Failed to fetch plans: {str(e)}")
             raise
 
+    @cached(ttl=300)  # Cache for 5 minutes
     async def get_plan_by_id(self, conn: asyncpg.Connection, plan_id: int) -> Optional[Dict[str, Any]]:
         """
-        Get a specific subscription plan by ID
+        Get a specific subscription plan by ID with caching
         
         Args:
             conn: Database connection
@@ -162,7 +258,6 @@ class SubscriptionService:
         Returns:
             Plan details or None if not found
         """
-        print(f"🔍 [PLAN SERVICE] Fetching plan with ID: {plan_id}")
         query = """
         SELECT id, name, description, price, billing_cycle, features, is_active, created_at, updated_at
         FROM plans 
@@ -245,7 +340,13 @@ class SubscriptionService:
             
             if row:
                 created_plan = dict(row)
-                print(f"✅ [PLAN SERVICE] Successfully created plan: {created_plan.get('name')} (ID: {created_plan.get('id')})")
+                plan_id = created_plan.get('id')
+                print(f"✅ [PLAN SERVICE] Successfully created plan: {created_plan.get('name')} (ID: {plan_id})")
+                
+                # Invalidate the plans list cache to include the new plan
+                invalidate_cache("all_plans")
+                print(f"🔄 [PLAN SERVICE] Invalidated all_plans cache after creating new plan ID: {plan_id}")
+                
                 return created_plan
             else:
                 print("❌ [PLAN SERVICE] Failed to create plan: No data returned from database")
@@ -343,6 +444,16 @@ class SubscriptionService:
             if row:
                 updated_plan = dict(row)
                 print(f"✅ [PLAN SERVICE] Successfully updated plan: {updated_plan.get('name')} (ID: {plan_id})")
+                
+                # Invalidate cache for this plan to ensure immediate visibility of changes
+                cache_key = f"plan:{plan_id}"
+                invalidate_cache(cache_key)
+                print(f"🔄 [PLAN SERVICE] Invalidated cache for plan ID: {plan_id}")
+                
+                # Also invalidate the plans list cache
+                invalidate_cache("all_plans")
+                print("🔄 [PLAN SERVICE] Invalidated all_plans cache")
+                
                 return updated_plan
             else:
                 print(f"❌ [PLAN SERVICE] Update failed for plan ID {plan_id}: No data returned")
@@ -372,10 +483,19 @@ class SubscriptionService:
         if not existing:
             print(f"⚠️ [PLAN SERVICE] Delete failed: Plan ID {plan_id} not found")
             return False
-        if result > 0:
+            
+        # Check for active subscriptions
+        check_subscriptions = """
+        SELECT COUNT(*) FROM subscriptions 
+        WHERE plan_id = $1 AND status = 'active'
+        """
+        active_count = await conn.fetchval(check_subscriptions, plan_id)
+        
+        if active_count > 0:
+            print(f"⚠️ [PLAN SERVICE] Delete failed: Plan ID {plan_id} has {active_count} active subscriptions")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot delete plan with active subscriptions"
+                detail=f"Cannot delete plan with {active_count} active subscriptions"
             )
             
         # Soft delete by marking as inactive
@@ -386,7 +506,19 @@ class SubscriptionService:
         RETURNING id
         """
         result = await conn.execute(query, plan_id)
-        return result != "DELETE 0"
+        
+        if result != "DELETE 0":
+            # Invalidate cache for this plan
+            cache_key = f"plan:{plan_id}"
+            invalidate_cache(cache_key)
+            print(f"🔄 [PLAN SERVICE] Invalidated cache for deleted plan ID: {plan_id}")
+            
+            # Also invalidate the plans list cache
+            invalidate_cache("all_plans")
+            print("🔄 [PLAN SERVICE] Invalidated all_plans cache after deletion")
+            
+            return True
+        return False
 
     async def get_user_subscription(self, conn: asyncpg.Connection, user_id: int) -> Optional[Dict[str, Any]]:
         """Get a user's active subscription"""
@@ -397,104 +529,277 @@ class SubscriptionService:
         WHERE s.user_id = $1 
         AND s.status = 'active'
         AND (s.end_date > NOW())
+        ORDER BY s.end_date DESC
         LIMIT 1
         """
         row = await conn.fetchrow(query, user_id)
         return dict(row) if row else None
+        
+    async def get_all_subscriptions(
+        self, 
+        conn: asyncpg.Connection, 
+        status_filter: Optional[str] = None,
+        user_id: Optional[int] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Get all subscriptions with optional filtering
+        
+        Args:
+            conn: Database connection
+            status_filter: Optional status to filter by (active, canceled, expired)
+            user_id: Optional user_id to filter by
+            limit: Maximum number of results to return
+            offset: Number of results to skip (for pagination)
+            
+        Returns:
+            Dict with 'subscriptions' list and 'total_count' of matching records
+        """
+        # Build the WHERE clause based on filters
+        where_clauses = []
+        params = []
+        param_count = 0
+        
+        if status_filter:
+            param_count += 1
+            where_clauses.append(f"s.status = ${param_count}")
+            params.append(status_filter)
+            
+        if user_id is not None:
+            param_count += 1
+            where_clauses.append(f"s.user_id = ${param_count}")
+            params.append(user_id)
+            
+        where_clause = " AND ".join(where_clauses) if where_clauses else "1=1"
+        
+        # Get total count for pagination
+        count_query = f"""
+        SELECT COUNT(*) as total
+        FROM subscriptions s
+        WHERE {where_clause}
+        """
+        
+        total_count = await conn.fetchval(count_query, *params)
+        
+        # Get subscriptions with filtering and pagination
+        query = f"""
+        SELECT 
+            s.*,
+            p.name as plan_name,
+            p.price,
+            p.billing_cycle,
+            p.features,
+            u.name as user_name,
+            u.email as user_email
+        FROM subscriptions s
+        JOIN plans p ON s.plan_id = p.id
+        JOIN users u ON s.user_id = u.user_id
+        WHERE {where_clause}
+        ORDER BY s.end_date DESC
+        LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}
+        """
+        print(f"[DEBUG] Executing subscriptions query with status_filter={status_filter}, user_id={user_id}")
+        
+        # Execute the query with parameters
+        rows = await conn.fetch(query, *params, limit, offset)
+        
+        # Debug log the first result to verify field names
+        if rows:
+            print(f"[DEBUG] First subscription result keys: {rows[0].keys()}")
+            print(f"[DEBUG] First subscription ID: {rows[0].get('subscription_id')} (type: {type(rows[0].get('subscription_id'))})")
+            print(f"[DEBUG] First subscription data: {dict(rows[0])}")
+        
+        return {
+            'subscriptions': [dict(row) for row in rows],
+            'total_count': total_count,
+            'limit': limit,
+            'offset': offset
+        }
 
     async def create_subscription(
         self, 
         conn: asyncpg.Connection,
         user_id: int, 
         plan_id: int, 
-        payment_transaction_id: Optional[str] = None
+        payment_transaction_id: Optional[str] = None,
+        request: Optional[Request] = None
     ) -> Dict[str, Any]:
         """
-        Create a new subscription for a user
+        Create a new subscription for a user with rate limiting and caching
         
         Args:
             conn: Database connection
             user_id: ID of the user subscribing
             plan_id: ID of the plan to subscribe to
             payment_transaction_id: Optional payment transaction ID
+            request: FastAPI Request object for rate limiting
             
         Returns:
             Dict containing the created subscription
             
         Raises:
-            HTTPException: If plan not found or user already has an active subscription
+            HTTPException: If plan not found, user already has an active subscription,
+                        or rate limit exceeded
         """
-        # Check if plan exists
+        # Apply rate limiting if request object is provided
+        if request:
+            client_ip = request.client.host if request.client else 'unknown'
+            rate_limit_key = f"sub_create:{client_ip}:{user_id}"
+            
+            # Check rate limit (max 5 requests per minute per IP+user)
+            rate_limit = await self._check_rate_limit(conn, rate_limit_key, limit=5, window=60)
+            if not rate_limit['allowed']:
+                retry_after = rate_limit['retry_after']
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    headers={"Retry-After": str(retry_after)},
+                    detail={
+                        "error": "rate_limit_exceeded",
+                        "message": "Too many subscription attempts. Please try again later.",
+                        "retry_after": retry_after
+                    }
+                )
+        
+        # Check if plan exists (uses cached result if available)
         plan = await self.get_plan_by_id(conn, plan_id)
         if not plan:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Subscription plan not found"
+                detail=f"Plan with ID {plan_id} not found"
             )
-
-        # Check for existing active subscription
+            
+        # Check if user already has an active subscription
         existing_sub = await self.get_user_subscription(conn, user_id)
-        if existing_sub:
+        if existing_sub and existing_sub['status'] == 'active':
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="User already has an active subscription"
             )
-
-        # Calculate start and end dates based on billing cycle
-        now = datetime.utcnow()
-        if plan['billing_cycle'] == BillingCycle.MONTHLY:
-            end_date = now + timedelta(days=30)
-        elif plan['billing_cycle'] == BillingCycle.BI_WEEKLY:
-            end_date = now + timedelta(days=14)
-        else:  # YEARLY
-            end_date = now + timedelta(days=365)
-
-        # Create new subscription
+            
+        # Calculate end date based on billing cycle
+        start_date = datetime.utcnow()
+        if plan['billing_cycle'] == 'monthly':
+            end_date = start_date + timedelta(days=30)
+        elif plan['billing_cycle'] == 'yearly':
+            end_date = start_date + timedelta(days=365)
+        else:  # bi-weekly default
+            end_date = start_date + timedelta(days=14)
+            
+        # Create subscription
         query = """
-        INSERT INTO subscriptions (
-            user_id, plan_id, start_date, end_date, status
-        )
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING *
+            INSERT INTO subscriptions (
+                user_id, plan_id, start_date, end_date, status, payment_transaction_id
+            ) VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING *
         """
         
-        row = await conn.fetchrow(
-            query,
-            user_id,
-            plan_id,
-            now,
-            end_date,
-            SubscriptionStatus.ACTIVE.value
-        )
-        
-        return dict(row) if row else None
+        try:
+            # Invalidate any cached user subscription data
+            await self._invalidate_user_cache(user_id)
+            
+            subscription = await conn.fetchrow(
+                query,
+                user_id,
+                plan_id,
+                start_date,
+                end_date,
+                'active',
+                payment_transaction_id
+            )
+            
+            # Log successful subscription creation
+            logger.info(f"Created subscription {subscription['subscription_id']} for user {user_id} to plan {plan_id}")
+            
+            return dict(subscription)
+            
+        except Exception as e:
+            logger.error(f"Error creating subscription: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create subscription"
+            )
 
-    async def cancel_subscription(self, conn: asyncpg.Connection, user_id: int) -> bool:
+    async def update_subscription_status(
+        self, 
+        conn: asyncpg.Connection, 
+        subscription_id: int, 
+        status: str
+    ) -> Dict[str, Any]:
         """
-        Cancel a user's active subscription
+        Update the status of a subscription
         
         Args:
             conn: Database connection
-            user_id: ID of the user whose subscription to cancel
+            subscription_id: ID of the subscription to update
+            status: New status (active, canceled, expired)
             
         Returns:
-            bool: True if subscription was cancelled, False if no active subscription found
+            Dict containing the updated subscription
+            
+        Raises:
+            HTTPException: If subscription not found or status is invalid
         """
+        # Normalize status input (handle both 'canceled' and 'cancelled' which are us ans uk spellings of the same thing)
+        normalized_status = status.lower()
+        if normalized_status == 'cancelled':
+            normalized_status = 'canceled'
+            
+        # Validate status
+        try:
+            status_enum = SubscriptionStatus(normalized_status)
+        except ValueError:
+            raise HTTPException(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid status. Must be one of: {', '.join([s.value for s in SubscriptionStatus])}"
+            )
+            
+        # Get subscription to ensure it exists
         query = """
-        UPDATE subscriptions
-        SET status = $1
-        WHERE user_id = $2 
-        AND status = $3
-        AND end_date > NOW()
-        RETURNING subscription_id
+            SELECT * FROM subscriptions 
+            WHERE subscription_id = $1
+            FOR UPDATE
         """
-        result = await conn.execute(
-            query,
-            SubscriptionStatus.CANCELED.value,
-            user_id,
-            SubscriptionStatus.ACTIVE.value
-        )
-        return bool(await conn.fetchval("SELECT row_count"))
+        subscription = await conn.fetchrow(query, subscription_id)
+        
+        if not subscription:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Subscription not found"
+            )
+            
+        # Update subscription status
+        update_query = """
+            UPDATE subscriptions 
+            SET status = $1
+            WHERE subscription_id = $2
+            RETURNING *
+        """
+        updated = await conn.fetchrow(update_query, status_enum.value, subscription_id)
+        
+        # Invalidate cache for this user
+        await self._invalidate_user_cache(subscription['user_id'])
+        
+        # Get plan details for response
+        plan = await self.get_plan_by_id(conn, updated['plan_id'])
+        
+        response = {
+            'subscription_id': updated['subscription_id'],
+            'user_id': updated['user_id'],
+            'plan_id': updated['plan_id'],
+            'plan_name': plan['name'] if plan else None,
+            'status': updated['status'],
+            'start_date': updated['start_date'],
+            'end_date': updated['end_date']
+        }
+        
+        # Add created_at and updated_at if they exist in the database
+        if 'created_at' in updated:
+            response['created_at'] = updated['created_at']
+        if 'updated_at' in updated:
+            response['updated_at'] = updated['updated_at']
+            
+        return response
 
     async def get_subscription_status(self, conn: asyncpg.Connection, user_id: int) -> Dict[str, Any]:
         """
@@ -578,7 +883,10 @@ class SubscriptionService:
         # Check if subscription exists and belongs to user
         sub_query = """
         SELECT 1 FROM subscriptions 
-        WHERE subscription_id = $1 AND user_id = $2 AND status = 'active'
+        WHERE subscription_id = $1 
+        AND user_id = $2 
+        AND status = 'active'
+        AND (end_date > NOW() OR end_date IS NULL)
         """
         sub_exists = await conn.fetchval(sub_query, meal_plan.subscription_id, meal_plan.user_id)
         if not sub_exists:
@@ -670,21 +978,29 @@ class SubscriptionService:
             HTTPException: If any meal is not found or other database error occurs
         """
         import time
+        logger.info(f"Starting meal addition for plan {meal_plan_id}...")
         start_time = time.time()
         
         if not meals:
             logger.info("No meals to add, skipping...")
             return
             
+        # Time connection acquisition
+        conn_time = time.time()
+        logger.info(f"Got connection in {(conn_time - start_time)*1000:.2f}ms")
+        
         # Prepare arrays for bulk insert
+        prep_start = time.time()
         meal_ids = [meal['meal_id'] for meal in meals]
         quantities = [meal.get('quantity', 1) for meal in meals]
+        prep_time = time.time()
         
         # Log meal IDs being processed (first 5 for brevity)
         sample_meals = ", ".join(meal_ids[:5])
         if len(meal_ids) > 5:
             sample_meals += f" and {len(meal_ids) - 5} more"
-        logger.info(f"Adding {len(meal_ids)} meals to plan {meal_plan_id}: {sample_meals}")
+        logger.info(f"Prepared {len(meal_ids)} meals in {(prep_time - prep_start)*1000:.2f}ms")
+        logger.info(f"Meal IDs: {sample_meals}")
         
         # Single query with unnest for bulk insert/update
         # Note: The database's foreign key constraint (fk_meal_plan_meals_meals)
@@ -699,15 +1015,21 @@ class SubscriptionService:
         
         # Execute the bulk insert/update
         try:
+            # Using direct execute instead of prepare + fetch
+            # This skips the expensive prepare step which was taking ~1.3s
+            # Since we're not reusing the prepared statement, this should be faster
             db_start = time.time()
             await conn.execute(query, meal_plan_id, meal_ids, quantities)
             db_duration = (time.time() - db_start) * 1000
-            total_duration = (time.time() - start_time) * 1000
             
+            # Log detailed timings
+            total_duration = (time.time() - start_time) * 1000
             logger.info(
-                f"Successfully processed {len(meal_ids)} meals for plan {meal_plan_id} | "
-                f"Total time: {total_duration:.2f}ms | "
-                f"DB operation: {db_duration:.2f}ms"
+                f"Successfully processed {len(meal_ids)} meals | "
+                f"Total time: {total_duration:.2f}ms\n"
+                f"  • Connection: {(conn_time - start_time)*1000:.2f}ms\n"
+                f"  • Data prep: {(prep_time - prep_start)*1000:.2f}ms\n"
+                f"  • DB execute: {db_duration:.2f}ms"
             )
             
         except asyncpg.ForeignKeyViolationError as e:
@@ -811,13 +1133,13 @@ class SubscriptionService:
             mp.created_at,
             u.user_id,
             u.name as user_name,
-            u.phone as user_phone,
+            u.phone_number as user_phone,
             u.email as user_email,
             jsonb_agg(
                 jsonb_build_object(
                     'meal_id', m.meal_id,
-                    'name', m.name,
-                    'image_url', m.image_url,
+                    'name', m.meal_name,
+                    'image_url', m.image_link,
                     'quantity', mpm.quantity
                 )
             ) as meals
@@ -826,7 +1148,7 @@ class SubscriptionService:
         LEFT JOIN meal_plan_meals mpm ON mp.meal_plan_id = mpm.meal_plan_id
         LEFT JOIN meals m ON mpm.meal_id = m.meal_id
         WHERE mp.chefid = $1
-        GROUP BY mp.meal_plan_id, u.user_id, u.name, u.phone, u.email
+        GROUP BY mp.meal_plan_id, u.user_id, u.name, u.phone_number, u.email
         ORDER BY mp.start_date DESC, mp.created_at DESC
         """
         
@@ -866,13 +1188,13 @@ class SubscriptionService:
             mp.end_date,
             mp.created_at,
             c.chefid,
-            c.first_name as chef_name,
-            c.profile_picture_url as chef_image,
+            c.name as chef_name,
+            c.image as chef_image,
             jsonb_agg(
                 jsonb_build_object(
                     'meal_id', m.meal_id,
-                    'name', m.name,
-                    'image_url', m.image_url,
+                    'name', m.meal_name,
+                    'image_url', m.image_link,
                     'quantity', mpm.quantity
                 )
             ) as meals
@@ -881,7 +1203,7 @@ class SubscriptionService:
         LEFT JOIN meal_plan_meals mpm ON mp.meal_plan_id = mpm.meal_plan_id
         LEFT JOIN meals m ON mpm.meal_id = m.meal_id
         WHERE mp.user_id = $1
-        GROUP BY mp.meal_plan_id, c.chefid, c.first_name, c.profile_picture_url
+        GROUP BY mp.meal_plan_id, c.chefid, c.name, c.image
         ORDER BY mp.start_date DESC, mp.created_at DESC
         """
         

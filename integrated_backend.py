@@ -32,7 +32,9 @@ from pydantic import BaseModel, Field, validator
 
 # --- FastAPI Imports ---
 from services.fcm_service import FirebaseMessagingService
-from fastapi import FastAPI, Request, Depends, HTTPException, status, Body, Query, Path, BackgroundTasks
+from fastapi import FastAPI, Request, Depends, HTTPException, status, Body, Query, Path, BackgroundTasks, Response
+from fastapi import status as http_status
+from fastapi import status as http_status_import
 from typing import Dict, Any, Optional, List, Union, Tuple
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -2484,6 +2486,89 @@ from services.subscription_service import (
 subscription_service = SubscriptionService()
 
 
+# --- Admin Subscriptions Endpoints ---
+
+@app.put("/api/admin/subscriptions/{subscription_id}/status", response_model=Dict[str, Any])
+async def update_subscription_status(
+    subscription_id: int,
+    status_update: Dict[str, str],
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    Update the status of a subscription (Admin only)
+    
+    - **subscription_id**: ID of the subscription to update
+    - **status_update**: JSON object with 'status' field (active, canceled, expired)
+    """
+    try:
+        if 'status' not in status_update:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Status field is required"
+            )
+            
+        updated_subscription = await subscription_service.update_subscription_status(
+            conn=conn,
+            subscription_id=subscription_id,
+            status=status_update['status']
+        )
+        
+        return updated_subscription
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating subscription status: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update subscription status: {str(e)}"
+        )
+
+@app.get("/api/admin/subscriptions", response_model=Dict[str, Any])
+async def list_all_subscriptions(
+    status: Optional[str] = Query(None, description="Filter by status (active, canceled, expired)"),
+    user_id: Optional[int] = Query(None, description="Filter by user ID"),
+    limit: int = Query(20, ge=1, le=100, description="Number of results per page"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    """
+    List all subscriptions with optional filtering (Admin only)
+    
+    Returns a paginated list of subscriptions with user and plan details.
+    """
+    try:
+        # Convert status to lowercase if provided
+        status_filter = status.lower() if status else None
+        
+        try:
+            # Get subscriptions with filtering and pagination
+            result = await subscription_service.get_all_subscriptions(
+                conn=conn,
+                status_filter=status_filter,
+                user_id=user_id,
+                limit=limit,
+                offset=offset
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Error in get_all_subscriptions: {str(e)}")
+            raise HTTPException(
+                status_code=http_status_import.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to retrieve subscriptions: {str(e)}"
+            )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing subscriptions: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve subscriptions"
+        )
+
 # --- Admin Plan Management Endpoints ---
 
 @app.post("/api/admin/plans", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
@@ -2980,6 +3065,86 @@ async def get_chef_meal_plans(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch meal plans"
+        )
+
+@app.get("/api/users/{user_id}/meal-plans", response_model=List[Dict[str, Any]])
+async def get_user_meal_plans(
+    user_id: int,
+    status: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Get meal plans for a specific user
+    
+    Parameters:
+    - user_id: ID of the user
+    - status: Optional filter by status (e.g., 'active', 'upcoming', 'completed')
+    - start_date: Optional filter by start date (YYYY-MM-DD)
+    - end_date: Optional filter by end date (YYYY-MM-DD)
+    """
+    try:
+        # Convert date strings to date objects if provided
+        start_date_obj = None
+        end_date_obj = None
+        
+        if start_date:
+            try:
+                start_date_obj = datetime.strptime(start_date, '%Y-%m-%d').date()
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid start_date format. Use YYYY-MM-DD"
+                )
+                
+        if end_date:
+            try:
+                end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid end_date format. Use YYYY-MM-DD"
+                )
+        
+        # Get meal plans for the user
+        meal_plans = await subscription_service.get_user_meal_plans(conn, user_id)
+        
+        # Apply filters
+        filtered_plans = []
+        today = date.today()
+        
+        for plan in meal_plans:
+            # Filter by status if provided
+            if status:
+                plan_start = plan.get('start_date')
+                plan_end = plan.get('end_date')
+                
+                if status.lower() == 'active' and not (plan_start <= today <= plan_end):
+                    continue
+                elif status.lower() == 'upcoming' and plan_start <= today:
+                    continue
+                elif status.lower() == 'completed' and plan_end >= today:
+                    continue
+            
+            # Filter by date range if provided
+            if start_date_obj and plan.get('end_date') < start_date_obj:
+                continue
+                
+            if end_date_obj and plan.get('start_date') > end_date_obj:
+                continue
+                
+            filtered_plans.append(plan)
+        
+        return filtered_plans
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error fetching meal plans for user {user_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch user meal plans"
         )
 
 # --- Other Classes (Chefs, Producers, etc. Updated for asyncpg pool) ---
