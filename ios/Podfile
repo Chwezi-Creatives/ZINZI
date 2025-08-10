@@ -1,13 +1,16 @@
 # Uncomment this line to define a global platform for your project
 source 'https://github.com/CocoaPods/Specs.git'
 platform :ios, '14.0'
-# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+
+# Disable CocoaPods analytics to improve Flutter build speed
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
 project 'Runner', {
   'Debug' => :debug,
   'Profile' => :release,
   'Release' => :release,
 }
+
 def flutter_root
   generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
   unless File.exist?(generated_xcode_build_settings_path)
@@ -19,21 +22,29 @@ def flutter_root
   end
   raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
 end
+
 require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
 flutter_ios_podfile_setup
+
 target 'Runner' do
-  use_frameworks!
+  # Use static linkage to avoid modular header issues in Xcode 16+
+  use_frameworks! :linkage => :static
+
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+
   target 'RunnerTests' do
     inherit! :search_paths
   end
 end
+
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
-    # Fix for Firebase modular header issue
     target.build_configurations.each do |config|
+      # Allow non-modular includes (still useful as fallback)
       config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+      # Required for Xcode 16 archive builds
+      config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
     end
   end
 end
