@@ -76,7 +76,7 @@ dependencies:
   url_launcher: ^6.3.1
   vibration: ^3.1.3
   
-  flutter_local_notifications: ^16.3.2
+  flutter_local_notifications: ^17.2.1 #attempts to fix big large ambijous build erro in java so dont tamper with the version
   # Web-specific dependencies
   image_picker_web: ^4.0.0
   audioplayers_web: ^4.1.0

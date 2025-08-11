@@ -252,7 +252,7 @@ SPEC CHECKSUMS:
   FirebaseInstallations: 913cf60d0400ebd5d6b63a28b290372ab44590dd
   FirebaseMessaging: 9bc34a98d2e0237e1b121915120d4d48ddcf301e
   flutter_image_compress_macos: c26c3c13ea0f28ae6dea4e139b3292e7729f99f1
-  flutter_local_notifications: 3805ca215b2fb7f397d78b66db91f6a747af52e4
+  flutter_local_notifications: 4b427ffabf278fc6ea9484c97505e231166927a5
   FlutterMacOS: 8f6f14fa908a6fb3fba0cd85dbd81ec4b251fb24
   geolocator_apple: 66b711889fd333205763b83c9dcf0a57a28c7afd
   GoogleAppMeasurement: 70ce9aa438cff1cfb31ea3e660bcc67734cb716e
