@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart'; // Add this import for date formatting
-import 'package:zinzi/allmeals.dart';
+import 'package:zinzi/onboard.dart'; // Import for LandingPage
 import 'package:zinzi/app_drawer_unified.dart'
     as drawer; // Import the unified AppDrawer widget with prefix
 
@@ -562,7 +562,7 @@ class _ShoppingCartScreenState extends State<ShoppingCartScreen> {
             onPressed: () {
               // Navigate to the AllMealsScreen or equivalent
               Navigator.pushReplacement(
-                  context, MaterialPageRoute(builder: (_) => AllMealsScreen()));
+                  context, MaterialPageRoute(builder: (_) => LandingPage()));
             },
             style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.teal,
