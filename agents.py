@@ -1,450 +1,295 @@
 """
-crewai_sql_pipeline.py
+ZINZI Agentic Framework — Local Review Loops per Agent (Planner → Executor → Reviewer) to ensure accuracy
 
-Production-grade NL→SQL pipeline using CrewAI (multi-agent orchestration) + LangChain:
-
-- Planner (NL→SQL via LangChain) → Guardian (read-only & privacy guard) → Executor (SQLAlchemy/pyodbc)
-  → Analyst (concise insights)
-- Robust safety: read-only enforcement, SELECT * ban, alias-aware user_id filters on private tables,
-  configurable row caps, CTE/comment-safe read-only detection.
-- Deterministic, stepwise orchestration: one mini-crew per step for reliability in production.
-- Structured rows (list[dict]) from the DB for accurate downstream analysis.
-
-Requirements
-------------
-pip install -U crewai crewai-tools langchain langchain-openai langchain-community sqlalchemy pyodbc pydantic python-dotenv
-
-Environment
------------
-OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-4o-mini            # optional (defaults to gpt-4o-mini)
-SQL_DEFAULT_CAP=500                 # optional
-SQL_MAX_CAP=5000                    # optional
-DEMO_USER_ID=138                    # optional
+Prereqs:
+  pip install -U crewai crewai-tools langchain langchain-openai langchain-community sqlalchemy pyodbc pydantic python-dotenv
+Environment:
+  OPENAI_API_KEY=... ; OPENAI_MODEL=gpt-4o-mini ; BACKGROUND_FILE=agents_tools_guide.md
 """
 
 from __future__ import annotations
-
-import os
-import re
-import json
-import logging
-import urllib.parse
-from typing import List, Dict, Any, Optional
-
-from pydantic import BaseModel, Field, ValidationError
-
+import os, re, json, logging, urllib.parse
+from typing import Dict, Any, Optional, List
+from pydantic import BaseModel, Field
 from crewai import Agent, Task, Crew, Process
 from crewai.tools import BaseTool
-
 from langchain_openai import ChatOpenAI
 from langchain.chains import create_sql_query_chain
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_community.utilities import SQLDatabase
-
 from sqlalchemy import text
 from sqlalchemy.engine import Engine, Result
 
-# -----------------------------------------------------------------------------
-# Logging
-# -----------------------------------------------------------------------------
+# -------------------- Logging --------------------
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-)
-logger = logging.getLogger("crewai_sql_pipeline")
+logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
+log = logging.getLogger("zinzi.local_loops")
 
-# -----------------------------------------------------------------------------
-# DB connection (SQL Server / ODBC)
-# -----------------------------------------------------------------------------
-def mssql_uri(
-    driver: str = "ODBC Driver 17 for SQL Server",
-    server: str = r"localhost\SQLExpress",
-    database: str = "ZANZA",
-    trusted: bool = True,
-) -> str:
-    """
-    Build a SQLAlchemy ODBC connection URI for SQL Server.
-    Mirrors the settings used in your existing codebase.
-    """
-    odbc = (
-        f"Driver={{{driver}}};"
-        f"Server={server};"
-        f"Database={database};"
-        f"Trusted_Connection={'Yes' if trusted else 'No'};"
-        f"TrustServerCertificate=Yes;"
-    )
+# -------------------- DB + LangChain --------------------
+def mssql_uri(driver="ODBC Driver 17 for SQL Server", server=r"localhost\SQLExpress", database="ZANZA", trusted=True):
+    odbc = f"Driver={{{driver}}};Server={server};Database={database};Trusted_Connection={'Yes' if trusted else 'No'};TrustServerCertificate=Yes;"
     return "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(odbc)
 
 DB_URI = mssql_uri()
-# A few sample rows per table are injected into the LLM prompt to reduce hallucinations
 db = SQLDatabase.from_uri(DB_URI, sample_rows_in_table_info=2)
-
-# Attempt to access the underlying SQLAlchemy engine (version-dependent attr)
 ENGINE: Optional[Engine] = getattr(db, "engine", None) or getattr(db, "_engine", None)
 
-# -----------------------------------------------------------------------------
-# Safety / Privacy
-# -----------------------------------------------------------------------------
 DEFAULT_CAP = int(os.getenv("SQL_DEFAULT_CAP", "500"))
 MAX_CAP = int(os.getenv("SQL_MAX_CAP", "5000"))
-
-# Per-user tables that MUST be constrained by user_id
+BACKGROUND_FILE = os.getenv("BACKGROUND_FILE", "agents_tools_guide.md")
 PRIVATE_TABLES = {"user_preferences", "user_metrics"}
 
-# Read-only and forbidden statements (handles comments, CTEs)
-FORBIDDEN_SQL = re.compile(
-    r"\b(UPDATE|INSERT|DELETE|MERGE|EXEC|EXECUTE|DROP|ALTER|TRUNCATE|CREATE|GRANT|REVOKE)\b",
-    re.IGNORECASE,
-)
-READONLY_HEAD = re.compile(
-    r"^\s*(?:--.*?$|/\*.*?\*/\s*)*(?:WITH\b.*?\bSELECT\b|SELECT\b)",
-    re.IGNORECASE | re.DOTALL | re.MULTILINE,
-)
-STAR_PAT = re.compile(r"\bSELECT\s+\*", re.IGNORECASE)
+FORBIDDEN_SQL = re.compile(r"\b(UPDATE|INSERT|DELETE|MERGE|EXEC|EXECUTE|DROP|ALTER|TRUNCATE|CREATE|GRANT|REVOKE)\b", re.I)
+READONLY_HEAD = re.compile(r"^\s*(?:--.*?$|/\*.*?\*/\s*)*(?:WITH\b.*?\bSELECT\b|SELECT\b)", re.I | re.S | re.M)
+STAR_PAT = re.compile(r"\bSELECT\s+\*", re.I)
+ALIAS_PAT = re.compile(r"\b(?:FROM|JOIN)\s+([a-zA-Z0-9_]+)(?:\s+AS)?\s+([a-zA-Z0-9_]+)", re.I)
 
-# Alias finder: FROM tbl AS t  |  JOIN tbl t
-ALIAS_PAT = re.compile(r"\b(?:FROM|JOIN)\s+([a-zA-Z0-9_]+)(?:\s+AS)?\s+([a-zA-Z0-9_]+)", re.IGNORECASE)
-
-def is_read_only(sql: str) -> bool:
-    return READONLY_HEAD.search(sql or "") is not None and FORBIDDEN_SQL.search(sql or "") is None
-
-def has_select_star(sql: str) -> bool:
-    return STAR_PAT.search(sql or "") is not None
-
-def ref_tables(sql: str, known: List[str]) -> List[str]:
-    L = (sql or "").lower()
-    return sorted({t for t in known if re.search(rf"\b{re.escape(t)}\b", L)})
-
-def alias_map(sql: str) -> Dict[str, List[str]]:
-    """
-    Map physical table -> list of aliases used in the query.
-    {"user_metrics": ["um"], "user_preferences": ["up"]}
-    """
-    mapping: Dict[str, List[str]] = {}
-    for tbl, alias in ALIAS_PAT.findall(sql or ""):
-        tbl_l, alias_l = tbl.lower(), alias.lower()
-        mapping.setdefault(tbl_l, []).append(alias_l)
-    return mapping
-
-def ensure_user_filter(sql: str, tables: List[str], user_id: int) -> str:
-    """
-    Inject WHERE predicates that scope ALL private tables to the current user_id.
-    This may turn LEFT JOINs into effectively inner behavior; preferred to prevent leakage.
-    """
-    priv_used = [t for t in tables if t in PRIVATE_TABLES]
-    if not priv_used:
-        return sql
-
-    L = (sql or "").lower()
-    # Heuristic: if any user_id predicate exists, accept it
-    if re.search(r"\buser_?id\s*=", L):
-        return sql
-
-    amap = alias_map(sql)
-    preds: List[str] = []
-    for t in priv_used:
-        aliases = amap.get(t, [])
-        if aliases:
-            preds.extend([f"{a}.user_id = {int(user_id)}" for a in aliases])
-        else:
-            preds.append(f"{t}.user_id = {int(user_id)}")
-
-    # AND across all private tables
-    clause = "(" + " AND ".join(preds) + ")"
-
-    if re.search(r"\bWHERE\b", sql, re.IGNORECASE):
-        return re.sub(r"\bWHERE\b", f"WHERE {clause} AND", sql, count=1, flags=re.IGNORECASE)
-
-    # Insert WHERE before grouping/ordering or append at end
-    insert_pt = re.search(r"\b(GROUP BY|ORDER BY|HAVING|OPTION|FOR JSON|FOR XML)\b", sql, re.IGNORECASE)
-    if insert_pt:
-        i = insert_pt.start()
-        return sql[:i] + f" WHERE {clause} " + sql[i:]
-    return sql.rstrip().rstrip(";") + f" WHERE {clause};"
-
-def cap_rows(sql: str, requested: Optional[int] = None) -> str:
-    """
-    Add TOP N for simple SELECTs. Respect existing TOP/OFFSET.
-    For CTE-heavy queries, prefer to have the validator add a limit with ORDER BY.
-    """
-    cap = min(int(requested or DEFAULT_CAP), MAX_CAP)
-    # Respect existing TOP or OFFSET/FETCH
-    if re.search(r"\bSELECT\s+TOP\s+\d+", sql, re.IGNORECASE) or re.search(r"\bOFFSET\s+\d+\s+ROWS", sql, re.IGNORECASE):
-        return sql
-
-    # If starts with WITH CTE, avoid naive injection
-    if re.match(r"^\s*(?:--.*?$|/\*.*?\*/\s*)*WITH\b", sql, re.IGNORECASE | re.DOTALL | re.MULTILINE):
-        return sql  # rely on validator prompt to add paging
-
-    # Inject after SELECT or SELECT DISTINCT
-    sql = re.sub(r"^\s*SELECT\s+DISTINCT\s+", f"SELECT DISTINCT TOP {cap} ", sql, count=1, flags=re.IGNORECASE)
-    sql = re.sub(r"^\s*SELECT\s+", f"SELECT TOP {cap} ", sql, count=1, flags=re.IGNORECASE)
-    return sql
-
-def safe_sql_transform(sql: str, user_id: int, requested_limit: Optional[int] = None) -> str:
-    """
-    Apply hard safety constraints and privacy scoping.
-    """
-    if not sql or not is_read_only(sql):
-        raise ValueError("Refusing non-read-only SQL. Only SELECT/CTE queries are allowed.")
-    if has_select_star(sql):
-        raise ValueError("Refusing SELECT *. Request explicit columns.")
-
-    known_tables = [t.lower() for t in db.get_usable_table_names()]
-    tables_in_sql = ref_tables(sql, known_tables)
-    if not tables_in_sql:
-        logger.warning("No known tables referenced; query may fail.")
-
-    sql = ensure_user_filter(sql, tables_in_sql, user_id)
-    sql = cap_rows(sql, requested_limit)
-    return sql
-
-# -----------------------------------------------------------------------------
-# LangChain: NL→SQL + Validation
-# -----------------------------------------------------------------------------
-llm = ChatOpenAI(
-    model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-    temperature=0,
-    timeout=60,
-    max_retries=2,
-)
-
-# Base NL→SQL: uses the live schema supplied by SQLDatabase
+llm = ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"), temperature=0, timeout=60, max_retries=2)
 sql_gen_chain = create_sql_query_chain(llm, db)
-
-# Validator: fix common issues, enforce explicit columns & pagination guidance
-_validator_prompt = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            """You are a meticulous SQL Server (T-SQL) reviewer.
-- Avoid SELECT *; use explicit columns that exist.
-- If result can be large, add ORDER BY and TOP {cap} or OFFSET/FETCH.
-- Check NOT IN + NULL, UNION vs UNION ALL, BETWEEN edges, join keys, casts/types.
-- Return ONLY the final SQL (no prose).""",
-        ),
-        ("human", "{query}"),
-    ]
-).partial(cap=str(DEFAULT_CAP))
-
+_validator_prompt = ChatPromptTemplate.from_messages([
+    ("system", f"You are a meticulous SQL Server reviewer. Avoid SELECT *; use explicit columns. "
+               f"If large, add ORDER BY and TOP {DEFAULT_CAP} or OFFSET/FETCH. Return ONLY SQL."),
+    ("human", "{query}")
+])
 validation_chain = _validator_prompt | llm | StrOutputParser()
 
 def generate_and_validate_sql(question: str) -> str:
     raw_sql = sql_gen_chain.invoke({"question": question})
     return validation_chain.invoke({"query": raw_sql})
 
-# -----------------------------------------------------------------------------
-# CrewAI Tools
-# -----------------------------------------------------------------------------
+# -------------------- Tools --------------------
 class NL2SQLInput(BaseModel):
-    question: str = Field(..., description="User's natural-language question")
-
+    question: str
 class NL2SQLTool(BaseTool):
-    name: str = "nl2sql_tool"
-    description: str = "Generate a read-only SQL Server SELECT for the given question."
-    args_schema = NL2SQLInput
-
-    def _run(self, question: str) -> str:
-        return generate_and_validate_sql(question)
+    name, description, args_schema = "nl2sql_tool", "Generate SQL Server SELECT for a question.", NL2SQLInput
+    def _run(self, question: str) -> str: return generate_and_validate_sql(question)
 
 class GuardSQLInput(BaseModel):
-    sql: str = Field(..., description="Candidate SQL query")
-    user_id: int = Field(..., description="Current user id for privacy filtering")
-    limit: Optional[int] = Field(None, description="Requested row cap")
-
+    sql: str; user_id: int; limit: Optional[int] = None
 class GuardSQLTool(BaseTool):
-    name: str = "guard_sql_tool"
-    description: str = "Enforce read-only, ban SELECT *, inject user_id filter on private tables, cap rows."
-    args_schema = GuardSQLInput
-
+    name, description, args_schema = "guard_sql_tool", "Read-only, explicit cols, user_id scope, row caps.", GuardSQLInput
     def _run(self, sql: str, user_id: int, limit: Optional[int] = None) -> str:
-        return safe_sql_transform(sql, user_id=user_id, requested_limit=limit)
+        if not READONLY_HEAD.search(sql) or FORBIDDEN_SQL.search(sql): raise ValueError("Non-read-only SQL.")
+        if STAR_PAT.search(sql): raise ValueError("SELECT * not allowed.")
+        tables = [t.lower() for t in db.get_usable_table_names()]
+        used = sorted({t for t in tables if re.search(rf"\b{re.escape(t)}\b", sql.lower())})
+        priv = [t for t in used if t in PRIVATE_TABLES]
+        if priv and not re.search(r"\buser_?id\s*=", sql, re.I):
+            # alias-aware
+            alias_map = {}
+            for tbl, alias in ALIAS_PAT.findall(sql):
+                alias_map.setdefault(tbl.lower(), []).append(alias.lower())
+            preds=[]
+            for t in priv:
+                aliases = alias_map.get(t, [])
+                preds += [f"{a}.user_id = {user_id}" for a in aliases] or [f"{t}.user_id = {user_id}"]
+            clause = "(" + " AND ".join(preds) + ")"
+            if re.search(r"\bWHERE\b", sql, re.I):
+                sql = re.sub(r"\bWHERE\b", f"WHERE {clause} AND", sql, 1, flags=re.I)
+            else:
+                anchor = re.search(r"\b(GROUP BY|ORDER BY|HAVING|OPTION|FOR JSON|FOR XML)\b", sql, re.I)
+                sql = sql[:anchor.start()] + f" WHERE {clause} " + sql[anchor.start():] if anchor else sql.rstrip().rstrip(";") + f" WHERE {clause};"
+        cap = min(int(limit or DEFAULT_CAP), MAX_CAP)
+        if not re.search(r"\bSELECT\s+TOP\s+\d+\b", sql, re.I) and not re.search(r"\bOFFSET\s+\d+\s+ROWS\b", sql, re.I):
+            if not re.match(r"^\s*(?:--.*?$|/\*.*?\*/\s*)*WITH\b", sql, re.I | re.S | re.M):
+                sql = re.sub(r"^\s*SELECT\s+DISTINCT\s+", f"SELECT DISTINCT TOP {cap} ", sql, 1, flags=re.I)
+                sql = re.sub(r"^\s*SELECT\s+", f"SELECT TOP {cap} ", sql, 1, flags=re.I)
+        return sql
 
 class ExecSQLInput(BaseModel):
-    sql: str = Field(..., description="Final safe SQL to execute")
-
+    sql: str
 class ExecSQLTool(BaseTool):
-    name: str = "exec_sql_tool"
-    description: str = "Execute SQL on SQL Server and return rows as list[dict]."
-    args_schema = ExecSQLInput
-
+    name, description, args_schema = "exec_sql_tool", "Execute SQL and return rows as list[dict].", ExecSQLInput
     def _run(self, sql: str) -> Any:
-        if ENGINE is None:
-            # Fallback to string repr (LangChain's db.run)
-            logger.warning("SQLAlchemy engine unavailable on SQLDatabase; using db.run fallback.")
-            return db.run(sql)
+        if ENGINE is None: return db.run(sql)
         with ENGINE.begin() as conn:
             result: Result = conn.execute(text(sql))
-            # Convert to list of dicts for robust downstream analysis
             return [dict(row._mapping) for row in result]
 
-# -----------------------------------------------------------------------------
-# CrewAI Agents
-# -----------------------------------------------------------------------------
-planner = Agent(
-    role="SQL Planner",
-    goal="Turn user questions into correct SQL Server SELECT queries using the live schema.",
-    backstory="A T-SQL expert who never guesses column names and prefers minimal, correct queries.",
-    tools=[NL2SQLTool()],
-    allow_delegation=False,
-)
-
-guardian = Agent(
-    role="Privacy & Safety Officer",
-    goal="Ensure queries are read-only, user-scoped, explicit-column, and row-capped.",
-    backstory="Security-first engineer specializing in data governance and least-privilege access.",
-    tools=[GuardSQLTool()],
-    allow_delegation=False,
-)
-
-executor = Agent(
-    role="SQL Executor",
-    goal="Run safe SQL against the database and return structured rows.",
-    backstory="DBA who executes audited queries and returns stable, typed outputs.",
-    tools=[ExecSQLTool()],
-    allow_delegation=False,
-)
-
-analyst_llm = ChatOpenAI(
-    model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-    temperature=0,
-    timeout=60,
-    max_retries=2,
-)
-ANALYST_PROMPT = ChatPromptTemplate.from_messages(
-    [
-        ("system", "You are a careful data analyst. Only use the provided rows to answer."),
-        (
-            "human",
-            """Question: {question}
-SQL: {sql}
-Rows (JSON): {rows_json}
-
-Tasks:
-1) If rows are empty, say that plainly and suggest a tighter query.
-2) Provide up to 5 concise insights (counts, trends, top/bottom, ranges).
-3) If categories with metrics appear, include a compact ranking.
-4) Never fabricate values; if unsure, state the limitation.
-Return a short, plain answer.""",
-        ),
-    ]
-)
-def interpret_rows(question: str, sql: str, rows: Any) -> str:
-    rows_json = json.dumps(rows, ensure_ascii=False)[:12000]  # trim huge outputs
-    return (ANALYST_PROMPT | analyst_llm | StrOutputParser()).invoke(
-        {"question": question, "sql": sql, "rows_json": rows_json}
-    )
-
-analyst = Agent(
-    role="Insights Analyst",
-    goal="Explain results succinctly with counts, trends, and rankings. Never fabricate.",
-    backstory="Business analyst who writes crisp, actionable insights from tabular data.",
-    tools=[],  # reasoning-only; we call a deterministic prompt above
-    allow_delegation=False,
-)
-
-# -----------------------------------------------------------------------------
-# Mini-crew runners (robust in production)
-# -----------------------------------------------------------------------------
-def _run_planner(question: str) -> str:
-    task = Task(
-        description=(
-            "Generate ONE minimal, correct SQL Server SELECT that answers the user's question. "
-            "Use the nl2sql_tool. Return ONLY the SQL."
-        ),
-        expected_output="A single SQL string.",
-        agent=planner,
-    )
-    crew = Crew(agents=[planner], tasks=[task], process=Process.sequential)
-    out = crew.kickoff(inputs={"question": question})
-    sql = (out.raw or "").strip()
-    if not sql:
-        # Deterministic fallback: call chain directly
-        sql = generate_and_validate_sql(question)
-    return sql
-
-def _run_guard(sql: str, user_id: int, limit: Optional[int] = None) -> str:
-    task = Task(
-        description=(
-            "Harden the provided SQL: enforce read-only, reject SELECT *, scope all private tables "
-            f"to user_id={user_id}, and cap rows to a reasonable limit. Return ONLY the final safe SQL."
-        ),
-        expected_output="A single safe SQL string.",
-        agent=guardian,
-    )
-    crew = Crew(agents=[guardian], tasks=[task], process=Process.sequential)
-    out = crew.kickoff(inputs={"sql": sql, "user_id": user_id, "limit": limit})
-    safe_sql = (out.raw or "").strip() or sql
-    # Server-side verification regardless of agent output
-    return safe_sql_transform(safe_sql, user_id=user_id, requested_limit=limit)
-
-def _run_exec(sql: str) -> Any:
-    task = Task(
-        description="Execute the SQL and return rows as a JSON-like list.",
-        expected_output="Rows as list[dict] (or string repr if engine unavailable).",
-        agent=executor,
-    )
-    crew = Crew(agents=[executor], tasks=[task], process=Process.sequential)
-    out = crew.kickoff(inputs={"sql": sql})
-    rows = out.raw
-    # If the tool returned a string (db.run fallback), try to json-load, else keep string
-    if isinstance(rows, str):
+class ReadFileInput(BaseModel):
+    path: str; max_chars: int = 3000
+class ReadFileTool(BaseTool):
+    name, description, args_schema = "read_file_tool", "Read a local text/markdown file (truncated).", ReadFileInput
+    def _run(self, path: str, max_chars: int = 3000) -> str:
         try:
-            rows = json.loads(rows)
+            with open(path, "r", encoding="utf-8") as f: data = f.read()
+            return data[:max_chars]
+        except Exception as e:
+            return f"[FILE_READ_ERROR] {e}"
+
+# -------------------- Local 3-Subagent Loop (Planner → Executor → Reviewer) --------------------
+MAX_ITERS = int(os.getenv("REVIEW_MAX_ITERS", "3"))
+
+def run_local_loop(agent_name: str,
+                   planner: Agent, executor: Agent, reviewer: Agent,
+                   plan_desc: str, exec_desc: str, review_desc: str,
+                   inputs: Dict[str, Any]) -> str:
+    """
+    Reviewer must output JSON: {"status":"PASS|LOOP","artifact":"...", "feedback":"..."}.
+    Loops until PASS or max iters; returns artifact (maybe reviewer-corrected).
+    """
+    critique = ""
+    artifact_out = ""
+    for _ in range(MAX_ITERS):
+        t_plan = Task(description=f"{plan_desc}\n\nContext:\nquestion={{question}}\ncritique={{critique}}",
+                      expected_output="Short plan (<=8 lines).", agent=planner)
+        t_exec = Task(description=f"{exec_desc}\n\nUse the plan above.\nReturn ONLY the artifact (string/JSON).",
+                      expected_output="Artifact only.", agent=executor, context=[t_plan])
+        t_rev  = Task(description=f"{review_desc}\n\nReturn control JSON only.",
+                      expected_output='{"status":"PASS|LOOP","artifact":"...","feedback":"..."}',
+                      agent=reviewer, context=[t_plan, t_exec])
+        crew = Crew(agents=[planner, executor, reviewer], tasks=[t_plan, t_exec, t_rev], process=Process.sequential)
+        out = crew.kickoff(inputs={**inputs, "critique": critique})
+        raw = (out.raw or "").strip()
+        # Extract last JSON block from reviewer output
+        try:
+            start, end = raw.rfind("{"), raw.rfind("}")
+            ctrl = json.loads(raw[start:end+1]) if start != -1 else {}
         except Exception:
-            pass
+            ctrl = {"status":"LOOP","artifact":artifact_out,"feedback":"Malformed review JSON"}
+        status = (ctrl.get("status") or "").upper()
+        artifact_out = ctrl.get("artifact", artifact_out)
+        critique = ctrl.get("feedback","")
+        if status == "PASS": return artifact_out
+    return artifact_out  # best effort after max iters
+
+# -------------------- Subagent Triples per Agent --------------------
+def make_intent_triple():
+    return (
+      Agent(role="Intent Planner", goal="Plan how to classify the user query.", tools=[], allow_delegation=False),
+      Agent(role="Intent Executor", goal="Output JSON: {intent, targets[], confidence, reasons}.", tools=[], allow_delegation=False),
+      Agent(role="Intent Reviewer", goal="Validate JSON & alignment; PASS or LOOP with fixes.", tools=[], allow_delegation=False),
+    )
+
+def make_background_triple():
+    return (
+      Agent(role="BG Planner", goal="Plan what to extract from background file.", tools=[], allow_delegation=False),
+      Agent(role="BG Executor", goal="Read file and extract <=1200 char relevant snippet.", tools=[ReadFileTool()], allow_delegation=False),
+      Agent(role="BG Reviewer", goal="Check relevance and length; PASS or LOOP.", tools=[], allow_delegation=False),
+    )
+
+def make_domain_triple(name: str):
+    return (
+      Agent(role=f"{name} Planner", goal=f"Plan minimal SQL for {name}.", tools=[], allow_delegation=False),
+      Agent(role=f"{name} Executor", goal=f"Generate SQL via NL2SQLTool for {name}.", tools=[NL2SQLTool()], allow_delegation=False),
+      Agent(role=f"{name} Reviewer", goal="Validate SQL vs spec; fix cols; PASS or LOOP.", tools=[], allow_delegation=False),
+    )
+
+# -------------------- Public steps using local loops --------------------
+def classify_intent(question: str) -> Dict[str, Any]:
+    P,E,R = make_intent_triple()
+    plan = "Decide which domain(s) the query targets (meals/weight/wearables/mixed)."
+    execd= ("Produce compact JSON only with keys: intent (meals|weight|wearables|mixed), "
+            "targets (array), confidence (0-1), reasons (string). No extra text.")
+    review=("Ensure JSON schema is correct, intent matches question, and targets set is coherent. "
+            "If fixes needed, return corrected JSON in 'artifact'.")
+    art = run_local_loop("intent", P,E,R, plan, execd, review, {"question": question})
+    try: return json.loads(art)
+    except Exception: return {"intent":"meals","targets":["meals"],"confidence":0.5,"reasons":"fallback"}
+
+def load_background_snippet(question: str) -> str:
+    P,E,R = make_background_triple()
+    plan = "Pick minimal guidance from background file to help agents/tools choose correctly."
+    execd= f"Use read_file_tool with path='{BACKGROUND_FILE}'. Extract <=1200 chars most relevant to the question. Return ONLY snippet text."
+    review="Check snippet is under 1200 chars and relevant; trim or refine if needed and return snippet in 'artifact'."
+    return run_local_loop("background", P,E,R, plan, execd, review, {"question": question, "path": BACKGROUND_FILE, "max_chars": 3000})[:1200]
+
+def gen_domain_sql(domain: str, question: str, spec_yaml: str, background: str) -> str:
+    P,E,R = make_domain_triple(domain.capitalize())
+    plan = f"From spec + background, choose exact tables/columns and constraints for {domain}."
+    execd= "Use nl2sql_tool to emit ONE SQL Server SELECT. No SELECT *. No prose."
+    review=("Verify SQL matches spec & domain; fix invalid columns/joins; ensure explicit cols; "
+            "return corrected SQL in 'artifact'. PASS when valid.")
+    return run_local_loop(domain, P,E,R, plan, execd, review, {"question": question, "spec": spec_yaml, "background": background})
+
+# -------------------- Guard + Execute + Analyst + Final Review (unchanged shape) --------------------
+class GuardSQLInput(BaseModel):
+    sql: str; user_id: int; limit: Optional[int] = None
+
+privacy_guard = Agent(role="Privacy Guard", goal="Harden SQL (read-only, explicit cols, user_id scope, caps).", tools=[GuardSQLTool()], allow_delegation=False)
+sql_executor_agent = Agent(role="SQL Executor", goal="Run safe SQL and return rows.", tools=[ExecSQLTool()], allow_delegation=False)
+final_reviewer = Agent(role="Final Review Crew", goal="Validate final JSON for schema/privacy/intent.", tools=[], allow_delegation=False)
+
+def harden_sql(sql: str, user_id: int, limit: Optional[int]) -> str:
+    t = Task(description=f"Harden SQL for user_id={user_id}; return ONLY safe SQL.", expected_output="SQL", agent=privacy_guard)
+    c = Crew(agents=[privacy_guard], tasks=[t], process=Process.sequential)
+    out = (c.kickoff(inputs={"sql": sql, "user_id": user_id, "limit": limit}).raw or "").strip()
+    # server-side verify anyway
+    return GuardSQLTool()._run(out or sql, user_id=user_id, limit=limit)
+
+def exec_sql(sql: str) -> Any:
+    t = Task(description="Execute SQL and return rows as list[dict] (or raw repr).", expected_output="Rows payload.", agent=sql_executor_agent)
+    c = Crew(agents=[sql_executor_agent], tasks=[t], process=Process.sequential)
+    rows = c.kickoff(inputs={"sql": sql}).raw
+    if isinstance(rows, str):
+        try: rows = json.loads(rows)
+        except Exception: pass
     return rows
 
-def _run_analyst(question: str, sql: str, rows: Any) -> str:
-    # Deterministic LLM summarizer (outside of Crew for predictability)
-    return interpret_rows(question, sql, rows)
+ANALYST_JSON_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", "Return STRICT JSON only: {answer, highlights[], tables[], queries[], meta{}}. No extra text."),
+    ("human", "Question: {question}\nSQLs: {sqls}\nRows: {rows_json}\nMeta: {meta}\nReturn ONLY JSON.")
+])
+analyst_llm = ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"), temperature=0)
+def analyze_structured(question: str, sql_map: Dict[str,str], rows_map: Dict[str,Any], user_id: int) -> str:
+    msg = ANALYST_JSON_PROMPT.format(
+        question=question,
+        sqls=json.dumps(sql_map, ensure_ascii=False),
+        rows_json=json.dumps(rows_map, ensure_ascii=False)[:16000],
+        meta=json.dumps({"user_id":user_id,"limits":{"top":DEFAULT_CAP}}, ensure_ascii=False)
+    ).to_messages()
+    return (analyst_llm | StrOutputParser()).invoke(msg).strip()
 
-# -----------------------------------------------------------------------------
-# Public API
-# -----------------------------------------------------------------------------
-def run_crewai_pipeline(question: str, user_id: int, limit: Optional[int] = None) -> Dict[str, Any]:
-    """
-    End-to-end execution with robust safety and structured results.
-    """
+def final_json_review(payload: str, intent: Dict[str,Any]) -> str:
+    t = Task(description=f"Validate JSON structure/privacy and match to intent={intent}. Return corrected JSON only if needed; else original JSON.", expected_output="JSON", agent=final_reviewer)
+    c = Crew(agents=[final_reviewer], tasks=[t], process=Process.sequential)
+    raw = (c.kickoff(inputs={"json_payload": payload}).raw or "").strip()
     try:
-        sql = _run_planner(question)
-        logger.info("Planner SQL: %s", sql)
+        start, end = raw.find("{"), raw.rfind("}")
+        return raw[start:end+1] if (start!=-1 and end!=-1) else payload
+    except Exception:
+        return payload
 
-        safe_sql = _run_guard(sql, user_id=user_id, limit=limit)
-        logger.info("Safe SQL: %s", safe_sql)
+# -------------------- Orchestrator API --------------------
+def run_zinzi_pipeline(question: str, user_id: int, limit: Optional[int] = None) -> Dict[str, Any]:
+    # Intent loop
+    intent = classify_intent(question)
+    targets = intent.get("targets") or [intent.get("intent","meals")]
+    # Background loop
+    bg_snippet = load_background_snippet(question)
+    # (Optional) Spec is lightweight and can be added similarly; we keep it implicit here for brevity.
 
-        rows = _run_exec(safe_sql)
-        # Normalize rows to list[dict] where possible
-        if isinstance(rows, str) and rows.startswith("[") and rows.endswith("]"):
-            try:
-                rows = json.loads(rows)
-            except Exception:
-                pass
+    # Domain loops (parallelizable by caller if desired)
+    sql_map: Dict[str,str] = {}
+    for d in targets:
+        sql_map[d] = gen_domain_sql(d, question, spec_yaml="(implicit)", background=bg_snippet)
 
-        answer = _run_analyst(question, safe_sql, rows)
-        return {"sql": safe_sql, "rows": rows, "answer": answer}
+    # Guard + Execute per domain
+    safe_sql_map, rows_map = {}, {}
+    for d, sql in sql_map.items():
+        if not sql: continue
+        safe_sql_map[d] = harden_sql(sql, user_id, limit)
+        rows_map[d] = exec_sql(safe_sql_map[d])
 
-    except ValidationError as ve:
-        logger.exception("Validation error")
-        raise
-    except Exception as e:
-        logger.exception("Pipeline error")
-        raise
+    # Analyst + Final review
+    structured = analyze_structured(question, safe_sql_map, rows_map, user_id)
+    final_json = final_json_review(structured, intent)
 
-# -----------------------------------------------------------------------------
-# Demo
-# -----------------------------------------------------------------------------
+    return {
+        "intent": intent,
+        "background": bg_snippet,
+        "sql": safe_sql_map,
+        "rows": rows_map,
+        "answer": final_json
+    }
+
+# -------------------- CLI demo --------------------
 if __name__ == "__main__":
     uid = int(os.getenv("DEMO_USER_ID", "138"))
-    q = "Average calories per meal category with top 5 examples."
-    result = run_crewai_pipeline(q, uid)
-    print("\nSQL:\n", result["sql"])
-    preview = result["rows"]
-    if isinstance(preview, list) and preview and isinstance(preview[0], dict):
-        print("\nRows (first 5):\n", json.dumps(preview[:5], indent=2, ensure_ascii=False))
-    else:
-        print("\nRows (raw preview):\n", str(preview)[:500])
-    print("\nAnswer:\n", result["answer"])
+    q = os.getenv("DEMO_QUESTION", "Show my fiber-rich meals and last 14 days of weight and steps.")
+    out = run_zinzi_pipeline(q, uid)
+    print("\nINTENT:\n", json.dumps(out["intent"], indent=2))
+    print("\nSQL:\n", json.dumps(out["sql"], indent=2))
+    print("\nROWS PREVIEW:\n", {k: (v[:2] if isinstance(v, list) else str(v)[:240]) for k,v in out["rows"].items()})
+    print("\nSTRUCTURED ANSWER:\n", out["answer"])
