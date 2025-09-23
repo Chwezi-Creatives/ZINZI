@@ -178,7 +178,7 @@ class DisbursementService:
             return
             
         # Generate IDs outside the transaction to ensure they're the same for success/failure cases
-        external_id = f"ZINZI_{order_id}_{user_type.upper()}_{int(datetime.utcnow().timestamp())}"
+        external_id = f"ZINZI_{order_id}_{user_type.upper()}_{int(datetime.now(timezone.utc).timestamp())}"
         payer_message = f"ZINZI Order {order_id} payment"
         payee_note = f"Payment for completing order {order_id}"
         
@@ -223,7 +223,7 @@ class DisbursementService:
                     user_type=user_type,
                     user_id=user_id,
                     amount=self.disbursement_amount,
-                    transaction_id=f"FAILED_{int(datetime.utcnow().timestamp())}",
+                    transaction_id=f"FAILED_{int(datetime.now(timezone.utc).timestamp())}",
                     status="failed",
                     reference_id=f"FAILED_{external_id}",
                     phone_number=phone_number,

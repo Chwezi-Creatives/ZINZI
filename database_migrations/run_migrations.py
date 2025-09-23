@@ -31,8 +31,8 @@ def get_db_connection():
         print(f"Database Error: {e}")
         return None
 
-def run_migrations():
-    """Run all SQL migrations."""
+def run_sql_file(sql_file_path):
+    """Executes a SQL file and rolls back on error."""
     connection = get_db_connection()
     if not connection:
         return
@@ -40,17 +40,23 @@ def run_migrations():
     try:
         with connection.cursor() as cursor:
             # Read and execute the SQL file
-            with open('notifications.sql', 'r') as file:
+            with open(sql_file_path, 'r') as file:
                 sql = file.read()
                 cursor.execute(sql)
         
         connection.commit()
-        print("Migrations completed successfully!")
+        print(f"Successfully executed SQL from {sql_file_path}")
+
     except Exception as e:
-        print(f"Error running migrations: {e}")
+        print(f"Error executing SQL from {sql_file_path}: {e}")
+        # Automatically roll back any changes made during the transaction
         connection.rollback()
+        print("Changes have been rolled back due to an error.")
+        
     finally:
         connection.close()
+        print("Database connection closed.")
 
 if __name__ == "__main__":
-    run_migrations()
+    sql_file_to_run = 'notifications.sql'
+    run_sql_file(sql_file_to_run)

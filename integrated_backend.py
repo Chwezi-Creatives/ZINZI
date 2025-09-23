@@ -1,4 +1,6 @@
 #cspell:disable
+from __future__ import annotations
+
 # --- AuthenticationAndUsers Class (Updated for asyncpg pool) ---
 import os
 import json
@@ -31,7 +33,17 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, validator
 
 # --- FastAPI Imports ---
-from services.fcm_service import FirebaseMessagingService
+from services.fcm_service import FirebaseMessagingService as FCMService
+from services.subscription_service import (
+    SubscriptionService, 
+    SubscriptionStatus, 
+    PlanStatusResponse,
+    PlanCreate,
+    PlanUpdate,
+    BillingCycle,
+    MealPlanCreate,
+    MealPlanResponse
+)
 from fastapi import FastAPI, Request, Depends, HTTPException, status, Body, Query, Path, BackgroundTasks, Response
 from fastapi import status as http_status
 from fastapi import status as http_status_import
@@ -124,9 +136,52 @@ except ImportError:
         return d
     logger.warning("utils.lowercase_keys not found, using basic fallback.")
 
-# --- Database Connection Pool (asyncpg) ---
-# Global variable to hold the pool, managed by lifespan
-db_pool: Optional[asyncpg.Pool] = None
+from typing import Any, Optional, TypeVar, Type, Dict
+import asyncpg
+
+# Define a generic type variable for service classes
+T = TypeVar('T')
+
+class ServiceManager:
+    _instance = None
+    _services: Dict[str, Any] = {}
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(ServiceManager, cls).__new__(cls)
+        return cls._instance
+    
+    @classmethod
+    async def init_service(cls, service_class: Type[T], *args, **kwargs) -> T:
+        """Initialize a service and store it in the manager"""
+        service_name = service_class.__name__.lower()
+        try:
+            service = service_class(*args, **kwargs)
+            cls._services[service_name] = service
+            return service
+        except Exception as e:
+            logger.error(f"Failed to initialize {service_name}: {e}")
+            raise
+    
+    @classmethod
+    def get_service(cls, service_class: Type[T]) -> Optional[T]:
+        """Get an initialized service by its class"""
+        service_name = service_class.__name__.lower()
+        return cls._services.get(service_name)
+    
+    @classmethod
+    def clear_services(cls):
+        """Clear all services"""
+        cls._services.clear()
+
+# Global service manager instance
+service_manager = ServiceManager()
+
+# For backward compatibility
+db_pool = None
+notification_service = None
+fcm_service = None
+subscription_service = None
 
 # Function to preload meal data to avoid slow first request
 async def preload_meal_data():
@@ -199,18 +254,37 @@ async def lifespan(app: FastAPI):
         # Preload meal data to avoid slow first request
         await preload_meal_data()
         
+                # Initialize services with proper error handling
+        try:
+            # Initialize services using the service manager with proper dependencies
+            fcm_service = await service_manager.init_service(FCMService, db_pool=db_pool)
+            notification_service = await service_manager.init_service(NotificationService, db_pool=db_pool)
+            subscription_service = await service_manager.init_service(SubscriptionService, db_pool=db_pool)
+            
+            # Store in app state for FastAPI dependency injection
+            app.state.notification_service = notification_service
+            app.state.fcm_service = fcm_service
+            app.state.subscription_service = subscription_service
+            
+            # Set global variables for backward compatibility
+            globals().update({
+                'notification_service': notification_service,
+                'fcm_service': fcm_service,
+                'subscription_service': subscription_service
+            })
+            
+            logger.info("Services initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize services: {e}")
+            raise
+        
         # Ensure all required database indexes exist
-        subscription_service = SubscriptionService()
         try:
             async with db_pool.acquire() as conn:
                 await subscription_service.ensure_indexes_exist(conn)
                 logger.info("Database indexes verified/created successfully")
         except Exception as e:
             logger.error(f"Error ensuring database indexes: {e}", exc_info=True)
-        
-        # Initialize services on-demand
-        app.state.notification_service = None
-        app.state.fcm_service = None
         
         yield # Application runs here
     except (asyncpg.exceptions.PostgresError, OSError, Exception) as e:
@@ -228,10 +302,24 @@ async def lifespan(app: FastAPI):
             finally:
                 db_pool = None
         
-        # Clear app state
-        app.state.notification_service = None
-        app.state.fcm_service = None
-        logger.info("Application shutdown: Database connection pool closed.")
+        # Clear app state and global references
+        try:
+            # Clear services from the manager
+            service_manager.clear_services()
+            
+            # Clear app state
+            app.state.notification_service = None
+            app.state.fcm_service = None
+            app.state.subscription_service = None
+            
+            # Clear global references
+            for var in ['notification_service', 'fcm_service', 'subscription_service']:
+                if var in globals():
+                    globals()[var] = None
+            
+            logger.info("Application shutdown: Services and database connection pool closed.")
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
 
 # Define allowed origins for CORS
 ALLOWED_ORIGINS = [
@@ -365,8 +453,81 @@ def deserialize_list_from_json_string(json_string):
 
 # --- Consolidated BaseRepository (Takes connection as argument) ---
 class BaseRepository:
-    # REMOVED DB Connection initialization her
-    # Methods now take 'conn' as the first argument
+    """
+    Base repository class that provides common database operations.
+    All repository classes should inherit from this class.
+    """
+    
+    async def _verify_or_reset_password(self, conn, user_id: int, password: str, stored_hashed_password: str, table_name: str, id_column: str = 'id'):
+        """
+        Verify a password and reset it if the stored hash is invalid.
+        
+        Args:
+            conn: Database connection
+            user_id: ID of the user
+            password: Plain text password to verify
+            stored_hashed_password: The stored hashed password
+            table_name: Name of the table containing the user
+            id_column: Name of the ID column (default: 'id')
+            
+        Returns:
+            bool: True if password is valid or was reset, False otherwise
+        """
+        try:
+            # If no stored password, set a new one
+            if not stored_hashed_password:
+                logger.warning(f"No password set for {table_name} {user_id}, setting new password")
+                return await self._reset_password(conn, user_id, password, table_name, id_column)
+                
+            # Check if stored hash is in correct bcrypt format
+            if isinstance(stored_hashed_password, str):
+                if stored_hashed_password.startswith('$2b$') and len(stored_hashed_password) == 60:
+                    stored_hashed_pw_bytes = stored_hashed_password.encode('utf-8')
+                    if bcrypt.checkpw(password.encode('utf-8'), stored_hashed_pw_bytes):
+                        return True
+                
+                # If we get here, either the format is wrong or password doesn't match
+                logger.warning(f"Invalid password hash format for {table_name} {user_id}, resetting password")
+                return await self._reset_password(conn, user_id, password, table_name, id_column)
+                
+            elif isinstance(stored_hashed_password, bytes):
+                if bcrypt.checkpw(password.encode('utf-8'), stored_hashed_password):
+                    return True
+                
+                # If we get here, password doesn't match
+                return False
+                
+            # Invalid hash type
+            logger.error(f"Invalid hashed_password type for {table_name} {user_id}. Type: {type(stored_hashed_password)}")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error during password verification for {table_name} {user_id}: {str(e)}")
+            return False
+    
+    async def _reset_password(self, conn, user_id: int, new_password: str, table_name: str, id_column: str = 'id') -> bool:
+        """
+        Reset a user's password.
+        
+        Args:
+            conn: Database connection
+            user_id: ID of the user
+            new_password: New plain text password
+            table_name: Name of the table containing the user
+            id_column: Name of the ID column (default: 'id')
+            
+        Returns:
+            bool: True if password was reset successfully, False otherwise
+        """
+        try:
+            new_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
+            update_sql = f"UPDATE {table_name} SET hashed_password = $1 WHERE {id_column} = $2"
+            await self._execute_query(conn, update_sql, (new_hash.decode('utf-8'), user_id))
+            logger.info(f"Successfully reset password for {table_name} {user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to reset password for {table_name} {user_id}: {str(e)}")
+            return False
 
     async def _execute_query(self, conn: asyncpg.Connection, sql: str, params: Optional[tuple] = None, 
                             fetch_one: bool = False, fetch_val: bool = False, fetch_all: bool = False, 
@@ -754,18 +915,6 @@ class AuthenticationAndUsers(BaseRepository):
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to verify password reset configuration"
             )
-        
-        # Generate a 6-digit code
-        code = await self._generate_reset_code()
-        logger.info(f"[CODE_GENERATED] New reset code {code} generated for {email} (type: {user_type})")
-        
-        # Ensure we're using timezone-aware datetime for expiration
-        expires_at = datetime.utcnow().replace(tzinfo=timezone.utc) + timedelta(minutes=self.PASSWORD_RESET_CODE_EXPIRE_MINUTES)
-        logger.info(f"[CODE_STORAGE] Storing code {code} for {email}, expires at: {expires_at} (UTC)")
-        
-        # Delete any existing codes for this email and user_type
-        try:
-            logger.info(f"Deleting existing reset codes for {email} (type: {user_type})")
             result = await self._execute_query(
                 conn,
                 "DELETE FROM password_reset_codes WHERE email = $1 AND user_type = $2",
@@ -1564,19 +1713,74 @@ class AuthenticationAndUsers(BaseRepository):
             if not is_verified:
                 logger.warning(f"Login failed: Email not verified for user '{identifier}'")
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Email not verified. Please verify your email before logging in.')
-            stored_hashed_pw_bytes = stored_hashed_password.encode('utf-8') if isinstance(stored_hashed_password, str) else stored_hashed_password
-            if not isinstance(stored_hashed_pw_bytes, bytes):
-                 logger.error(f"Invalid hashed_password type for user {user_id}. Type: {type(stored_hashed_password)}")
-                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Internal server error during login.')
-            if bcrypt.checkpw(password.encode('utf-8'), stored_hashed_pw_bytes):
-                logger.info(f"Login successful for identifier '{identifier}', User ID: {user_id}")
-                update_sql = "UPDATE users SET last_login = NOW() WHERE user_id = $1"
-                try: await self._execute_query(conn, update_sql, (user_id,)) # Use _execute_query
-                except Exception as update_err: logger.error(f"Failed to update last_login for user {user_id}: {update_err}")
-                return {'message': 'Login successful', 'data': {'user_id': user_id, 'user_type': user_type, 'verified': is_verified, 'phone': result.get('phone_number')}}
+            
+            # Handle case where hashed password is empty or null
+            if not stored_hashed_password:
+                logger.info(f"Empty or null password detected for user {user_id}, updating with provided password")
+                new_hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+                update_sql = "UPDATE users SET hashed_password = $1 WHERE user_id = $2"
+                try:
+                    await self._execute_query(conn, update_sql, (new_hashed_password.decode('utf-8'), user_id))
+                    logger.info(f"Successfully updated password for user {user_id}")
+                except Exception as update_err:
+                    logger.error(f"Failed to update password for user {user_id}: {update_err}")
+                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Failed to update password')
             else:
-                logger.warning(f"Login failed: Invalid password for identifier '{identifier}'.")
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
+                # Normal password verification flow
+                try:
+                    # Ensure the stored hash is in bytes format
+                    if isinstance(stored_hashed_password, str):
+                        # Check if the stored hash is already in the correct bcrypt format
+                        if stored_hashed_password.startswith('$2b$') and len(stored_hashed_password) == 60:
+                            stored_hashed_pw_bytes = stored_hashed_password.encode('utf-8')
+                        else:
+                            # If it's a plain string but not in bcrypt format, automatically reset it with the provided password
+                            logger.warning(f"Invalid password hash format for user {user_id}, resetting password")
+                            new_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+                            update_sql = "UPDATE users SET hashed_password = $1 WHERE user_id = $2"
+                            try:
+                                await self._execute_query(conn, update_sql, (new_hash.decode('utf-8'), user_id))
+                                logger.info(f"Successfully reset password for user {user_id} due to invalid hash format")
+                                stored_hashed_pw_bytes = new_hash
+                            except Exception as update_err:
+                                logger.error(f"Failed to reset password for user {user_id}: {update_err}")
+                                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                                                 detail='Failed to update password')
+                    elif isinstance(stored_hashed_password, bytes):
+                        stored_hashed_pw_bytes = stored_hashed_password
+                    else:
+                        logger.error(f"Invalid hashed_password type for user {user_id}. Type: {type(stored_hashed_password)}")
+                        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                                         detail='Internal server error during login.')
+                    
+                    # Verify the password
+                    if bcrypt.checkpw(password.encode('utf-8'), stored_hashed_pw_bytes):
+                        logger.info(f"Login successful for identifier '{identifier}', User ID: {user_id}")
+                    else:
+                        logger.warning(f"Login failed: Invalid password for identifier '{identifier}'.")
+                        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, 
+                                         detail='wrong password or name.')
+                except Exception as e:
+                    logger.error(f"Error during password verification for user {user_id}: {str(e)}")
+                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                                     detail='Internal server error during login.')
+            
+            # Update last login on successful authentication
+            update_sql = "UPDATE users SET last_login = NOW() WHERE user_id = $1"
+            try: 
+                await self._execute_query(conn, update_sql, (user_id,))
+            except Exception as update_err: 
+                logger.error(f"Failed to update last_login for user {user_id}: {update_err}")
+            
+            return {
+                'message': 'Login successful', 
+                'data': {
+                    'user_id': user_id, 
+                    'user_type': user_type, 
+                    'verified': is_verified, 
+                    'phone': result.get('phone_number')
+                }
+            }
         except HTTPException: raise
         except asyncpg.PostgresError as e: logger.error(f"DB error login '{identifier}': {e}"); raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='Login unavailable.') from e
         except Exception as e: logger.error(f"Unexpected error login '{identifier}': {e}", exc_info=True); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Unexpected login error.') from e
@@ -2472,23 +2676,6 @@ class AuthenticationAndUsers(BaseRepository):
         except Exception as e:
             logger.error(f"Error fetching calorie history for user {user_id}: {str(e)}")
             raise
-
-# Import subscription service at the top with other imports
-from services.subscription_service import (
-    SubscriptionService, 
-    SubscriptionStatus, 
-    PlanStatusResponse,
-    PlanCreate,
-    PlanUpdate
-)
-
-# Initialize subscription service
-subscription_service = SubscriptionService()
-
-
-# --- Admin Subscriptions Endpoints ---
-
-@app.put("/api/admin/subscriptions/{subscription_id}/status", response_model=Dict[str, Any])
 async def update_subscription_status(
     subscription_id: int,
     status_update: Dict[str, str],
@@ -2598,33 +2785,89 @@ async def create_plan(
 
 @app.get("/api/admin/plans", response_model=List[Dict[str, Any]])
 async def list_all_plans(
+    is_prebuilt: Optional[bool] = Query(None, description="Filter by prebuilt status"),
+    chef_id: Optional[int] = Query(None, description="Filter by chef ID (for prebuilt plans)"),
+    is_featured: Optional[bool] = Query(None, description="Filter by featured status"),
     include_inactive: bool = False,
     conn: asyncpg.Connection = Depends(get_db),
 ):
     """
-    Get all subscription plans, including inactive ones (Admin only)
+    Get all subscription plans with optional filtering (Admin only)
+    
+    - **is_prebuilt**: Filter by prebuilt status (true/false)
+    - **chef_id**: Filter by chef ID (for prebuilt plans)
+    - **is_featured**: Filter by featured status (true/false)
+    - **include_inactive**: Include inactive plans (default: false)
     """
     try:
-        return await subscription_service.get_subscription_plans(conn, include_inactive=include_inactive)
+        query = """
+            SELECT * FROM plans
+            WHERE 1=1
+        """
+        params = []
+        
+        if not include_inactive:
+            query += " AND is_active = true"
+            
+        if is_prebuilt is not None:
+            query += f" AND is_prebuilt = ${len(params) + 1}"
+            params.append(is_prebuilt)
+            
+        if chef_id is not None:
+            query += f" AND chef_id = ${len(params) + 1}"
+            params.append(chef_id)
+            
+        if is_featured is not None:
+            query += f" AND is_featured = ${len(params) + 1}"
+            params.append(is_featured)
+            
+        query += " ORDER BY created_at DESC"
+        
+        plans = await conn.fetch(query, *params)
+        return [dict(plan) for plan in plans]
+        
     except Exception as e:
-        logger.error(f"Error fetching all plans: {str(e)}")
+        logger.error(f"Error listing plans: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch subscription plans"
+            detail="Failed to fetch plans"
         )
 
 @app.get("/api/plans", response_model=List[Dict[str, Any]])
-async def list_subscription_plans(conn: asyncpg.Connection = Depends(get_db)):
+async def list_subscription_plans(
+    is_featured: Optional[bool] = Query(None, description="Filter by featured status"),
+    conn: asyncpg.Connection = Depends(get_db)
+):
     """
-    Get all active subscription plans
+    Get all active subscription plans with optional featured filter
+    
+    - **is_featured**: Optional filter to get only featured plans
     """
     try:
-        return await subscription_service.get_subscription_plans(conn, include_inactive=False)
+        plans = await subscription_service.get_subscription_plans(conn, include_inactive=False)
+        if is_featured is not None:
+            return [plan for plan in plans if plan.get('is_featured') == is_featured]
+        return plans
     except Exception as e:
         logger.error(f"Error fetching subscription plans: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch subscription plans"
+        )
+
+@app.get("/api/plans/featured", response_model=List[Dict[str, Any]])
+async def list_featured_plans(conn: asyncpg.Connection = Depends(get_db)):
+    """
+    Get all featured subscription plans
+    """
+    try:
+        plans = await subscription_service.get_subscription_plans(conn, include_inactive=False)
+        return [plan for plan in plans if plan.get('is_featured')]
+    except Exception as e:
+        logger.error(f"Error fetching featured plans: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch featured plans"
         )
 
 @app.get("/api/plans/{plan_id}", response_model=Dict[str, Any])
@@ -2714,7 +2957,8 @@ async def delete_plan(
 @app.get("/api/subscription/status", response_model=PlanStatusResponse)  # Keeping both for backward compatibility
 async def get_subscription_status(
     user_id: int = Query(..., description="User ID to check subscription status for"),
-    conn: asyncpg.Connection = Depends(get_db)
+    conn: asyncpg.Connection = Depends(get_db),
+    subscription_service: SubscriptionService = Depends(lambda: app.state.subscription_service)
 ):
     """
     Get the current subscription status for a user
@@ -2723,27 +2967,13 @@ async def get_subscription_status(
     for backward compatibility.
     """
     try:
-        subscription_service = SubscriptionService()
         status = await subscription_service.get_subscription_status(conn, user_id)
         return status
     except Exception as e:
         logger.error(f"Error getting subscription status for user {user_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-async def get_subscription_status(
-    user_id: int = Query(..., description="User ID to check subscription status for"),
-    conn: asyncpg.Connection = Depends(get_db)
-):
-    """
-    Get the current subscription status for a user
-    """
-    try:
-        return await subscription_service.get_subscription_status(conn, user_id)
-    except Exception as e:
-        logger.error(f"Error getting subscription status for user {user_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get subscription status"
+            detail=f"Failed to get subscription status: {str(e)}"
         )
 
 @app.post("/api/subscription/subscribe", response_model=Dict[str, Any])
@@ -2828,13 +3058,102 @@ class MealPlanCreate(BaseModel):
     end_date: str    # Will be validated as YYYY-MM-DD
     meals: List[Dict[str, Any]]  # List of meals with meal_id and quantity
 
+class PlanCreate(BaseModel):
+    """Model for creating a new plan"""
+    name: str
+    description: Optional[str] = None
+    price: float
+    billing_cycle: BillingCycle
+    features: List[str] = []
+    is_active: bool = True
+    is_prebuilt: bool = False
+    is_featured: bool = False
+    meals: List[Dict[str, Any]] = Field(default_factory=list, description="List of meal objects with id, name, description, and imageUrl")
+    chef: Optional[Dict[str, Any]] = Field(None, description="Chef object with id, name, and image")
+    image_url: Optional[str] = None
+    duration_days: int = 7
+
+class PlanUpdate(BaseModel):
+    """Model for updating an existing plan"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    price: Optional[float] = None
+    billing_cycle: Optional[BillingCycle] = None
+    features: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+    is_prebuilt: Optional[bool] = None
+    is_featured: Optional[bool] = None
+    meals: Optional[List[Dict[str, Any]]] = Field(None, description="List of meal objects with id, name, description, and imageUrl")
+    chef: Optional[Dict[str, Any]] = Field(None, description="Chef object with id, name, and image")
+    image_url: Optional[str] = None
+    duration_days: Optional[int] = None
+
+class PrebuiltMealPlanBase(BaseModel):
+    """Base model for prebuilt meal plans"""
+    name: str
+    description: Optional[str] = None
+    chef_id: int
+    meal_ids: List[int] = []
+    price: float
+    is_active: bool = True
+    image_url: Optional[str] = None
+    duration_days: int = 7
+
+class PrebuiltMealPlanCreate(PrebuiltMealPlanBase):
+    """Model for creating a new prebuilt meal plan"""
+    pass
+
+class PrebuiltMealPlanResponse(PrebuiltMealPlanBase):
+    """Response model for prebuilt meal plans"""
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+
+class PrebuiltMealPlanUpdate(BaseModel):
+    """Model for updating an existing prebuilt meal plan"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    chef_id: Optional[int] = None
+    meal_ids: Optional[List[int]] = None
+    price: Optional[float] = None
+    is_active: Optional[bool] = None
+    image_url: Optional[str] = None
+
+# Services are now initialized in the lifespan function
+
+class PrebuiltMealPlanResponse(PrebuiltMealPlanBase):
+    """Response model for prebuilt meal plans"""
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+
 @app.get("/api/plans", response_model=List[Dict[str, Any]])
-async def get_plans(conn: asyncpg.Connection = Depends(get_db)):
+async def get_plans(
+    is_prebuilt: Optional[bool] = Query(None, description="Filter by prebuilt status"),
+    chef_id: Optional[int] = Query(None, description="Filter by chef ID (for prebuilt plans)"),
+    include_inactive: bool = Query(False, description="Include inactive plans"),
+    conn: asyncpg.Connection = Depends(get_db)
+):
     """
-    Get all available subscription plans
+    Get all available subscription plans with optional filtering
+    
+    - **is_prebuilt**: Filter by prebuilt status (true/false)
+    - **chef_id**: Filter by chef ID (for prebuilt plans)
+    - **include_inactive**: Include inactive plans (default: false)
     """
     try:
-        return await subscription_service.get_subscription_plans(conn)
+        return await subscription_service.get_subscription_plans(
+            conn,
+            is_prebuilt=is_prebuilt,
+            chef_id=chef_id,
+            include_inactive=include_inactive
+        )
     except Exception as e:
         logger.error(f"Error fetching plans: {str(e)}")
         raise HTTPException(
@@ -2854,11 +3173,15 @@ async def create_subscription_endpoint(
     - user_id: int - ID of the user subscribing
     - plan_id: int - ID of the plan to subscribe to
     - payment_transaction_id: str (optional) - ID of the payment transaction
+    - is_prebuilt: bool (optional) - Whether this is a prebuilt plan subscription
+    - phone_number: str (optional) - User's phone number for notifications
     """
     try:
         user_id = subscription_data.get('user_id')
         plan_id = subscription_data.get('plan_id')
         payment_transaction_id = subscription_data.get('payment_transaction_id')
+        is_prebuilt = subscription_data.get('is_prebuilt', False)
+        phone_number = subscription_data.get('phone_number')
         
         if not user_id or not plan_id:
             raise HTTPException(
@@ -2868,23 +3191,58 @@ async def create_subscription_endpoint(
             
         async with conn.transaction():
             subscription = await subscription_service.create_subscription(
-                conn, user_id, plan_id, payment_transaction_id
+                conn=conn,
+                user_id=user_id,
+                plan_id=plan_id,
+                payment_transaction_id=payment_transaction_id,
+                is_prebuilt=is_prebuilt,
+                phone_number=phone_number,
+                request=Request(scope={'type': 'http', 'client': ('127.0.0.1', 0)})
             )
+            
             return {
                 "success": True, 
                 "subscription_id": subscription['subscription_id'],
                 "start_date": subscription['start_date'].isoformat(),
                 "end_date": subscription['end_date'].isoformat(),
-                "status": subscription['status']
+                "status": subscription['status'],
+                "is_prebuilt": subscription.get('is_prebuilt', False)
             }
             
     except HTTPException as he:
-        raise he
+        logger.error(
+            "HTTP error in create_subscription_endpoint",
+            exc_info=True,
+            extra={
+                'error': str(he.detail) if hasattr(he, 'detail') else str(he),
+                'status_code': he.status_code,
+                'user_id': user_id,
+                'plan_id': plan_id,
+                'is_prebuilt': is_prebuilt,
+                'request_data': subscription_data
+            }
+        )
+        raise
     except Exception as e:
-        logger.error(f"Error creating subscription: {str(e)}")
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(
+            "Unexpected error in create_subscription_endpoint",
+            exc_info=True,
+            extra={
+                'error_type': type(e).__name__,
+                'error_message': str(e),
+                'stack_trace': error_trace,
+                'user_id': user_id,
+                'plan_id': plan_id,
+                'is_prebuilt': is_prebuilt,
+                'request_data': subscription_data
+            }
+        )
+        # Return a generic error message to the client
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create subscription: {str(e)}"
+            detail="An unexpected error occurred while processing your request"
         )
 
 # --- Meal Plan Endpoints ---
@@ -2987,31 +3345,59 @@ async def create_meal_plan(
             detail="An unexpected error occurred while creating the meal plan"
         )
 
-@app.get("/api/chefs/{chef_id}/meal-plans", response_model=List[Dict[str, Any]])
+@app.get("/api/chefs/{chef_id}/meal-plans", response_model=Dict[str, Any])
 async def get_chef_meal_plans(
     chef_id: int,
     status: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    include_prebuilt: bool = Query(True, description="Include prebuilt meal plans"),
+    limit: int = Query(10, ge=1, le=100, description="Number of results per page"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
     conn: asyncpg.Connection = Depends(get_db)
 ):
     """
-    Get meal plans for a specific chef
+    Get meal plans for a specific chef with optional filtering and pagination
     
     Parameters:
     - chef_id: ID of the chef
     - status: Optional filter by status (e.g., 'active', 'upcoming', 'completed')
     - start_date: Optional filter by start date (YYYY-MM-DD)
     - end_date: Optional filter by end date (YYYY-MM-DD)
+    - include_prebuilt: Include prebuilt meal plans (default: true)
+    - limit: Number of results per page (default: 10, max: 100)
+    - offset: Pagination offset (default: 0)
+    
+    Returns:
+    {
+        "plans": List[MealPlan],  # List of meal plans
+        "total_count": int,       # Total number of matching plans
+        "limit": int,            # Number of results per page
+        "offset": int            # Current offset
+    }
     """
     try:
-        # Convert date strings to date objects if provided
+        # Handle prebuilt meal plans if requested
+        if include_prebuilt:
+            prebuilt_result = await subscription_service.get_prebuilt_plans_by_chef(
+                conn=conn,
+                chef_id=chef_id,
+                limit=limit,
+                offset=offset,
+                include_inactive=(status != 'active')
+            )
+            
+            # If only prebuilt plans are requested, return them directly
+            if status is None and start_date is None and end_date is None:
+                return prebuilt_result
+        
+        # Get regular meal plans with filters
         start_date_obj = None
         end_date_obj = None
         
         if start_date:
             try:
-                start_date_obj = datetime.strptime(start_date, '%Y-%m-%d').date()
+                start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
             except ValueError:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -3020,48 +3406,118 @@ async def get_chef_meal_plans(
                 
         if end_date:
             try:
-                end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
+                end_date_obj = datetime.strptime(end_date, "%Y-%m-%d")
             except ValueError:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid end_date format. Use YYYY-MM-DD"
                 )
         
-        # Get meal plans for the chef
-        meal_plans = await subscription_service.get_chef_meal_plans(conn, chef_id)
+        # Base query for counting total records
+        count_query = """
+        SELECT COUNT(DISTINCT mp.meal_plan_id) as total
+        FROM meal_plans mp
+        WHERE mp.chefid = $1
+        """
         
-        # Apply filters
-        filtered_plans = []
-        today = date.today()
+        # Base query for fetching meal plans
+        query = """
+        SELECT 
+            mp.meal_plan_id as id,
+            mp.name as plan_name,
+            mp.start_date,
+            mp.end_date,
+            mp.created_at,
+            u.user_id,
+            u.name as user_name,
+            u.phone_number as user_phone,
+            u.email as user_email,
+            s.status,
+            jsonb_agg(
+                jsonb_build_object(
+                    'meal_id', m.meal_id,
+                    'name', m.name,
+                    'description', m.description,
+                    'price', m.price,
+                    'image_url', m.image_url,
+                    'quantity', mpm.quantity
+                )
+            ) as meals
+        FROM meal_plans mp
+        JOIN users u ON mp.user_id = u.user_id
+        LEFT JOIN subscriptions s ON mp.subscription_id = s.subscription_id
+        LEFT JOIN meal_plan_meals mpm ON mp.meal_plan_id = mpm.meal_plan_id
+        LEFT JOIN meals m ON mpm.meal_id = m.meal_id
+        WHERE mp.chefid = $1
+        """
         
-        for plan in meal_plans:
-            # Filter by status if provided
-            if status:
-                plan_start = plan.get('start_date')
-                plan_end = plan.get('end_date')
-                
-                if status.lower() == 'active' and not (plan_start <= today <= plan_end):
-                    continue
-                elif status.lower() == 'upcoming' and plan_start <= today:
-                    continue
-                elif status.lower() == 'completed' and plan_end >= today:
-                    continue
+        params = [chef_id]
+        conditions = []
+        
+        # Add status filter
+        if status:
+            if status.lower() == 'active':
+                conditions.append("mp.end_date >= CURRENT_DATE AND mp.start_date <= CURRENT_DATE")
+            elif status.lower() == 'upcoming':
+                conditions.append("mp.start_date > CURRENT_DATE")
+            elif status.lower() == 'completed':
+                conditions.append("mp.end_date < CURRENT_DATE")
+        
+        # Add date range filters
+        if start_date_obj:
+            conditions.append(f"mp.start_date >= ${len(params) + 1}::date")
+            params.append(start_date_obj)
             
-            # Filter by date range if provided
-            if start_date_obj and plan.get('end_date') < start_date_obj:
-                continue
-                
-            if end_date_obj and plan.get('start_date') > end_date_obj:
-                continue
-                
-            filtered_plans.append(plan)
+        if end_date_obj:
+            conditions.append(f"mp.end_date <= ${len(params) + 1}::date")
+            params.append(end_date_obj)
         
-        return filtered_plans
+        # Add conditions to queries
+        if conditions:
+            condition_str = " AND " + " AND ".join(conditions)
+            query += condition_str
+            count_query += condition_str
         
-    except HTTPException as he:
-        raise he
+        # Add pagination to main query
+        query += """
+        GROUP BY 
+            mp.meal_plan_id, u.user_id, u.name, u.phone_number, u.email, s.status
+        ORDER BY mp.start_date DESC, mp.created_at DESC
+        LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}
+        """
+        params.extend([limit, offset])
+        
+        # Execute queries
+        total_count = await conn.fetchval(count_query, *params[:len(params)-2])  # Exclude limit/offset for count
+        rows = await conn.fetch(query, *params)
+        
+        # Process results
+        plans = []
+        for row in rows:
+            plan = dict(row)
+            plan['meals'] = row['meals'] or []
+            plan['is_prebuilt'] = False  # Mark as regular meal plan
+            plans.append(plan)
+        
+        # Combine with prebuilt plans if needed
+        if include_prebuilt and (status is None and start_date is None and end_date is None):
+            # We already have prebuilt plans from earlier
+            all_plans = prebuilt_result['plans'] + plans
+            total_count += prebuilt_result['total_count']
+        else:
+            all_plans = plans
+        
+        return {
+            'plans': all_plans,
+            'total_count': total_count,
+            'limit': limit,
+            'offset': offset
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error fetching meal plans for chef {chef_id}: {str(e)}", exc_info=True)
+        logger.error(f"Error fetching meal plans for chef {chef_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch meal plans"
@@ -3147,13 +3603,233 @@ async def get_user_meal_plans(
             detail="Failed to fetch user meal plans"
         )
 
+# --- Prebuilt Meal Plan Endpoints ---
+
+@app.get("/api/prebuilt-meal-plans/search", response_model=Dict[str, Any])
+async def search_prebuilt_meal_plans(
+    meal_ids: str = Query(..., description="Comma-separated list of meal IDs to search for"),
+    require_all: bool = Query(False, description="If true, only return plans that include ALL specified meal IDs"),
+    limit: int = Query(10, ge=1, le=100, description="Number of results per page"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Search for prebuilt meal plans that include any or all of the specified meal IDs
+    
+    - **meal_ids**: Comma-separated list of meal IDs to search for
+    - **require_all**: If true, only return plans that include ALL specified meal IDs (default: false)
+    - **limit**: Number of results per page (default: 10, max: 100)
+    - **offset**: Pagination offset (default: 0)
+    
+    Returns:
+    {
+        "plans": List[PrebuiltMealPlan],  # List of matching prebuilt meal plans
+        "total_count": int,              # Total number of matching plans
+        "limit": int,                    # Number of results per page
+        "offset": int                    # Current offset
+    }
+    """
+    try:
+        # Parse meal IDs
+        try:
+            meal_id_list = [int(meal_id.strip()) for meal_id in meal_ids.split(",") if meal_id.strip().isdigit()]
+            if not meal_id_list:
+                raise ValueError("No valid meal IDs provided")
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid meal_ids format. Please provide comma-separated integers."
+            )
+        
+        # Call the service method
+        result = await subscription_service.get_prebuilt_plans_by_meals(
+            conn=conn,
+            meal_ids=meal_id_list,
+            require_all=require_all,
+            limit=limit,
+            offset=offset
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error searching prebuilt meal plans: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to search prebuilt meal plans"
+        )
+
+
+
+@app.post("/api/prebuilt-meal-plans", response_model=PrebuiltMealPlanResponse, status_code=status.HTTP_201_CREATED)
+async def create_prebuilt_meal_plan(
+    plan_data: PrebuiltMealPlanCreate,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Create a new prebuilt meal plan (Admin only)
+    
+    - **name**: Name of the prebuilt meal plan
+    - **description**: Optional description
+    - **chef_id**: ID of the chef who created this plan
+    - **meal_ids**: List of meal IDs included in this plan
+    - **price**: Price of the plan
+    - **is_active**: Whether the plan is active (default: true)
+    - **image_url**: Optional URL to an image of the meal plan
+    - **duration_days**: Duration of the plan in days (default: 7)
+    """
+    try:
+        # Verify user is admin
+        logger.info(f"Creating prebuilt meal plan: {plan_data.name}")
+        
+        # Convert Pydantic model to dict and create the plan using the service
+        created_plan = await subscription_service.create_prebuilt_meal_plan(
+            conn=conn,
+            plan_data=plan_data.dict()
+        )
+        
+        if not created_plan:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create prebuilt meal plan"
+            )
+            
+        return created_plan
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating prebuilt meal plan: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create prebuilt meal plan: {str(e)}"
+        )
+
+
+@app.get("/api/prebuilt-meal-plans/{plan_id}", response_model=PrebuiltMealPlanResponse)
+async def get_prebuilt_meal_plan(
+    plan_id: int,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Get details of a specific prebuilt meal plan by ID
+    """
+    try:
+        plan = await subscription_service.get_prebuilt_meal_plan(
+            conn=conn,
+            plan_id=plan_id
+        )
+        
+        if not plan:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Prebuilt meal plan not found"
+            )
+            
+        return plan
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching prebuilt meal plan {plan_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch prebuilt meal plan"
+        )
+
+@app.put("/api/prebuilt-meal-plans/{plan_id}", response_model=PrebuiltMealPlanResponse)
+async def update_prebuilt_meal_plan(
+    plan_id: int,
+    plan_data: PrebuiltMealPlanUpdate,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Update an existing prebuilt meal plan (Admin only)
+    
+    Only the fields provided in the request will be updated.
+    """
+    try:
+        # Convert Pydantic model to dict and remove unset fields
+        update_data = plan_data.dict(exclude_unset=True)
+        
+        if not update_data:
+            # No fields to update, return the current plan
+            current_plan = await subscription_service.get_prebuilt_meal_plan(conn, plan_id)
+            if not current_plan:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Prebuilt meal plan not found"
+                )
+            return current_plan
+        
+        # Update the plan using the service
+        updated_plan = await subscription_service.update_prebuilt_meal_plan(
+            conn=conn,
+            plan_id=plan_id,
+            update_data=update_data
+        )
+        
+        if not updated_plan:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Prebuilt meal plan not found or update failed"
+            )
+            
+        return updated_plan
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating prebuilt meal plan {plan_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update prebuilt meal plan"
+        )
+
+@app.delete("/api/prebuilt-meal-plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_prebuilt_meal_plan(
+    plan_id: int,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Delete a prebuilt meal plan (Admin only)
+    
+    This performs a soft delete by setting is_active to FALSE.
+    """
+    try:
+        # Delete the plan using the service
+        success = await subscription_service.delete_prebuilt_meal_plan(
+            conn=conn,
+            plan_id=plan_id
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Prebuilt meal plan not found or already deleted"
+            )
+            
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting prebuilt meal plan {plan_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete prebuilt meal plan"
+        )
+
 # --- Other Classes (Chefs, Producers, etc. Updated for asyncpg pool) ---
 # Repeat the pattern for ALL classes that interact with the database:
 # 1. Remove __init__ if it only dealt with DB connection.
 # 2. Add 'conn: asyncpg.Connection' as the first argument to all methods performing DB operations.
-# 3. Call self._execute_query(conn, ...) within those methods.
-
-# Removed duplicate BaseRepository class - using the more comprehensive one above
+# 3. Update any SQL queries to use asyncpg's parameterized queries.
+# 4. Add proper error handling with try/except blocks.
+# 5. Use transactions (async with conn.transaction():) for multi-statement operations.
 
 class Chefs(BaseRepository):
     # _validate_stock remains synchronous helper
@@ -3401,27 +4077,51 @@ class Chefs(BaseRepository):
         sql = f"UPDATE chefs SET {','.join(set_clauses)} WHERE chefid = ${idx}"; params.append(chef_id)
 
     async def login_chef(self, conn: asyncpg.Connection, identifier: str, password: str):
-        # ... (uses conn for _execute_query) ...
-        sql = "SELECT chefid, hashed_password, user_type, is_email_verified, phone_number FROM chefs WHERE lower(name) = lower($1) OR lower(email) = lower($2)"
+        # Query chef details
+        sql = """
+            SELECT chefid, hashed_password, user_type, is_email_verified, phone_number 
+            FROM chefs 
+            WHERE lower(name) = lower($1) OR lower(email) = lower($2)
+        """
         params = (identifier.lower(), identifier.lower())
         result = await self._execute_query(conn, sql, params, fetch_one=True)
+        
         if not result: 
             logger.warning(f"Chef login fail: '{identifier}'")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
-        chef_id = result['chefid']; stored_hash = result['hashed_password']; user_type = result['user_type']; is_verified = result['is_email_verified']
+            
+        chef_id = result['chefid']
+        stored_hash = result['hashed_password']
+        user_type = result['user_type']
+        is_verified = result['is_email_verified']
+        
         if not is_verified:
             logger.warning(f"Login failed: Email not verified for chef '{identifier}'")
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Email not verified. Please verify your email before logging in.')
-        stored_hash_bytes = stored_hash.encode() if isinstance(stored_hash, str) else stored_hash
-        if not isinstance(stored_hash_bytes, bytes): logger.error(f"Bad hash type chef {chef_id}"); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Login error.')
-        if bcrypt.checkpw(password.encode(), stored_hash_bytes):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, 
+                detail='Email not verified. Please verify your email before logging in.'
+            )
+            
+        # Use the base method to verify or reset password
+        password_valid = await self._verify_or_reset_password(
+            conn, 
+            chef_id, 
+            password, 
+            stored_hash, 
+            'chefs', 
+            'chefid'
+        )
+        
+        if password_valid:
             logger.info(f"Chef login success '{identifier}', ID: {chef_id}")
             # Optional: Update last_login
             # update_sql = "UPDATE chefs SET last_login = NOW() WHERE chefid = $1"
             # try: await self._execute_query(conn, update_sql, (chef_id,))
             # except Exception as update_err: logger.error(f"Failed last_login update chef {chef_id}: {update_err}")
-            return {'message': 'Login successful', 'data': {'chef_id': chef_id, 'user_type': user_type, 'verified': is_verified, 'phone': result.get('phone_number')}}
-        else: logger.warning(f"Chef login fail pwd: '{identifier}'."); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
+        else:
+            logger.warning(f"Invalid password for chef '{identifier}', ID: {chef_id}")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
+        return {'message': 'Login successful', 'data': {'chef_id': chef_id, 'user_type': user_type, 'verified': is_verified, 'phone': result.get('phone_number')}}
 
     async def delete_chef(self, conn: asyncpg.Connection, chef_id: int):
         # ... (uses conn for fetchval via _execute_query) ...
@@ -3567,24 +4267,59 @@ class Producers(BaseRepository):
         return processed
 
     async def login_producer(self, conn: asyncpg.Connection, identifier: str, password: str):
-        # ... (uses conn for _execute_query) ...
-        sql = "SELECT producer_id, hashed_password, user_type, is_email_verified, phone_number FROM producers WHERE lower(name) = lower($1) OR lower(email) = lower($2)"
+        # Query producer details
+        sql = """
+            SELECT producer_id, hashed_password, user_type, is_email_verified, phone_number 
+            FROM producers 
+            WHERE lower(name) = lower($1) OR lower(email) = lower($2)
+        """
         params = (identifier.lower(), identifier.lower())
         result = await self._execute_query(conn, sql, params, fetch_one=True)
+        
         if not result:
             logger.warning(f"Producer login fail: '{identifier}'")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
-        producer_id=result['producer_id']; stored_hash=result['hashed_password']; user_type=result['user_type']; is_verified=result['is_email_verified']
+            
+        producer_id = result['producer_id']
+        stored_hash = result['hashed_password']
+        user_type = result['user_type']
+        is_verified = result['is_email_verified']
+        
         if not is_verified:
             logger.warning(f"Login failed: Email not verified for producer '{identifier}'")
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Email not verified. Please verify your email before logging in.')
-        stored_hash_bytes = stored_hash.encode() if isinstance(stored_hash, str) else stored_hash
-        if not isinstance(stored_hash_bytes, bytes): logger.error(f"Bad hash producer {producer_id}"); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Login error.')
-        if bcrypt.checkpw(password.encode(), stored_hash_bytes):
-             logger.info(f"Producer login success '{identifier}', ID: {producer_id}")
-             # Optional: update last_login
-             return {'message':'Login successful', 'data':{'producer_id':producer_id, 'user_type':user_type, 'verified':is_verified, 'phone': result.get('phone_number')}}
-        else: logger.warning(f"Producer login fail pwd: '{identifier}'."); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, 
+                detail='Email not verified. Please verify your email before logging in.'
+            )
+            
+        # Use the base method to verify or reset password
+        password_valid = await self._verify_or_reset_password(
+            conn, 
+            producer_id, 
+            password, 
+            stored_hash, 
+            'producers', 
+            'producer_id'
+        )
+        
+        if password_valid:
+            logger.info(f"Producer login success '{identifier}', ID: {producer_id}")
+            # Optional: update last_login
+            # update_sql = "UPDATE producers SET last_login = NOW() WHERE producer_id = $1"
+            # try: await self._execute_query(conn, update_sql, (producer_id,))
+            # except Exception as update_err: logger.error(f"Failed last_login update producer {producer_id}: {update_err}")
+            return {
+                'message': 'Login successful', 
+                'data': {
+                    'producer_id': producer_id, 
+                    'user_type': user_type, 
+                    'verified': is_verified, 
+                    'phone': result.get('phone_number')
+                }
+            }
+        else:
+            logger.warning(f"Invalid password for producer '{identifier}', ID: {producer_id}")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
 
     async def delete_producer(self, conn: asyncpg.Connection, producer_id: int):
         # ... (uses conn for fetchval via _execute_query) ...
@@ -3685,24 +4420,59 @@ class Transporters(BaseRepository):
         await self._execute_query(conn, sql, tuple(params)); logger.info(f"Updated transporter ID: {transporter_id}")
 
     async def login_transporter(self, conn: asyncpg.Connection, identifier: str, password: str):
-        # ... (uses conn for _execute_query) ...
-        sql="SELECT transporter_id, hashed_password, user_type, is_email_verified, phone_number FROM transporters WHERE lower(name)=lower($1) OR lower(email)=lower($2)"
-        params=(identifier.lower(), identifier.lower())
+        # Query transporter details
+        sql = """
+            SELECT transporter_id, hashed_password, user_type, is_email_verified, phone_number 
+            FROM transporters 
+            WHERE lower(name) = lower($1) OR lower(email) = lower($2)
+        """
+        params = (identifier.lower(), identifier.lower())
         result = await self._execute_query(conn, sql, params, fetch_one=True)
+        
         if not result:
             logger.warning(f"Transporter login fail: '{identifier}'")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
-        transporter_id=result['transporter_id']; stored_hash=result['hashed_password']; user_type=result.get('user_type','transporter'); is_verified=result.get('is_email_verified',True) # Assume verified if column missing
+            
+        transporter_id = result['transporter_id']
+        stored_hash = result['hashed_password']
+        user_type = result['user_type']
+        is_verified = result['is_email_verified']
+        
         if not is_verified:
             logger.warning(f"Login failed: Email not verified for transporter '{identifier}'")
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Email not verified. Please verify your email before logging in.')
-        stored_hash_bytes = stored_hash.encode() if isinstance(stored_hash, str) else stored_hash
-        if not isinstance(stored_hash_bytes, bytes): logger.error(f"Bad hash transporter {transporter_id}"); raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Login error.')
-        if bcrypt.checkpw(password.encode(), stored_hash_bytes):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, 
+                detail='Email not verified. Please verify your email before logging in.'
+            )
+            
+        # Use the base method to verify or reset password
+        password_valid = await self._verify_or_reset_password(
+            conn, 
+            transporter_id, 
+            password, 
+            stored_hash, 
+            'transporters', 
+            'transporter_id'
+        )
+        
+        if password_valid:
             logger.info(f"Transporter login success '{identifier}', ID: {transporter_id}")
             # Optional: update last_login
-            return {'message':'Login successful', 'data':{'transporter_id':transporter_id, 'user_type':user_type, 'verified':is_verified, 'phone': result.get('phone_number')}}
-        else: logger.warning(f"Transporter login fail pwd: '{identifier}'."); raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
+            # update_sql = "UPDATE transporters SET last_login = NOW() WHERE transporter_id = $1"
+            # try: await self._execute_query(conn, update_sql, (transporter_id,))
+            # except Exception as update_err: logger.error(f"Failed last_login update transporter {transporter_id}: {update_err}")
+            return {
+                'message': 'Login successful', 
+                'data': {
+                    'transporter_id': transporter_id, 
+                    'user_type': user_type, 
+                    'verified': is_verified, 
+                    'phone': result.get('phone_number')
+                }
+            }
+        else:
+            logger.warning(f"Invalid password for transporter '{identifier}', ID: {transporter_id}")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
 
     async def delete_transporter(self, conn: asyncpg.Connection, transporter_id: int):
         # ... (uses conn for fetchval via _execute_query) ...
@@ -3823,24 +4593,59 @@ class Stakeholders(BaseRepository):
         await self._execute_query(conn, sql, tuple(params)); logger.info(f"Updated stakeholder ID: {stakeholder_id}")
 
     async def login_stakeholder(self, conn: asyncpg.Connection, identifier: str, password: str):
-        # ... (uses conn for _execute_query) ...
-        sql="SELECT stakeholder_id, hashed_password, user_type, is_email_verified FROM stakeholders WHERE lower(name)=lower($1) OR lower(email)=lower($2)"
-        params=(identifier.lower(), identifier.lower())
+        # Query stakeholder details
+        sql = """
+            SELECT stakeholder_id, hashed_password, user_type, is_email_verified, phone_number 
+            FROM stakeholders 
+            WHERE lower(name) = lower($1) OR lower(email) = lower($2)
+        """
+        params = (identifier.lower(), identifier.lower())
         result = await self._execute_query(conn, sql, params, fetch_one=True)
+        
         if not result:
             logger.warning(f"Stakeholder login fail: '{identifier}'")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
-        stakeholder_id=result['stakeholder_id']; stored_hash=result['hashed_password']; user_type=result.get('user_type','stakeholder'); is_verified=result.get('is_email_verified',False)
+            
+        stakeholder_id = result['stakeholder_id']
+        stored_hash = result['hashed_password']
+        user_type = result.get('user_type', 'stakeholder')
+        is_verified = result.get('is_email_verified', False)
+        
         if not is_verified:
             logger.warning(f"Login failed: Email not verified for stakeholder '{identifier}'")
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Email not verified. Please verify your email before logging in.')
-        stored_hash_bytes = stored_hash.encode() if isinstance(stored_hash, str) else stored_hash
-        if not isinstance(stored_hash_bytes, bytes): raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Login error.')
-        if bcrypt.checkpw(password.encode(), stored_hash_bytes):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, 
+                detail='Email not verified. Please verify your email before logging in.'
+            )
+            
+        # Use the base method to verify or reset password
+        password_valid = await self._verify_or_reset_password(
+            conn, 
+            stakeholder_id, 
+            password, 
+            stored_hash, 
+            'stakeholders', 
+            'stakeholder_id'
+        )
+        
+        if password_valid:
             logger.info(f"Stakeholder login success '{identifier}', ID: {stakeholder_id}")
             # Optional: update last_login
-            return {'message':'Login successful', 'data':{'stakeholder_id':stakeholder_id, 'user_type':user_type, 'verified':is_verified}}
-        else: raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
+            # update_sql = "UPDATE stakeholders SET last_login = NOW() WHERE stakeholder_id = $1"
+            # try: await self._execute_query(conn, update_sql, (stakeholder_id,))
+            # except Exception as update_err: logger.error(f"Failed last_login update stakeholder {stakeholder_id}: {update_err}")
+            return {
+                'message': 'Login successful', 
+                'data': {
+                    'stakeholder_id': stakeholder_id, 
+                    'user_type': user_type, 
+                    'verified': is_verified,
+                    'phone': result.get('phone_number')
+                }
+            }
+        else:
+            logger.warning(f"Invalid password for stakeholder '{identifier}', ID: {stakeholder_id}")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='wrong password or name.')
 
     async def delete_stakeholder(self, conn: asyncpg.Connection, stakeholder_id: int):
         # ... (uses conn for fetchval via _execute_query) ...
@@ -4197,7 +5002,7 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
                 'status': new_status.lower().replace(' ', '_'),  # Normalize status
                 'notification_type': notification_type,
                 'user_type': user_type,
-                'timestamp': datetime.utcnow().isoformat(),
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 **kwargs  # Include any additional metadata
             }
 
@@ -7101,7 +7906,7 @@ async def send_notification(
         metadata={
             **payload,
             'user_type': user_type,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         },
         title="Order Update" if notification_type == 'order_status' else "New Message",
         body=message
@@ -7682,7 +8487,7 @@ async def create_order_endpoint(order_data: dict = Body(...), conn: asyncpg.Conn
                         metadata={
                             **result,
                             'user_type': recipient_type,
-                            'timestamp': datetime.utcnow().isoformat(),
+                            'timestamp': datetime.now(timezone.utc).isoformat(),
                             'status': 'created',
                             'order_id': order_id
                         }
@@ -8100,7 +8905,7 @@ async def momo_callback(
                 WHERE transaction_id = $3 OR external_id = $4
                 """,
                 status_value,
-                json.dumps({"callback": payload, "updated_at": datetime.utcnow().isoformat()}),
+                json.dumps({"callback": payload, "updated_at": datetime.now(timezone.utc).isoformat()}),
                 transaction_id,
                 external_id
             )
@@ -8119,7 +8924,7 @@ async def momo_callback(
                 currency,
                 status_value,
                 "momo",
-                json.dumps({"callback": payload, "created_at": datetime.utcnow().isoformat()})
+                json.dumps({"callback": payload, "created_at": datetime.now(timezone.utc).isoformat()})
             )
             logger.info(f"Created new transaction record for {transaction_id}")
         
@@ -8176,7 +8981,7 @@ async def momo_callback(
                                     'amount': float(total_price),
                                     'transaction_id': transaction_id,
                                     'status': new_status,
-                                    'timestamp': datetime.utcnow().isoformat()
+                                    'timestamp': datetime.now(timezone.utc).isoformat()
                                 }
                             )
                             logger.info(f"Sent payment success notification for order {order_id}")
@@ -8210,7 +9015,7 @@ async def momo_callback(
                             'amount': float(order['total_price']),
                             'transaction_id': transaction_id,
                             'reason': payload.get('reason', 'Payment processing failed'),
-                            'timestamp': datetime.utcnow().isoformat()
+                            'timestamp': datetime.now(timezone.utc).isoformat()
                         }
                     )
                     logger.info(f"Sent payment failed notification for order {order['order_id']}")

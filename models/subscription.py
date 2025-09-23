@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from pydantic import BaseModel, Field, validator
 from enum import Enum
@@ -16,6 +16,10 @@ class SubscriptionPlanBase(BaseModel):
     billing_cycle_days: int = Field(..., gt=0, description="Billing cycle length in days")
     features: List[str] = Field(default_factory=list, description="List of features included in this plan")
     is_active: bool = True
+    # New fields for pre-built plans
+    is_prebuilt: bool = Field(default=False, description="Whether this is a pre-built plan with predefined meals and chef")
+    chef_id: Optional[int] = Field(None, description="ID of the chef associated with this pre-built plan")
+    meal_ids: List[str] = Field(default_factory=list, description="List of meal IDs (e.g., M101, M102) included in this pre-built plan")
 
 class SubscriptionPlanCreate(SubscriptionPlanBase):
     pass
@@ -40,7 +44,7 @@ class SubscriptionBase(BaseModel):
 class SubscriptionCreate(SubscriptionBase):
     @validator('start_date', pre=True, always=True)
     def set_start_date_now(cls, v):
-        return v or datetime.utcnow()
+        return v or datetime.now(timezone.utc)
 
 class SubscriptionInDB(SubscriptionBase):
     id: int

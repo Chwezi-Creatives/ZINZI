@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone, timezone
 from typing import Optional, Dict, Any, List, Union, Tuple, AsyncGenerator, Callable
 import asyncpg
 from fastapi import status, HTTPException, Request
@@ -9,7 +9,7 @@ from functools import wraps
 import time
 
 # Import caching utilities
-from utils.cache import cached, invalidate_cache, clear_all_caches
+from utils.cache import cached, invalidate_cache, clear_all_caches, get_cache, set_cache
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -71,6 +71,111 @@ class PlanUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class SubscriptionService:
+    def __init__(self, db_pool: asyncpg.Pool):
+        self.db_pool = db_pool
+        # Initialize in-memory caches
+        self._cache = {}
+        self._cache_ttl = {}
+        logger.info("SubscriptionService initialized with database pool and in-memory cache")
+        
+    @cached(ttl=300)  # Cache for 5 minutes
+    async def get_subscription_plans(
+        self,
+        conn: asyncpg.Connection,
+        is_prebuilt: Optional[bool] = None,
+        is_active: Optional[bool] = None,
+        is_featured: Optional[bool] = None,
+        chef_id: Optional[int] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve subscription plans with optional filters
+        
+        Args:
+            conn: Database connection
+            is_prebuilt: Filter by prebuilt status
+            is_active: Filter by active status
+            is_featured: Filter by featured status
+            chef_id: Filter by chef ID
+            limit: Maximum number of plans to return
+            offset: Number of plans to skip (for pagination)
+            
+        Returns:
+            List of plan dictionaries
+        """
+        query = """
+            SELECT
+                plan_id, name, description, price,
+                billing_cycle, features, is_active,
+                is_prebuilt, is_featured, chef, meals,
+                created_at, updated_at
+            FROM plans
+            WHERE 1=1
+        """
+        
+        params = []
+        
+        # Add filters based on provided parameters
+        if is_prebuilt is not None:
+            query += f" AND is_prebuilt = ${len(params) + 1}"
+            params.append(is_prebuilt)
+            logger.debug(f"Filtering by is_prebuilt: {is_prebuilt}")
+            
+        if is_active is not None:
+            query += f" AND is_active = ${len(params) + 1}"
+            params.append(is_active)
+            logger.debug(f"Filtering by is_active: {is_active}")
+            
+        if chef_id is not None:
+            query += f" AND chef_id = ${len(params) + 1}"
+            params.append(chef_id)
+            logger.debug(f"Filtering by chef_id: {chef_id}")
+            
+        if is_featured is not None:
+            query += f" AND is_featured = ${len(params) + 1}"
+            params.append(is_featured)
+            logger.debug(f"Filtering by is_featured: {is_featured}")
+            
+        logger.info(f"Fetching {'active ' if is_active is not None else ''}subscription plans"
+                  f"{' (prebuilt only)' if is_prebuilt else ''}"
+                  f"{' (featured only)' if is_featured is not None and is_featured else ''}"
+                  f"{' for chef ' + str(chef_id) if chef_id is not None else ''}")
+            
+        # Add ordering and pagination
+        query += " ORDER BY created_at DESC"
+        query += f" LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}"
+        params.extend([limit, offset])
+        
+        try:
+            logger.debug(f"Executing query: {query} with params: {params}")
+            rows = await conn.fetch(query, *params)
+            
+            # Convert rows to list of dicts
+            plans = []
+            for row in rows:
+                plan = dict(row)
+                # Convert Decimal to float for JSON serialization
+                if 'price' in plan and plan['price'] is not None:
+                    plan['price'] = float(plan['price'])
+                # Parse JSON fields if they are strings
+                for field in ['features', 'chef', 'meals']:
+                    if field in plan and isinstance(plan[field], str):
+                        try:
+                            plan[field] = json.loads(plan[field])
+                        except (json.JSONDecodeError, TypeError):
+                            plan[field] = [] if field in ['features', 'meals'] else None
+                plans.append(plan)
+                
+            logger.info(f"Found {len(plans)} plans matching criteria")
+            return plans
+            
+        except Exception as e:
+            logger.error(f"Error fetching subscription plans: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to fetch subscription plans"
+            )
     
     async def _check_rate_limit(
         self, 
@@ -80,10 +185,10 @@ class SubscriptionService:
         window: int = 60
     ) -> Dict[str, Any]:
         """
-        Check if a rate limit has been exceeded for the given key
+        Check if a rate limit has been exceeded for the given key using in-memory storage
         
         Args:
-            conn: Database connection
+            conn: Database connection (kept for compatibility)
             key: Rate limit key (e.g., 'sub_create:ip:user_id')
             limit: Maximum number of allowed requests
             window: Time window in seconds
@@ -91,56 +196,38 @@ class SubscriptionService:
         Returns:
             Dict with 'allowed' (bool), 'remaining' (int), and 'retry_after' (int)
         """
-        current_time = int(time.time())
+        current_time = time.time()
         window_start = current_time - window
         
-        # Use database for rate limiting
-        cache_key = f"rate_limit:{key}"
+        # Use in-memory storage for rate limiting
+        rate_limit_key = f"rate_limit:{key}"
         
-        # Get existing timestamps for this key
-        query = """
-            SELECT value FROM cache 
-            WHERE key = $1 AND expires_at > NOW()
-        """
-        result = await conn.fetchval(query, cache_key)
+        # Get existing timestamps or initialize if not exists
+        timestamps = self._cache.get(rate_limit_key, [])
         
-        if result:
-            timestamps = json.loads(result)
-            # Filter out old timestamps outside the current window
-            timestamps = [ts for ts in timestamps if ts > window_start]
-        else:
-            timestamps = []
+        # Filter out timestamps outside the current window
+        timestamps = [ts for ts in timestamps if ts > window_start]
         
-        # Check if we've exceeded the limit
+        # Check if limit is exceeded
         if len(timestamps) >= limit:
-            # Calculate when the next request will be allowed
-            retry_after = (timestamps[0] + window) - current_time
             return {
                 'allowed': False,
                 'remaining': 0,
-                'retry_after': max(1, retry_after)  # At least 1 second
+                'retry_after': int(timestamps[0] + window - current_time)
             }
         
-        # Add current timestamp and update cache
+        # Add current timestamp
         timestamps.append(current_time)
-        
-        # Store updated timestamps
-        query = """
-            INSERT INTO cache (key, value, expires_at)
-            VALUES ($1, $2, NOW() + INTERVAL '1 hour')
-            ON CONFLICT (key) DO UPDATE 
-            SET value = EXCLUDED.value, 
-                expires_at = NOW() + INTERVAL '1 hour'
-        """
-        await conn.execute(query, cache_key, json.dumps(timestamps))
+        self._cache[rate_limit_key] = timestamps
         
         return {
             'allowed': True,
             'remaining': limit - len(timestamps),
+            'remaining': max(0, limit - len(timestamps)),
             'retry_after': 0
         }
     
-    async def _invalidate_user_cache(self, user_id: int) -> None:
+    def _invalidate_user_cache(self, user_id: int) -> None:
         """
         Invalidate cache entries for a specific user
         
@@ -154,12 +241,14 @@ class SubscriptionService:
             f"user_meal_plans:{user_id}"
         ]
         
-        # Invalidate each key
         for key in cache_keys:
-            invalidate_cache(key)
+            if key in self._cache:
+                del self._cache[key]
+                logger.debug(f"Invalidated cache for key: {key}")
         
-        # Also clear any cached plan data that might be user-specific
-        clear_all_caches()
+        # Clear all caches if the function exists
+        if 'clear_all_caches' in globals() and callable(clear_all_caches):
+            clear_all_caches()  # This is a sync function, no await needed
     
     async def ensure_indexes_exist(self, conn: asyncpg.Connection) -> None:
         """
@@ -202,33 +291,63 @@ class SubscriptionService:
             except Exception as e:
                 print(f"Error creating index: {str(e)}")
 
-    async def get_subscription_plans(self, conn: asyncpg.Connection, include_inactive: bool = False) -> List[Dict[str, Any]]:
+    async def get_subscription_plans(
+        self, 
+        conn: asyncpg.Connection, 
+        include_inactive: bool = False,
+        is_prebuilt: Optional[bool] = None,
+        chef_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """
-        Get all available subscription plans
+        Get all available subscription plans with optional filtering
         
         Args:
             conn: Database connection
             include_inactive: Whether to include inactive plans
-            
+            is_prebuilt: Filter by prebuilt status (True for prebuilt only, False for non-prebuilt only)
+            chef_id: Filter plans by chef ID (only applicable for prebuilt plans)
+        
         Returns:
-            List of subscription plans
+            List of subscription plans matching the criteria
         """
-        print(f"🔍 [PLAN SERVICE] Fetching {'all' if include_inactive else 'active'} subscription plans")
+        cache_key = f"plans:active:{not include_inactive}:prebuilt:{is_prebuilt}:chef:{chef_id}"
+        cached = get_cache(cache_key)
+        if cached is not None:
+            print(f" [PLAN SERVICE] Using cached plans for key: {cache_key}")
+            return cached
+
+        print(f" [PLAN SERVICE] Fetching {'all' if include_inactive else 'active'} subscription plans"
+              f"{' (prebuilt only)' if is_prebuilt is True else ''}"
+              f"{' (non-prebuilt only)' if is_prebuilt is False else ''}"
+              f"{' for chef ID: ' + str(chef_id) if chef_id else ''}")
+        
         query = """
-        SELECT id, name, description, price, billing_cycle, features, is_active, created_at, updated_at
+        SELECT plan_id, name, description, price, billing_cycle, features, is_active,
+               is_prebuilt, chef_id, meal_ids, created_at, updated_at
         FROM plans
+        WHERE 1=1
         """
+        
         params = []
+        
         if not include_inactive:
-            query += " WHERE is_active = $1"
-            params.append(True)
-            
-        query += " ORDER BY price ASC"
+            query += " AND is_active = true"
+        
+        if is_prebuilt is not None:
+            query += f" AND is_prebuilt = ${len(params) + 1}"
+            params.append(is_prebuilt)
+        
+            # If filtering for prebuilt plans and chef_id is provided
+            if is_prebuilt and chef_id is not None:
+                query += f" AND chef_id = ${len(params) + 1}"
+                params.append(chef_id)
+        
+        query += " ORDER BY created_at DESC"
         
         try:
-            rows = await conn.fetch(query, *params)
-            print(f"✅ [PLAN SERVICE] Successfully retrieved {len(rows)} plans")
-            
+            rows = await conn.fetch(query, *params) if params else await conn.fetch(query)
+            print(f" [PLAN SERVICE] Found {len(rows)} plans matching criteria")
+        
             # Convert rows to dict and ensure price is float
             result = []
             for row in rows:
@@ -239,17 +358,305 @@ class SubscriptionService:
                         plan_dict['price'] = float(plan_dict['price'])
                     except (ValueError, TypeError):
                         plan_dict['price'] = 0.0
+            
+                # Ensure meal_ids is always a list
+                if 'meal_ids' not in plan_dict or plan_dict['meal_ids'] is None:
+                    plan_dict['meal_ids'] = []
+            
                 result.append(plan_dict)
-                
+        
+            # Cache the result for 5 minutes
+            set_cache(cache_key, result, ttl=300)
+        
             return result
         except Exception as e:
-            print(f"❌ [PLAN SERVICE] Failed to fetch plans: {str(e)}")
+            print(f" [PLAN SERVICE] Failed to fetch plans: {str(e)}")
             raise
 
     @cached(ttl=300)  # Cache for 5 minutes
+    async def get_prebuilt_plans_by_chef(
+        self,
+        conn: asyncpg.Connection,
+        chef_id: int,
+        limit: int = 10,
+        offset: int = 0,
+        include_inactive: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Get prebuilt meal plans created by a specific chef with pagination
+        
+        Args:
+            conn: Database connection
+            chef_id: ID of the chef who created the plans
+            limit: Maximum number of plans to return per page
+            offset: Number of plans to skip (for pagination)
+            include_inactive: Whether to include inactive plans
+            
+        Returns:
+            Dictionary containing:
+                - plans: List of prebuilt plans
+                - total_count: Total number of plans matching the criteria
+                - limit: Number of plans per page
+                - offset: Number of plans skipped
+        """
+        cache_key = f"prebuilt_plans:chef:{chef_id}:limit:{limit}:offset:{offset}:inactive:{include_inactive}"
+        cached = get_cache(cache_key)
+        if cached is not None:
+            print(f"📦 [PLAN SERVICE] Using cached prebuilt plans for chef {chef_id}")
+            return cached
+            
+        print(f"🔍 [PLAN SERVICE] Fetching prebuilt plans for chef ID: {chef_id} (limit: {limit}, offset: {offset})")
+        
+        # Base query for counting total records
+        count_query = """
+        SELECT COUNT(*) as total
+        FROM plans
+        WHERE is_prebuilt = true
+        AND chef_id = $1
+        """
+        
+        # Base query for fetching plans
+        query = """
+        SELECT 
+            id, name, description, price, billing_cycle, features, 
+            is_active, is_prebuilt, chef_id, meal_ids, created_at, updated_at
+        FROM plans
+        WHERE is_prebuilt = true
+        AND chef_id = $1
+        """
+        
+        # Add active status filter if needed
+        if not include_inactive:
+            count_query += " AND is_active = true"
+            query += " AND is_active = true"
+            
+        # Add ordering and pagination to the main query
+        query += """
+        ORDER BY created_at DESC
+        LIMIT $2 OFFSET $3
+        """
+        
+        try:
+            # Get total count
+            total_count = await conn.fetchval(count_query, chef_id)
+            
+            # Get paginated results
+            rows = await conn.fetch(query, chef_id, limit, offset)
+            
+            # Process results
+            plans = []
+            for row in rows:
+                plan = dict(row)
+                # Ensure price is float
+                if isinstance(plan.get('price'), str):
+                    try:
+                        plan['price'] = float(plan['price'])
+                    except (ValueError, TypeError):
+                        plan['price'] = 0.0
+                # Ensure meal_ids is always a list
+                if 'meal_ids' not in plan or plan['meal_ids'] is None:
+                    plan['meal_ids'] = []
+                plans.append(plan)
+            
+            result = {
+                'plans': plans,
+                'total_count': total_count,
+                'limit': limit,
+                'offset': offset
+            }
+            
+            # Cache for 5 minutes
+            set_cache(cache_key, result, ttl=300)
+            
+            print(f"✅ [PLAN SERVICE] Found {len(plans)} prebuilt plans for chef {chef_id} "
+                  f"(total: {total_count})")
+            
+            return result
+            
+        except Exception as e:
+            print(f"❌ [PLAN SERVICE] Error fetching prebuilt plans for chef {chef_id}: {str(e)}")
+            raise
+
+    @cached(ttl=300)  # Cache for 5 minutes
+    async def get_prebuilt_plans_by_meals(
+        self,
+        conn: asyncpg.Connection,
+        meal_ids: List[int],
+        require_all: bool = False,
+        limit: int = 10,
+        offset: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Get prebuilt meal plans that include any or all of the specified meal IDs
+        
+        Args:
+            conn: Database connection
+            meal_ids: List of meal IDs to search for
+            require_all: If True, only return plans that include ALL specified meal IDs.
+                       If False, return plans that include ANY of the specified meal IDs.
+            limit: Maximum number of plans to return per page
+            offset: Number of plans to skip (for pagination)
+            
+        Returns:
+            Dictionary containing:
+                - plans: List of matching prebuilt plans
+                - total_count: Total number of plans matching the criteria
+                - limit: Number of plans per page
+                - offset: Number of plans skipped
+        """
+        if not meal_ids:
+            return {'plans': [], 'total_count': 0, 'limit': limit, 'offset': offset}
+            
+        # Create a cache key based on the query parameters
+        meal_ids_sorted = sorted(meal_ids)
+        cache_key = f"prebuilt_plans:meals:{':'.join(map(str, meal_ids_sorted))}:all:{require_all}:limit:{limit}:offset:{offset}"
+        
+        # Check cache first
+        cached = get_cache(cache_key)
+        if cached is not None:
+            print(f"📦 [PLAN SERVICE] Using cached prebuilt plans for meals: {meal_ids}")
+            return cached
+            
+        print(f"🔍 [PLAN SERVICE] Fetching prebuilt plans with meals: {meal_ids} "
+              f"(require_all: {require_all}, limit: {limit}, offset: {offset})")
+        
+        # Base query for counting total records
+        count_query = """
+        SELECT COUNT(DISTINCT p.plan_id) as total
+        FROM plans p
+        WHERE p.is_prebuilt = true
+        AND p.is_active = true
+        AND (
+            SELECT COUNT(DISTINCT meal_id) 
+            FROM unnest(p.meal_ids::int[]) AS meal_id 
+            WHERE meal_id = ANY($1::int[])
+        ) > 0
+        """
+        
+        # Base query for fetching plans
+        query = """
+        SELECT 
+            p.plan_id, p.name, p.description, p.price, p.billing_cycle, p.features, 
+            p.is_active, p.is_prebuilt, p.chef_id, p.meal_ids, 
+            p.created_at, p.updated_at,
+            (
+                SELECT COUNT(DISTINCT meal_id)
+                FROM unnest(p.meal_ids::int[]) AS meal_id
+                WHERE meal_id = ANY($1::int[])
+            ) as matching_meals_count
+        FROM plans p
+        WHERE p.is_prebuilt = true
+        AND p.is_active = true
+        """
+        
+        # Add condition based on require_all
+        if require_all:
+            # Only include plans that contain ALL specified meal IDs
+            having_clause = """
+            HAVING COUNT(DISTINCT meal_id) = $2
+            """
+            
+            # For the main query, we need to join with a filtered version of the meal_ids array
+            query = """
+            WITH plan_matches AS (
+                SELECT 
+                    p.*,
+                    (
+                        SELECT COUNT(DISTINCT meal_id)
+                        FROM unnest(p.meal_ids::int[]) AS meal_id
+                        WHERE meal_id = ANY($1::int[])
+                    ) as matching_meals_count
+                FROM plans p
+                WHERE p.is_prebuilt = true
+                AND p.is_active = true
+                AND (
+                    SELECT COUNT(DISTINCT meal_id) 
+                    FROM unnest(p.meal_ids::int[]) AS meal_id 
+                    WHERE meal_id = ANY($1::int[])
+                ) = $2
+            )
+            SELECT * FROM plan_matches
+            ORDER BY matching_meals_count DESC, created_at DESC
+            LIMIT $3 OFFSET $4
+            """
+            
+            # For counting with require_all, we need to ensure all meal_ids are present
+            count_query = """
+            SELECT COUNT(*) as total
+            FROM (
+                SELECT p.plan_id
+                FROM plans p
+                CROSS JOIN unnest(p.meal_ids::int[]) AS meal_id
+                WHERE p.is_prebuilt = true
+                AND p.is_active = true
+                AND meal_id = ANY($1::int[])
+                GROUP BY p.plan_id
+                HAVING COUNT(DISTINCT meal_id) = $2
+            ) AS matching_plans
+            """
+            
+            params = [meal_ids, len(meal_ids), limit, offset]
+            count_params = [meal_ids, len(meal_ids)]
+            
+        else:
+            # Include plans that contain ANY of the specified meal IDs
+            query += """
+            AND (
+                SELECT COUNT(DISTINCT meal_id) 
+                FROM unnest(p.meal_ids::int[]) AS meal_id 
+                WHERE meal_id = ANY($1::int[])
+            ) > 0
+            ORDER BY matching_meals_count DESC, created_at DESC
+            LIMIT $2 OFFSET $3
+            """
+            
+            params = [meal_ids, limit, offset]
+            count_params = [meal_ids]
+        
+        try:
+            # Get total count
+            total_count = await conn.fetchval(count_query, *count_params)
+            
+            # Get paginated results
+            rows = await conn.fetch(query, *params)
+            
+            # Process results
+            plans = []
+            for row in rows:
+                plan = dict(row)
+                # Ensure price is float
+                if isinstance(plan.get('price'), str):
+                    try:
+                        plan['price'] = float(plan['price'])
+                    except (ValueError, TypeError):
+                        plan['price'] = 0.0
+                # Ensure meal_ids is always a list
+                if 'meal_ids' not in plan or plan['meal_ids'] is None:
+                    plan['meal_ids'] = []
+                plans.append(plan)
+            
+            result = {
+                'plans': plans,
+                'total_count': total_count,
+                'limit': limit,
+                'offset': offset
+            }
+            
+            # Cache for 5 minutes
+            set_cache(cache_key, result, ttl=300)
+            
+            print(f"✅ [PLAN SERVICE] Found {len(plans)} prebuilt plans matching the criteria "
+                  f"(total: {total_count})")
+            
+            return result
+            
+        except Exception as e:
+            print(f"❌ [PLAN SERVICE] Error fetching prebuilt plans by meals: {str(e)}")
+            raise
+
     async def get_plan_by_id(self, conn: asyncpg.Connection, plan_id: int) -> Optional[Dict[str, Any]]:
         """
-        Get a specific subscription plan by ID with caching
+        Get a specific subscription plan by ID
         
         Args:
             conn: Database connection
@@ -258,30 +665,30 @@ class SubscriptionService:
         Returns:
             Plan details or None if not found
         """
-        query = """
-        SELECT id, name, description, price, billing_cycle, features, is_active, created_at, updated_at
-        FROM plans 
-        WHERE id = $1
-        """
         try:
-            row = await conn.fetchrow(query, plan_id)
-            if row:
-                plan_data = dict(row)
-                # Ensure price is float
-                if isinstance(plan_data.get('price'), str):
-                    try:
-                        plan_data['price'] = float(plan_data['price'])
-                    except (ValueError, TypeError):
-                        plan_data['price'] = 0.0
+            query = """
+                SELECT * FROM plans
+                WHERE plan_id = $1 AND is_active = TRUE
+            """
+            plan = await conn.fetchrow(query, plan_id)
+            if plan:
+                plan_data = dict(plan)
+                # Ensure price is a float
+                try:
+                    plan_data['price'] = float(plan_data.get('price', 0))
+                except (ValueError, TypeError):
+                    plan_data['price'] = 0.0
                 
-                print(f"✅ [PLAN SERVICE] Found plan: {plan_data.get('name')} (ID: {plan_id})")
-                print(f"   - Active: {plan_data.get('is_active')}, Price: {plan_data.get('price')}, Billing: {plan_data.get('billing_cycle')}")
+                logger.info(f"Found plan: {plan_data.get('name')} (ID: {plan_id})")
+                logger.info(f"Active: {plan_data.get('is_active')}, Price: {plan_data.get('price')}, Billing: {plan_data.get('billing_cycle')}")
                 return plan_data
             else:
-                print(f"⚠️ [PLAN SERVICE] Plan not found with ID: {plan_id}")
+                logger.warning(f"Plan not found with ID: {plan_id}")
                 return None
+                
         except Exception as e:
-            print(f"❌ [PLAN SERVICE] Error fetching plan {plan_id}: {str(e)}")
+            logger.error(f"Error fetching plan {plan_id}: {str(e)}")
+            return None
             raise
         
     async def create_plan(self, conn: asyncpg.Connection, plan_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -301,12 +708,34 @@ class SubscriptionService:
         print("\n📝 [PLAN SERVICE] Starting plan creation")
         print(f"📋 Plan data received: {json.dumps(plan_data, indent=2, default=str)}")
         
+        required_fields = ['name', 'price', 'billing_cycle']
+        for field in required_fields:
+            if field not in plan_data:
+                raise ValueError(f"Missing required field: {field}")
+                
+        # Set default values for optional fields
+        plan_data.setdefault('description', '')
+        plan_data.setdefault('features', [])
+        plan_data.setdefault('is_active', True)
+        plan_data.setdefault('is_prebuilt', False)
+        plan_data.setdefault('is_featured', False)
+        plan_data.setdefault('chef', None)
+        plan_data.setdefault('meals', [])
+        
+        # Convert JSON fields to strings
+        features_json = json.dumps(plan_data['features'])
+        chef_json = json.dumps(plan_data['chef']) if plan_data['chef'] else None
+        meals_json = json.dumps(plan_data['meals']) if plan_data['meals'] else None
+        
         query = """
-        INSERT INTO plans (name, description, price, billing_cycle, features, is_active)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, name, description, price, billing_cycle, features, is_active,
-                  created_at, updated_at
+            INSERT INTO plans (
+                name, description, price, billing_cycle,
+                features, is_active, is_prebuilt, is_featured,
+                chef, meals
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING *
         """
+        
         try:
             # Get the billing cycle value, handling both enum and string cases
             billing_cycle = (
@@ -319,12 +748,21 @@ class SubscriptionService:
             features = plan_data.get("features", [])
             features_json = json.dumps(features)  # Convert list to JSON string
             
+            # Get pre-built plan fields
+            is_prebuilt = plan_data.get("is_prebuilt", False)
+            chef = plan_data.get("chef")
+            meals = plan_data.get("meals", [])
+            
             print(f"🔧 [PLAN SERVICE] Processed data:")
             print(f"   - Name: {plan_data.get('name')}")
             print(f"   - Price: {plan_data.get('price')}")
             print(f"   - Billing Cycle: {billing_cycle}")
             print(f"   - Features ({len(features)}): {features}")
             print(f"   - Active: {plan_data.get('is_active', True)}")
+            print(f"   - Is Pre-built: {is_prebuilt}")
+            if is_prebuilt:
+                print(f"   - Chef: {chef}")
+                print(f"   - Meals: {meals}")
             
             # Execute the query with explicit JSONB conversion
             print("💾 [PLAN SERVICE] Saving plan to database...")
@@ -335,12 +773,16 @@ class SubscriptionService:
                 plan_data["price"],
                 billing_cycle,
                 features_json,  # Use the JSON string directly
-                plan_data.get("is_active", True)
+                plan_data.get("is_active", True),
+                is_prebuilt,
+                plan_data.get("is_featured", False),
+                chef_json,  # Chef as JSONB
+                meals_json  # Meals as JSONB array
             )
             
             if row:
                 created_plan = dict(row)
-                plan_id = created_plan.get('id')
+                plan_id = created_plan.get('plan_id')
                 print(f"✅ [PLAN SERVICE] Successfully created plan: {created_plan.get('name')} (ID: {plan_id})")
                 
                 # Invalidate the plans list cache to include the new plan
@@ -378,6 +820,9 @@ class SubscriptionService:
             
         Returns:
             Updated plan details or None if not found
+            
+        Raises:
+            HTTPException: If validation fails or database error occurs
         """
         print(f"\n✏️ [PLAN SERVICE] Starting update for plan ID: {plan_id}")
         print(f"📋 Update data received: {json.dumps(updates, indent=2, default=str)}")
@@ -389,6 +834,35 @@ class SubscriptionService:
             return None
             
         print(f"🔍 [PLAN SERVICE] Current plan data: {json.dumps(existing, indent=2, default=str)}")
+        
+        # Validate prebuilt plan updates
+        is_prebuilt = updates.get('is_prebuilt', existing.get('is_prebuilt', False))
+        if is_prebuilt:
+            print("🔍 [PLAN SERVICE] Validating prebuilt plan updates...")
+            # Check if this is changing to a prebuilt plan
+            if 'is_prebuilt' in updates and not existing.get('is_prebuilt'):
+                if 'chef' not in updates or not updates['chef']:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="chef is required for prebuilt plans"
+                    )
+                if 'meals' not in updates or not updates['meals']:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="meals are required for prebuilt plans"
+                    )
+            
+            # If updating a prebuilt plan, ensure required fields are present
+            if 'chef' in updates and not updates['chef']:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="chef cannot be empty for prebuilt plans"
+                )
+            if 'meals' in updates and not updates['meals']:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="meals cannot be empty for prebuilt plans"
+                )
         
         # Build dynamic update query
         set_clauses = []
@@ -402,6 +876,10 @@ class SubscriptionService:
             "billing_cycle": "billing_cycle",
             "features": "features",
             "is_active": "is_active",
+            "is_prebuilt": "is_prebuilt",
+            "is_featured": "is_featured",
+            "chef": "chef",
+            "meals": "meals"
         }
         
         print("🔄 [PLAN SERVICE] Processing updates:")
@@ -412,9 +890,14 @@ class SubscriptionService:
                 
                 if field == 'billing_cycle' and hasattr(value, 'value'):
                     value = value.value
-                elif field == 'features':
-                    value = json.dumps(value)  # Convert list to JSON string
-                    print(f"   - Updating features: {len(updates['features'])} items")
+                elif field in ['features', 'chef', 'meals']:
+                    value = json.dumps(value)  # Convert to JSON string
+                    if field == 'features':
+                        print(f"   - Updating features: {len(updates['features'])} items")
+                    elif field == 'meals':
+                        print(f"   - Updating meals: {len(updates['meals'])} items")
+                    elif field == 'chef':
+                        print(f"   - Updating chef data")
                 
                 print(f"   - {field}: {original_value} → {value}")
                 set_clauses.append(f"{db_field} = ${param_count}")
@@ -428,12 +911,13 @@ class SubscriptionService:
         # Add updated_at timestamp
         set_clauses.append("updated_at = NOW()")
         
+        # Include all fields in RETURNING clause to ensure we get complete updated record
         query = f"""
         UPDATE plans
         SET {', '.join(set_clauses)}
-        WHERE id = ${param_count}
-        RETURNING id, name, description, price, billing_cycle, features, is_active,
-                  created_at, updated_at
+        WHERE plan_id = ${param_count}
+        RETURNING plan_id, name, description, price, billing_cycle, features, is_active,
+                  is_prebuilt, is_featured, chef_id, meal_ids, created_at, updated_at
         """
         params.append(plan_id)
         
@@ -445,14 +929,17 @@ class SubscriptionService:
                 updated_plan = dict(row)
                 print(f"✅ [PLAN SERVICE] Successfully updated plan: {updated_plan.get('name')} (ID: {plan_id})")
                 
-                # Invalidate cache for this plan to ensure immediate visibility of changes
-                cache_key = f"plan:{plan_id}"
-                invalidate_cache(cache_key)
-                print(f"🔄 [PLAN SERVICE] Invalidated cache for plan ID: {plan_id}")
+                # Invalidate all relevant caches
+                cache_keys = [
+                    f"plan:{plan_id}",
+                    "all_plans",
+                    "active_plans",
+                    f"prebuilt_plans:{updated_plan.get('chef_id', 'all')}"
+                ]
                 
-                # Also invalidate the plans list cache
-                invalidate_cache("all_plans")
-                print("🔄 [PLAN SERVICE] Invalidated all_plans cache")
+                for key in cache_keys:
+                    invalidate_cache(key)
+                    print(f"🔄 [PLAN SERVICE] Invalidated cache: {key}")
                 
                 return updated_plan
             else:
@@ -460,63 +947,117 @@ class SubscriptionService:
                 return None
                 
         except Exception as e:
+            print(f"❌ [PLAN SERVICE] Error updating plan: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to update plan: {str(e)}"
             )
             
-    async def delete_plan(self, conn: asyncpg.Connection, plan_id: int) -> bool:
+    async def delete_plan(self, conn: asyncpg.Connection, plan_id: int) -> Dict[str, Any]:
         """
-        Delete a subscription plan
+        Soft delete a subscription plan by marking it as inactive
         
         Args:
             conn: Database connection
             plan_id: ID of the plan to delete
             
         Returns:
-            bool: True if the plan was deleted, False if not found
+            Dict containing the deleted plan details
+            
+        Raises:
+            HTTPException: If the plan has active subscriptions or other error occurs
         """
-        print(f"\n🗑️ [PLAN SERVICE] Attempting to delete plan ID: {plan_id}")
+        print(f"\n🗑️ [PLAN SERVICE] Attempting to soft delete plan ID: {plan_id}")
         
-        # First get the plan details for logging
+        # First get the plan details for logging and validation
         existing = await self.get_plan_by_id(conn, plan_id)
         if not existing:
             print(f"⚠️ [PLAN SERVICE] Delete failed: Plan ID {plan_id} not found")
-            return False
-            
-        # Check for active subscriptions
-        check_subscriptions = """
-        SELECT COUNT(*) FROM subscriptions 
-        WHERE plan_id = $1 AND status = 'active'
-        """
-        active_count = await conn.fetchval(check_subscriptions, plan_id)
-        
-        if active_count > 0:
-            print(f"⚠️ [PLAN SERVICE] Delete failed: Plan ID {plan_id} has {active_count} active subscriptions")
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot delete plan with {active_count} active subscriptions"
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Plan ID {plan_id} not found"
             )
             
+        # Additional validation for prebuilt plans
+        is_prebuilt = existing.get('is_prebuilt', False)
+        if is_prebuilt:
+            print("🔍 [PLAN SERVICE] Validating prebuilt plan deletion...")
+            # Check if there are any active subscriptions to this prebuilt plan
+            check_subscriptions = """
+            SELECT COUNT(*) FROM subscriptions 
+            WHERE plan_id = $1 AND status = 'active'
+            """
+            active_count = await conn.fetchval(check_subscriptions, plan_id)
+            
+            if active_count > 0:
+                print(f"⚠️ [PLAN SERVICE] Delete failed: Prebuilt plan ID {plan_id} has {active_count} active subscriptions")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot delete prebuilt plan with {active_count} active subscriptions"
+                )
+            
+            # Check if there are any active meal plans using this prebuilt plan
+            check_meal_plans = """
+            SELECT COUNT(*) FROM meal_plans 
+            WHERE plan_id = $1 AND end_date >= CURRENT_DATE
+            """
+            active_meal_plans = await conn.fetchval(check_meal_plans, plan_id)
+            
+            if active_meal_plans > 0:
+                print(f"⚠️ [PLAN SERVICE] Delete failed: Prebuilt plan ID {plan_id} has {active_meal_plans} active meal plans")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot delete prebuilt plan with {active_meal_plans} active meal plans"
+                )
+        
         # Soft delete by marking as inactive
         query = """
         UPDATE plans
         SET is_active = FALSE, updated_at = NOW()
-        WHERE id = $1
-        RETURNING id
+        WHERE plan_id = $1
+        RETURNING plan_id, name, is_prebuilt, chef_id, meal_ids
         """
-        result = await conn.execute(query, plan_id)
         
-        if result != "DELETE 0":
-            # Invalidate cache for this plan
-            cache_key = f"plan:{plan_id}"
-            invalidate_cache(cache_key)
-            print(f"🔄 [PLAN SERVICE] Invalidated cache for deleted plan ID: {plan_id}")
+        try:
+            deleted_plan = await conn.fetchrow(query, plan_id)
+            if not deleted_plan:
+                print(f"⚠️ [PLAN SERVICE] Delete failed: Plan ID {plan_id} not found")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Plan ID {plan_id} not found"
+                )
+                
+            deleted_plan = dict(deleted_plan)
+            print(f"✅ [PLAN SERVICE] Successfully soft-deleted plan ID: {plan_id}")
             
-            # Also invalidate the plans list cache
-            invalidate_cache("all_plans")
-            print("🔄 [PLAN SERVICE] Invalidated all_plans cache after deletion")
+            # Invalidate all relevant caches
+            cache_keys = [
+                f"plan:{plan_id}",
+                "all_plans",
+                "active_plans"
+            ]
             
+            # Invalidate prebuilt plan caches if this was a prebuilt plan
+            if is_prebuilt:
+                chef_id = deleted_plan.get('chef_id')
+                if chef_id:
+                    cache_keys.append(f"prebuilt_plans:{chef_id}")
+                cache_keys.append("prebuilt_plans:all")
+            
+            for key in cache_keys:
+                invalidate_cache(key)
+                print(f"🔄 [PLAN SERVICE] Invalidated cache: {key}")
+            
+            return deleted_plan
+            
+        except Exception as e:
+            print(f"❌ [PLAN SERVICE] Error deleting plan: {str(e)}")
+            if not isinstance(e, HTTPException):
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to delete plan: {str(e)}"
+                )
+            raise
             return True
         return False
 
@@ -525,7 +1066,7 @@ class SubscriptionService:
         query = """
         SELECT s.*, p.name as plan_name, p.price, p.billing_cycle
         FROM subscriptions s
-        JOIN plans p ON s.plan_id = p.id
+        JOIN plans p ON s.plan_id = p.plan_id
         WHERE s.user_id = $1 
         AND s.status = 'active'
         AND (s.end_date > NOW())
@@ -593,7 +1134,7 @@ class SubscriptionService:
             u.name as user_name,
             u.email as user_email
         FROM subscriptions s
-        JOIN plans p ON s.plan_id = p.id
+        JOIN plans p ON s.plan_id = p.plan_id
         JOIN users u ON s.user_id = u.user_id
         WHERE {where_clause}
         ORDER BY s.end_date DESC
@@ -623,7 +1164,9 @@ class SubscriptionService:
         user_id: int, 
         plan_id: int, 
         payment_transaction_id: Optional[str] = None,
-        request: Optional[Request] = None
+        request: Optional[Request] = None,
+        is_prebuilt: bool = False,
+        phone_number: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Create a new subscription for a user with rate limiting and caching
@@ -634,6 +1177,8 @@ class SubscriptionService:
             plan_id: ID of the plan to subscribe to
             payment_transaction_id: Optional payment transaction ID
             request: FastAPI Request object for rate limiting
+            is_prebuilt: Whether this is a prebuilt plan subscription
+            phone_number: User's phone number for notifications
             
         Returns:
             Dict containing the created subscription
@@ -669,16 +1214,17 @@ class SubscriptionService:
                 detail=f"Plan with ID {plan_id} not found"
             )
             
-        # Check if user already has an active subscription
-        existing_sub = await self.get_user_subscription(conn, user_id)
-        if existing_sub and existing_sub['status'] == 'active':
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User already has an active subscription"
-            )
+        # Check if user already has an active subscription (only for non-prebuilt plans)
+        if not is_prebuilt:
+            existing_sub = await self.get_user_subscription(conn, user_id)
+            if existing_sub and existing_sub['status'] == 'active':
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="User already has an active subscription"
+                )
             
         # Calculate end date based on billing cycle
-        start_date = datetime.utcnow()
+        start_date = datetime.now(timezone.utc)
         if plan['billing_cycle'] == 'monthly':
             end_date = start_date + timedelta(days=30)
         elif plan['billing_cycle'] == 'yearly':
@@ -689,35 +1235,66 @@ class SubscriptionService:
         # Create subscription
         query = """
             INSERT INTO subscriptions (
-                user_id, plan_id, start_date, end_date, status, payment_transaction_id
-            ) VALUES ($1, $2, $3, $4, $5, $6)
+                user_id, plan_id, start_date, end_date, status, 
+                payment_transaction_id, is_prebuilt, phone_number
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
         """
         
         try:
-            # Invalidate any cached user subscription data
-            await self._invalidate_user_cache(user_id)
+            # Invalidate any cached user subscription data first (synchronous call)
+            self._invalidate_user_cache(user_id)
             
-            subscription = await conn.fetchrow(
-                query,
-                user_id,
-                plan_id,
-                start_date,
-                end_date,
-                'active',
-                payment_transaction_id
-            )
-            
-            # Log successful subscription creation
-            logger.info(f"Created subscription {subscription['subscription_id']} for user {user_id} to plan {plan_id}")
-            
-            return dict(subscription)
+            # Start the transaction
+            async with conn.transaction():
+                # Execute the query and get the subscription
+                result = await conn.fetchrow(
+                    query,
+                    user_id,
+                    plan_id,
+                    start_date,
+                    end_date,
+                    'active',
+                    payment_transaction_id,
+                    is_prebuilt,
+                    phone_number
+                )
+                
+                if not result:
+                    raise Exception("Failed to create subscription: No subscription returned from database")
+                
+                # Convert to dict before returning
+                subscription = dict(result)
+                
+                # Log successful subscription creation
+                logger.info(f"Created subscription {subscription.get('subscription_id')} for user {user_id} to plan {plan_id}")
+                return subscription
             
         except Exception as e:
-            logger.error(f"Error creating subscription: {str(e)}")
+            import traceback
+            error_trace = traceback.format_exc()
+            error_details = {
+                'error_type': type(e).__name__,
+                'error_message': str(e),
+                'stack_trace': error_trace,
+                'user_id': user_id,
+                'plan_id': plan_id,
+                'is_prebuilt': is_prebuilt
+            }
+            logger.error(
+                "Error creating subscription. Details: %s",
+                error_details,
+                exc_info=True,
+                extra={
+                    'error_details': error_details,
+                    'user_id': user_id,
+                    'plan_id': plan_id
+                }
+            )
+            # Re-raise with a clean error message for the client
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create subscription"
+                detail="An error occurred while processing your subscription"
             )
 
     async def update_subscription_status(
@@ -819,8 +1396,11 @@ class SubscriptionService:
         # Calculate days remaining
         days_remaining = 0
         if subscription['end_date']:
-            end_date = subscription['end_date'].replace(tzinfo=None) if hasattr(subscription['end_date'], 'replace') else subscription['end_date']
-            days_remaining = (end_date - datetime.utcnow()).days
+            # Ensure end_date is timezone-aware
+            end_date = subscription['end_date']
+            if hasattr(end_date, 'tzinfo') and end_date.tzinfo is None:
+                end_date = end_date.replace(tzinfo=timezone.utc)
+            days_remaining = (end_date - datetime.now(timezone.utc)).days
             days_remaining = max(0, days_remaining)
 
         # Prepare response
@@ -860,7 +1440,7 @@ class SubscriptionService:
                 - name: str
                 - start_date: datetime
                 - end_date: datetime
-                - meals: List[Dict[meal_id: str, quantity: int]]
+                - meals: List[Dict[meal_id: str, quantity: int]] (optional for pre-built plans)
                 
         Returns:
             Dict containing the created meal plan with associated meals
@@ -871,10 +1451,86 @@ class SubscriptionService:
         import time
         start_time = time.time()
         logger.info("Starting meal plan creation...")
+        
+        # Extract and validate required fields
+        required_fields = ['user_id', 'chefid', 'subscription_id', 'name', 'start_date', 'end_date']
+        for field in required_fields:
+            if field not in meal_plan_data:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Missing required field: {field}"
+                )
+        
+        # Get subscription and plan details
+        subscription_query = """
+        SELECT 
+            s.plan_id,
+            p.is_prebuilt, 
+            p.meal_ids, 
+            p.chef_id as plan_chef_id,
+            p.name as plan_name
+        FROM subscriptions s
+        JOIN plans p ON s.plan_id = p.plan_id
+        WHERE s.subscription_id = $1 AND s.user_id = $2
+        """
+        sub_row = await conn.fetchrow(
+            subscription_query, 
+            meal_plan_data['subscription_id'],
+            meal_plan_data['user_id']
+        )
+        
+        if not sub_row:
+            logger.error(f"Subscription not found: sub_id={meal_plan_data['subscription_id']}, user_id={meal_plan_data['user_id']}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Subscription not found or does not belong to user"
+            )
+            
+        is_prebuilt = sub_row['is_prebuilt']
+        plan_chef_id = sub_row['plan_chef_id']
+        plan_id = sub_row['plan_id']
+        plan_name = sub_row['plan_name']
+        
+        logger.info(f"Processing meal plan creation - Prebuilt: {is_prebuilt}, Plan ID: {plan_id}, Chef ID: {plan_chef_id}")
+        
+        # Handle pre-built plan logic
+        if is_prebuilt:
+            # If this is a pre-built plan, the chef_id should match the plan's chef_id
+            if plan_chef_id and plan_chef_id != meal_plan_data['chefid']:
+                logger.warning(f"Chef mismatch for pre-built plan. Plan Chef: {plan_chef_id}, Request Chef: {meal_plan_data['chefid']}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot assign pre-built plan to a different chef"
+                )
+            
+            # Override the chef_id to ensure it matches the plan
+            meal_plan_data['chefid'] = plan_chef_id
+                
+            # Use meal IDs from the plan if not overridden in the request
+            if 'meals' not in meal_plan_data or not meal_plan_data['meals']:
+                meal_ids = sub_row['meal_ids'] or []
+                logger.info(f"Using {len(meal_ids)} meals from pre-built plan {plan_id}")
+                meal_plan_data['meals'] = [
+                    {'meal_id': meal_id, 'quantity': 1} 
+                    for meal_id in meal_ids
+                ]
+            else:
+                logger.info("Using custom meals provided in request for pre-built plan")
+        
+        # Validate meals are provided for non-prebuilt plans
+        if not is_prebuilt and ('meals' not in meal_plan_data or not meal_plan_data['meals']):
+            logger.error("No meals provided for non-prebuilt plan")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Meals are required for non-prebuilt plans"
+            )
+            
         # Validate input data
         try:
             meal_plan = MealPlanCreate(**meal_plan_data)
+            logger.debug(f"Validated meal plan data for user {meal_plan.user_id}")
         except Exception as e:
+            logger.error(f"Validation failed for meal plan data: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Invalid meal plan data: {str(e)}"
@@ -1135,6 +1791,7 @@ class SubscriptionService:
             u.name as user_name,
             u.phone_number as user_phone,
             u.email as user_email,
+            s.status as status,
             jsonb_agg(
                 jsonb_build_object(
                     'meal_id', m.meal_id,
@@ -1145,10 +1802,11 @@ class SubscriptionService:
             ) as meals
         FROM meal_plans mp
         JOIN users u ON mp.user_id = u.user_id
+        JOIN subscriptions s ON mp.subscription_id = s.subscription_id
         LEFT JOIN meal_plan_meals mpm ON mp.meal_plan_id = mpm.meal_plan_id
         LEFT JOIN meals m ON mpm.meal_id = m.meal_id
         WHERE mp.chefid = $1
-        GROUP BY mp.meal_plan_id, u.user_id, u.name, u.phone_number, u.email
+        GROUP BY mp.meal_plan_id, u.user_id, u.name, u.phone_number, u.email, s.status
         ORDER BY mp.start_date DESC, mp.created_at DESC
         """
         
@@ -1179,42 +1837,409 @@ class SubscriptionService:
         Returns:
             List of the user's meal plans with associated meals and chef information
         """
-        # Get user's meal plans
-        query = """
-        SELECT 
-            mp.meal_plan_id as id,
-            mp.name as plan_name,
-            mp.start_date,
-            mp.end_date,
-            mp.created_at,
-            c.chefid,
-            c.name as chef_name,
-            c.image as chef_image,
-            jsonb_agg(
+        try:
+            # Single query to get all meal plans with their meals and chef info
+            query = """
+            SELECT 
+                mp.id, 
+                mp.user_id, 
+                mp.chefid, 
+                mp.subscription_id, 
+                mp.name, 
+                mp.start_date, 
+                mp.end_date, 
+                mp.created_at,
+                COALESCE(
+                    json_agg(
+                        DISTINCT jsonb_build_object(
+                            'meal_id', m.meal_id,
+                            'name', m.meal_name,
+                            'image_url', m.image_link,
+                            'quantity', mpm.quantity
+                        )
+                    ) FILTER (WHERE m.meal_id IS NOT NULL),
+                    '[]'::jsonb
+                ) as meals,
                 jsonb_build_object(
-                    'meal_id', m.meal_id,
-                    'name', m.meal_name,
-                    'image_url', m.image_link,
-                    'quantity', mpm.quantity
-                )
-            ) as meals
-        FROM meal_plans mp
-        JOIN chefs c ON mp.chefid = c.chefid
-        LEFT JOIN meal_plan_meals mpm ON mp.meal_plan_id = mpm.meal_plan_id
-        LEFT JOIN meals m ON mpm.meal_id = m.meal_id
-        WHERE mp.user_id = $1
-        GROUP BY mp.meal_plan_id, c.chefid, c.name, c.image
-        ORDER BY mp.start_date DESC, mp.created_at DESC
-        """
-        
-        rows = await conn.fetch(query, user_id)
-        
-        # Process results
-        result = []
-        for row in rows:
-            plan = dict(row)
-            # Convert JSONB to Python list
-            plan['meals'] = row['meals'] or []
-            result.append(plan)
+                    'chefid', c.chefid,
+                    'name', c.name,
+                    'image', c.image,
+                    'cuisine_type', c.cuisine_type,
+                    'rating', c.rating
+                ) as chef_info,
+                p.name as plan_name,
+                p.is_prebuilt as is_prebuilt_plan
+            FROM meal_plans mp
+            LEFT JOIN meal_plan_meals mpm ON mp.id = mpm.meal_plan_id
+            LEFT JOIN meals m ON mpm.meal_id = m.meal_id
+            LEFT JOIN chefs c ON mp.chefid = c.chefid
+            LEFT JOIN subscriptions s ON mp.subscription_id = s.subscription_id
+            LEFT JOIN plans p ON s.plan_id = p.id
+            WHERE mp.user_id = $1
+            GROUP BY 
+                mp.id, 
+                c.chefid, 
+                c.name, 
+                c.image, 
+                c.cuisine_type, 
+                c.rating,
+                p.name, 
+                p.is_prebuilt
+            ORDER BY mp.start_date DESC, mp.created_at DESC
+            """
             
-        return result
+            rows = await conn.fetch(query, user_id)
+            
+            # Process results
+            result = []
+            for row in rows:
+                plan = dict(row)
+                # Convert JSONB to Python list
+                plan['meals'] = row['meals'] or []
+                result.append(plan)
+                
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error fetching meal plans for user {user_id}: {str(e)}")
+            raise
+
+    # --- Prebuilt Meal Plan Methods ---
+            
+    async def create_prebuilt_meal_plan(
+        self,
+        conn: asyncpg.Connection,
+        plan_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Create a new prebuilt meal plan
+        
+        Args:
+            conn: Database connection
+            plan_data: Dictionary containing prebuilt meal plan data
+                - name: str
+                - description: Optional[str]
+                - chef_id: int
+                - meal_ids: List[str]
+                - price: float (in dollars, will be converted to cents)
+                - is_active: bool (default: True)
+                - image_url: Optional[str]
+                - duration_days: int (default: 30 for monthly)
+                - billing_cycle: str (default: 'monthly')
+                - features: List[str] (default: [])
+                
+        Returns:
+            Dict containing the created prebuilt meal plan
+            
+        Raises:
+            HTTPException: If creation fails
+        """
+        try:
+            # Set default values
+            is_active = plan_data.get('is_active', True)
+            servings = plan_data.get('servings', 1)
+            duration_days = plan_data.get('duration_days', 30)
+            billing_cycle = plan_data.get('billing_cycle', 'monthly')
+            features = plan_data.get('features', [])
+            price_in_cents = int(float(plan_data['price']) * 100)  # Convert to cents
+            
+            query = """
+            INSERT INTO subscription_plans (
+                name, description, chef_id, meal_ids, price_in_cents, 
+                billing_cycle_days, is_active, is_prebuilt, image_url, 
+                features
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $9)
+            RETURNING *
+            """
+            
+            # Prepare the data
+            plan_dict = dict(plan_data)
+            
+            # Execute the query with parameters
+            row = await conn.fetchrow(
+                query,
+                plan_data['name'],
+                plan_data.get('description'),
+                plan_data['chef_id'],
+                plan_data.get('meal_ids', []),
+                price_in_cents,  # Price in cents
+                duration_days,   # Billing cycle in days
+                is_active,       # Is active flag
+                plan_data.get('image_url'),
+                features         # Plan features
+            )
+            
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to create prebuilt meal plan"
+                )
+                
+            return dict(row)
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error creating prebuilt meal plan: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create prebuilt meal plan: {str(e)}"
+            )
+            
+    async def get_prebuilt_meal_plan(
+        self,
+        conn: asyncpg.Connection,
+        plan_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get a prebuilt meal plan by ID
+        
+        Args:
+            conn: Database connection
+            plan_id: ID of the prebuilt meal plan
+            
+        Returns:
+            Prebuilt meal plan details or None if not found
+        """
+        try:
+            query = """
+            SELECT 
+                id, name, description, price_in_cents as price, 
+                billing_cycle_days, features, is_active, is_prebuilt,
+                chef_id, meal_ids, image_url, created_at, updated_at
+            FROM subscription_plans 
+            WHERE id = $1 AND is_prebuilt = true
+            """
+            
+            row = await conn.fetchrow(query, plan_id)
+            if not row:
+                return None
+                
+            # Convert to dict and format the response
+            plan = dict(row)
+            
+            # Convert price from cents to dollars
+            if 'price' in plan and plan['price'] is not None:
+                plan['price'] = float(plan['price']) / 100
+                
+            # Ensure all expected fields are present
+            plan.setdefault('features', [])
+            plan.setdefault('meal_ids', [])
+            
+            return plan
+            return dict(row) if row else None
+            
+        except Exception as e:
+            logger.error(f"Error fetching prebuilt meal plan {plan_id}: {str(e)}")
+            return None
+            
+    async def list_prebuilt_meal_plans(
+        self,
+        conn: asyncpg.Connection,
+        is_active: Optional[bool] = None,
+        chef_id: Optional[int] = None,
+        min_price: Optional[float] = None,
+        max_price: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        List prebuilt meal plans with optional filtering
+        
+        Args:
+            conn: Database connection
+            is_active: Filter by active status
+            chef_id: Filter by chef ID
+            min_price: Minimum price filter (in dollars)
+            max_price: Maximum price filter (in dollars)
+            
+        Returns:
+            List of prebuilt meal plans with prices in dollars
+        """
+        try:
+            query = """
+            SELECT 
+                id, name, description, price_in_cents as price, 
+                billing_cycle_days, features, is_active, is_prebuilt,
+                chef_id, meal_ids, image_url, created_at, updated_at
+            FROM subscription_plans
+            WHERE is_prebuilt = true
+            """
+            
+            params = []
+            param_count = 1
+            
+            if is_active is not None:
+                query += f" AND is_active = ${param_count}"
+                params.append(is_active)
+                param_count += 1
+                
+            if chef_id is not None:
+                query += f" AND chef_id = ${param_count}"
+                params.append(chef_id)
+                param_count += 1
+                
+            if min_price is not None:
+                # Convert dollars to cents for database comparison
+                min_cents = int(float(min_price) * 100)
+                query += f" AND price_in_cents >= ${param_count}"
+                params.append(min_cents)
+                param_count += 1
+                
+            if max_price is not None:
+                # Convert dollars to cents for database comparison
+                max_cents = int(float(max_price) * 100)
+                query += f" AND price_in_cents <= ${param_count}"
+                params.append(max_cents)
+                param_count += 1
+                
+            query += " ORDER BY created_at DESC"
+            
+            rows = await conn.fetch(query, *params)
+            
+            # Process results to convert prices from cents to dollars
+            results = []
+            for row in rows:
+                plan = dict(row)
+                # Convert price from cents to dollars
+                if 'price' in plan and plan['price'] is not None:
+                    plan['price'] = float(plan['price']) / 100
+                    
+                # Ensure all expected fields are present
+                plan.setdefault('features', [])
+                plan.setdefault('meal_ids', [])
+                
+                results.append(plan)
+                
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error listing prebuilt meal plans: {str(e)}")
+            return []
+            
+    async def update_prebuilt_meal_plan(
+        self,
+        conn: asyncpg.Connection,
+        plan_id: int,
+        updates: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Update a prebuilt meal plan
+        
+        Args:
+            conn: Database connection
+            plan_id: ID of the prebuilt meal plan to update
+            updates: Dictionary of fields to update
+                - name: Optional[str]
+                - description: Optional[str]
+                - price: Optional[float] - in dollars (will be converted to cents)
+                - is_active: Optional[bool]
+                - image_url: Optional[str]
+                - features: Optional[List[str]]
+                - meal_ids: Optional[List[str]]
+                - billing_cycle_days: Optional[int]
+                
+        Returns:
+            Updated prebuilt meal plan with price in dollars or None if not found
+        """
+        try:
+            if not updates:
+                return None
+                
+            set_clauses = []
+            params = []
+            param_count = 1
+            
+            # Build the SET clause dynamically based on provided updates
+            for field, value in updates.items():
+                if field == 'price' and value is not None:
+                    # Convert price to cents for storage
+                    value = int(float(value) * 100)
+                    field = 'price_in_cents'
+                    
+                set_clauses.append(f"{field} = ${param_count}")
+                params.append(value)
+                param_count += 1
+                
+            if not set_clauses:
+                return None
+                
+            # Add updated_at timestamp
+            set_clauses.append("updated_at = NOW()")
+            
+            query = f"""
+            UPDATE subscription_plans
+            SET {', '.join(set_clauses)}
+            WHERE id = ${param_count} AND is_prebuilt = true
+            RETURNING 
+                id, name, description, price_in_cents as price, 
+                billing_cycle_days, features, is_active, is_prebuilt,
+                chef_id, meal_ids, image_url, created_at, updated_at
+            """
+            
+            params.append(plan_id)
+            
+            row = await conn.fetchrow(query, *params)
+            
+            if not row:
+                return None
+                
+            # Convert to dict and format the response
+            plan = dict(row)
+            
+            # Convert price from cents to dollars
+            if 'price' in plan and plan['price'] is not None:
+                plan['price'] = float(plan['price']) / 100
+                
+            # Ensure all expected fields are present
+            plan.setdefault('features', [])
+            plan.setdefault('meal_ids', [])
+            
+            return plan
+            
+        except Exception as e:
+            logger.error(f"Error updating prebuilt meal plan {plan_id}: {str(e)}")
+            return None
+            
+    async def delete_prebuilt_meal_plan(
+        self,
+        conn: asyncpg.Connection,
+        plan_id: int
+    ) -> bool:
+        """
+        Soft delete a prebuilt meal plan by setting is_active to False
+        
+        Args:
+            conn: Database connection
+            plan_id: ID of the prebuilt meal plan to delete
+            
+        Returns:
+            bool: True if the plan was deleted, False otherwise
+        """
+        try:
+            # First check if the plan exists and is a prebuilt plan
+            check_query = """
+            SELECT id FROM subscription_plans 
+            WHERE id = $1 AND is_prebuilt = true
+            """
+            plan_exists = await conn.fetchval(check_query, plan_id)
+            
+            if not plan_exists:
+                return False
+                
+            # Soft delete by setting is_active to false
+            query = """
+            UPDATE subscription_plans
+            SET is_active = false, updated_at = NOW()
+            WHERE id = $1 AND is_prebuilt = true
+            RETURNING id
+            """
+            
+            result = await conn.execute(query, plan_id)
+            return bool('UPDATE 1' in result)
+            
+        except Exception as e:
+            logger.error(f"Error deleting prebuilt meal plan {plan_id}: {str(e)}")
+            return False        
+        except Exception as e:
+            logger.error(f"Error deleting prebuilt meal plan {plan_id}: {str(e)}")
+            return False

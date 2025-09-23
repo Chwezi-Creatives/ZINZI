@@ -72,6 +72,38 @@ def invalidate_cache(*cache_keys: str) -> None:
         _cache.pop(key, None)
         _cache_ttl.pop(key, None)
 
+def get_cache(key: str) -> Any:
+    """Get a value from the cache by key.
+    
+    Args:
+        key: The cache key to look up
+        
+    Returns:
+        The cached value if found and not expired, None otherwise
+    """
+    if key in _cache and (key not in _cache_ttl or _cache_ttl[key] > time.time()):
+        return _cache[key]
+    # Remove expired cache entries
+    if key in _cache:
+        del _cache[key]
+    if key in _cache_ttl:
+        del _cache_ttl[key]
+    return None
+
+def set_cache(key: str, value: Any, ttl: int = DEFAULT_TTL) -> None:
+    """Store a value in the cache with an optional time-to-live.
+    
+    Args:
+        key: The cache key to store the value under
+        value: The value to cache
+        ttl: Time to live in seconds (default: 300s / 5 minutes)
+    """
+    _cache[key] = value
+    if ttl > 0:
+        _cache_ttl[key] = time.time() + ttl
+    elif key in _cache_ttl:
+        del _cache_ttl[key]
+
 def clear_all_caches() -> None:
     """Clear all cached data."""
     _cache.clear()
