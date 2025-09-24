@@ -1,22 +1,6 @@
 #cspell:disable
 from __future__ import annotations
 
-# --- Import FastAPI and related modules ---
-from fastapi import FastAPI, HTTPException, Depends, status, Request, Body, Query, BackgroundTasks, Response, Path
-from fastapi.responses import JSONResponse, ORJSONResponse, FileResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-
-# --- Import database module ---
-from database import (
-    create_database_pool, 
-    close_database_pool, 
-    get_database_pool, 
-    get_db,
-    BaseRepository
-)
-
 # --- AuthenticationAndUsers Class (Updated for asyncpg pool) ---
 import os
 import json
@@ -34,8 +18,7 @@ import bcrypt
 import asyncpg # Added asynchronous driver
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-# Import Google's Request with an alias to avoid shadowing FastAPI's Request
-from google.auth.transport.requests import Request as GoogleRequest
+from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google.auth.exceptions import RefreshError
 from email.mime.text import MIMEText
@@ -57,9 +40,11 @@ from services.subscription_service import (
     PlanStatusResponse,
     PlanCreate,
     PlanUpdate,
+    BillingCycle,
     MealPlanCreate,
-    BillingCycle
+    MealPlanResponse
 )
+from fastapi import FastAPI, Request, Depends, HTTPException, status, Body, Query, Path, BackgroundTasks, Response
 from fastapi import status as http_status
 from fastapi import status as http_status_import
 from typing import Dict, Any, Optional, List, Union, Tuple
@@ -192,7 +177,7 @@ class ServiceManager:
 # Global service manager instance
 service_manager = ServiceManager()
 
-# For backward compatibility - these will be set during startup
+# For backward compatibility
 db_pool = None
 notification_service = None
 fcm_service = None
@@ -222,22 +207,54 @@ async def lifespan(app: FastAPI):
     global db_pool  # Declare as global within the function
     logger.info("Application startup: Initializing database pool...")
     
-    # Initialize database pool using the database module
-    db_pool = await create_database_pool()
+    # Get database configuration
+    db_host = os.getenv("DB_HOST")
+    db_port = os.getenv("DB_PORT", "5432")
+    db_name = os.getenv("DB_NAME", "zinzi")
+    db_user = os.getenv("DB_USER")
+    db_password = os.getenv("DB_PASSWORD")
     
-    if db_pool is None:
+    # Check for missing required variables
+    missing_vars = []
+    if not db_host: missing_vars.append("DB_HOST")
+    if not db_name: missing_vars.append("DB_NAME")
+    if not db_user: missing_vars.append("DB_USER")
+    if not db_password: missing_vars.append("DB_PASSWORD")
+    
+    if missing_vars:
+        error_msg = f"Database pool creation failed: Missing required environment variables: {', '.join(missing_vars)}."
+        logger.critical(error_msg)
+        db_pool = None # Ensure pool is None
         # Allow app to start but endpoints using DB will fail
         yield
         logger.info("Application shutdown: No database pool to close.")
         return # Exit early
 
+    # Use ssl=require for Render/cloud databases, adjust if needed
+    db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?ssl=require"
+    logger.info(f"Database DSN constructed: postgresql://{db_user}:*****@{db_host}:{db_port}/{db_name}?ssl=require")
+
     try:
-        logger.info(f"Database connection pool created successfully (Min: {db_pool.get_min_size()}, Max: {db_pool.get_max_size()}).")
+        # Initialize database pool
+        # Already declared as global at the start of the function
+        db_pool = await asyncpg.create_pool(
+            dsn=db_url,
+            min_size=int(os.getenv("DB_POOL_MIN_SIZE", "2")), # Configurable min size
+            max_size=int(os.getenv("DB_POOL_MAX_SIZE", "10")),# Configurable max size
+            timeout=30, # Connection acquisition timeout
+            command_timeout=60, # Default timeout for commands
+            statement_cache_size=0, # Uncomment ONLY if needed for pgbouncer transaction/statement mode
+            server_settings={
+                'timezone': 'Africa/Nairobi',
+                'application_name': 'zinzi_backend'
+            }
+        )
+        logger.info(f"Database connection pool created successfully (Min: {db_pool.get_min_size()}, Max: {db_pool.get_max_size()}).")        
         
         # Preload meal data to avoid slow first request
         await preload_meal_data()
         
-        # Initialize services with proper error handling
+                # Initialize services with proper error handling
         try:
             # Initialize services using the service manager with proper dependencies
             fcm_service = await service_manager.init_service(FCMService, db_pool=db_pool)
@@ -271,11 +288,19 @@ async def lifespan(app: FastAPI):
         
         yield # Application runs here
     except (asyncpg.exceptions.PostgresError, OSError, Exception) as e:
-        logger.critical(f"FATAL: Failed during application startup: {e}", exc_info=True)
-        yield # Allow app startup even if some initialization fails
+        logger.critical(f"FATAL: Failed to create database pool: {e}", exc_info=True)
+        db_pool = None # Ensure pool is None on failure
+        yield # Allow app startup even if pool fails, but DB access will fail
     finally:
         # Cleanup during shutdown
-        await close_database_pool()
+        if db_pool is not None:
+            try:
+                await db_pool.close()
+                logger.info("Database pool closed")
+            except Exception as e:
+                logger.error(f"Error closing database pool: {e}")
+            finally:
+                db_pool = None
         
         # Clear app state and global references
         try:
@@ -288,7 +313,7 @@ async def lifespan(app: FastAPI):
             app.state.subscription_service = None
             
             # Clear global references
-            for var in ['notification_service', 'fcm_service', 'subscription_service', 'db_pool']:
+            for var in ['notification_service', 'fcm_service', 'subscription_service']:
                 if var in globals():
                     globals()[var] = None
             
@@ -325,13 +350,13 @@ app = FastAPI(
 def get_notification_service() -> NotificationService:
     """Get or initialize the notification service."""
     if not app.state.notification_service:
-        app.state.notification_service = NotificationService(get_database_pool())
+        app.state.notification_service = NotificationService(db_pool)
     return app.state.notification_service
 
 def get_fcm_service() -> FirebaseMessagingService:
     """Get or initialize the FCM service."""
     if not app.state.fcm_service:
-        app.state.fcm_service = FirebaseMessagingService(get_database_pool())
+        app.state.fcm_service = FirebaseMessagingService(db_pool)
     return app.state.fcm_service
 
 @app.get("/health")
@@ -362,7 +387,23 @@ app.add_middleware(
 # --- Subscription Endpoints ---
 # (Moved after SubscriptionService class definition)
 
-
+# --- Database Dependency ---
+async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
+    """FastAPI dependency to get a database connection from the pool."""
+    # ... (rest of the code remains the same)
+    ...
+    if db_pool is None:
+        logger.error("Attempted to acquire DB connection, but pool is not available.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database service is currently unavailable. Please try again later."
+        )
+    # Acquire connection from pool; automatically released when block exits
+    async with db_pool.acquire() as connection:
+        # SET TIMEZONE is now handled by the pool's `setup` parameter (init_connection)
+        # Optional: Set transaction isolation level or other session settings here if needed
+        # await connection.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+        yield connection
 
 # --- Helper Functions (Mostly Unchanged) ---
 def hash_password(password): return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
@@ -410,6 +451,200 @@ def deserialize_list_from_json_string(json_string):
         return [item.strip() for item in json_string.split(',') if item.strip()]
 
 
+# --- Consolidated BaseRepository (Takes connection as argument) ---
+class BaseRepository:
+    """
+    Base repository class that provides common database operations.
+    All repository classes should inherit from this class.
+    """
+    
+    async def _verify_or_reset_password(self, conn, user_id: int, password: str, stored_hashed_password: str, table_name: str, id_column: str = 'id'):
+        """
+        Verify a password and reset it if the stored hash is invalid.
+        
+        Args:
+            conn: Database connection
+            user_id: ID of the user
+            password: Plain text password to verify
+            stored_hashed_password: The stored hashed password
+            table_name: Name of the table containing the user
+            id_column: Name of the ID column (default: 'id')
+            
+        Returns:
+            bool: True if password is valid or was reset, False otherwise
+        """
+        try:
+            # If no stored password, set a new one
+            if not stored_hashed_password:
+                logger.warning(f"No password set for {table_name} {user_id}, setting new password")
+                return await self._reset_password(conn, user_id, password, table_name, id_column)
+                
+            # Check if stored hash is in correct bcrypt format
+            if isinstance(stored_hashed_password, str):
+                if stored_hashed_password.startswith('$2b$') and len(stored_hashed_password) == 60:
+                    stored_hashed_pw_bytes = stored_hashed_password.encode('utf-8')
+                    if bcrypt.checkpw(password.encode('utf-8'), stored_hashed_pw_bytes):
+                        return True
+                
+                # If we get here, either the format is wrong or password doesn't match
+                logger.warning(f"Invalid password hash format for {table_name} {user_id}, resetting password")
+                return await self._reset_password(conn, user_id, password, table_name, id_column)
+                
+            elif isinstance(stored_hashed_password, bytes):
+                if bcrypt.checkpw(password.encode('utf-8'), stored_hashed_password):
+                    return True
+                
+                # If we get here, password doesn't match
+                return False
+                
+            # Invalid hash type
+            logger.error(f"Invalid hashed_password type for {table_name} {user_id}. Type: {type(stored_hashed_password)}")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error during password verification for {table_name} {user_id}: {str(e)}")
+            return False
+    
+    async def _reset_password(self, conn, user_id: int, new_password: str, table_name: str, id_column: str = 'id') -> bool:
+        """
+        Reset a user's password.
+        
+        Args:
+            conn: Database connection
+            user_id: ID of the user
+            new_password: New plain text password
+            table_name: Name of the table containing the user
+            id_column: Name of the ID column (default: 'id')
+            
+        Returns:
+            bool: True if password was reset successfully, False otherwise
+        """
+        try:
+            new_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
+            update_sql = f"UPDATE {table_name} SET hashed_password = $1 WHERE {id_column} = $2"
+            await self._execute_query(conn, update_sql, (new_hash.decode('utf-8'), user_id))
+            logger.info(f"Successfully reset password for {table_name} {user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to reset password for {table_name} {user_id}: {str(e)}")
+            return False
+
+    async def _execute_query(self, conn: asyncpg.Connection, sql: str, params: Optional[tuple] = None, 
+                            fetch_one: bool = False, fetch_val: bool = False, fetch_all: bool = False, 
+                            returning_id_column: Optional[str] = None) -> Any:
+        """
+        Executes SQL query asynchronously using the provided asyncpg connection.
+        
+        Args:
+            conn: Database connection
+            sql: SQL query to execute
+            params: Query parameters
+            fetch_one: If True, fetch a single row
+            fetch_val: If True, fetch a single value
+            fetch_all: If True, fetch all rows
+            returning_id_column: Column name to return for INSERT ... RETURNING queries
+            
+        Returns:
+            Query results based on the fetch_* parameters
+            
+        Raises:
+            HTTPException: With appropriate status code and user-friendly message
+        """
+        results = None
+        returned_id = None
+        params = params or ()
+        # Sanitize parameters for logging (avoid logging sensitive data)
+        log_params = tuple('***' if any(s in str(p).lower() for s in ['password', 'token', 'secret', 'key']) 
+                          else str(p) if isinstance(p, bytes) else p 
+                          for p in params)
+        
+        # Log the SQL query with parameters (sanitized for logging)
+        logger.debug(f"Executing SQL: {sql} | Params: {log_params}")
+
+        try:
+            # Use fetchval for RETURNING ID for simplicity and efficiency
+            if returning_id_column:
+                returned_id = await conn.fetchval(sql, *params)
+                if returned_id is not None:
+                    logger.debug(f"Returning {returning_id_column}: [ID: {returned_id}]")
+                else:
+                    logger.warning(f"Query with RETURNING {returning_id_column} did not return a value")
+                return returned_id
+                
+            elif fetch_one:
+                row = await conn.fetchrow(sql, *params)
+                results = dict(row) if row else None
+                logger.debug(f"Fetched one row: {'Found' if results else 'Not Found'}")
+                return results
+                
+            elif fetch_all:
+                rows = await conn.fetch(sql, *params)
+                results = [dict(row) for row in rows]
+                logger.debug(f"Fetched {len(results)} rows")
+                return results
+                
+            else:  # Just execute (INSERT, UPDATE, DELETE without RETURNING)
+                status_str = await conn.execute(sql, *params)
+                logger.debug(f"Executed statement. Status: {status_str}")
+                return status_str
+
+        except asyncpg.PostgresError as e:
+            # Log the full error details for debugging
+            error_code = getattr(e, 'sqlstate', 'UNKNOWN')
+            error_context = {
+                'error_code': error_code,
+                'error_message': str(e),
+                'sql': sql,
+                'params_type': str(type(params)),
+                'params_length': len(params) if params else 0
+            }
+            logger.error(f"Database Error: {error_context}", exc_info=True)
+            
+            # Map specific database errors to appropriate HTTP status codes
+            if error_code == '23505':  # unique_violation
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A record with these details already exists"
+                )
+            elif error_code == '23503':  # foreign_key_violation
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid reference to another resource"
+                )
+            elif error_code == '23502':  # not_null_violation
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Required field is missing"
+                )
+            elif error_code == '42P01':  # undefined_table
+                logger.critical(f"Database table does not exist: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="A system error occurred. Please try again later."
+                )
+            elif error_code == '42601':  # syntax_error
+                logger.critical(f"SQL syntax error: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="A system error occurred. Please try again later."
+                )
+            else:
+                # For all other database errors, return a generic error
+                logger.error(f"Unhandled database error: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="A database error occurred. Please try again later."
+                )
+
+        except Exception as e:
+            # Log the full error for debugging
+            logger.critical(f"Unexpected error in _execute_query: {e}", exc_info=True)
+            
+            # Return a generic error to the client
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="An unexpected error occurred. Please try again later."
+            )
 
 
 
@@ -1815,13 +2050,13 @@ class AuthenticationAndUsers(BaseRepository):
         Recalculate and update daily calories in a new database connection.
         This is a helper method that can be called without blocking the main request.
         """
-        # Use the database pool from database module
-        current_db_pool = get_database_pool()
-        if not current_db_pool:
+        # Use the global db_pool
+        global db_pool
+        if not db_pool:
             logger.error("Database pool is not initialized")
             return
             
-        async with current_db_pool.acquire() as conn:
+        async with db_pool.acquire() as conn:
             try:
                 # Fetch the latest metrics for the user
                 metric_row = await conn.fetchrow(
@@ -2598,6 +2833,28 @@ async def list_all_plans(
             detail="Failed to fetch plans"
         )
 
+@app.get("/api/plans", response_model=List[Dict[str, Any]])
+async def list_subscription_plans(
+    is_featured: Optional[bool] = Query(None, description="Filter by featured status"),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Get all active subscription plans with optional featured filter
+    
+    - **is_featured**: Optional filter to get only featured plans
+    """
+    try:
+        plans = await subscription_service.get_subscription_plans(conn, include_inactive=False)
+        if is_featured is not None:
+            return [plan for plan in plans if plan.get('is_featured') == is_featured]
+        return plans
+    except Exception as e:
+        logger.error(f"Error fetching subscription plans: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch subscription plans"
+        )
+
 @app.get("/api/plans/featured", response_model=List[Dict[str, Any]])
 async def list_featured_plans(conn: asyncpg.Connection = Depends(get_db)):
     """
@@ -2696,35 +2953,19 @@ async def delete_plan(
             detail="Failed to delete plan"
         )
 
-@app.get(
-    "/api/subscriptions/status", 
-    response_model=PlanStatusResponse,
-    summary="Get subscription status",
-    description="""
-    Get the current subscription status for a user.
-    
-    Returns detailed information about the user's active subscription, including:
-    - Subscription details (status, start/end dates, etc.)
-    - Associated plan information
-    - Billing information
-    - Next billing date (if applicable)
-    """
-)
-@app.get(
-    "/api/subscription/status",
-    response_model=PlanStatusResponse,
-    deprecated=True,
-    summary="[DEPRECATED] Use /api/subscriptions/status instead",
-    description="""
-    ⚠️ DEPRECATED: This endpoint is kept for backward compatibility only.
-    Please use the /api/subscriptions/status endpoint instead.
-    """
-)
+@app.get("/api/subscriptions/status", response_model=PlanStatusResponse)
+@app.get("/api/subscription/status", response_model=PlanStatusResponse)  # Keeping both for backward compatibility
 async def get_subscription_status(
     user_id: int = Query(..., description="User ID to check subscription status for"),
     conn: asyncpg.Connection = Depends(get_db),
     subscription_service: SubscriptionService = Depends(lambda: app.state.subscription_service)
 ):
+    """
+    Get the current subscription status for a user
+    
+    This endpoint is available at both /api/subscription/status and /api/subscriptions/status
+    for backward compatibility.
+    """
     try:
         status = await subscription_service.get_subscription_status(conn, user_id)
         return status
@@ -2735,25 +2976,19 @@ async def get_subscription_status(
             detail=f"Failed to get subscription status: {str(e)}"
         )
 
-@app.post(
-    "/api/subscription/subscribe", 
-    response_model=Dict[str, Any],
-    deprecated=True,
-    summary="Deprecated: Use /api/subscriptions instead",
-    description="""
-    ⚠️ Deprecated: This endpoint is kept for backward compatibility.
-    Please use the more comprehensive `/api/subscriptions` endpoint instead.
+@app.post("/api/subscription/subscribe", response_model=Dict[str, Any])
+async def subscribe(
+    subscription_data: Dict[str, Any] = Body(...),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Subscribe a user to a plan
     
     Request body should contain:
     - user_id: int - ID of the user subscribing
     - plan_id: int - ID of the plan to subscribe to
     - payment_transaction_id: str (optional) - ID of the payment transaction
     """
-)
-async def subscribe(
-    subscription_data: Dict[str, Any] = Body(...),
-    conn: asyncpg.Connection = Depends(get_db)
-):
     try:
         user_id = subscription_data.get('user_id')
         plan_id = subscription_data.get('plan_id')
@@ -2780,8 +3015,7 @@ async def subscribe(
             detail="Failed to create subscription"
         )
 
-@app.post("/api/subscriptions/cancel", response_model=Dict[str, Any], summary="Cancel a subscription")
-@app.post("/api/subscription/cancel", response_model=Dict[str, Any], deprecated=True, summary="[DEPRECATED] Use /api/subscriptions/cancel instead")
+@app.post("/api/subscription/cancel", response_model=Dict[str, Any])
 async def cancel_subscription(
     user_id: int = Body(..., embed=True, description="ID of the user whose subscription to cancel"),
     conn: asyncpg.Connection = Depends(get_db)
@@ -2809,6 +3043,95 @@ async def cancel_subscription(
         )
 
 # --- New Subscription and Meal Plan Endpoints ---
+
+from pydantic import BaseModel
+from datetime import date, datetime
+from typing import List, Dict, Any, Optional
+
+class MealPlanCreate(BaseModel):
+    """Pydantic model for creating a new meal plan"""
+    user_id: int
+    subscription_id: int
+    chefid: int
+    name: str
+    start_date: str  # Will be validated as YYYY-MM-DD
+    end_date: str    # Will be validated as YYYY-MM-DD
+    meals: List[Dict[str, Any]]  # List of meals with meal_id and quantity
+
+class PlanCreate(BaseModel):
+    """Model for creating a new plan"""
+    name: str
+    description: Optional[str] = None
+    price: float
+    billing_cycle: BillingCycle
+    features: List[str] = []
+    is_active: bool = True
+    is_prebuilt: bool = False
+    is_featured: bool = False
+    meals: List[Dict[str, Any]] = Field(default_factory=list, description="List of meal objects with id, name, description, and imageUrl")
+    chef: Optional[Dict[str, Any]] = Field(None, description="Chef object with id, name, and image")
+    image_url: Optional[str] = None
+    duration_days: int = 7
+
+class PlanUpdate(BaseModel):
+    """Model for updating an existing plan"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    price: Optional[float] = None
+    billing_cycle: Optional[BillingCycle] = None
+    features: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+    is_prebuilt: Optional[bool] = None
+    is_featured: Optional[bool] = None
+    meals: Optional[List[Dict[str, Any]]] = Field(None, description="List of meal objects with id, name, description, and imageUrl")
+    chef: Optional[Dict[str, Any]] = Field(None, description="Chef object with id, name, and image")
+    image_url: Optional[str] = None
+    duration_days: Optional[int] = None
+
+class PrebuiltMealPlanBase(BaseModel):
+    """Base model for prebuilt meal plans"""
+    name: str
+    description: Optional[str] = None
+    chef_id: int
+    meal_ids: List[int] = []
+    price: float
+    is_active: bool = True
+    image_url: Optional[str] = None
+    duration_days: int = 7
+
+class PrebuiltMealPlanCreate(PrebuiltMealPlanBase):
+    """Model for creating a new prebuilt meal plan"""
+    pass
+
+class PrebuiltMealPlanResponse(PrebuiltMealPlanBase):
+    """Response model for prebuilt meal plans"""
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+
+class PrebuiltMealPlanUpdate(BaseModel):
+    """Model for updating an existing prebuilt meal plan"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    chef_id: Optional[int] = None
+    meal_ids: Optional[List[int]] = None
+    price: Optional[float] = None
+    is_active: Optional[bool] = None
+    image_url: Optional[str] = None
+
+# Services are now initialized in the lifespan function
+
+class PrebuiltMealPlanResponse(PrebuiltMealPlanBase):
+    """Response model for prebuilt meal plans"""
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
 
 @app.get("/api/plans", response_model=List[Dict[str, Any]])
 async def get_plans(
@@ -2901,7 +3224,7 @@ async def create_subscription_endpoint(
                 payment_transaction_id=payment_transaction_id,
                 is_prebuilt=is_prebuilt,
                 phone_number=phone_number,
-                request=GoogleRequest(scope={'type': 'http', 'client': ('127.0.0.1', 0)})
+                request=Request(scope={'type': 'http', 'client': ('127.0.0.1', 0)})
             )
             
             return {
@@ -3307,16 +3630,225 @@ async def get_user_meal_plans(
             detail="Failed to fetch user meal plans"
         )
 
-# Prebuilt meal plan functionality has been consolidated into the main plan endpoints
-# Use GET /api/plans with is_prebuilt=true and other filters instead
+# --- Prebuilt Meal Plan Endpoints ---
+
+@app.get("/api/prebuilt-meal-plans/search", response_model=Dict[str, Any])
+async def search_prebuilt_meal_plans(
+    meal_ids: str = Query(..., description="Comma-separated list of meal IDs to search for"),
+    require_all: bool = Query(False, description="If true, only return plans that include ALL specified meal IDs"),
+    limit: int = Query(10, ge=1, le=100, description="Number of results per page"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Search for prebuilt meal plans that include any or all of the specified meal IDs
+    
+    - **meal_ids**: Comma-separated list of meal IDs to search for
+    - **require_all**: If true, only return plans that include ALL specified meal IDs (default: false)
+    - **limit**: Number of results per page (default: 10, max: 100)
+    - **offset**: Pagination offset (default: 0)
+    
+    Returns:
+    {
+        "plans": List[PrebuiltMealPlan],  # List of matching prebuilt meal plans
+        "total_count": int,              # Total number of matching plans
+        "limit": int,                    # Number of results per page
+        "offset": int                    # Current offset
+    }
+    """
+    try:
+        # Parse meal IDs
+        try:
+            meal_id_list = [int(meal_id.strip()) for meal_id in meal_ids.split(",") if meal_id.strip().isdigit()]
+            if not meal_id_list:
+                raise ValueError("No valid meal IDs provided")
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid meal_ids format. Please provide comma-separated integers."
+            )
+        
+        # Call the service method
+        result = await subscription_service.get_prebuilt_plans_by_meals(
+            conn=conn,
+            meal_ids=meal_id_list,
+            require_all=require_all,
+            limit=limit,
+            offset=offset
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error searching prebuilt meal plans: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to search prebuilt meal plans"
+        )
 
 
 
-# Prebuilt meal plan functionality has been consolidated into the main plan endpoints
-# - Create: POST /api/plans with is_prebuilt=true
-# - Read: GET /api/plans/{plan_id}
-# - Update: PUT /api/plans/{plan_id}
-# - Delete: DELETE /api/plans/{plan_id}
+@app.post("/api/prebuilt-meal-plans", response_model=PrebuiltMealPlanResponse, status_code=status.HTTP_201_CREATED)
+async def create_prebuilt_meal_plan(
+    plan_data: PrebuiltMealPlanCreate,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Create a new prebuilt meal plan (Admin only)
+    
+    - **name**: Name of the prebuilt meal plan
+    - **description**: Optional description
+    - **chef_id**: ID of the chef who created this plan
+    - **meal_ids**: List of meal IDs included in this plan
+    - **price**: Price of the plan
+    - **is_active**: Whether the plan is active (default: true)
+    - **image_url**: Optional URL to an image of the meal plan
+    - **duration_days**: Duration of the plan in days (default: 7)
+    """
+    try:
+        # Verify user is admin
+        logger.info(f"Creating prebuilt meal plan: {plan_data.name}")
+        
+        # Convert Pydantic model to dict and create the plan using the service
+        created_plan = await subscription_service.create_prebuilt_meal_plan(
+            conn=conn,
+            plan_data=plan_data.dict()
+        )
+        
+        if not created_plan:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create prebuilt meal plan"
+            )
+            
+        return created_plan
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating prebuilt meal plan: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create prebuilt meal plan: {str(e)}"
+        )
+
+
+@app.get("/api/prebuilt-meal-plans/{plan_id}", response_model=PrebuiltMealPlanResponse)
+async def get_prebuilt_meal_plan(
+    plan_id: int,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Get details of a specific prebuilt meal plan by ID
+    """
+    try:
+        plan = await subscription_service.get_prebuilt_meal_plan(
+            conn=conn,
+            plan_id=plan_id
+        )
+        
+        if not plan:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Prebuilt meal plan not found"
+            )
+            
+        return plan
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching prebuilt meal plan {plan_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch prebuilt meal plan"
+        )
+
+@app.put("/api/prebuilt-meal-plans/{plan_id}", response_model=PrebuiltMealPlanResponse)
+async def update_prebuilt_meal_plan(
+    plan_id: int,
+    plan_data: PrebuiltMealPlanUpdate,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Update an existing prebuilt meal plan (Admin only)
+    
+    Only the fields provided in the request will be updated.
+    """
+    try:
+        # Convert Pydantic model to dict and remove unset fields
+        update_data = plan_data.dict(exclude_unset=True)
+        
+        if not update_data:
+            # No fields to update, return the current plan
+            current_plan = await subscription_service.get_prebuilt_meal_plan(conn, plan_id)
+            if not current_plan:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Prebuilt meal plan not found"
+                )
+            return current_plan
+        
+        # Update the plan using the service
+        updated_plan = await subscription_service.update_prebuilt_meal_plan(
+            conn=conn,
+            plan_id=plan_id,
+            update_data=update_data
+        )
+        
+        if not updated_plan:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Prebuilt meal plan not found or update failed"
+            )
+            
+        return updated_plan
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating prebuilt meal plan {plan_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update prebuilt meal plan"
+        )
+
+@app.delete("/api/prebuilt-meal-plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_prebuilt_meal_plan(
+    plan_id: int,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Delete a prebuilt meal plan (Admin only)
+    
+    This performs a soft delete by setting is_active to FALSE.
+    """
+    try:
+        # Delete the plan using the service
+        success = await subscription_service.delete_prebuilt_meal_plan(
+            conn=conn,
+            plan_id=plan_id
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Prebuilt meal plan not found or already deleted"
+            )
+            
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting prebuilt meal plan {plan_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete prebuilt meal plan"
+        )
 
 # --- Other Classes (Chefs, Producers, etc. Updated for asyncpg pool) ---
 # Repeat the pattern for ALL classes that interact with the database:
@@ -5243,7 +5775,7 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
                         task_id = f"disburse_order_{original_order_id}_{int(time.time())}"
                         try:
                             logger.info(f"[DISBURSEMENT][{task_id}] Starting disbursement process")
-                            async with get_database_pool().acquire() as conn:
+                            async with db_pool.acquire() as conn:
                                 try:
                                     await disbursement_service.process_order_disbursements(conn, original_order_id)
                                     logger.info(f"[DISBURSEMENT][{task_id}] Successfully processed disbursements for order {original_order_id}")
@@ -5307,17 +5839,16 @@ class Orders(BaseRepository): # Make sure BaseRepository is defined/imported
     async def _log_calories_with_error_handling(self, order_id: int):
         """
         Wrapper for log_meal_calories to be used with asyncio.create_task.
-        Acquires its own database connection from the database pool.
+        Acquires its own database connection from the global 'db_pool'.
         """
         try:
-            current_db_pool = get_database_pool()
-            if current_db_pool is None:
-                logger.error(f"[INTERNAL TASK] Database pool is None for order {order_id}. Cannot log calories. Ensure the pool is initialized and accessible.")
+            if db_pool is None:
+                logger.error(f"[INTERNAL TASK] Global 'db_pool' is None for order {order_id}. Cannot log calories. Ensure the pool is initialized and accessible.")
                 return
 
             logger.info(f"[INTERNAL TASK] Attempting to log calories for order {order_id}")
             try:
-                async with current_db_pool.acquire() as conn:
+                async with db_pool.acquire() as conn:
                     async with conn.transaction():
                         success = await self.log_meal_calories(conn, order_id)
                         if success:
@@ -6272,15 +6803,9 @@ class AdminUsers(BaseRepository):
         """
         try:
             # Query the admin user by username (case-sensitive)
-            # Note: console_users.id uses UUID type, while other tables (like chefs, producers) use different ID types
-            # This is the only table currently using UUID as primary key
+            # Only select columns that exist in the console_users table
             sql = """
-                SELECT 
-                    id::text as id,  -- Explicitly cast UUID to string for consistent handling
-                    username, 
-                    password_hash, 
-                    role, 
-                    created_at
+                SELECT id, username, password_hash, role, created_at
                 FROM console_users 
                 WHERE username = $1
             """
@@ -6310,25 +6835,21 @@ class AdminUsers(BaseRepository):
                 )
                 
             # Update last login time
-            # Note: The $1 parameter will be automatically cast to UUID by asyncpg
-            # because the 'id' column in console_users is defined as UUID type
             try:
                 update_sql = """
                     UPDATE console_users 
                     SET last_login = NOW() 
-                    WHERE id = $1::uuid  -- Explicit cast to ensure type safety
+                    WHERE id = $1
                 """
                 await self._execute_query(conn, update_sql, (result['id'],))
             except Exception as update_err:
                 logger.error(f"Failed to update last_login for admin {username}: {update_err}")
             
             logger.info(f"Admin login successful: {username}")
-            # Return the admin data with explicit type documentation
-            # Note: admin_id is a UUID string, which is consistent with our API contract
             return {
                 'message': 'Login successful',
                 'data': {
-                    'admin_id': result['id'],  # This is already a string due to the ::text cast in the query
+                    'admin_id': result['id'],
                     'username': result['username'],
                     'role': result['role'],
                     'created_at': result['created_at'].isoformat() if result.get('created_at') else None
@@ -6701,7 +7222,7 @@ async def resend_verification_email(
             logger.info(f"Attempting to resend verification email to {email_to_send}")
             try:
                 # Get a new connection from the pool for the background task
-                async with get_database_pool().acquire() as bg_conn:
+                async with db_pool.acquire() as bg_conn:
                     auth_handler = AuthenticationAndUsers()
                     # Let _handle_email_verification handle code generation and storage
                     # This will also handle deleting any existing codes for this user
@@ -7452,7 +7973,7 @@ async def send_batch_notifications(
             raise HTTPException(status_code=400, detail="Notifications must be a list")
         
         # Initialize FCM service with connection pool
-        fcm_service = FirebaseMessagingService(get_database_pool())
+        fcm_service = FirebaseMessagingService(db_pool)
         user_identifiers = [
             {"user_id": n["user_id"], "user_type": n.get("user_type", "user")}
             for n in batch_data['notifications']
@@ -8145,7 +8666,7 @@ async def update_metric_endpoint(user_id: int, updates: dict = Body(...), conn: 
         # Create a new database connection for the background task
         async def _recalculate():
             try:
-                async with get_database_pool().acquire() as task_conn:
+                async with db_pool.acquire() as task_conn:
                     await repo._recalculate_daily_calories(task_conn, user_id)
                     logger.info(f"Completed async recalculation of daily calories for user {user_id} after weight update")
             except Exception as e:
@@ -8269,7 +8790,7 @@ async def update_user_preferences_endpoint(
             # Create a new database connection for the background task
             async def _recalculate():
                 try:
-                    async with get_database_pool().acquire() as task_conn:
+                    async with db_pool.acquire() as task_conn:
                         await repo._recalculate_daily_calories(task_conn, user_id)
                         logger.info(f"Completed async recalculation of daily calories for user {user_id} after preferences update")
                 except Exception as e:

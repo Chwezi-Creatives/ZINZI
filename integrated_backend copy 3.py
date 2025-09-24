@@ -1,13 +1,6 @@
 #cspell:disable
 from __future__ import annotations
 
-# --- Import FastAPI and related modules ---
-from fastapi import FastAPI, HTTPException, Depends, status, Request, Body, Query, BackgroundTasks, Response, Path
-from fastapi.responses import JSONResponse, ORJSONResponse, FileResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-
 # --- Import database module ---
 from database import (
     create_database_pool, 
@@ -34,8 +27,7 @@ import bcrypt
 import asyncpg # Added asynchronous driver
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-# Import Google's Request with an alias to avoid shadowing FastAPI's Request
-from google.auth.transport.requests import Request as GoogleRequest
+from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google.auth.exceptions import RefreshError
 from email.mime.text import MIMEText
@@ -57,9 +49,11 @@ from services.subscription_service import (
     PlanStatusResponse,
     PlanCreate,
     PlanUpdate,
+    BillingCycle,
     MealPlanCreate,
-    BillingCycle
+    MealPlanResponse
 )
+from fastapi import FastAPI, Request, Depends, HTTPException, status, Body, Query, Path, BackgroundTasks, Response
 from fastapi import status as http_status
 from fastapi import status as http_status_import
 from typing import Dict, Any, Optional, List, Union, Tuple
@@ -2598,6 +2592,28 @@ async def list_all_plans(
             detail="Failed to fetch plans"
         )
 
+@app.get("/api/plans", response_model=List[Dict[str, Any]])
+async def list_subscription_plans(
+    is_featured: Optional[bool] = Query(None, description="Filter by featured status"),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Get all active subscription plans with optional featured filter
+    
+    - **is_featured**: Optional filter to get only featured plans
+    """
+    try:
+        plans = await subscription_service.get_subscription_plans(conn, include_inactive=False)
+        if is_featured is not None:
+            return [plan for plan in plans if plan.get('is_featured') == is_featured]
+        return plans
+    except Exception as e:
+        logger.error(f"Error fetching subscription plans: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch subscription plans"
+        )
+
 @app.get("/api/plans/featured", response_model=List[Dict[str, Any]])
 async def list_featured_plans(conn: asyncpg.Connection = Depends(get_db)):
     """
@@ -2696,35 +2712,19 @@ async def delete_plan(
             detail="Failed to delete plan"
         )
 
-@app.get(
-    "/api/subscriptions/status", 
-    response_model=PlanStatusResponse,
-    summary="Get subscription status",
-    description="""
-    Get the current subscription status for a user.
-    
-    Returns detailed information about the user's active subscription, including:
-    - Subscription details (status, start/end dates, etc.)
-    - Associated plan information
-    - Billing information
-    - Next billing date (if applicable)
-    """
-)
-@app.get(
-    "/api/subscription/status",
-    response_model=PlanStatusResponse,
-    deprecated=True,
-    summary="[DEPRECATED] Use /api/subscriptions/status instead",
-    description="""
-    ⚠️ DEPRECATED: This endpoint is kept for backward compatibility only.
-    Please use the /api/subscriptions/status endpoint instead.
-    """
-)
+@app.get("/api/subscriptions/status", response_model=PlanStatusResponse)
+@app.get("/api/subscription/status", response_model=PlanStatusResponse)  # Keeping both for backward compatibility
 async def get_subscription_status(
     user_id: int = Query(..., description="User ID to check subscription status for"),
     conn: asyncpg.Connection = Depends(get_db),
     subscription_service: SubscriptionService = Depends(lambda: app.state.subscription_service)
 ):
+    """
+    Get the current subscription status for a user
+    
+    This endpoint is available at both /api/subscription/status and /api/subscriptions/status
+    for backward compatibility.
+    """
     try:
         status = await subscription_service.get_subscription_status(conn, user_id)
         return status
@@ -2735,25 +2735,19 @@ async def get_subscription_status(
             detail=f"Failed to get subscription status: {str(e)}"
         )
 
-@app.post(
-    "/api/subscription/subscribe", 
-    response_model=Dict[str, Any],
-    deprecated=True,
-    summary="Deprecated: Use /api/subscriptions instead",
-    description="""
-    ⚠️ Deprecated: This endpoint is kept for backward compatibility.
-    Please use the more comprehensive `/api/subscriptions` endpoint instead.
+@app.post("/api/subscription/subscribe", response_model=Dict[str, Any])
+async def subscribe(
+    subscription_data: Dict[str, Any] = Body(...),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Subscribe a user to a plan
     
     Request body should contain:
     - user_id: int - ID of the user subscribing
     - plan_id: int - ID of the plan to subscribe to
     - payment_transaction_id: str (optional) - ID of the payment transaction
     """
-)
-async def subscribe(
-    subscription_data: Dict[str, Any] = Body(...),
-    conn: asyncpg.Connection = Depends(get_db)
-):
     try:
         user_id = subscription_data.get('user_id')
         plan_id = subscription_data.get('plan_id')
@@ -2780,8 +2774,7 @@ async def subscribe(
             detail="Failed to create subscription"
         )
 
-@app.post("/api/subscriptions/cancel", response_model=Dict[str, Any], summary="Cancel a subscription")
-@app.post("/api/subscription/cancel", response_model=Dict[str, Any], deprecated=True, summary="[DEPRECATED] Use /api/subscriptions/cancel instead")
+@app.post("/api/subscription/cancel", response_model=Dict[str, Any])
 async def cancel_subscription(
     user_id: int = Body(..., embed=True, description="ID of the user whose subscription to cancel"),
     conn: asyncpg.Connection = Depends(get_db)
@@ -2809,6 +2802,95 @@ async def cancel_subscription(
         )
 
 # --- New Subscription and Meal Plan Endpoints ---
+
+from pydantic import BaseModel
+from datetime import date, datetime
+from typing import List, Dict, Any, Optional
+
+class MealPlanCreate(BaseModel):
+    """Pydantic model for creating a new meal plan"""
+    user_id: int
+    subscription_id: int
+    chefid: int
+    name: str
+    start_date: str  # Will be validated as YYYY-MM-DD
+    end_date: str    # Will be validated as YYYY-MM-DD
+    meals: List[Dict[str, Any]]  # List of meals with meal_id and quantity
+
+class PlanCreate(BaseModel):
+    """Model for creating a new plan"""
+    name: str
+    description: Optional[str] = None
+    price: float
+    billing_cycle: BillingCycle
+    features: List[str] = []
+    is_active: bool = True
+    is_prebuilt: bool = False
+    is_featured: bool = False
+    meals: List[Dict[str, Any]] = Field(default_factory=list, description="List of meal objects with id, name, description, and imageUrl")
+    chef: Optional[Dict[str, Any]] = Field(None, description="Chef object with id, name, and image")
+    image_url: Optional[str] = None
+    duration_days: int = 7
+
+class PlanUpdate(BaseModel):
+    """Model for updating an existing plan"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    price: Optional[float] = None
+    billing_cycle: Optional[BillingCycle] = None
+    features: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+    is_prebuilt: Optional[bool] = None
+    is_featured: Optional[bool] = None
+    meals: Optional[List[Dict[str, Any]]] = Field(None, description="List of meal objects with id, name, description, and imageUrl")
+    chef: Optional[Dict[str, Any]] = Field(None, description="Chef object with id, name, and image")
+    image_url: Optional[str] = None
+    duration_days: Optional[int] = None
+
+class PrebuiltMealPlanBase(BaseModel):
+    """Base model for prebuilt meal plans"""
+    name: str
+    description: Optional[str] = None
+    chef_id: int
+    meal_ids: List[int] = []
+    price: float
+    is_active: bool = True
+    image_url: Optional[str] = None
+    duration_days: int = 7
+
+class PrebuiltMealPlanCreate(PrebuiltMealPlanBase):
+    """Model for creating a new prebuilt meal plan"""
+    pass
+
+class PrebuiltMealPlanResponse(PrebuiltMealPlanBase):
+    """Response model for prebuilt meal plans"""
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+
+class PrebuiltMealPlanUpdate(BaseModel):
+    """Model for updating an existing prebuilt meal plan"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    chef_id: Optional[int] = None
+    meal_ids: Optional[List[int]] = None
+    price: Optional[float] = None
+    is_active: Optional[bool] = None
+    image_url: Optional[str] = None
+
+# Services are now initialized in the lifespan function
+
+class PrebuiltMealPlanResponse(PrebuiltMealPlanBase):
+    """Response model for prebuilt meal plans"""
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
 
 @app.get("/api/plans", response_model=List[Dict[str, Any]])
 async def get_plans(
@@ -2901,7 +2983,7 @@ async def create_subscription_endpoint(
                 payment_transaction_id=payment_transaction_id,
                 is_prebuilt=is_prebuilt,
                 phone_number=phone_number,
-                request=GoogleRequest(scope={'type': 'http', 'client': ('127.0.0.1', 0)})
+                request=Request(scope={'type': 'http', 'client': ('127.0.0.1', 0)})
             )
             
             return {
@@ -3307,16 +3389,225 @@ async def get_user_meal_plans(
             detail="Failed to fetch user meal plans"
         )
 
-# Prebuilt meal plan functionality has been consolidated into the main plan endpoints
-# Use GET /api/plans with is_prebuilt=true and other filters instead
+# --- Prebuilt Meal Plan Endpoints ---
+
+@app.get("/api/prebuilt-meal-plans/search", response_model=Dict[str, Any])
+async def search_prebuilt_meal_plans(
+    meal_ids: str = Query(..., description="Comma-separated list of meal IDs to search for"),
+    require_all: bool = Query(False, description="If true, only return plans that include ALL specified meal IDs"),
+    limit: int = Query(10, ge=1, le=100, description="Number of results per page"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Search for prebuilt meal plans that include any or all of the specified meal IDs
+    
+    - **meal_ids**: Comma-separated list of meal IDs to search for
+    - **require_all**: If true, only return plans that include ALL specified meal IDs (default: false)
+    - **limit**: Number of results per page (default: 10, max: 100)
+    - **offset**: Pagination offset (default: 0)
+    
+    Returns:
+    {
+        "plans": List[PrebuiltMealPlan],  # List of matching prebuilt meal plans
+        "total_count": int,              # Total number of matching plans
+        "limit": int,                    # Number of results per page
+        "offset": int                    # Current offset
+    }
+    """
+    try:
+        # Parse meal IDs
+        try:
+            meal_id_list = [int(meal_id.strip()) for meal_id in meal_ids.split(",") if meal_id.strip().isdigit()]
+            if not meal_id_list:
+                raise ValueError("No valid meal IDs provided")
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid meal_ids format. Please provide comma-separated integers."
+            )
+        
+        # Call the service method
+        result = await subscription_service.get_prebuilt_plans_by_meals(
+            conn=conn,
+            meal_ids=meal_id_list,
+            require_all=require_all,
+            limit=limit,
+            offset=offset
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error searching prebuilt meal plans: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to search prebuilt meal plans"
+        )
 
 
 
-# Prebuilt meal plan functionality has been consolidated into the main plan endpoints
-# - Create: POST /api/plans with is_prebuilt=true
-# - Read: GET /api/plans/{plan_id}
-# - Update: PUT /api/plans/{plan_id}
-# - Delete: DELETE /api/plans/{plan_id}
+@app.post("/api/prebuilt-meal-plans", response_model=PrebuiltMealPlanResponse, status_code=status.HTTP_201_CREATED)
+async def create_prebuilt_meal_plan(
+    plan_data: PrebuiltMealPlanCreate,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Create a new prebuilt meal plan (Admin only)
+    
+    - **name**: Name of the prebuilt meal plan
+    - **description**: Optional description
+    - **chef_id**: ID of the chef who created this plan
+    - **meal_ids**: List of meal IDs included in this plan
+    - **price**: Price of the plan
+    - **is_active**: Whether the plan is active (default: true)
+    - **image_url**: Optional URL to an image of the meal plan
+    - **duration_days**: Duration of the plan in days (default: 7)
+    """
+    try:
+        # Verify user is admin
+        logger.info(f"Creating prebuilt meal plan: {plan_data.name}")
+        
+        # Convert Pydantic model to dict and create the plan using the service
+        created_plan = await subscription_service.create_prebuilt_meal_plan(
+            conn=conn,
+            plan_data=plan_data.dict()
+        )
+        
+        if not created_plan:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create prebuilt meal plan"
+            )
+            
+        return created_plan
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating prebuilt meal plan: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create prebuilt meal plan: {str(e)}"
+        )
+
+
+@app.get("/api/prebuilt-meal-plans/{plan_id}", response_model=PrebuiltMealPlanResponse)
+async def get_prebuilt_meal_plan(
+    plan_id: int,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Get details of a specific prebuilt meal plan by ID
+    """
+    try:
+        plan = await subscription_service.get_prebuilt_meal_plan(
+            conn=conn,
+            plan_id=plan_id
+        )
+        
+        if not plan:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Prebuilt meal plan not found"
+            )
+            
+        return plan
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching prebuilt meal plan {plan_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch prebuilt meal plan"
+        )
+
+@app.put("/api/prebuilt-meal-plans/{plan_id}", response_model=PrebuiltMealPlanResponse)
+async def update_prebuilt_meal_plan(
+    plan_id: int,
+    plan_data: PrebuiltMealPlanUpdate,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Update an existing prebuilt meal plan (Admin only)
+    
+    Only the fields provided in the request will be updated.
+    """
+    try:
+        # Convert Pydantic model to dict and remove unset fields
+        update_data = plan_data.dict(exclude_unset=True)
+        
+        if not update_data:
+            # No fields to update, return the current plan
+            current_plan = await subscription_service.get_prebuilt_meal_plan(conn, plan_id)
+            if not current_plan:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Prebuilt meal plan not found"
+                )
+            return current_plan
+        
+        # Update the plan using the service
+        updated_plan = await subscription_service.update_prebuilt_meal_plan(
+            conn=conn,
+            plan_id=plan_id,
+            update_data=update_data
+        )
+        
+        if not updated_plan:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Prebuilt meal plan not found or update failed"
+            )
+            
+        return updated_plan
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating prebuilt meal plan {plan_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update prebuilt meal plan"
+        )
+
+@app.delete("/api/prebuilt-meal-plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_prebuilt_meal_plan(
+    plan_id: int,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Delete a prebuilt meal plan (Admin only)
+    
+    This performs a soft delete by setting is_active to FALSE.
+    """
+    try:
+        # Delete the plan using the service
+        success = await subscription_service.delete_prebuilt_meal_plan(
+            conn=conn,
+            plan_id=plan_id
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Prebuilt meal plan not found or already deleted"
+            )
+            
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting prebuilt meal plan {plan_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete prebuilt meal plan"
+        )
 
 # --- Other Classes (Chefs, Producers, etc. Updated for asyncpg pool) ---
 # Repeat the pattern for ALL classes that interact with the database:
@@ -6272,15 +6563,9 @@ class AdminUsers(BaseRepository):
         """
         try:
             # Query the admin user by username (case-sensitive)
-            # Note: console_users.id uses UUID type, while other tables (like chefs, producers) use different ID types
-            # This is the only table currently using UUID as primary key
+            # Only select columns that exist in the console_users table
             sql = """
-                SELECT 
-                    id::text as id,  -- Explicitly cast UUID to string for consistent handling
-                    username, 
-                    password_hash, 
-                    role, 
-                    created_at
+                SELECT id, username, password_hash, role, created_at
                 FROM console_users 
                 WHERE username = $1
             """
@@ -6310,25 +6595,21 @@ class AdminUsers(BaseRepository):
                 )
                 
             # Update last login time
-            # Note: The $1 parameter will be automatically cast to UUID by asyncpg
-            # because the 'id' column in console_users is defined as UUID type
             try:
                 update_sql = """
                     UPDATE console_users 
                     SET last_login = NOW() 
-                    WHERE id = $1::uuid  -- Explicit cast to ensure type safety
+                    WHERE id = $1
                 """
                 await self._execute_query(conn, update_sql, (result['id'],))
             except Exception as update_err:
                 logger.error(f"Failed to update last_login for admin {username}: {update_err}")
             
             logger.info(f"Admin login successful: {username}")
-            # Return the admin data with explicit type documentation
-            # Note: admin_id is a UUID string, which is consistent with our API contract
             return {
                 'message': 'Login successful',
                 'data': {
-                    'admin_id': result['id'],  # This is already a string due to the ::text cast in the query
+                    'admin_id': result['id'],
                     'username': result['username'],
                     'role': result['role'],
                     'created_at': result['created_at'].isoformat() if result.get('created_at') else None

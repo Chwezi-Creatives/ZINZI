@@ -1,5 +1,6 @@
 # VS Code files
 .vscode/
+.trae/
 
 # Python files
 *.pyc

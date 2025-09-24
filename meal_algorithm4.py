@@ -1,7 +1,7 @@
 # cspell:disable
 import logging
 from typing import Optional, Dict, List
-from database import get_db_connection
+from database import get_db
 from datetime import datetime, timedelta
 from psycopg2.extras import RealDictCursor
 import json
@@ -37,7 +37,7 @@ class MealRecommendation4:
         logging.info(f"Initializing meal recommender for user {user_id}")
         
         try:
-            connection = get_db_connection()
+            connection = get_db()
             if not connection:
                 logging.error("Failed to establish database connection")
                 self._set_defaults()
@@ -194,7 +194,7 @@ class MealRecommendation4:
             
             close_connection = False
             if not connection:
-                connection = get_db_connection()
+                connection = get_db()
                 close_connection = True
                 if not connection:
                     return []
@@ -465,7 +465,7 @@ class MealRecommendation4:
         cache_key = f"recommendations_{self.user_id}"
         
         try:
-            connection = get_db_connection()
+            connection = get_db()
             if connection:
                 with connection:
                     fresh_prefs, fresh_metrics = self._get_user_data(connection)
