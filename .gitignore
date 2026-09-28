@@ -21,21 +21,31 @@ dist/
 .venv/
 env/
 virtualenv/
-*.json
-*.crt
+venv/
+
+# Secrets and credentials (NEVER commit)
+.env
+.env.*
 *.pem
+*.crt
+*.key
 *.rsa
 *.pub
-*.txt
-~/.aws/credentials
-~/.aws/config
-~/.config/gcloud/application_default_credentials.json
-instance/
-env.py
+*secret*.json
+*credentials*.json
+client_secret*.json
+token.json
+firebase-adminsdk*.json
+
+# Service account keys
+*service-account*.json
+*-adminsdk-*.json
 
 # Logs and databases
 *.log
 *.db
+*.sqlite
+*.sqlite3
 
 # OS-specific files
 .DS_Store
@@ -45,8 +55,26 @@ Thumbs.db
 .idea/
 .settings/
 .metadata/
+*.swp
+*.swo
 
-# Other files
+# Backup and temp files
 *.bak
 *.tmp
+*.backup
+*~
+
+# Test artifacts
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.tox/
+
+# Vercel/Netlify
 .vercel
+.netlify
+
+# Local config files that shouldn't be shared
+local_settings.py
+config.local.py
