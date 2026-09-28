@@ -82,6 +82,7 @@ from passlib.context import CryptContext
 
 # Import notification service
 from services.notification_service import NotificationService
+from services.brevo_email_service import get_brevo_email_service
 
 # Import MoMo service
 from services.momo_service import MomoService
@@ -843,7 +844,7 @@ class AuthenticationAndUsers(BaseRepository):
     
     async def _send_password_reset_email(self, email: str, user_type: str, code: str) -> None:
         """
-        Send a password reset email with the reset code.
+        Send a password reset email with the reset code via Brevo.
         
         Args:
             email: The recipient's email address
@@ -851,52 +852,20 @@ class AuthenticationAndUsers(BaseRepository):
             code: The reset code to include in the email
         """
         try:
-            logger.info(f"[EMAIL] Starting email send to {email}")
-            logger.info(f"[EMAIL] Code being sent: {code} (length: {len(code)})")
-            logger.info(f"[EMAIL] Code with quotes: '{code}'")
-            logger.info(f"[EMAIL] User type: {user_type}")
+            logger.info(f"[EMAIL] Starting password reset email send to {email}")
             
-            # Log the actual email content that will be sent
-            email_content = f"""
-            <html>
-                <body>
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-                        <h2>Password Reset Request</h2>
-                        <p>Hello,</p>
-                        <p>We received a request to reset the password for your {user_type.capitalize()} account.</p>
-                        <p>Your password reset code is: <strong>{code}</strong></p>
-                        <p>Please enter this code in the app to reset your password. This code will expire in 10 minutes.</p>
-                        <p>If you didn't request this password reset, you can safely ignore this email.</p>
-                        <p>Best regards,<br>The Zinzi Team</p>
-                    </div>
-                </body>
-            </html>
-            """
-            logger.debug(f"[EMAIL] Email content preview: {email_content[:200]}...")
+            brevo_service = get_brevo_email_service()
+            success = await brevo_service.send_password_reset_email(
+                to_email=email,
+                reset_code=code,
+                user_type=user_type,
+            )
             
-            # Email subject
-            subject = "Your Password Reset Code"
-            
-            # Email body with HTML formatting
-            body = f"""
-            <html>
-                <body>
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-                        <h2>Password Reset Request</h2>
-                        <p>Hello,</p>
-                        <p>We received a request to reset the password for your {user_type.capitalize()} account.</p>
-                        <p>Your password reset code is: <strong>{code}</strong></p>
-                        <p>Please enter this code in the app to reset your password. This code will expire in 10 minutes.</p>
-                        <p>If you didn't request this password reset, you can safely ignore this email.</p>
-                        <p>Best regards,<br>The Zinzi Team</p>
-                    </div>
-                </body>
-            </html>
-            """
-            
-            # Send the email
-            await self._send_email(email, subject, body)
-            logger.info(f"Password reset email sent successfully to {email}")
+            if success:
+                logger.info(f"Password reset email sent successfully to {email} via Brevo")
+            else:
+                logger.error(f"Failed to send password reset email to {email} via Brevo")
+                raise Exception("Brevo email sending failed")
             
         except Exception as e:
             logger.error(f"Error sending password reset email to {email}: {e}", exc_info=True)
@@ -905,40 +874,24 @@ class AuthenticationAndUsers(BaseRepository):
     
     async def _send_email(self, to_email: str, subject: str, body: str) -> None:
         """
-        Helper method to send an email using Gmail SMTP.
+        Helper method to send an email using Brevo API.
         
         Args:
             to_email: Recipient email address
             subject: Email subject
             body: Email body (HTML)
         """
-        import smtplib
-        from email.mime.text import MIMEText
-        from email.mime.multipart import MIMEMultipart
-        import os
-        
-        # Get email credentials from environment variables
-        sender_email = os.getenv("GMAIL_USERNAME")
-        password = os.getenv("GMAIL_APP_PASSWORD")
-        
-        if not sender_email or not password:
-            logger.error("Email credentials not configured")
-            return
-            
         try:
-            # Create message
-            msg = MIMEMultipart()
-            msg['From'] = sender_email
-            msg['To'] = to_email
-            msg['Subject'] = subject
+            brevo_service = get_brevo_email_service()
+            success = await brevo_service.send_email(
+                to_email=to_email,
+                subject=subject,
+                html_content=body,
+            )
             
-            # Attach HTML body
-            msg.attach(MIMEText(body, 'html'))
-            
-            # Connect to Gmail SMTP server and send email
-            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-                server.login(sender_email, password)
-                server.send_message(msg)
+            if not success:
+                logger.error(f"Failed to send email to {to_email} via Brevo")
+                raise Exception("Brevo email sending failed")
                 
         except Exception as e:
             logger.error(f"Error sending email to {to_email}: {e}")
@@ -1284,7 +1237,7 @@ class AuthenticationAndUsers(BaseRepository):
 
     async def send_verification_email_gmail(self, to_email: str, verification_code: str):
         """
-        Send verification email using Gmail SMTP with App Password authentication.
+        Send verification email using Brevo API.
         
         Args:
             to_email: Recipient email address
@@ -1293,151 +1246,26 @@ class AuthenticationAndUsers(BaseRepository):
         Raises:
             Exception: If email sending fails
         """
-        import smtplib
-        import ssl
-        from email.mime.text import MIMEText
-        from email.mime.multipart import MIMEMultipart
-        import os
-        from dotenv import load_dotenv
-        
-        # Load environment variables
-        load_dotenv()
-        
-        # Configuration - Update these in your .env file
-        SMTP_SERVER = 'smtp.gmail.com'
-        SMTP_PORT = 587  # For starttls
-        SENDER_EMAIL = os.getenv('GMAIL_USERNAME')   # Your Gmail address
-        APP_PASSWORD = os.getenv('GMAIL_APP_PASSWORD')  # Your 16-character app password
-        
-        if not APP_PASSWORD:
-            error_msg = "GMAIL_APP_PASSWORD not found in environment variables"
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-        
         try:
-            logger.info(f"Attempting to send verification email to {to_email}")
+            logger.info(f"Attempting to send verification email to {to_email} via Brevo")
             
-            # Email styling and template
-            subject = "🔐 Your ZINZI Verification Code"
-            body = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <style>
-                    body {{
-                        font-family: 'Arial', sans-serif;
-                        line-height: 1.6;
-                        color: #333333;
-                        max-width: 600px;
-                        margin: 0 auto;
-                        padding: 20px;
-                    }}
-                    .container {{
-                        border: 1px solid #e0e0e0;
-                        border-radius: 8px;
-                        overflow: hidden;
-                    }}
-                    .header {{
-                        background-color: #4CAF50;  /* ZINZI green */
-                        padding: 20px;
-                        text-align: center;
-                    }}
-                    .header img {{
-                        max-width: 150px;
-                        height: auto;
-                    }}
-                    .content {{
-                        padding: 30px;
-                        background-color: #ffffff;
-                    }}
-                    .verification-code {{
-                        background-color: #f8f9fa;
-                        border: 2px dashed #4CAF50;
-                        color: #4CAF50;
-                        font-size: 28px;
-                        font-weight: bold;
-                        letter-spacing: 5px;
-                        padding: 15px 25px;
-                        margin: 25px 0;
-                        text-align: center;
-                        border-radius: 4px;
-                        display: inline-block;
-                    }}
-                    .button {{
-                        display: inline-block;
-                        padding: 12px 25px;
-                        background-color: #4CAF50;
-                        color: white !important;
-                        text-decoration: none;
-                        border-radius: 4px;
-                        font-weight: bold;
-                        margin: 15px 0;
-                    }}
-                    .footer {{
-                        text-align: center;
-                        padding: 20px;
-                        font-size: 12px;
-                        color: #999999;
-                        background-color: #f8f9fa;
-                    }}
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="header">
-                        <h1 style="color: white; margin: 0;">ZINZI</h1>
-                        <p style="color: white; margin: 5px 0 0 0;">Healthy Food, Happy Life</p>
-                    </div>
-                    
-                    <div class="content">
-                        <h2>Welcome to ZINZI! 🌱</h2>
-                        <p>Thank you for joining our community of health-conscious individuals. To complete your registration, please verify your email address using the code below:</p>
-                        
-                        <div class="verification-code">
-                            {verification_code}
-                        </div>
-                        
-                        <p>This code will expire in soon for security reasons.</p>
-                        
-                        <p>If you didn't request this, please ignore this email or contact our support team if you have any concerns.</p>
-                        
-                        <p>Best regards,<br>The ZINZI Team</p>
-                    </div>
-                    
-                    <div class="footer">
-                        <p>© {datetime.now().year} ZINZI. All rights reserved.</p>
-                        <p>Kampala, Uganda | <a href="https://zinzi.ug" style="color: #4CAF50; text-decoration: none;">zinzi.ug</a></p>
-                    </div>
-                </div>
-            </body>
-            </html>
-            """
+            brevo_service = get_brevo_email_service()
+            success = await brevo_service.send_verification_email(
+                to_email=to_email,
+                verification_code=verification_code,
+            )
             
-            # Create message container
-            message = MIMEMultipart('alternative')
-            message['From'] = SENDER_EMAIL
-            message['To'] = to_email
-            message['Subject'] = subject
-            
-            # Attach HTML version
-            message.attach(MIMEText(body, 'html'))
-            
-            # Create secure connection with server and send email
-            context = ssl.create_default_context()
-            
-            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-                server.ehlo()  # Can be omitted
-                server.starttls(context=context)
-                server.ehlo()  # Can be omitted
-                server.login(SENDER_EMAIL, APP_PASSWORD)
-                server.send_message(message)
-            
-            logger.info(f"Verification email sent to {to_email}")
+            if success:
+                logger.info(f"Verification email sent to {to_email} via Brevo")
+            else:
+                error_msg = f"Failed to send verification email to {to_email} via Brevo"
+                logger.error(error_msg)
+                raise Exception(error_msg)
             
         except Exception as e:
             error_msg = f"Failed to send verification email to {to_email}: {str(e)}"
             logger.error(error_msg, exc_info=True)
-            raise ConnectionError(error_msg) from e
+            raise Exception(error_msg) from e
 
     async def create_user(self, conn: asyncpg.Connection, user_data: Dict[str, Any]) -> Dict[str, Any]:
         # ... (implementation unchanged, calls signup_user with conn) ...
