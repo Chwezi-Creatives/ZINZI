@@ -1,11 +1,15 @@
 # cspell:disable
 import logging
-from typing import Optional, Dict, List
-from database import get_db
+from typing import Optional, Dict, List, Tuple, Any, AsyncGenerator
+from database import get_db, get_database_pool
 from datetime import datetime, timedelta
-from psycopg2.extras import RealDictCursor
+import asyncpg
 import json
 import hashlib
+import random
+import math
+import re
+from contextlib import asynccontextmanager
 
 # Configure logging
 logging.basicConfig(
@@ -13,6 +17,9 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
+
+# Create module-level logger
+logger = logging.getLogger(__name__)
 
 class MealRecommendation4:
     _shared_cache = {
@@ -22,44 +29,75 @@ class MealRecommendation4:
         'last_update': datetime.now()
     }
 
-    def __init__(self, user_id: int):
+    def __init__(self, user_id: int, db_pool: Optional[asyncpg.Pool] = None):
+        """
+        Initialize the meal recommendation system.
+        
+        Args:
+            user_id: The ID of the user to make recommendations for
+            db_pool: Optional database connection pool. If not provided, will use the global pool.
+        """
         self.user_id = user_id
         self._cache = {
             'filtered_meals': None,
             'last_update': datetime.now(),
             'user_data_hash': None
         }
+        self.user_preferences = None
+        self.user_metrics = None
+        self.daily_calorie_budget = 2000
+        self._current_user_data_hash = None
+        
+        # Set the database pool (use provided pool or get the global one)
+        if db_pool is not None:
+            self._db_pool = db_pool
+        else:
+            self._db_pool = get_database_pool()
 
+        # Initialize cache
         for cache_key in ['nutrition_data', 'meal_ingredients']:
             if cache_key not in self.__class__._shared_cache:
                 self.__class__._shared_cache[cache_key] = {}
 
-        logging.info(f"Initializing meal recommender for user {user_id}")
+    async def initialize(self):
+        """
+        Async initialization method to be called after instantiation.
+        This method should be called before any other methods that require database access.
+        """
+        logger.info(f"Initializing meal recommender for user {self.user_id}")
         
-        try:
-            connection = get_db()
-            if not connection:
-                logging.error("Failed to establish database connection")
-                self._set_defaults()
-                return
-
-            with connection:
-                self.user_preferences, self.user_metrics = self._get_user_data(connection)
+        if not self._db_pool:
+            logger.error("Database pool not available")
+            self._set_defaults()
+            return
+            
+        async with self._db_pool.acquire() as connection:
+            try:
+                # Load user data
+                self.user_preferences, self.user_metrics = await self._get_user_data(connection)
+                if not self.user_preferences or not self.user_metrics:
+                    logger.warning("Failed to load user data, using defaults")
+                    self._set_defaults()
+                    return
+                    
                 self.daily_calorie_budget = self.calculate_daily_calorie_budget()
 
+                # Prefetch data if needed
                 if not self.__class__._shared_cache['nutrition_data']:
-                    self._prefetch_nutrition_data(connection)
+                    await self._prefetch_nutrition_data(connection)
                 
                 if not self.__class__._shared_cache['all_meals']:
-                    self.fetch_all_meals(connection)
+                    await self.fetch_all_meals(connection)
 
-            self._current_user_data_hash = self._get_user_data_hash()
-            self._cache['user_data_hash'] = self._current_user_data_hash
-            logging.info("Meal recommender initialized successfully")
-
-        except Exception as e:
-            logging.error(f"Error during initialization: {str(e)}")
-            self._set_defaults()
+                # Update cache and hashes
+                self._current_user_data_hash = self._get_user_data_hash()
+                self._cache['user_data_hash'] = self._current_user_data_hash
+                logger.info("Meal recommender initialized successfully")
+                
+            except Exception as e:
+                logger.error(f"Error during initialization: {str(e)}")
+                self._set_defaults()
+                raise
 
     def _set_defaults(self):
         self.user_preferences = None
@@ -67,75 +105,78 @@ class MealRecommendation4:
         self.daily_calorie_budget = 2000
         logging.warning("Using default values due to initialization failure")
 
-    def _get_user_data(self, connection) -> tuple:
+    async def _get_user_data(self, connection: asyncpg.Connection) -> tuple[Optional[Dict], Optional[Dict]]:
         try:
-            # Import RealDictCursor here to avoid circular imports
-            from psycopg2.extras import RealDictCursor
-            
-            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                # First, try to get data with a JOIN
-                query_join = """
-                    SELECT 
-                        up.goals, up.diet_type, up.food_restrictions, up.cuisine_preferences,
-                        um.weight, um.height, um.cholesterol_level, um.sys_bp, um.dia_bp, 
-                        um.pulse, um.age_range, um.sex, um.activity_level
-                    FROM user_preferences up
-                    LEFT JOIN user_metrics um ON up.user_id = um.user_id
-                    WHERE up.user_id = %s
+            # First, try to get data with a JOIN
+            query_join = """
+                SELECT 
+                    up.goals, up.diet_type, up.food_restrictions, up.cuisine_preferences,
+                    um.weight, um.height, um.cholesterol_level, um.sys_bp, um.dia_bp, 
+                    um.pulse, um.age_range, um.sex, um.activity_level
+                FROM user_preferences up
+                LEFT JOIN user_metrics um ON up.user_id = um.user_id
+                WHERE up.user_id = $1
+            """
+            result = await connection.fetchrow(query_join, self.user_id)
+
+            if not result:
+                logging.warning(f"No user preferences found for user_id {self.user_id}")
+                return None, None
+
+            # Check if we have metrics from the JOIN
+            if result.get('weight') is None:
+                logging.warning(f"No user metrics found for user_id {self.user_id}, fetching separately or using defaults.")
+                query_metrics = """
+                    SELECT weight, height, age_range, sex, activity_level 
+                    FROM user_metrics 
+                    WHERE user_id = $1
                 """
-                cursor.execute(query_join, (self.user_id,))
-                result = cursor.fetchone()
+                metrics_result = await connection.fetchrow(query_metrics, self.user_id)
+            else:
+                metrics_result = result
 
-                if not result:
-                    logging.warning(f"No user preferences found for user_id {self.user_id}")
-                    return None, None
+            # Handle case where metrics_result is None (no metrics found)
+            if not metrics_result:
+                logging.warning(f"No metrics found for user_id {self.user_id}, using defaults")
+                metrics_result = {}
 
-                # Check if we have metrics from the JOIN
-                if result.get('weight') is None:
-                    logging.warning(f"No user metrics found for user_id {self.user_id}, fetching separately or using defaults.")
-                    query_metrics = """
-                        SELECT weight, height, age_range, sex, activity_level 
-                        FROM user_metrics 
-                        WHERE user_id = %s
-                    """
-                    cursor.execute(query_metrics, (self.user_id,))
-                    metrics_result = cursor.fetchone()
-                else:
-                    metrics_result = result
-
-                preferences = {
-                    "goals": result.get("goals"),
-                    "diet_type": result.get("diet_type"),
-                    "food_restrictions": result.get("food_restrictions"),
-                    "cuisine_preferences": result.get("cuisine_preferences"),
-                }
-                
-                # Safely extract and convert metrics with proper type checking
-                def safe_get_float(data, key, default=0.0):
-                    value = data.get(key) if data else None
-                    try:
-                        return float(value) if value is not None else default
-                    except (ValueError, TypeError):
-                        return default
-                        
-                def safe_get_str(data, key, default=""):
-                    value = data.get(key) if data else None
-                    if value is None:
-                        return default
-                    try:
-                        return str(value).strip().lower()
-                    except (AttributeError, TypeError):
-                        return default.lower()
-                
-                metrics = {
-                    "weight": safe_get_float(metrics_result, "weight", 70.0),
-                    "height": safe_get_float(metrics_result, "height", 170.0),
-                    "age_range": safe_get_str(metrics_result, "age_range", "30-40"),
-                    "sex": safe_get_str(metrics_result, "sex", "male"),
-                    "activity_level": safe_get_str(metrics_result, "activity_level", "sedentary")
-                }
-                
-                return preferences, metrics
+            preferences = {
+                "goals": result.get("goals"),
+                "diet_type": result.get("diet_type"),
+                "food_restrictions": result.get("food_restrictions"),
+                "cuisine_preferences": result.get("cuisine_preferences"),
+            }
+            
+            # Safely extract and convert metrics with proper type checking
+            def safe_get_float(data, key, default=0.0):
+                if not data:
+                    return default
+                value = data.get(key)
+                try:
+                    return float(value) if value is not None else default
+                except (ValueError, TypeError):
+                    return default
+                    
+            def safe_get_str(data, key, default=""):
+                if not data:
+                    return default
+                value = data.get(key)
+                if value is None:
+                    return default
+                try:
+                    return str(value).strip().lower()
+                except (AttributeError, TypeError):
+                    return default.lower()
+            
+            metrics = {
+                "weight": safe_get_float(metrics_result, "weight", 70.0),
+                "height": safe_get_float(metrics_result, "height", 170.0),
+                "age_range": safe_get_str(metrics_result, "age_range", "30-40"),
+                "sex": safe_get_str(metrics_result, "sex", "male"),
+                "activity_level": safe_get_str(metrics_result, "activity_level", "sedentary")
+            }
+            
+            return preferences, metrics
 
         except Exception as e:
             logging.error(f"Error fetching user data: {str(e)}")
@@ -147,112 +188,133 @@ class MealRecommendation4:
             return set()
         return {tag.strip().lower() for tag in value.split(',') if tag.strip()}
 
-    def _prefetch_nutrition_data(self, connection):
-        # ... (This function is unchanged)
+    async def _prefetch_nutrition_data(self, connection: asyncpg.Connection):
         try:
-            logging.info("Prefetching nutrition data...")
-            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute("""
-                    SELECT 
-                        produce_id, 
-                        COALESCE(calories, 0)::float as calories,
-                        COALESCE(carbohydrates, 0)::float as carbohydrates,
-                        COALESCE(proteins, 0)::float as proteins,
-                        COALESCE(fats, 0)::float as fats,
-                        COALESCE(fiber, 0)::float as fiber,
-                        COALESCE(sugar, 'Non') as sugar,
-                        COALESCE(iron, 'Non') as iron,
-                        COALESCE(vitamins, 'Non') as vitamins,
-                        COALESCE(magnesium, 'Non') as magnesium,
-                        COALESCE(calcium, 'Non') as calcium,
-                        COALESCE(potassium, 'Non') as potassium,
-                        COALESCE(cobalamin, 'Non') as cobalamin
-                    FROM Produce
-                """)
-                
-                count = 0
-                for row in cursor:
-                    self.__class__._shared_cache['nutrition_data'][row['produce_id']] = dict(row)
-                    count += 1
-                
-                logging.info(f"Prefetched nutrition data for {count} ingredients")
+            logger.info("Prefetching nutrition data...")
+            
+            # Clear existing cache
+            self.__class__._shared_cache['nutrition_data'] = {}
+            
+            rows = await connection.fetch("""
+                SELECT 
+                    produce_id, 
+                    COALESCE(calories, 0)::float as calories,
+                    COALESCE(carbohydrates, 0)::float as carbohydrates,
+                    COALESCE(proteins, 0)::float as proteins,
+                    COALESCE(fats, 0)::float as fats,
+                    COALESCE(fiber, 0)::float as fiber,
+                    COALESCE(NULLIF(sugar, ''), 'Non') as sugar,
+                    COALESCE(NULLIF(iron, ''), 'Non') as iron,
+                    COALESCE(NULLIF(vitamins, ''), 'Non') as vitamins,
+                    COALESCE(NULLIF(magnesium, ''), 'Non') as magnesium,
+                    COALESCE(NULLIF(calcium, ''), 'Non') as calcium,
+                    COALESCE(NULLIF(potassium, ''), 'Non') as potassium,
+                    COALESCE(NULLIF(cobalamin, ''), 'Non') as cobalamin
+                FROM Produce
+            """)
+            
+            count = 0
+            for row in rows:
+                self.__class__._shared_cache['nutrition_data'][row['produce_id']] = dict(row)
+                count += 1
+            
+            logger.info(f"Prefetched nutrition data for {count} ingredients")
 
         except Exception as e:
-            logging.error(f"Error prefetching nutrition data: {str(e)}")
+            logger.error(f"Error prefetching nutrition data: {str(e)}")
 
 
-    def fetch_all_meals(self, connection=None) -> List[Dict]:
-        # ... (This function is unchanged)
+    async def fetch_all_meals(self, connection: Optional[asyncpg.Connection] = None) -> List[Dict]:
+        """
+        Fetch all meals from the database.
+        
+        Args:
+            connection: Optional database connection. If not provided, will use the pool.
+            
+        Returns:
+            List of meal dictionaries with their details
+        """
         try:
             now = datetime.now()
             if (self.__class__._shared_cache['all_meals'] and 
                 (now - self.__class__._shared_cache['last_update']) < timedelta(hours=24)):
-                logging.debug("Using cached meals data")
+                logger.debug("Using cached meals data")
                 return self.__class__._shared_cache['all_meals']
 
-            logging.info("Fetching meals from database...")
+            logger.info("Fetching meals from database...")
             
-            close_connection = False
-            if not connection:
-                connection = get_db()
-                close_connection = True
-                if not connection:
-                    return []
-
-            try:
-                with connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                    query = """
-                        SELECT 
-                            m.*,
-                            string_agg(DISTINCT pr.produce_name, ', ') AS ingredients,
-                            COALESCE(SUM(mi.produce_quantity_in_grams), 0) as total_weight,
+            async def _fetch_meals(conn: asyncpg.Connection) -> List[Dict]:
+                query = """
+                    SELECT 
+                        m.*,
+                        string_agg(DISTINCT pr.produce_name, ', ') AS ingredients,
+                        COALESCE(SUM(mi.produce_quantity_in_grams), 0) as total_weight,
+                        COALESCE(
                             jsonb_object_agg(
                                 mi.produce_id, 
                                 jsonb_build_object(
                                     'quantity', COALESCE(mi.produce_quantity_in_grams, 0),
                                     'name', pr.produce_name
                                 )
-                            ) as ingredients_detail
-                        FROM meals m
-                        LEFT JOIN meal_ingredients mi ON m.meal_id = mi.meal_id
-                        LEFT JOIN produce pr ON mi.produce_id = pr.produce_id
-                        GROUP BY m.meal_id
-                        ORDER BY m.meal_name
-                    """
-                    cursor.execute(query)
-                    meals = []
-                    error_count = 0
+                            ) FILTER (WHERE mi.produce_id IS NOT NULL),
+                            '{}'::jsonb
+                        ) as ingredients_detail
+                    FROM meals m
+                    LEFT JOIN meal_ingredients mi ON m.meal_id = mi.meal_id
+                    LEFT JOIN produce pr ON mi.produce_id = pr.produce_id
+                    GROUP BY m.meal_id
+                    ORDER BY m.meal_name
+                """
+                
+                rows = await conn.fetch(query)
+                meals = []
+                error_count = 0
 
-                    for row in cursor:
-                        try:
-                            meal = dict(row)
-                            meal_id = meal['meal_id']
-                            
-                            ingredients = meal.pop('ingredients_detail', {})
-                            self.__class__._shared_cache['meal_ingredients'][meal_id] = ingredients
-                            
-                            nutritional_info = self._calculate_meal_nutrition(meal_id, ingredients)
-                            meal['Nutritional_Info'] = nutritional_info
-                            # Price is already included from the database query (m.* in the SELECT statement)
-                            
-                            meals.append(meal)
-                        except Exception as e:
-                            error_count += 1
-                            logging.error(f"Error processing meal {meal.get('meal_id')}: {str(e)}")
-                            continue
-
-                    self.__class__._shared_cache['all_meals'] = meals
-                    self.__class__._shared_cache['last_update'] = now
+                for row in rows:
+                    try:
+                        meal = dict(row)
+                        meal_id = meal['meal_id']
+                        
+                        # Handle ingredients detail (already JSON from the query)
+                        ingredients = meal.pop('ingredients_detail', {})
+                        if isinstance(ingredients, str) and ingredients:
+                            import json
+                            ingredients = json.loads(ingredients)
+                        
+                        self.__class__._shared_cache['meal_ingredients'][meal_id] = ingredients
+                        
+                        nutritional_info = self._calculate_meal_nutrition(meal_id, ingredients)
+                        meal['Nutritional_Info'] = nutritional_info
+                        
+                        meals.append(meal)
+                    except Exception as e:
+                        error_count += 1
+                        logger.error(f"Error processing meal {meal.get('meal_id')}: {str(e)}")
+                        continue
+                
+                return meals, error_count
+            
+            if connection:
+                # Use the provided connection
+                meals, error_count = await _fetch_meals(connection)
+            else:
+                # Get a new connection from the pool
+                if not self._db_pool:
+                    logger.error("Database pool not available")
+                    return []
                     
-                    logging.info(f"Loaded {len(meals)} meals ({error_count} errors)")
-                    return meals
-
-            finally:
-                if close_connection and connection:
-                    connection.close()
+                async with self._db_pool.acquire() as conn:
+                    meals, error_count = await _fetch_meals(conn)
+            
+            # Update cache
+            self.__class__._shared_cache['all_meals'] = meals
+            self.__class__._shared_cache['last_update'] = now
+            
+            logger.info(f"Loaded {len(meals)} meals ({error_count} errors)")
+            return meals
 
         except Exception as e:
-            logging.error(f"Error fetching meals: {str(e)}")
+            logger.error(f"Error fetching meals: {str(e)}", exc_info=True)
             return []
 
     def _calculate_meal_nutrition(self, meal_id, ingredients) -> Dict:
@@ -405,17 +467,17 @@ class MealRecommendation4:
         def log_remaining(meals_list, filter_name, filter_value=None):
             count = len(meals_list)
             log_msg = f"After {filter_name} filter (value: {filter_value}): {count} meals remaining"
-            logging.info(log_msg)
+            logger.info(log_msg)
             return meals_list
 
         try:
             all_meals = self.fetch_all_meals()
             if not all_meals:
-                logging.error("No meals found in the database.")
+                logger.error("No meals found in the database.")
                 return []
             
             if not self.user_preferences:
-                logging.warning("No user preferences found. Cannot generate recommendations.")
+                logger.warning("No user preferences found. Cannot generate recommendations.")
                 return []
 
             filtered_meals = all_meals.copy()
@@ -529,7 +591,7 @@ class MealRecommendation4:
             )
             return round(serving_size, -1)
         except (ZeroDivisionError, KeyError, ValueError, TypeError) as e:
-            logging.error(f"Error calculating serving size for meal {meal.get('meal_id')}: {e}")
+            logger.error(f"Error calculating serving size for meal {meal.get('meal_id')}: {e}")
             return 0
 
     def calculate_calorie_density(self, meal) -> float:
@@ -539,7 +601,7 @@ class MealRecommendation4:
             total_weight = float(meal["Nutritional_Info"].get("total_weight", 1))
             return round(total_calories / total_weight, 1) if total_weight > 0 else 0.0
         except (KeyError, ValueError, TypeError) as e:
-            logging.error(f"Failed to calculate calorie density: {e}")
+            logger.error(f"Failed to calculate calorie density: {e}")
             return 0.0
 
     async def calculate_meal_calories(self, meal_id: str) -> Dict:
@@ -648,9 +710,9 @@ class MealRecommendation4:
     # END OF CORRECTED AND SIMPLIFIED MATCHING LOGIC
     # ===================================================================
 
-if __name__ == "__main__":
+async def main():
     logging.info("Starting meal recommendation service...")
-    user_id = 206 # Testing with the user from the example
+    user_id = 206  # Testing with the user from the example
     try:
         meal_recommender = MealRecommendation4(user_id)
         recommendations = meal_recommender.recommend_meals()
@@ -658,4 +720,4 @@ if __name__ == "__main__":
         for rec in recommendations:
             print(f"- {rec['meal_name']} (ID: {rec['meal_id']})")
     except Exception as e:
-        logging.error(f"Failed to generate recommendations: {str(e)}")
+        logger.error(f"Failed to generate recommendations: {str(e)}")

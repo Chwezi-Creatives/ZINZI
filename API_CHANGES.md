@@ -91,6 +91,66 @@ This document tracks all API changes to help with frontend updates.
 - `GET /api/subscriptions/me` - Get current user's subscription
   - Replaces the need for `GET /api/users/{user_id}/subscriptions`
 
+### Plan Endpoint Details
+
+#### Create Plan (POST /api/plans)
+- **Required Fields**:
+  - `name`: string - Name of the plan
+  - `price`: number - Price in USD
+  - `billing_cycle`: string - 'monthly' or 'yearly'
+  - `is_prebuilt`: boolean - Whether this is a prebuilt meal plan
+
+- **Conditional Fields (when is_prebuilt=true)**:
+  - `chef`: object - Chef details (required)
+    - `chef_id`: number - ID of the chef
+    - `name`: string - Chef's name
+    - `avatar_url`: string - URL to chef's avatar
+  - `meals`: object[] - Array of meal objects (required)
+    - `meal_id`: number - Unique identifier for the meal
+    - `name`: string - Name of the meal
+    - `description`: string - Description of the meal
+    - `image_url`: string - URL to meal image
+    - `nutritional_info`: object - Nutritional information
+  - `description`: string - Optional plan description
+  - `is_featured`: boolean - Whether to feature this plan (default: false)
+
+- **Example Request (Prebuilt Plan)**:
+  ```json
+  {
+    "name": "Gourmet Weekly Plan",
+    "price": 99.99,
+    "billing_cycle": "monthly",
+    "is_prebuilt": true,
+    "chef": {
+      "chef_id": 123,
+      "name": "Chef Michael",
+      "avatar_url": "https://example.com/chef.jpg"
+    },
+    "meals": [
+      {
+        "meal_id": 1,
+        "name": "Pasta Carbonara",
+        "description": "Classic Italian pasta",
+        "image_url": "https://example.com/pasta.jpg",
+        "nutritional_info": {
+          "calories": 650,
+          "protein": 25,
+          "carbs": 75,
+          "fat": 30
+        }
+      }
+    ],
+    "is_featured": true
+  }
+  ```
+
+#### List Plans (GET /api/plans)
+- **Pagination**:
+  - `limit`: number (default: 20, max: 100)
+  - `offset`: number (default: 0)
+  - `sort_by`: string - Field to sort by (e.g., 'price', 'created_at')
+  - `sort_order`: 'asc'|'desc' (default: 'desc')
+
 ### Frontend Updates Required
 1. Update all references to `/prebuilt-meal-plans/*` to use `/plans` with appropriate filters
 2. Update subscription endpoints to use the non-deprecated versions
